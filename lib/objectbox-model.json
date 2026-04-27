@@ -1,0 +1,395 @@
+{
+  "_note1": "KEEP THIS FILE! Check it into a version control system (VCS) like git.",
+  "_note2": "ObjectBox manages crucial IDs for your object model. See docs for details.",
+  "_note3": "If you have VCS merge conflicts, you must resolve them according to ObjectBox docs.",
+  "entities": [
+    {
+      "id": "1:805574422642691043",
+      "lastPropertyId": "8:4668469838628667719",
+      "name": "ItemVenda",
+      "properties": [
+        {
+          "id": "1:2844102084704375443",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:2558730134591822875",
+          "name": "quantidade",
+          "type": 6
+        },
+        {
+          "id": "3:1217395620768445493",
+          "name": "precoUnitario",
+          "type": 8
+        },
+        {
+          "id": "4:4432181740490742128",
+          "name": "produtoId",
+          "indexId": "1:3416570875771764023",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Produto"
+        },
+        {
+          "id": "5:1892429704353673689",
+          "name": "vendaId",
+          "indexId": "2:1007099967024991476",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Venda"
+        },
+        {
+          "id": "6:6701956797859389788",
+          "name": "nomeProduto",
+          "type": 9
+        },
+        {
+          "id": "7:7921971802503083893",
+          "name": "precoCustoUnitario",
+          "type": 8
+        },
+        {
+          "id": "8:4668469838628667719",
+          "name": "precoTipo",
+          "type": 9
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "2:12069401530715107",
+      "lastPropertyId": "23:4928394063071914210",
+      "name": "Produto",
+      "properties": [
+        {
+          "id": "1:6845762842088825305",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:8766242792253639911",
+          "name": "nome",
+          "type": 9
+        },
+        {
+          "id": "3:3014136920685238834",
+          "name": "estoque",
+          "type": 6
+        },
+        {
+          "id": "4:7112622695991261288",
+          "name": "precoCusto",
+          "type": 8
+        },
+        {
+          "id": "5:6136892366305375888",
+          "name": "precoVenda",
+          "type": 8
+        },
+        {
+          "id": "6:8198160407953380318",
+          "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "7:7930730832698641369",
+          "name": "quantidadeMinima",
+          "type": 6
+        },
+        {
+          "id": "8:4671123828913692338",
+          "name": "codigoInterno",
+          "type": 9
+        },
+        {
+          "id": "9:7692428431208033005",
+          "name": "descricao",
+          "type": 9
+        },
+        {
+          "id": "10:3014708834110749898",
+          "name": "unidade",
+          "type": 9
+        },
+        {
+          "id": "11:6060727120274258032",
+          "name": "categoria",
+          "type": 9
+        },
+        {
+          "id": "12:2904582454658343626",
+          "name": "subcategoria",
+          "type": 9
+        },
+        {
+          "id": "13:3028419417235337371",
+          "name": "marca",
+          "type": 9
+        },
+        {
+          "id": "14:8220153953280622826",
+          "name": "fornecedor",
+          "type": 9
+        },
+        {
+          "id": "15:6843794985607382992",
+          "name": "fabricante",
+          "type": 9
+        },
+        {
+          "id": "16:2717273193349575761",
+          "name": "codigoBarras",
+          "type": 9
+        },
+        {
+          "id": "17:3697983639399962673",
+          "name": "localizacao",
+          "type": 9
+        },
+        {
+          "id": "18:3087462972484931213",
+          "name": "ncm",
+          "type": 9
+        },
+        {
+          "id": "20:4384449226668016299",
+          "name": "fotoPath",
+          "type": 9
+        },
+        {
+          "id": "21:4705565524302891427",
+          "name": "preco1",
+          "type": 8
+        },
+        {
+          "id": "22:2856288256615956036",
+          "name": "preco2",
+          "type": 8
+        },
+        {
+          "id": "23:4928394063071914210",
+          "name": "preco3",
+          "type": 8
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "3:1373149988303506096",
+      "lastPropertyId": "16:7685998874231786707",
+      "name": "Venda",
+      "properties": [
+        {
+          "id": "1:3054998435758771479",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:9148258983918137274",
+          "name": "data",
+          "type": 10
+        },
+        {
+          "id": "3:6039271794964740472",
+          "name": "total",
+          "type": 8
+        },
+        {
+          "id": "4:8005448189673274687",
+          "name": "custoTotal",
+          "type": 8
+        },
+        {
+          "id": "5:1561233662105521358",
+          "name": "lucroTotal",
+          "type": 8
+        },
+        {
+          "id": "6:3487146687259899031",
+          "name": "cancelada",
+          "type": 1
+        },
+        {
+          "id": "7:9036576713029794994",
+          "name": "status",
+          "type": 9
+        },
+        {
+          "id": "8:5888505887334690258",
+          "name": "numeroOrcamento",
+          "type": 6
+        },
+        {
+          "id": "9:5228539885091922933",
+          "name": "formaPagamento",
+          "type": 9
+        },
+        {
+          "id": "10:3562657315709897588",
+          "name": "quantidadeParcelas",
+          "type": 6
+        },
+        {
+          "id": "11:5139057823397078840",
+          "name": "clienteId",
+          "indexId": "3:4584164524797729456",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Cliente"
+        },
+        {
+          "id": "12:3131322751820763613",
+          "name": "tipoEntrega",
+          "type": 9
+        },
+        {
+          "id": "13:2999771205042016440",
+          "name": "valorFrete",
+          "type": 8
+        },
+        {
+          "id": "14:8042255218919570048",
+          "name": "enderecoEntrega",
+          "type": 9
+        },
+        {
+          "id": "15:8422240493862704459",
+          "name": "observacaoEntrega",
+          "type": 9
+        },
+        {
+          "id": "16:7685998874231786707",
+          "name": "statusEntrega",
+          "type": 9
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "4:8923372746033765628",
+      "lastPropertyId": "20:6486430712394977568",
+      "name": "Cliente",
+      "properties": [
+        {
+          "id": "1:890861945693633328",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:6553881396131161790",
+          "name": "tipoPessoa",
+          "type": 9
+        },
+        {
+          "id": "3:5724585618422995633",
+          "name": "nomeRazao",
+          "type": 9
+        },
+        {
+          "id": "4:6143058838078556321",
+          "name": "nomeFantasia",
+          "type": 9
+        },
+        {
+          "id": "5:1179106941222261668",
+          "name": "documento",
+          "type": 9
+        },
+        {
+          "id": "6:8725588667688515569",
+          "name": "inscricaoEstadual",
+          "type": 9
+        },
+        {
+          "id": "7:3449271875040642616",
+          "name": "telefone",
+          "type": 9
+        },
+        {
+          "id": "8:4873452929797137508",
+          "name": "whatsapp",
+          "type": 9
+        },
+        {
+          "id": "9:8018106346336043925",
+          "name": "email",
+          "type": 9
+        },
+        {
+          "id": "10:8902294221741944013",
+          "name": "cep",
+          "type": 9
+        },
+        {
+          "id": "11:467815795108994607",
+          "name": "endereco",
+          "type": 9
+        },
+        {
+          "id": "12:4590892111661655236",
+          "name": "numero",
+          "type": 9
+        },
+        {
+          "id": "13:271737529434947332",
+          "name": "bairro",
+          "type": 9
+        },
+        {
+          "id": "14:3517125582596044450",
+          "name": "cidade",
+          "type": 9
+        },
+        {
+          "id": "15:8648437437100286039",
+          "name": "uf",
+          "type": 9
+        },
+        {
+          "id": "16:4134087706641037077",
+          "name": "referencia",
+          "type": 9
+        },
+        {
+          "id": "17:2981032616131028380",
+          "name": "limiteCredito",
+          "type": 8
+        },
+        {
+          "id": "18:6022032322724880616",
+          "name": "observacoes",
+          "type": 9
+        },
+        {
+          "id": "19:5153641913998207152",
+          "name": "ativo",
+          "type": 1
+        },
+        {
+          "id": "20:6486430712394977568",
+          "name": "criadoEm",
+          "type": 10
+        }
+      ],
+      "relations": []
+    }
+  ],
+  "lastEntityId": "4:8923372746033765628",
+  "lastIndexId": "3:4584164524797729456",
+  "lastRelationId": "0:0",
+  "lastSequenceId": "0:0",
+  "modelVersion": 5,
+  "modelVersionParserMinimum": 5,
+  "retiredEntityUids": [],
+  "retiredIndexUids": [],
+  "retiredPropertyUids": [
+    8694161291238035285
+  ],
+  "retiredRelationUids": [],
+  "version": 1
+}
