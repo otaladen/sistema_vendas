@@ -4,6 +4,7 @@ import 'data/cliente_repository.dart';
 import 'data/objectbox.dart';
 import 'data/produto_repository.dart';
 import 'data/venda_repository.dart';
+import 'data/vendedor_repository.dart';
 import 'ui/main_menu_page.dart';
 
 Future<void> main() async {
@@ -58,7 +59,10 @@ class MyApp extends StatelessWidget {
         ),
         inputDecorationTheme: baseTheme.inputDecorationTheme.copyWith(
           floatingLabelBehavior: FloatingLabelBehavior.auto,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 14,
+          ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(globalRadius),
           ),
@@ -68,7 +72,10 @@ class MyApp extends StatelessWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(globalRadius),
-            borderSide: BorderSide(color: baseTheme.colorScheme.primary, width: 1.4),
+            borderSide: BorderSide(
+              color: baseTheme.colorScheme.primary,
+              width: 1.4,
+            ),
           ),
           errorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(globalRadius),
@@ -76,7 +83,10 @@ class MyApp extends StatelessWidget {
           ),
           focusedErrorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(globalRadius),
-            borderSide: BorderSide(color: baseTheme.colorScheme.error, width: 1.4),
+            borderSide: BorderSide(
+              color: baseTheme.colorScheme.error,
+              width: 1.4,
+            ),
           ),
         ),
         cardTheme: CardThemeData(
@@ -101,9 +111,7 @@ class MyApp extends StatelessWidget {
             side: BorderSide(color: baseTheme.colorScheme.outline),
           ),
         ),
-        dialogTheme: DialogThemeData(
-          shape: globalShape,
-        ),
+        dialogTheme: DialogThemeData(shape: globalShape),
         snackBarTheme: SnackBarThemeData(
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
@@ -131,6 +139,7 @@ class MyApp extends StatelessWidget {
         produtoRepository: ProdutoRepository(objectBox),
         clienteRepository: ClienteRepository(objectBox),
         vendaRepository: VendaRepository(objectBox),
+        vendedorRepository: VendedorRepository(objectBox),
       ),
     );
   }
@@ -205,10 +214,12 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
     if (other is! AppSemanticColors) return this;
     return AppSemanticColors(
       successBg: Color.lerp(successBg, other.successBg, t) ?? successBg,
-      successBorder: Color.lerp(successBorder, other.successBorder, t) ?? successBorder,
+      successBorder:
+          Color.lerp(successBorder, other.successBorder, t) ?? successBorder,
       successFg: Color.lerp(successFg, other.successFg, t) ?? successFg,
       warningBg: Color.lerp(warningBg, other.warningBg, t) ?? warningBg,
-      warningBorder: Color.lerp(warningBorder, other.warningBorder, t) ?? warningBorder,
+      warningBorder:
+          Color.lerp(warningBorder, other.warningBorder, t) ?? warningBorder,
       warningFg: Color.lerp(warningFg, other.warningFg, t) ?? warningFg,
       errorBg: Color.lerp(errorBg, other.errorBg, t) ?? errorBg,
       errorBorder: Color.lerp(errorBorder, other.errorBorder, t) ?? errorBorder,

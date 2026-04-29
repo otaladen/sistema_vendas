@@ -60,7 +60,7 @@
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "23:4928394063071914210",
+      "lastPropertyId": "25:7480330671656088555",
       "name": "Produto",
       "properties": [
         {
@@ -173,13 +173,23 @@
           "id": "23:4928394063071914210",
           "name": "preco3",
           "type": 8
+        },
+        {
+          "id": "24:2024617714080193216",
+          "name": "estoqueReal",
+          "type": 6
+        },
+        {
+          "id": "25:7480330671656088555",
+          "name": "estoqueReservado",
+          "type": 6
         }
       ],
       "relations": []
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "16:7685998874231786707",
+      "lastPropertyId": "18:84220956428728917",
       "name": "Venda",
       "properties": [
         {
@@ -265,6 +275,19 @@
           "id": "16:7685998874231786707",
           "name": "statusEntrega",
           "type": 9
+        },
+        {
+          "id": "17:8460305363199017199",
+          "name": "entregaPendente",
+          "type": 1
+        },
+        {
+          "id": "18:84220956428728917",
+          "name": "vendedorId",
+          "indexId": "4:7118507350466257646",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Vendedor"
         }
       ],
       "relations": []
@@ -377,10 +400,79 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "5:8242003091166492994",
+      "lastPropertyId": "12:3289138156469858386",
+      "name": "Vendedor",
+      "properties": [
+        {
+          "id": "1:8181750620432306485",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:110391731621943108",
+          "name": "codigoInterno",
+          "type": 9
+        },
+        {
+          "id": "3:2278074910823669549",
+          "name": "nomeCompleto",
+          "type": 9
+        },
+        {
+          "id": "4:534013903122726007",
+          "name": "apelido",
+          "type": 9
+        },
+        {
+          "id": "5:587059015709535238",
+          "name": "telefone",
+          "type": 9
+        },
+        {
+          "id": "6:1311270489590818942",
+          "name": "whatsapp",
+          "type": 9
+        },
+        {
+          "id": "7:6554308987806244005",
+          "name": "email",
+          "type": 9
+        },
+        {
+          "id": "8:8503588951673150391",
+          "name": "percentualComissao",
+          "type": 8
+        },
+        {
+          "id": "9:2413539508533576454",
+          "name": "metaMensalValor",
+          "type": 8
+        },
+        {
+          "id": "10:8043924587541092663",
+          "name": "observacoesComerciais",
+          "type": 9
+        },
+        {
+          "id": "11:8320874757360384906",
+          "name": "ativo",
+          "type": 1
+        },
+        {
+          "id": "12:3289138156469858386",
+          "name": "criadoEm",
+          "type": 10
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "4:8923372746033765628",
-  "lastIndexId": "3:4584164524797729456",
+  "lastEntityId": "5:8242003091166492994",
+  "lastIndexId": "4:7118507350466257646",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

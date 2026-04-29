@@ -18,6 +18,7 @@ import 'model/cliente.dart';
 import 'model/item_venda.dart';
 import 'model/produto.dart';
 import 'model/venda.dart';
+import 'model/vendedor.dart';
 
 export 'package:objectbox/objectbox.dart'; // so that callers only have to import this file
 
@@ -89,7 +90,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(2, 12069401530715107),
     name: 'Produto',
-    lastPropertyId: const obx_int.IdUid(23, 4928394063071914210),
+    lastPropertyId: const obx_int.IdUid(25, 7480330671656088555),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -224,6 +225,18 @@ final _entities = <obx_int.ModelEntity>[
         type: 8,
         flags: 0,
       ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(24, 2024617714080193216),
+        name: 'estoqueReal',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(25, 7480330671656088555),
+        name: 'estoqueReservado',
+        type: 6,
+        flags: 0,
+      ),
     ],
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
@@ -231,7 +244,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(16, 7685998874231786707),
+    lastPropertyId: const obx_int.IdUid(18, 84220956428728917),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -332,6 +345,21 @@ final _entities = <obx_int.ModelEntity>[
         name: 'statusEntrega',
         type: 9,
         flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(17, 8460305363199017199),
+        name: 'entregaPendente',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(18, 84220956428728917),
+        name: 'vendedorId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(4, 7118507350466257646),
+        relationField: 'vendedor',
+        relationTarget: 'Vendedor',
       ),
     ],
     relations: <obx_int.ModelRelation>[],
@@ -473,6 +501,88 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(5, 8242003091166492994),
+    name: 'Vendedor',
+    lastPropertyId: const obx_int.IdUid(12, 3289138156469858386),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 8181750620432306485),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 110391731621943108),
+        name: 'codigoInterno',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 2278074910823669549),
+        name: 'nomeCompleto',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 534013903122726007),
+        name: 'apelido',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 587059015709535238),
+        name: 'telefone',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 1311270489590818942),
+        name: 'whatsapp',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 6554308987806244005),
+        name: 'email',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 8503588951673150391),
+        name: 'percentualComissao',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 2413539508533576454),
+        name: 'metaMensalValor',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 8043924587541092663),
+        name: 'observacoesComerciais',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 8320874757360384906),
+        name: 'ativo',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 3289138156469858386),
+        name: 'criadoEm',
+        type: 10,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -518,8 +628,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(4, 8923372746033765628),
-    lastIndexId: const obx_int.IdUid(3, 4584164524797729456),
+    lastEntityId: const obx_int.IdUid(5, 8242003091166492994),
+    lastIndexId: const obx_int.IdUid(4, 7118507350466257646),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -635,7 +745,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final localizacaoOffset = fbb.writeString(object.localizacao);
         final ncmOffset = fbb.writeString(object.ncm);
         final fotoPathOffset = fbb.writeString(object.fotoPath);
-        fbb.startTable(24);
+        fbb.startTable(26);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, nomeOffset);
         fbb.addInt64(2, object.estoque);
@@ -658,6 +768,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addFloat64(20, object.preco1);
         fbb.addFloat64(21, object.preco2);
         fbb.addFloat64(22, object.preco3);
+        fbb.addInt64(23, object.estoqueReal);
+        fbb.addInt64(24, object.estoqueReservado);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -713,6 +825,18 @@ obx_int.ModelDefinition getObjectBoxModel() {
           buffer,
           rootOffset,
           8,
+          0,
+        );
+        final estoqueRealParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          50,
+          0,
+        );
+        final estoqueReservadoParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          52,
           0,
         );
         final quantidadeMinimaParam = const fb.Int64Reader().vTableGet(
@@ -771,6 +895,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
           localizacao: localizacaoParam,
           ncm: ncmParam,
           estoque: estoqueParam,
+          estoqueReal: estoqueRealParam,
+          estoqueReservado: estoqueReservadoParam,
           quantidadeMinima: quantidadeMinimaParam,
           precoCusto: precoCustoParam,
           preco1: preco1Param,
@@ -785,7 +911,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     ),
     Venda: obx_int.EntityDefinition<Venda>(
       model: _entities[2],
-      toOneRelations: (Venda object) => [object.cliente],
+      toOneRelations: (Venda object) => [object.cliente, object.vendedor],
       toManyRelations: (Venda object) => {
         obx_int.RelInfo<ItemVenda>.toOneBacklink(
           5,
@@ -806,7 +932,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           object.observacaoEntrega,
         );
         final statusEntregaOffset = fbb.writeString(object.statusEntrega);
-        fbb.startTable(17);
+        fbb.startTable(19);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -823,6 +949,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(13, enderecoEntregaOffset);
         fbb.addOffset(14, observacaoEntregaOffset);
         fbb.addOffset(15, statusEntregaOffset);
+        fbb.addBool(16, object.entregaPendente);
+        fbb.addInt64(17, object.vendedor.targetId);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -893,6 +1021,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final statusEntregaParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 34, '');
+        final entregaPendenteParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          36,
+          false,
+        );
         final canceladaParam = const fb.BoolReader().vTableGet(
           buffer,
           rootOffset,
@@ -914,6 +1048,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           enderecoEntrega: enderecoEntregaParam,
           observacaoEntrega: observacaoEntregaParam,
           statusEntrega: statusEntregaParam,
+          entregaPendente: entregaPendenteParam,
           cancelada: canceladaParam,
         );
         object.cliente.targetId = const fb.Int64Reader().vTableGet(
@@ -923,6 +1058,13 @@ obx_int.ModelDefinition getObjectBoxModel() {
           0,
         );
         object.cliente.attach(store);
+        object.vendedor.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          38,
+          0,
+        );
+        object.vendedor.attach(store);
         obx_int.InternalToManyAccess.setRelInfo<Venda>(
           object.itens,
           store,
@@ -1078,6 +1220,110 @@ obx_int.ModelDefinition getObjectBoxModel() {
           referencia: referenciaParam,
           limiteCredito: limiteCreditoParam,
           observacoes: observacoesParam,
+          ativo: ativoParam,
+          criadoEm: criadoEmParam,
+        );
+
+        return object;
+      },
+    ),
+    Vendedor: obx_int.EntityDefinition<Vendedor>(
+      model: _entities[4],
+      toOneRelations: (Vendedor object) => [],
+      toManyRelations: (Vendedor object) => {},
+      getId: (Vendedor object) => object.id,
+      setId: (Vendedor object, int id) {
+        object.id = id;
+      },
+      objectToFB: (Vendedor object, fb.Builder fbb) {
+        final codigoInternoOffset = fbb.writeString(object.codigoInterno);
+        final nomeCompletoOffset = fbb.writeString(object.nomeCompleto);
+        final apelidoOffset = fbb.writeString(object.apelido);
+        final telefoneOffset = fbb.writeString(object.telefone);
+        final whatsappOffset = fbb.writeString(object.whatsapp);
+        final emailOffset = fbb.writeString(object.email);
+        final observacoesComerciaisOffset = fbb.writeString(
+          object.observacoesComerciais,
+        );
+        fbb.startTable(13);
+        fbb.addInt64(0, object.id);
+        fbb.addOffset(1, codigoInternoOffset);
+        fbb.addOffset(2, nomeCompletoOffset);
+        fbb.addOffset(3, apelidoOffset);
+        fbb.addOffset(4, telefoneOffset);
+        fbb.addOffset(5, whatsappOffset);
+        fbb.addOffset(6, emailOffset);
+        fbb.addFloat64(7, object.percentualComissao);
+        fbb.addFloat64(8, object.metaMensalValor);
+        fbb.addOffset(9, observacoesComerciaisOffset);
+        fbb.addBool(10, object.ativo);
+        fbb.addInt64(11, object.criadoEm.millisecondsSinceEpoch);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final codigoInternoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 6, '');
+        final nomeCompletoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final apelidoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final telefoneParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 12, '');
+        final whatsappParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 14, '');
+        final emailParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 16, '');
+        final percentualComissaoParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          18,
+          0,
+        );
+        final metaMensalValorParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          20,
+          0,
+        );
+        final observacoesComerciaisParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 22, '');
+        final ativoParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          24,
+          false,
+        );
+        final criadoEmParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 26, 0),
+          isUtc: true,
+        );
+        final object = Vendedor(
+          id: idParam,
+          codigoInterno: codigoInternoParam,
+          nomeCompleto: nomeCompletoParam,
+          apelido: apelidoParam,
+          telefone: telefoneParam,
+          whatsapp: whatsappParam,
+          email: emailParam,
+          percentualComissao: percentualComissaoParam,
+          metaMensalValor: metaMensalValorParam,
+          observacoesComerciais: observacoesComerciaisParam,
           ativo: ativoParam,
           criadoEm: criadoEmParam,
         );
@@ -1244,6 +1490,16 @@ class Produto_ {
   static final preco3 = obx.QueryDoubleProperty<Produto>(
     _entities[1].properties[21],
   );
+
+  /// See [Produto.estoqueReal].
+  static final estoqueReal = obx.QueryIntegerProperty<Produto>(
+    _entities[1].properties[22],
+  );
+
+  /// See [Produto.estoqueReservado].
+  static final estoqueReservado = obx.QueryIntegerProperty<Produto>(
+    _entities[1].properties[23],
+  );
 }
 
 /// [Venda] entity fields to define ObjectBox queries.
@@ -1322,6 +1578,16 @@ class Venda_ {
   /// See [Venda.statusEntrega].
   static final statusEntrega = obx.QueryStringProperty<Venda>(
     _entities[2].properties[15],
+  );
+
+  /// See [Venda.entregaPendente].
+  static final entregaPendente = obx.QueryBooleanProperty<Venda>(
+    _entities[2].properties[16],
+  );
+
+  /// See [Venda.vendedor].
+  static final vendedor = obx.QueryRelationToOne<Venda, Vendedor>(
+    _entities[2].properties[17],
   );
 
   /// see [Venda.itens]
@@ -1430,5 +1696,68 @@ class Cliente_ {
   /// See [Cliente.criadoEm].
   static final criadoEm = obx.QueryDateProperty<Cliente>(
     _entities[3].properties[19],
+  );
+}
+
+/// [Vendedor] entity fields to define ObjectBox queries.
+class Vendedor_ {
+  /// See [Vendedor.id].
+  static final id = obx.QueryIntegerProperty<Vendedor>(
+    _entities[4].properties[0],
+  );
+
+  /// See [Vendedor.codigoInterno].
+  static final codigoInterno = obx.QueryStringProperty<Vendedor>(
+    _entities[4].properties[1],
+  );
+
+  /// See [Vendedor.nomeCompleto].
+  static final nomeCompleto = obx.QueryStringProperty<Vendedor>(
+    _entities[4].properties[2],
+  );
+
+  /// See [Vendedor.apelido].
+  static final apelido = obx.QueryStringProperty<Vendedor>(
+    _entities[4].properties[3],
+  );
+
+  /// See [Vendedor.telefone].
+  static final telefone = obx.QueryStringProperty<Vendedor>(
+    _entities[4].properties[4],
+  );
+
+  /// See [Vendedor.whatsapp].
+  static final whatsapp = obx.QueryStringProperty<Vendedor>(
+    _entities[4].properties[5],
+  );
+
+  /// See [Vendedor.email].
+  static final email = obx.QueryStringProperty<Vendedor>(
+    _entities[4].properties[6],
+  );
+
+  /// See [Vendedor.percentualComissao].
+  static final percentualComissao = obx.QueryDoubleProperty<Vendedor>(
+    _entities[4].properties[7],
+  );
+
+  /// See [Vendedor.metaMensalValor].
+  static final metaMensalValor = obx.QueryDoubleProperty<Vendedor>(
+    _entities[4].properties[8],
+  );
+
+  /// See [Vendedor.observacoesComerciais].
+  static final observacoesComerciais = obx.QueryStringProperty<Vendedor>(
+    _entities[4].properties[9],
+  );
+
+  /// See [Vendedor.ativo].
+  static final ativo = obx.QueryBooleanProperty<Vendedor>(
+    _entities[4].properties[10],
+  );
+
+  /// See [Vendedor.criadoEm].
+  static final criadoEm = obx.QueryDateProperty<Vendedor>(
+    _entities[4].properties[11],
   );
 }

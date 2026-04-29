@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
+import '../data/vendedor_repository.dart';
 import 'cadastros_page.dart';
 import 'configuracoes_page.dart';
 import 'estoque_page.dart';
@@ -14,11 +15,13 @@ class MainMenuPage extends StatelessWidget {
     required this.produtoRepository,
     required this.clienteRepository,
     required this.vendaRepository,
+    required this.vendedorRepository,
   });
 
   final ProdutoRepository produtoRepository;
   final ClienteRepository clienteRepository;
   final VendaRepository vendaRepository;
+  final VendedorRepository vendedorRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +41,7 @@ class MainMenuPage extends StatelessWidget {
                     builder: (_) => CadastrosPage(
                       produtoRepository: produtoRepository,
                       clienteRepository: clienteRepository,
+                      vendedorRepository: vendedorRepository,
                     ),
                   ),
                 );
@@ -50,7 +54,8 @@ class MainMenuPage extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => EstoquePage(produtoRepository: produtoRepository),
+                    builder: (_) =>
+                        EstoquePage(produtoRepository: produtoRepository),
                   ),
                 );
               },
@@ -66,6 +71,7 @@ class MainMenuPage extends StatelessWidget {
                       produtoRepository: produtoRepository,
                       clienteRepository: clienteRepository,
                       vendaRepository: vendaRepository,
+                      vendedorRepository: vendedorRepository,
                     ),
                   ),
                 );
@@ -77,9 +83,7 @@ class MainMenuPage extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const ConfiguracoesPage(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const ConfiguracoesPage()),
                 );
               },
             ),

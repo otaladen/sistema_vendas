@@ -21,10 +21,7 @@ class ResumoFinanceiroPeriodo {
 }
 
 class HistoricoVendaDetalhado {
-  HistoricoVendaDetalhado({
-    required this.venda,
-    required this.descricaoItens,
-  });
+  HistoricoVendaDetalhado({required this.venda, required this.descricaoItens});
 
   final Venda venda;
   final String descricaoItens;
@@ -35,6 +32,24 @@ class VendaService {
 
   final VendaRepository _vendaRepository;
 
+  String gerarSenhaDoDia({DateTime? dataBase}) {
+    final data = (dataBase ?? DateTime.now()).toLocal();
+    const fatorFixo = 37;
+    final senhaNumero = ((data.day * 100) + (data.month * fatorFixo)) % 10000;
+    return senhaNumero.toString().padLeft(4, '0');
+  }
+
+  void solicitarRetiradaFutura({
+    required int vendaId,
+    required String senhaDoDiaInformada,
+  }) {
+    final senhaEsperada = gerarSenhaDoDia();
+    if (senhaDoDiaInformada != senhaEsperada) {
+      throw StateError('Senha do dia invalida.');
+    }
+    _vendaRepository.marcarEntregaComoPendente(vendaId);
+  }
+
   int registrarVenda(List<ItemVendaInput> itens) {
     return _vendaRepository.registrarVenda(itens);
   }
@@ -43,11 +58,17 @@ class VendaService {
     List<ItemVendaInput> itens, {
     required DadosPagamentoOrcamento pagamento,
     DadosEntregaOrcamento? entrega,
+    int? clienteId,
+    int? vendedorId,
   }) {
     return _vendaRepository.registrarOrcamento(
       itens,
       pagamento: pagamento,
-      entrega: entrega ?? DadosEntregaOrcamento(tipoEntrega: 'retirada', valorFrete: 0),
+      entrega:
+          entrega ??
+          DadosEntregaOrcamento(tipoEntrega: 'retirada', valorFrete: 0),
+      clienteId: clienteId,
+      vendedorId: vendedorId,
     );
   }
 
@@ -63,7 +84,9 @@ class VendaService {
     _vendaRepository.cancelarVenda(vendaId);
   }
 
-  List<HistoricoVendaDetalhado> listarHistoricoDetalhado(PeriodoFiltro periodo) {
+  List<HistoricoVendaDetalhado> listarHistoricoDetalhado(
+    PeriodoFiltro periodo,
+  ) {
     final vendas = _vendaRepository.listarPorPeriodo(periodo);
     return vendas.map((venda) {
       final descricaoItens = venda.itens
@@ -74,9 +97,7 @@ class VendaService {
           .join(' | ');
       return HistoricoVendaDetalhado(
         venda: venda,
-        descricaoItens: descricaoItens.isEmpty
-            ? 'Sem itens'
-            : descricaoItens,
+        descricaoItens: descricaoItens.isEmpty ? 'Sem itens' : descricaoItens,
       );
     }).toList();
   }
@@ -102,17 +123,19 @@ class VendaService {
   PeriodoFiltro periodoHoje() {
     final agora = DateTime.now();
     final inicio = DateTime(agora.year, agora.month, agora.day);
-    final fim = inicio.add(const Duration(days: 1)).subtract(
-          const Duration(milliseconds: 1),
-        );
+    final fim = inicio
+        .add(const Duration(days: 1))
+        .subtract(const Duration(milliseconds: 1));
     return PeriodoFiltro(inicio: inicio, fim: fim);
   }
 
   PeriodoFiltro ultimosDias(int dias) {
     final agora = DateTime.now();
-    final inicio = DateTime(agora.year, agora.month, agora.day).subtract(
-      Duration(days: dias - 1),
-    );
+    final inicio = DateTime(
+      agora.year,
+      agora.month,
+      agora.day,
+    ).subtract(Duration(days: dias - 1));
     return PeriodoFiltro(inicio: inicio, fim: agora);
   }
 

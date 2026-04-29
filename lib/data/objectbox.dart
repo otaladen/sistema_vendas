@@ -7,6 +7,7 @@ import '../model/item_venda.dart';
 import '../model/cliente.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
+import '../model/vendedor.dart';
 import '../objectbox.g.dart';
 
 class ObjectBox {
@@ -15,6 +16,7 @@ class ObjectBox {
     clienteBox = Box<Cliente>(store);
     vendaBox = Box<Venda>(store);
     itemVendaBox = Box<ItemVenda>(store);
+    vendedorBox = Box<Vendedor>(store);
   }
 
   late final Store store;
@@ -22,6 +24,7 @@ class ObjectBox {
   late final Box<Cliente> clienteBox;
   late final Box<Venda> vendaBox;
   late final Box<ItemVenda> itemVendaBox;
+  late final Box<Vendedor> vendedorBox;
   late final Directory productImagesDir;
 
   static Future<ObjectBox> create() async {
@@ -37,9 +40,7 @@ class ObjectBox {
       productImagesDir.createSync(recursive: true);
     }
 
-    final store = await openStore(
-      directory: objectBoxDir.path,
-    );
+    final store = await openStore(directory: objectBoxDir.path);
     final instance = ObjectBox._create(store);
     instance.productImagesDir = productImagesDir;
     return instance;

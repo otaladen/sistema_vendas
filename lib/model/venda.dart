@@ -2,6 +2,7 @@ import 'package:objectbox/objectbox.dart';
 
 import 'cliente.dart';
 import 'item_venda.dart';
+import 'vendedor.dart';
 
 @Entity()
 class Venda {
@@ -20,6 +21,7 @@ class Venda {
     this.enderecoEntrega = '',
     this.observacaoEntrega = '',
     this.statusEntrega = 'nao_aplicavel',
+    this.entregaPendente = false,
     this.cancelada = false,
   }) : data = data ?? DateTime.now();
 
@@ -40,9 +42,11 @@ class Venda {
   String enderecoEntrega;
   String observacaoEntrega;
   String statusEntrega;
+  bool entregaPendente;
   bool cancelada;
 
   final cliente = ToOne<Cliente>();
+  final vendedor = ToOne<Vendedor>();
 
   @Backlink('venda')
   final itens = ToMany<ItemVenda>();

@@ -17,7 +17,9 @@ class Produto {
     this.fotoPath = '',
     this.localizacao = '',
     this.ncm = '',
-    required this.estoque,
+    int? estoque,
+    int? estoqueReal,
+    this.estoqueReservado = 0,
     required this.quantidadeMinima,
     required this.precoCusto,
     this.preco1 = 0,
@@ -25,7 +27,8 @@ class Produto {
     this.preco3 = 0,
     required this.precoVenda,
     DateTime? criadoEm,
-  }) : criadoEm = criadoEm ?? DateTime.now();
+  })  : estoqueReal = estoqueReal ?? estoque ?? 0,
+        criadoEm = criadoEm ?? DateTime.now();
 
   @Id()
   int id;
@@ -43,7 +46,8 @@ class Produto {
   String fotoPath;
   String localizacao;
   String ncm;
-  int estoque;
+  int estoqueReal;
+  int estoqueReservado;
   int quantidadeMinima;
   double precoCusto;
   double preco1;
@@ -66,4 +70,9 @@ class Produto {
 
   @Property(type: PropertyType.dateUtc)
   DateTime criadoEm;
+
+  // Mantem compatibilidade com o codigo legado enquanto a migracao
+  // para estoqueReal/estoqueReservado e finalizada.
+  int get estoque => estoqueReal;
+  set estoque(int value) => estoqueReal = value;
 }
