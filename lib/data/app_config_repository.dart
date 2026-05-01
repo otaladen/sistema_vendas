@@ -12,6 +12,7 @@ class EmpresaConfig {
     this.rodapeOrcamento = 'Este orcamento nao possui valor fiscal.',
     this.logoPath = '',
     this.limiteDivergenciaCaixa = 20,
+    this.permitirVendaSemEstoque = true,
   });
 
   final String nomeLoja;
@@ -24,6 +25,7 @@ class EmpresaConfig {
   final String rodapeOrcamento;
   final String logoPath;
   final double limiteDivergenciaCaixa;
+  final bool permitirVendaSemEstoque;
 }
 
 class AppConfigRepository {
@@ -38,6 +40,7 @@ class AppConfigRepository {
   static const _kRodapeOrcamento = 'config_rodape_orcamento';
   static const _kLogoPath = 'config_logo_path';
   static const _kLimiteDivergenciaCaixa = 'config_limite_divergencia_caixa';
+  static const _kPermitirVendaSemEstoque = 'config_permitir_venda_sem_estoque';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -57,6 +60,7 @@ class AppConfigRepository {
           'Este orcamento nao possui valor fiscal.',
       logoPath: prefs.getString(_kLogoPath) ?? '',
       limiteDivergenciaCaixa: prefs.getDouble(_kLimiteDivergenciaCaixa) ?? 20,
+      permitirVendaSemEstoque: prefs.getBool(_kPermitirVendaSemEstoque) ?? true,
     );
   }
 
@@ -82,5 +86,6 @@ class AppConfigRepository {
       _kLimiteDivergenciaCaixa,
       config.limiteDivergenciaCaixa < 0 ? 0 : config.limiteDivergenciaCaixa,
     );
+    await prefs.setBool(_kPermitirVendaSemEstoque, config.permitirVendaSemEstoque);
   }
 }

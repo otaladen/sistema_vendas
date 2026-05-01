@@ -14,6 +14,7 @@ import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
+import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
@@ -86,14 +87,28 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   String _prioridadeEntregaSelecionada = 'normal';
   String _janelaEntregaSelecionada = 'nao_definida';
   DateTime? _dataEntregaMarcada;
+  bool _permitirVendaSemEstoque = true;
+  int? _orcamentoEmEdicaoId;
+  int? _orcamentoEmEdicaoNumero;
 
   @override
   void initState() {
     super.initState();
     _carregarDadosIniciais();
+    _carregarConfiguracaoVendaSemEstoque();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _pesquisaFocus.requestFocus();
+    });
+  }
+
+  Future<void> _carregarConfiguracaoVendaSemEstoque() async {
+    final config = await _configRepository.carregarEmpresaConfig();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
     });
   }
 
@@ -198,6 +213,44 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   }
 
   bool _estoqueCritico(Produto p) => p.estoqueReal < p.quantidadeMinima;
+
+  TextSpan _textoComDestaqueBusca({
+    required BuildContext context,
+    required String texto,
+    required String termoBusca,
+    required TextStyle estiloBase,
+  }) {
+    final termo = termoBusca.trim().toLowerCase();
+    if (termo.isEmpty) {
+      return TextSpan(text: texto, style: estiloBase);
+    }
+    final textoLower = texto.toLowerCase();
+    final spans = <TextSpan>[];
+    var cursor = 0;
+
+    while (cursor < texto.length) {
+      final indice = textoLower.indexOf(termo, cursor);
+      if (indice < 0) {
+        spans.add(TextSpan(text: texto.substring(cursor)));
+        break;
+      }
+      if (indice > cursor) {
+        spans.add(TextSpan(text: texto.substring(cursor, indice)));
+      }
+      spans.add(
+        TextSpan(
+          text: texto.substring(indice, indice + termo.length),
+          style: estiloBase.copyWith(
+            color: Theme.of(context).colorScheme.primary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+      cursor = indice + termo.length;
+    }
+
+    return TextSpan(style: estiloBase, children: spans);
+  }
 
   /// Volta o foco ao campo de pesquisa para fluxo continuado sem mouse.
   void _voltarFocoParaPesquisa() {
@@ -346,35 +399,40 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     if (quantidade <= 0) return;
     final precoTipo = _precoListaAtivo;
     final unit = _precoPorTipo(produto, precoTipo);
-    final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
-    final disp = fresh.estoqueReal;
-    if (disp <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sem estoque de ${produto.nome}.')),
+    if (!_permitirVendaSemEstoque) {
+      final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
+      final disp = fresh.estoqueReal;
+      if (disp <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sem estoque de ${produto.nome}.')),
+        );
+        return;
+      }
+      final idxExistente = _carrinho.indexWhere(
+        (e) => e.produto.id == produto.id && e.precoTipo == precoTipo,
       );
-      return;
+      if (idxExistente >= 0) {
+        final novoTotal = _carrinho[idxExistente].quantidade + quantidade;
+        if (novoTotal > disp) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Estoque maximo para ${produto.nome}: $disp (ja ha ${_carrinho[idxExistente].quantidade} no orcamento).',
+              ),
+            ),
+          );
+          return;
+        }
+      } else if (quantidade > disp) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Estoque maximo para ${produto.nome}: $disp.')),
+        );
+        return;
+      }
     }
     final idxExistente = _carrinho.indexWhere(
       (e) => e.produto.id == produto.id && e.precoTipo == precoTipo,
     );
-    if (idxExistente >= 0) {
-      final novoTotal = _carrinho[idxExistente].quantidade + quantidade;
-      if (novoTotal > disp) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Estoque maximo para ${produto.nome}: $disp (ja ha ${_carrinho[idxExistente].quantidade} no orcamento).',
-            ),
-          ),
-        );
-        return;
-      }
-    } else if (quantidade > disp) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Estoque maximo para ${produto.nome}: $disp.')),
-      );
-      return;
-    }
     setState(() {
       if (idxExistente >= 0) {
         _carrinho[idxExistente].quantidade += quantidade;
@@ -451,7 +509,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   }
 
   void _alterarQuantidadeCarrinho(int index, int delta) {
-    if (delta > 0) {
+    if (!_permitirVendaSemEstoque && delta > 0) {
       final item = _carrinho[index];
       final fresh =
           widget.produtoRepository.obterPorId(item.produto.id) ?? item.produto;
@@ -699,40 +757,46 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     }
 
     final precoUnit = _precoPorTipo(produto, precoTipo);
-    final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
-    final disp = fresh.estoqueReal;
-    if (disp <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sem estoque de ${produto.nome}.')),
+    if (!_permitirVendaSemEstoque) {
+      final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
+      final disp = fresh.estoqueReal;
+      if (disp <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sem estoque de ${produto.nome}.')),
+        );
+        return;
+      }
+
+      final idxExistente = _carrinho.indexWhere(
+        (e) => e.produto.id == produto.id && e.precoTipo == precoTipo,
       );
-      return;
+      if (idxExistente >= 0) {
+        final novoTotal = _carrinho[idxExistente].quantidade + quantidade;
+        if (novoTotal > disp) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Estoque maximo para ${produto.nome}: $disp (ja ha ${_carrinho[idxExistente].quantidade} no orcamento).',
+              ),
+            ),
+          );
+          return;
+        }
+      } else {
+        if (quantidade > disp) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Estoque maximo para ${produto.nome}: $disp.'),
+            ),
+          );
+          return;
+        }
+      }
     }
 
     final idxExistente = _carrinho.indexWhere(
       (e) => e.produto.id == produto.id && e.precoTipo == precoTipo,
     );
-    if (idxExistente >= 0) {
-      final novoTotal = _carrinho[idxExistente].quantidade + quantidade;
-      if (novoTotal > disp) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Estoque maximo para ${produto.nome}: $disp (ja ha ${_carrinho[idxExistente].quantidade} no orcamento).',
-            ),
-          ),
-        );
-        return;
-      }
-    } else {
-      if (quantidade > disp) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Estoque maximo para ${produto.nome}: $disp.'),
-          ),
-        );
-        return;
-      }
-    }
 
     setState(() {
       if (idxExistente >= 0) {
@@ -815,33 +879,50 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
             ),
           )
           .toList();
-      final orcamentoId = widget.vendaRepository.registrarOrcamento(
-        itens,
-        pagamento: DadosPagamentoOrcamento(
-          formaPagamento: _formaPagamentoSelecionada,
-          quantidadeParcelas: _formaPagamentoSelecionada == 'cartao_credito'
-              ? _parcelasSelecionadas
-              : 1,
-        ),
-        entrega: DadosEntregaOrcamento(
-          tipoEntrega: _tipoEntregaSelecionada,
-          valorFrete: valorFrete,
-          enderecoEntrega: _enderecoEntregaController.text.trim(),
-          observacaoEntrega: _observacaoEntregaController.text.trim(),
-          prioridadeEntrega: _tipoEntregaSelecionada == 'entrega_loja'
-              ? _prioridadeEntregaSelecionada
-              : 'normal',
-          janelaEntrega: _tipoEntregaSelecionada == 'entrega_loja'
-              ? _janelaEntregaSelecionada
-              : 'nao_definida',
-          dataEntregaMarcada: _tipoEntregaSelecionada == 'entrega_loja'
-              ? _dataEntregaMarcada
-              : null,
-        ),
-        clienteId: _clienteSelecionadoId,
-        vendedorId: _vendedorSelecionadoId,
+      final pagamento = DadosPagamentoOrcamento(
+        formaPagamento: _formaPagamentoSelecionada,
+        quantidadeParcelas: _formaPagamentoSelecionada == 'cartao_credito'
+            ? _parcelasSelecionadas
+            : 1,
       );
+      final entrega = DadosEntregaOrcamento(
+        tipoEntrega: _tipoEntregaSelecionada,
+        valorFrete: valorFrete,
+        enderecoEntrega: _enderecoEntregaController.text.trim(),
+        observacaoEntrega: _observacaoEntregaController.text.trim(),
+        prioridadeEntrega: _tipoEntregaSelecionada == 'entrega_loja'
+            ? _prioridadeEntregaSelecionada
+            : 'normal',
+        janelaEntrega: _tipoEntregaSelecionada == 'entrega_loja'
+            ? _janelaEntregaSelecionada
+            : 'nao_definida',
+        dataEntregaMarcada: _tipoEntregaSelecionada == 'entrega_loja'
+            ? _dataEntregaMarcada
+            : null,
+      );
+      final orcamentoEdicaoId = _orcamentoEmEdicaoId;
+      int orcamentoId;
+      if (orcamentoEdicaoId != null) {
+        widget.vendaRepository.atualizarOrcamento(
+          orcamentoEdicaoId,
+          itens,
+          pagamento: pagamento,
+          entrega: entrega,
+          clienteId: _clienteSelecionadoId,
+          vendedorId: _vendedorSelecionadoId,
+        );
+        orcamentoId = orcamentoEdicaoId;
+      } else {
+        orcamentoId = widget.vendaRepository.registrarOrcamento(
+          itens,
+          pagamento: pagamento,
+          entrega: entrega,
+          clienteId: _clienteSelecionadoId,
+          vendedorId: _vendedorSelecionadoId,
+        );
+      }
       final vendaSalva = widget.vendaRepository.obterPorId(orcamentoId);
+      final numeroOrcamentoSalvo = vendaSalva?.numeroOrcamento ?? _orcamentoEmEdicaoNumero;
       setState(() {
         _carrinho.clear();
         _formaPagamentoSelecionada = 'dinheiro';
@@ -855,10 +936,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         _valorFreteController.clear();
         _enderecoEntregaController.clear();
         _observacaoEntregaController.clear();
+        _orcamentoEmEdicaoId = null;
+        _orcamentoEmEdicaoNumero = null;
       });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Orcamento #$orcamentoId salvo para o caixa.')),
+        SnackBar(
+          content: Text(
+            orcamentoEdicaoId != null
+                ? 'Orcamento #$numeroOrcamentoSalvo atualizado com sucesso.'
+                : 'Orcamento #$orcamentoId salvo para o caixa.',
+          ),
+        ),
       );
       if (vendaSalva != null && mounted) {
         await _mostrarAcoesPdfOrcamento(vendaSalva);
@@ -869,6 +958,296 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         context,
       ).showSnackBar(SnackBar(content: Text('Erro ao salvar orcamento: $e')));
     }
+  }
+
+  Future<bool> _confirmarSubstituirRascunhoAtual() async {
+    if (_carrinho.isEmpty) {
+      return true;
+    }
+    final resposta = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Carregar outro orcamento'),
+        content: const Text(
+          'Existe um orcamento em edicao na tela. Deseja descartar este rascunho e carregar outro?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Carregar'),
+          ),
+        ],
+      ),
+    );
+    return resposta == true;
+  }
+
+  String _rotuloVendedorUmLinhaOrcamento(Venda venda) {
+    final vendedor = _vendedorDaVenda(venda);
+    if (vendedor == null) {
+      return 'Sem vendedor';
+    }
+    final nome = vendedor.apelido.trim().isNotEmpty
+        ? vendedor.apelido.trim()
+        : vendedor.nomeCompleto.trim();
+    final codigo = vendedor.codigoInterno.trim();
+    return codigo.isEmpty ? nome : '$codigo · $nome';
+  }
+
+  String _normalizarTextoComparacao(String texto) {
+    var t = texto.trim().toLowerCase();
+    const mapa = {
+      'á': 'a',
+      'à': 'a',
+      'â': 'a',
+      'ã': 'a',
+      'ä': 'a',
+      'é': 'e',
+      'è': 'e',
+      'ê': 'e',
+      'ë': 'e',
+      'í': 'i',
+      'ì': 'i',
+      'î': 'i',
+      'ï': 'i',
+      'ó': 'o',
+      'ò': 'o',
+      'ô': 'o',
+      'õ': 'o',
+      'ö': 'o',
+      'ú': 'u',
+      'ù': 'u',
+      'û': 'u',
+      'ü': 'u',
+      'ç': 'c',
+    };
+    mapa.forEach((origem, destino) {
+      t = t.replaceAll(origem, destino);
+    });
+    t = t.replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+    return t;
+  }
+
+  Produto? _resolverProdutoItemOrcamento(
+    ItemVenda item,
+    List<Produto> todosProdutos,
+  ) {
+    final porTarget = item.produto.target;
+    if (porTarget != null) {
+      return porTarget;
+    }
+    final porId = widget.produtoRepository.obterPorId(item.produto.targetId);
+    if (porId != null) {
+      return porId;
+    }
+
+    final nomeItem = _normalizarTextoComparacao(item.nomeProduto);
+    if (nomeItem.isEmpty) {
+      return null;
+    }
+
+    final exato = todosProdutos.where((p) {
+      final nome = _normalizarTextoComparacao(p.nome);
+      return nome == nomeItem;
+    }).firstOrNull;
+    if (exato != null) {
+      return exato;
+    }
+
+    final aproximado = todosProdutos.where((p) {
+      final nome = _normalizarTextoComparacao(p.nome);
+      return nome.contains(nomeItem) || nomeItem.contains(nome);
+    }).firstOrNull;
+    return aproximado;
+  }
+
+  Future<void> _abrirLeitorOrcamento() async {
+    final podeSubstituir = await _confirmarSubstituirRascunhoAtual();
+    if (!mounted || !podeSubstituir) {
+      return;
+    }
+    final pendentes = widget.vendaRepository.listarOrcamentosPendentes();
+    if (pendentes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nao ha orcamentos pendentes para leitura.')),
+      );
+      return;
+    }
+
+    final pesquisaController = TextEditingController();
+    List<Venda> resultados = List<Venda>.from(pendentes);
+    final selecionado = await showDialog<Venda>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Ler orcamento'),
+              content: SizedBox(
+                width: 760,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: pesquisaController,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Numero, cliente, vendedor...',
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                      onChanged: (value) {
+                        final termo = value.trim().toLowerCase();
+                        setDialogState(() {
+                          resultados = pendentes.where((orc) {
+                            final cliente = _clienteDaVenda(orc)?.nomeRazao ?? '';
+                            final vendedor = _rotuloVendedorUmLinhaOrcamento(orc);
+                            return orc.numeroOrcamento.toString().contains(termo) ||
+                                cliente.toLowerCase().contains(termo) ||
+                                vendedor.toLowerCase().contains(termo);
+                          }).toList();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: 220,
+                        maxHeight: MediaQuery.of(context).size.height * 0.58,
+                      ),
+                      child: resultados.isEmpty
+                          ? const Center(child: Text('Nenhum orcamento encontrado.'))
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: resultados.length,
+                              itemBuilder: (context, index) {
+                                final orc = resultados[index];
+                                final cliente =
+                                    _clienteDaVenda(orc)?.nomeRazao ?? 'Sem cliente';
+                                return ListTile(
+                                  title: Text('Orcamento #${orc.numeroOrcamento}'),
+                                  subtitle: Text(
+                                    '$cliente | Itens: ${orc.itens.length} | Total: ${_formatarMoeda(orc.total)}',
+                                  ),
+                                  onTap: () => Navigator.pop(context, orc),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Fechar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    pesquisaController.dispose();
+    if (!mounted || selecionado == null) {
+      return;
+    }
+
+    final orcamentoCompleto =
+        widget.vendaRepository.obterPorId(selecionado.id) ?? selecionado;
+    final drafts = <_OrcamentoItemDraft>[];
+    final nomesItensSemProduto = <String>[];
+    final todosProdutos = widget.produtoRepository.listarTodos();
+    for (final item in orcamentoCompleto.itens) {
+      final produto = _resolverProdutoItemOrcamento(item, todosProdutos);
+      if (produto == null) {
+        nomesItensSemProduto.add(item.nomeProduto);
+        continue;
+      }
+      drafts.add(
+        _OrcamentoItemDraft(
+          produto: produto,
+          quantidade: item.quantidade,
+          precoTipo: item.precoTipo,
+          precoUnitario: item.precoUnitario,
+        ),
+      );
+    }
+    if (drafts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nomesItensSemProduto.isNotEmpty
+                ? 'Nao foi possivel carregar itens do orcamento. Produtos sem cadastro atual.'
+                : 'Nao foi possivel carregar itens do orcamento selecionado.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final clienteIdCarregado = orcamentoCompleto.cliente.targetId == 0
+        ? null
+        : orcamentoCompleto.cliente.targetId;
+    final vendedorIdCarregado = orcamentoCompleto.vendedor.targetId == 0
+        ? null
+        : orcamentoCompleto.vendedor.targetId;
+    final clienteIdValido = clienteIdCarregado != null &&
+            _clientes.any((c) => c.id == clienteIdCarregado)
+        ? clienteIdCarregado
+        : null;
+    final vendedorIdValido = vendedorIdCarregado != null &&
+            _vendedoresAtivos.any((v) => v.id == vendedorIdCarregado)
+        ? vendedorIdCarregado
+        : null;
+    final tipoEntregaValido = orcamentoCompleto.tipoEntrega == 'entrega_loja'
+        ? 'entrega_loja'
+        : 'retirada';
+    final prioridadeValida = switch (orcamentoCompleto.prioridadeEntrega) {
+      'urgente' => 'urgente',
+      'agendada' => 'agendada',
+      _ => 'normal',
+    };
+    final janelaValida = switch (orcamentoCompleto.janelaEntrega) {
+      'manha' => 'manha',
+      'tarde' => 'tarde',
+      _ => 'nao_definida',
+    };
+
+    setState(() {
+      _carrinho
+        ..clear()
+        ..addAll(drafts);
+      _indiceLinhaCarrinho = _carrinho.isEmpty ? null : 0;
+      _clienteSelecionadoId = clienteIdValido;
+      _vendedorSelecionadoId = vendedorIdValido;
+      _formaPagamentoSelecionada = orcamentoCompleto.formaPagamento;
+      _parcelasSelecionadas = orcamentoCompleto.quantidadeParcelas <= 0
+          ? 1
+          : orcamentoCompleto.quantidadeParcelas;
+      _tipoEntregaSelecionada = tipoEntregaValido;
+      _prioridadeEntregaSelecionada = prioridadeValida;
+      _janelaEntregaSelecionada = janelaValida;
+      _dataEntregaMarcada = orcamentoCompleto.dataEntregaMarcada;
+      _valorFreteController.text =
+          orcamentoCompleto.valorFrete.toStringAsFixed(2).replaceAll('.', ',');
+      _enderecoEntregaController.text = orcamentoCompleto.enderecoEntrega;
+      _observacaoEntregaController.text = orcamentoCompleto.observacaoEntrega;
+      _orcamentoEmEdicaoId = orcamentoCompleto.id;
+      _orcamentoEmEdicaoNumero = orcamentoCompleto.numeroOrcamento;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          nomesItensSemProduto.isEmpty
+              ? 'Orcamento #${selecionado.numeroOrcamento} carregado com ${drafts.length} item(ns) para edicao.'
+              : 'Orcamento #${selecionado.numeroOrcamento} carregado com ${drafts.length} item(ns). ${nomesItensSemProduto.length} item(ns) sem produto cadastrado foram ignorados.',
+        ),
+      ),
+    );
   }
 
   String _rotuloFormaPagamento(String forma) {
@@ -1292,6 +1671,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         SingleActivator(LogicalKeyboardKey.f10): PdvSalvarOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, control: true):
             PdvSalvarOrcamentoIntent(),
+        SingleActivator(LogicalKeyboardKey.keyO, control: true):
+            PdvLerOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.keyK, control: true):
             PdvLimparPesquisaIntent(),
       },
@@ -1344,6 +1725,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
               return null;
             },
           ),
+          PdvLerOrcamentoIntent: CallbackAction<PdvLerOrcamentoIntent>(
+            onInvoke: (_) {
+              unawaited(_abrirLeitorOrcamento());
+              return null;
+            },
+          ),
           PdvLimparPesquisaIntent: CallbackAction<PdvLimparPesquisaIntent>(
             onInvoke: (_) {
               _limparPesquisaAtalho();
@@ -1352,7 +1739,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           ),
         },
         child: Scaffold(
-          appBar: AppBar(title: const Text('Ponto de Venda')),
+          appBar: AppBar(
+            title: const Text('Ponto de Venda'),
+            actions: [
+              IconButton(
+                tooltip: 'Ler orcamento para editar',
+                onPressed: _abrirLeitorOrcamento,
+                icon: const Icon(Icons.description_outlined),
+              ),
+            ],
+          ),
           body: Padding(
             padding: const EdgeInsets.all(16),
             child: Row(
@@ -1429,6 +1825,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                           'Preco: ${_rotuloPreco(_precoListaAtivo)} (F1–F3) · F5 recarrega · Ctrl+K limpa busca · '
                           '${_produtos.length} produtos · Enter→lista · na lista: Numpad+ ou Shift+= adiciona 1 · '
                           'Enter abre qtd · Esc volta à busca · F6 carrinho · F7 checkout · F10 ou Ctrl+S salvar · '
+                          'Ctrl+O ler orcamento · '
                           'no carrinho: ↑↓ qtd · Ctrl+↑↓ linha · Del remove · Est vermelho = minimo · '
                           'busca rapida: "2 cimento" adiciona 2 do primeiro item, "sku +" adiciona 1',
                           style: Theme.of(context).textTheme.bodySmall,
@@ -1451,7 +1848,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                   ],
                                 ),
                               )
-                            : Focus(
+                            : Builder(
+                                builder: (context) {
+                                  final termoBuscaDestaque = _PesquisaComando.parse(
+                                    _pesquisaController.text,
+                                  ).termoBusca;
+                                  return Focus(
                                 focusNode: _listaProdutosFocus,
                                 onKeyEvent: _onKeyListaProdutos,
                                 child: ListView.builder(
@@ -1491,14 +1893,20 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                                 CrossAxisAlignment.center,
                                             children: [
                                               Expanded(
-                                                child: Text(
-                                                  item.nome,
+                                                child: RichText(
                                                   maxLines: 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: Theme.of(
-                                                    context,
-                                                  ).textTheme.bodyMedium,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  text: _textoComDestaqueBusca(
+                                                    context: context,
+                                                    texto: item.nome,
+                                                    termoBusca:
+                                                        termoBuscaDestaque,
+                                                    estiloBase:
+                                                        Theme.of(context)
+                                                            .textTheme
+                                                            .bodyMedium ??
+                                                        const TextStyle(),
+                                                  ),
                                                 ),
                                               ),
                                               Column(
@@ -1575,6 +1983,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                     );
                                   },
                                 ),
+                              );
+                                },
                               ),
                       ),
                     ],
@@ -2133,6 +2543,29 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                               'Selecionado: ${_rotuloParcela(_parcelasSelecionadas)}',
                             ),
                           ],
+                          if (_orcamentoEmEdicaoId != null) ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    'Editando orcamento #${_orcamentoEmEdicaoNumero ?? '-'}',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      _orcamentoEmEdicaoId = null;
+                                      _orcamentoEmEdicaoNumero = null;
+                                    });
+                                  },
+                                  child: const Text('Cancelar edicao'),
+                                ),
+                              ],
+                            ),
+                          ],
                           const SizedBox(height: 8),
                           SizedBox(
                             width: double.infinity,
@@ -2141,8 +2574,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                               child: ElevatedButton.icon(
                                 onPressed: _salvarOrcamento,
                                 icon: const Icon(Icons.save_outlined),
-                                label: const Text(
-                                  'Salvar orcamento (F10 · Ctrl+S)',
+                                label: Text(
+                                  _orcamentoEmEdicaoId != null
+                                      ? 'Atualizar orcamento (F10 · Ctrl+S)'
+                                      : 'Salvar orcamento (F10 · Ctrl+S)',
                                 ),
                               ),
                             ),
@@ -2437,6 +2872,10 @@ class PdvCheckoutAnteriorIntent extends Intent {
 
 class PdvSalvarOrcamentoIntent extends Intent {
   const PdvSalvarOrcamentoIntent();
+}
+
+class PdvLerOrcamentoIntent extends Intent {
+  const PdvLerOrcamentoIntent();
 }
 
 class PdvLimparPesquisaIntent extends Intent {

@@ -88,7 +88,10 @@ class VendaRepository {
         .toList();
   }
 
-  int registrarVenda(List<ItemVendaInput> itensInput) {
+  int registrarVenda(
+    List<ItemVendaInput> itensInput, {
+    bool permitirVendaSemEstoque = true,
+  }) {
     if (itensInput.isEmpty) {
       throw ArgumentError('A venda deve conter ao menos um item.');
     }
@@ -113,7 +116,8 @@ class VendaRepository {
         if (input.quantidade <= 0) {
           throw StateError('Quantidade invalida para ${produto.nome}.');
         }
-        if (produto.estoqueReal < input.quantidade) {
+
+        if (!permitirVendaSemEstoque && produto.estoqueReal < input.quantidade) {
           throw StateError('Estoque insuficiente para ${produto.nome}.');
         }
 
@@ -255,7 +259,127 @@ class VendaRepository {
     });
   }
 
-  void converterOrcamentoParaVenda(int vendaId) {
+  void atualizarOrcamento(
+    int vendaId,
+    List<ItemVendaInput> itensInput, {
+    required DadosPagamentoOrcamento pagamento,
+    required DadosEntregaOrcamento entrega,
+    int? clienteId,
+    int? vendedorId,
+  }) {
+    if (itensInput.isEmpty) {
+      throw ArgumentError('O orcamento deve conter ao menos um item.');
+    }
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Orcamento $vendaId nao encontrado.');
+      }
+      if (venda.status != 'orcamento') {
+        throw StateError('Somente orcamentos podem ser alterados.');
+      }
+      if (venda.cancelada) {
+        throw StateError('Nao e possivel editar orcamento cancelado.');
+      }
+
+      final parcelas = pagamento.formaPagamento == 'cartao_credito'
+          ? pagamento.quantidadeParcelas
+          : 1;
+      venda.formaPagamento = pagamento.formaPagamento;
+      venda.quantidadeParcelas = parcelas;
+      venda.tipoEntrega = entrega.tipoEntrega;
+      venda.valorFrete = entrega.tipoEntrega == 'entrega_loja' ? entrega.valorFrete : 0;
+      venda.enderecoEntrega = entrega.tipoEntrega == 'entrega_loja'
+          ? entrega.enderecoEntrega
+          : '';
+      venda.observacaoEntrega = entrega.tipoEntrega == 'entrega_loja'
+          ? entrega.observacaoEntrega
+          : '';
+      venda.statusEntrega = entrega.tipoEntrega == 'entrega_loja'
+          ? 'pendente'
+          : 'nao_aplicavel';
+      venda.prioridadeEntrega = entrega.tipoEntrega == 'entrega_loja'
+          ? entrega.prioridadeEntrega
+          : 'normal';
+      venda.janelaEntrega = entrega.tipoEntrega == 'entrega_loja'
+          ? entrega.janelaEntrega
+          : 'nao_definida';
+      venda.dataEntregaMarcada = entrega.tipoEntrega == 'entrega_loja'
+          ? entrega.dataEntregaMarcada
+          : null;
+
+      if (clienteId == null) {
+        venda.cliente.target = null;
+      } else {
+        final cliente = _db.clienteBox.get(clienteId);
+        if (cliente == null) {
+          throw StateError('Cliente $clienteId nao encontrado.');
+        }
+        venda.cliente.target = cliente;
+      }
+
+      if (vendedorId == null) {
+        venda.vendedor.target = null;
+      } else {
+        final vendedor = _db.vendedorBox.get(vendedorId);
+        if (vendedor == null) {
+          throw StateError('Vendedor $vendedorId nao encontrado.');
+        }
+        venda.vendedor.target = vendedor;
+      }
+
+      final idsAntigos = venda.itens.map((i) => i.id).toList();
+      if (idsAntigos.isNotEmpty) {
+        _db.itemVendaBox.removeMany(idsAntigos);
+      }
+      venda.itens.clear();
+
+      double total = 0;
+      double custoTotal = 0;
+      for (final input in itensInput) {
+        final produto = _db.produtoBox.get(input.produtoId);
+        if (produto == null) {
+          throw StateError('Produto ${input.produtoId} nao encontrado.');
+        }
+        if (input.quantidade <= 0) {
+          throw StateError('Quantidade invalida para ${produto.nome}.');
+        }
+        final item = ItemVenda(
+          nomeProduto: produto.nome,
+          quantidade: input.quantidade,
+          precoTipo: input.precoTipo,
+          precoUnitario: input.precoUnitario,
+          precoCustoUnitario: produto.precoCusto,
+        );
+        item.produto.target = produto;
+        item.venda.target = venda;
+        _db.itemVendaBox.put(item);
+        total += item.subtotal;
+        custoTotal += item.subtotalCusto;
+      }
+
+      if (venda.tipoEntrega == 'entrega_loja') {
+        if (venda.valorFrete < 0) {
+          throw StateError('Valor de frete nao pode ser negativo.');
+        }
+        if (venda.enderecoEntrega.trim().isEmpty) {
+          throw StateError(
+            'Endereco de entrega obrigatorio para entrega da loja.',
+          );
+        }
+      }
+
+      venda.total = total + venda.valorFrete;
+      venda.custoTotal = custoTotal;
+      venda.lucroTotal = venda.total - custoTotal;
+      _db.vendaBox.put(venda);
+    });
+  }
+
+  void converterOrcamentoParaVenda(
+    int vendaId, {
+    bool permitirVendaSemEstoque = true,
+  }) {
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
       if (venda == null) {
@@ -266,15 +390,17 @@ class VendaRepository {
       }
 
       if (venda.entregaPendente) {
-        for (final item in venda.itens) {
-          final produto = item.produto.target;
-          if (produto == null) {
-            throw StateError('Produto do item ${item.id} nao encontrado.');
-          }
-          if (produto.estoqueReal < item.quantidade) {
-            throw StateError(
-              'Estoque insuficiente para reservar ${produto.nome}.',
-            );
+        if (!permitirVendaSemEstoque) {
+          for (final item in venda.itens) {
+            final produto = item.produto.target;
+            if (produto == null) {
+              throw StateError('Produto do item ${item.id} nao encontrado.');
+            }
+            if (produto.estoqueReal < item.quantidade) {
+              throw StateError(
+                'Estoque insuficiente para reservar ${produto.nome}.',
+              );
+            }
           }
         }
         for (final item in venda.itens) {
@@ -290,7 +416,7 @@ class VendaRepository {
           if (produto == null) {
             throw StateError('Produto do item ${item.id} nao encontrado.');
           }
-          if (produto.estoqueReal < item.quantidade) {
+          if (!permitirVendaSemEstoque && produto.estoqueReal < item.quantidade) {
             throw StateError('Estoque insuficiente para ${produto.nome}.');
           }
         }

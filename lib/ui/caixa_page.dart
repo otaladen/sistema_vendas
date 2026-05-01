@@ -71,6 +71,7 @@ class _CaixaPageState extends State<CaixaPage> {
   double _totalSuprimentos = 0;
   double _totalSangrias = 0;
   double _limiteDivergenciaSemSupervisor = 20;
+  bool _permitirVendaSemEstoque = true;
 
   @override
   void initState() {
@@ -90,6 +91,7 @@ class _CaixaPageState extends State<CaixaPage> {
     if (!mounted) return;
     setState(() {
       _limiteDivergenciaSemSupervisor = config.limiteDivergenciaCaixa;
+      _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
     });
   }
 
@@ -1678,7 +1680,10 @@ class _CaixaPageState extends State<CaixaPage> {
           descontoAplicado,
         );
       }
-      widget.vendaRepository.converterOrcamentoParaVenda(venda.id);
+      widget.vendaRepository.converterOrcamentoParaVenda(
+        venda.id,
+        permitirVendaSemEstoque: _permitirVendaSemEstoque,
+      );
       final vendaFinalizada = widget.vendaRepository.obterPorId(venda.id) ?? venda;
       _carregarOrcamentos();
       if (!mounted) return;

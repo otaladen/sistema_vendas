@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'data/cliente_repository.dart';
@@ -12,8 +14,24 @@ import 'ui/main_menu_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _tentarSincronizarHorarioSistemaNoInicio();
   final objectBox = await ObjectBox.create();
   runApp(MyApp(objectBox: objectBox));
+}
+
+Future<void> _tentarSincronizarHorarioSistemaNoInicio() async {
+  if (!Platform.isWindows) {
+    return;
+  }
+  try {
+    await Process.run(
+      'w32tm',
+      ['/resync'],
+      runInShell: true,
+    ).timeout(const Duration(seconds: 4));
+  } catch (_) {
+    // Falha silenciosa: sem permissao/rede/servico, app segue normalmente.
+  }
 }
 
 class MyApp extends StatefulWidget {

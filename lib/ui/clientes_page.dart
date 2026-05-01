@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -73,100 +75,245 @@ class _ClientesPageState extends State<ClientesPage> {
   Future<void> _abrirPesquisaCliente() async {
     final clientesBase = widget.clienteRepository.listarTodos();
     final pesquisaController = TextEditingController();
+    final resultadosScrollController = ScrollController();
+    final pesquisaFocusNode = FocusNode();
     List<Cliente> resultados = clientesBase;
+    int indiceSelecionado = resultados.isEmpty ? -1 : 0;
 
     final clienteSelecionado = await showDialog<Cliente>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Pesquisar cliente'),
-              content: SizedBox(
-                width: 760,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: pesquisaController,
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Nome, documento, telefone, cidade...',
-                        prefixIcon: Icon(Icons.search),
-                      ),
-                      onChanged: (value) {
-                        final termo = value.trim().toLowerCase();
-                        final termoNumerico = _somenteDigitos(value);
-                        setDialogState(() {
-                          resultados = clientesBase.where((cliente) {
-                            final campos = [
-                              cliente.nomeRazao,
-                              cliente.nomeFantasia,
-                              cliente.documento,
-                              cliente.telefone,
-                              cliente.whatsapp,
-                              cliente.email,
-                              cliente.cidade,
-                            ].map((e) => e.toLowerCase());
-                            final matchTexto = campos.any((campo) => campo.contains(termo));
-                            if (matchTexto) return true;
-                            if (termoNumerico.isEmpty) return false;
-                            final camposNumericos = [
-                              cliente.documento,
-                              cliente.telefone,
-                              cliente.whatsapp,
-                              cliente.cep,
-                            ].map(_somenteDigitos);
-                            return camposNumericos.any(
-                              (campoNumerico) => campoNumerico.contains(termoNumerico),
-                            );
-                          }).toList();
-                        });
-                      },
+            TextSpan spanComDestaque(
+              String texto,
+              String termo,
+              TextStyle estiloBase,
+            ) {
+              final busca = termo.trim().toLowerCase();
+              if (busca.isEmpty) {
+                return TextSpan(text: texto, style: estiloBase);
+              }
+              final textoMinusculo = texto.toLowerCase();
+              final spans = <TextSpan>[];
+              var cursor = 0;
+
+              while (cursor < texto.length) {
+                final indice = textoMinusculo.indexOf(busca, cursor);
+                if (indice < 0) {
+                  spans.add(TextSpan(text: texto.substring(cursor)));
+                  break;
+                }
+                if (indice > cursor) {
+                  spans.add(TextSpan(text: texto.substring(cursor, indice)));
+                }
+                spans.add(
+                  TextSpan(
+                    text: texto.substring(indice, indice + busca.length),
+                    style: estiloBase.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w700,
                     ),
-                    const SizedBox(height: 12),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minHeight: 220,
-                        maxHeight: MediaQuery.of(context).size.height * 0.58,
+                  ),
+                );
+                cursor = indice + busca.length;
+              }
+
+              return TextSpan(style: estiloBase, children: spans);
+            }
+
+            void rolarParaIndiceSelecionado() {
+              if (!resultadosScrollController.hasClients || indiceSelecionado < 0) {
+                return;
+              }
+              const alturaEstimadaLinha = 64.0;
+              final posicaoDesejada = (indiceSelecionado * alturaEstimadaLinha).clamp(
+                0.0,
+                resultadosScrollController.position.maxScrollExtent,
+              );
+              resultadosScrollController.animateTo(
+                posicaoDesejada,
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+              );
+            }
+
+            return Focus(
+              onKeyEvent: (node, event) {
+                if (event is! KeyDownEvent || resultados.isEmpty) {
+                  return KeyEventResult.ignored;
+                }
+
+                if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                  setDialogState(() {
+                    indiceSelecionado = math.min(
+                      indiceSelecionado + 1,
+                      resultados.length - 1,
+                    );
+                  });
+                  rolarParaIndiceSelecionado();
+                  return KeyEventResult.handled;
+                }
+
+                if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                  setDialogState(() {
+                    indiceSelecionado = math.max(indiceSelecionado - 1, 0);
+                  });
+                  rolarParaIndiceSelecionado();
+                  return KeyEventResult.handled;
+                }
+
+                if (event.logicalKey == LogicalKeyboardKey.enter ||
+                    event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+                  final indice = indiceSelecionado >= 0 ? indiceSelecionado : 0;
+                  Navigator.pop(context, resultados[indice]);
+                  return KeyEventResult.handled;
+                }
+
+                if (event.logicalKey == LogicalKeyboardKey.escape) {
+                  Navigator.pop(context);
+                  return KeyEventResult.handled;
+                }
+
+                return KeyEventResult.ignored;
+              },
+              child: AlertDialog(
+                title: const Text('Pesquisar cliente'),
+                content: SizedBox(
+                  width: 760,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: pesquisaController,
+                        focusNode: pesquisaFocusNode,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Nome, documento, telefone, cidade...',
+                          prefixIcon: Icon(Icons.search),
+                        ),
+                        onChanged: (value) {
+                          final termo = value.trim().toLowerCase();
+                          final termoNumerico = _somenteDigitos(value);
+                          setDialogState(() {
+                            resultados = clientesBase.where((cliente) {
+                              final campos = [
+                                cliente.nomeRazao,
+                                cliente.nomeFantasia,
+                                cliente.documento,
+                                cliente.telefone,
+                                cliente.whatsapp,
+                                cliente.email,
+                                cliente.cidade,
+                              ].map((e) => e.toLowerCase());
+                              final matchTexto = campos.any((campo) => campo.contains(termo));
+                              if (matchTexto) return true;
+                              if (termoNumerico.isEmpty) return false;
+                              final camposNumericos = [
+                                cliente.documento,
+                                cliente.telefone,
+                                cliente.whatsapp,
+                                cliente.cep,
+                              ].map(_somenteDigitos);
+                              return camposNumericos.any(
+                                (campoNumerico) => campoNumerico.contains(termoNumerico),
+                              );
+                            }).toList();
+                            indiceSelecionado = resultados.isEmpty ? -1 : 0;
+                          });
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (resultadosScrollController.hasClients) {
+                              resultadosScrollController.jumpTo(0);
+                            }
+                            if (pesquisaFocusNode.canRequestFocus) {
+                              pesquisaFocusNode.requestFocus();
+                            }
+                          });
+                        },
+                        onSubmitted: (_) {
+                          if (resultados.isEmpty) {
+                            return;
+                          }
+                          final indice = indiceSelecionado >= 0 ? indiceSelecionado : 0;
+                          Navigator.pop(context, resultados[indice]);
+                        },
                       ),
-                      child: resultados.isEmpty
-                          ? const Center(child: Text('Nenhum cliente encontrado.'))
-                          : ListView.builder(
-                              shrinkWrap: true,
-                              itemCount: resultados.length,
-                              itemBuilder: (context, index) {
-                                final cliente = resultados[index];
-                                return ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 4,
-                                  ),
-                                  title: Text(cliente.nomeRazao),
-                                  subtitle: Text(
-                                    '${cliente.tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ'}: '
-                                    '${cliente.documento.isEmpty ? '-' : cliente.documento} | '
-                                    'Cidade: ${cliente.cidade.isEmpty ? '-' : cliente.cidade}',
-                                    style: Theme.of(context).textTheme.bodyMedium,
-                                  ),
-                                  titleTextStyle: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.w600),
-                                  onTap: () => Navigator.pop(context, cliente),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
+                      const SizedBox(height: 12),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: 220,
+                          maxHeight: MediaQuery.of(context).size.height * 0.58,
+                        ),
+                        child: resultados.isEmpty
+                            ? const Center(child: Text('Nenhum cliente encontrado.'))
+                            : ListView.builder(
+                                controller: resultadosScrollController,
+                                shrinkWrap: true,
+                                itemCount: resultados.length,
+                                itemBuilder: (context, index) {
+                                  final cliente = resultados[index];
+                                  final consulta = pesquisaController.text.trim();
+                                  final estiloTitulo = Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(fontWeight: FontWeight.w600) ??
+                                      const TextStyle(fontWeight: FontWeight.w600);
+                                  final estiloSubtitulo =
+                                      Theme.of(context).textTheme.bodyMedium ??
+                                          const TextStyle();
+                                  final selecionado = index == indiceSelecionado;
+
+                                  return MouseRegion(
+                                    onEnter: (_) {
+                                      if (indiceSelecionado == index) {
+                                        return;
+                                      }
+                                      setDialogState(() {
+                                        indiceSelecionado = index;
+                                      });
+                                    },
+                                    child: ListTile(
+                                      contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 4,
+                                      ),
+                                      selected: selecionado,
+                                      selectedTileColor: Theme.of(context)
+                                          .colorScheme
+                                          .primary
+                                          .withOpacity(0.08),
+                                      title: RichText(
+                                        text: spanComDestaque(
+                                          cliente.nomeRazao,
+                                          consulta,
+                                          estiloTitulo,
+                                        ),
+                                      ),
+                                      subtitle: RichText(
+                                        text: spanComDestaque(
+                                          '${cliente.tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ'}: '
+                                          '${cliente.documento.isEmpty ? '-' : cliente.documento} | '
+                                          'Cidade: ${cliente.cidade.isEmpty ? '-' : cliente.cidade}',
+                                          consulta,
+                                          estiloSubtitulo,
+                                        ),
+                                      ),
+                                      onTap: () => Navigator.pop(context, cliente),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
                 ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Fechar'),
+                  ),
+                ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Fechar'),
-                ),
-              ],
             );
           },
         );
@@ -174,6 +321,8 @@ class _ClientesPageState extends State<ClientesPage> {
     );
 
     pesquisaController.dispose();
+    resultadosScrollController.dispose();
+    pesquisaFocusNode.dispose();
 
     if (clienteSelecionado != null) {
       _editarCliente(clienteSelecionado);

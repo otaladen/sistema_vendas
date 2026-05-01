@@ -43,6 +43,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _backupEmAndamento = false;
   bool _restauracaoEmAndamento = false;
   String _ultimoBackupPath = '';
+  bool _permitirVendaSemEstoque = true;
 
   @override
   void initState() {
@@ -79,6 +80,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _modeloPdf = config.modeloPdf;
       _impressoraPadrao = config.impressoraPadrao;
       _logoPath = config.logoPath;
+      _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       _prefsEmpresaAplicadas = true;
     });
     try {
@@ -144,6 +146,62 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     );
   }
 
+  Future<void> _sincronizarHorarioWindows() async {
+    if (!Platform.isWindows) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Sincronizacao automatica disponivel apenas no Windows.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    try {
+      final resultado = await Process.run(
+        'w32tm',
+        ['/resync'],
+        runInShell: true,
+      );
+      final codigo = resultado.exitCode;
+      final saida = '${resultado.stdout}\n${resultado.stderr}'
+          .trim()
+          .toLowerCase();
+      if (!mounted) return;
+      if (codigo == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Relogio sincronizado com sucesso.')),
+        );
+      } else {
+        final precisaPermissao = saida.contains('acesso negado') ||
+            saida.contains('access is denied') ||
+            saida.contains('0x80070005');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              precisaPermissao
+                  ? 'Sem permissao para sincronizar automaticamente. Execute o app/terminal como administrador.'
+                  : 'Nao foi possivel sincronizar automaticamente. Verifique internet e servico de horario do Windows.',
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Falha ao tentar sincronizar automaticamente. Use "Ajustar no sistema".',
+          ),
+        ),
+      );
+    } finally {
+      await _carregarDiagnosticoHorario();
+    }
+  }
+
   Future<void> _escolherPastaPadraoPdf() async {
     final pasta = await FilePicker.platform.getDirectoryPath(
       dialogTitle: 'Escolha a pasta padrao para PDFs',
@@ -203,6 +261,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           logoPath: _logoPath,
           limiteDivergenciaCaixa:
               _parseMoeda(_limiteDivergenciaCaixaController.text) ?? 20,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
         ),
       );
       if (!mounted) return;
@@ -612,6 +671,15 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _sincronizarHorarioWindows,
+                      icon: const Icon(Icons.sync),
+                      label: const Text('Sincronizar horario agora (Windows)'),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -815,6 +883,20 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                     'Defina o limite de divergencia para exigir autorizacao '
                     'de supervisor (admin/financeiro) no fechamento do caixa.',
                     style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    value: _permitirVendaSemEstoque,
+                    onChanged: (value) {
+                      setState(() {
+                        _permitirVendaSemEstoque = value;
+                      });
+                    },
+                    title: const Text('Permitir venda sem estoque'),
+                    subtitle: const Text(
+                      'Quando ativo, o sistema permite finalizar venda mesmo sem saldo e o estoque pode ficar negativo.',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
