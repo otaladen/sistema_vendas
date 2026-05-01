@@ -1,0 +1,70 @@
+import '../model/funcionario.dart';
+import '../objectbox.g.dart';
+import 'objectbox.dart';
+
+class FuncionarioRepository {
+  FuncionarioRepository(this._db);
+
+  final ObjectBox _db;
+
+  List<Funcionario> listarTodos() {
+    final query = _db.funcionarioBox.query().order(Funcionario_.nomeCompleto).build();
+    final lista = query.find();
+    query.close();
+    return lista;
+  }
+
+  List<Funcionario> pesquisar(String termo) {
+    final t = termo.trim().toLowerCase();
+    if (t.isEmpty) {
+      return listarTodos();
+    }
+    return listarTodos().where((f) {
+      final campos = [
+        f.codigoInterno,
+        f.nomeCompleto,
+        f.cargo,
+        f.cpf,
+        f.telefone,
+        f.whatsapp,
+        f.cidade,
+      ].map((e) => e.toLowerCase());
+      return campos.any((c) => c.contains(t));
+    }).toList();
+  }
+
+  int salvar(Funcionario funcionario) => _db.funcionarioBox.put(funcionario);
+
+  bool remover(int id) => _db.funcionarioBox.remove(id);
+
+  Funcionario? obterPorId(int id) => _db.funcionarioBox.get(id);
+
+  bool existeCodigoParaOutro({
+    required String codigoNormalizado,
+    required int ignorarId,
+  }) {
+    final c = codigoNormalizado.trim().toLowerCase();
+    if (c.isEmpty) {
+      return false;
+    }
+    for (final f in listarTodos()) {
+      if (f.id != ignorarId && f.codigoInterno.trim().toLowerCase() == c) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  String proximoCodigoInterno() {
+    final funcionarios = listarTodos();
+    var maior = 0;
+    for (final f in funcionarios) {
+      final digits = f.codigoInterno.replaceAll(RegExp(r'\D'), '');
+      final numero = int.tryParse(digits);
+      if (numero != null && numero > maior) {
+        maior = numero;
+      }
+    }
+    return (maior + 1).toString();
+  }
+}

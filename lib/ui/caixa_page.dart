@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import '../data/app_config_repository.dart';
 import '../data/cliente_repository.dart';
+import '../data/mensageria_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
@@ -56,6 +57,7 @@ class _CaixaPageState extends State<CaixaPage> {
   final ScrollController _itensScrollController = ScrollController();
   final _descontoController = TextEditingController();
   final _configRepository = AppConfigRepository();
+  late final MensageriaRepository _mensageriaRepository;
   final _usuarioRepository = UsuarioRepository();
   late final VendaService _vendaService;
   final _senhaRetiradaController = TextEditingController();
@@ -76,6 +78,7 @@ class _CaixaPageState extends State<CaixaPage> {
   @override
   void initState() {
     super.initState();
+    _mensageriaRepository = MensageriaRepository();
     _vendaService = VendaService(widget.vendaRepository);
     _clientesAtivos = widget.clienteRepository
         .listarTodos()
@@ -1685,6 +1688,17 @@ class _CaixaPageState extends State<CaixaPage> {
         permitirVendaSemEstoque: _permitirVendaSemEstoque,
       );
       final vendaFinalizada = widget.vendaRepository.obterPorId(venda.id) ?? venda;
+      final clienteId = vendaFinalizada.cliente.targetId;
+      if (clienteId != 0) {
+        final cliente = widget.clienteRepository.obterPorId(clienteId);
+        if (cliente != null) {
+          await _mensageriaRepository.enfileirarAgradecimentoVenda(
+            venda: vendaFinalizada,
+            cliente: cliente,
+          );
+          await _mensageriaRepository.processarFilaPendente(limite: 5);
+        }
+      }
       _carregarOrcamentos();
       if (!mounted) return;
       setState(() {

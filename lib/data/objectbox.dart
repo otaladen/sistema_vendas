@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../model/item_venda.dart';
 import '../model/cliente.dart';
+import '../model/funcionario.dart';
 import '../model/historico_entrega.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
@@ -19,6 +20,7 @@ class ObjectBox {
     itemVendaBox = Box<ItemVenda>(store);
     historicoEntregaBox = Box<HistoricoEntrega>(store);
     vendedorBox = Box<Vendedor>(store);
+    funcionarioBox = Box<Funcionario>(store);
   }
 
   late final Store store;
@@ -28,6 +30,7 @@ class ObjectBox {
   late final Box<ItemVenda> itemVendaBox;
   late final Box<HistoricoEntrega> historicoEntregaBox;
   late final Box<Vendedor> vendedorBox;
+  late final Box<Funcionario> funcionarioBox;
   late final Directory productImagesDir;
 
   static Future<ObjectBox> create() async {

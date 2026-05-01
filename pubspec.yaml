@@ -45,6 +45,7 @@ dependencies:
   printing: ^5.14.3
   shared_preferences: ^2.5.5
   csv: ^8.0.0
+  http: ^1.5.0
 
 dev_dependencies:
   flutter_test:

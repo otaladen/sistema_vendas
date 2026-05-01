@@ -6,8 +6,11 @@ import 'package:intl/intl.dart';
 
 import '../main.dart';
 import '../data/cliente_repository.dart';
+import '../data/mensageria_repository.dart';
 import '../data/venda_repository.dart';
 import '../model/cliente.dart';
+import '../model/mensagem_log.dart';
+import '../model/mensagem_template.dart';
 import '../model/venda.dart';
 
 class ClientesPage extends StatefulWidget {
@@ -54,6 +57,7 @@ class _ClientesPageState extends State<ClientesPage> {
   late final _emailFormatter = _EmailInputFormatter();
   late final _limiteCreditoFormatter = _MoedaInputFormatter();
   final ScrollController _scrollController = ScrollController();
+  final MensageriaRepository _mensageriaRepository = MensageriaRepository();
   final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   String _periodoHistorico = 'todo';
@@ -589,6 +593,150 @@ class _ClientesPageState extends State<ClientesPage> {
 
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
 
+  String _rotuloStatusMensagem(String status) {
+    switch (status) {
+      case 'aceito_api':
+        return 'Aceito pela API';
+      case 'enviado':
+        return 'Enviado';
+      case 'entregue':
+        return 'Entregue';
+      case 'lido':
+        return 'Lido';
+      case 'falhou':
+        return 'Falhou';
+      default:
+        return status;
+    }
+  }
+
+  Cliente? _clienteEmEdicaoAtual() {
+    final id = _clienteEmEdicaoId;
+    if (id == null) return null;
+    return widget.clienteRepository.obterPorId(id);
+  }
+
+  Future<void> _enviarMensagemManualCliente(Cliente cliente) async {
+    final templates = await _mensageriaRepository.listarTemplates();
+    final templatesManuais = templates
+        .where((t) => t.ativo && t.evento == 'manual')
+        .toList();
+    if (templatesManuais.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cadastre um template manual em Configuracoes > Mensageria.'),
+        ),
+      );
+      return;
+    }
+    MensagemTemplate selecionado = templatesManuais.first;
+    final destinoController = TextEditingController(
+      text: cliente.whatsapp.trim().isNotEmpty ? cliente.whatsapp : cliente.telefone,
+    );
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Enviar mensagem ao cliente'),
+              content: SizedBox(
+                width: 520,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: selecionado.id,
+                      decoration: const InputDecoration(labelText: 'Template'),
+                      items: templatesManuais
+                          .map(
+                            (t) => DropdownMenuItem(
+                              value: t.id,
+                              child: Text(t.nome),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        if (v == null) return;
+                        final t = templatesManuais.firstWhere((e) => e.id == v);
+                        setDialogState(() => selecionado = t);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: destinoController,
+                      decoration: const InputDecoration(
+                        labelText: 'Destino (telefone/whatsapp)',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Enviar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (ok != true) return;
+    final destino = destinoController.text.replaceAll(RegExp(r'\D'), '');
+    if (destino.isEmpty) return;
+    await _mensageriaRepository.enfileirarMensagem(
+      clienteId: cliente.id,
+      templateId: selecionado.id,
+      destino: destino,
+      variaveis: {
+        'cliente_nome': cliente.nomeRazao.trim(),
+        'valor_total': '0,00',
+        'numero_orcamento': '-',
+      },
+    );
+    await _mensageriaRepository.processarFilaPendente(limite: 5);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Mensagem enviada para fila e processada.')),
+    );
+  }
+
+  Future<void> _verErroDetalhadoLogCliente(MensagemLog log) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Erro detalhado do envio'),
+          content: SizedBox(
+            width: 700,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                log.responseJson.trim().isEmpty
+                    ? 'Sem detalhe retornado pela API.'
+                    : log.responseJson,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fechar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1045,6 +1193,127 @@ class _ClientesPageState extends State<ClientesPage> {
                 ],
               ),
             ),
+            const SizedBox(height: 10),
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.colorScheme.outlineVariant),
+              ),
+              child: ExpansionTile(
+                initiallyExpanded: false,
+                tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                leading: Icon(Icons.chat_bubble_outline, color: theme.colorScheme.primary),
+                title: Text(
+                  'Mensagens enviadas',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                childrenPadding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                children: [
+                  if (!emEdicao)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Salve o cliente para habilitar logs de mensagens.',
+                      ),
+                    )
+                  else
+                    FutureBuilder<List<MensagemLog>>(
+                      future: _mensageriaRepository.listarLogsPorCliente(
+                        _clienteEmEdicaoId!,
+                      ),
+                      builder: (context, snapshot) {
+                        final logs = snapshot.data ?? const <MensagemLog>[];
+                        final clienteAtual = _clienteEmEdicaoAtual();
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 8),
+                            child: LinearProgressIndicator(),
+                          );
+                        }
+                        if (clienteAtual == null) {
+                          return const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text('Cliente nao encontrado.'),
+                          );
+                        }
+                        if (logs.isEmpty) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () =>
+                                      _enviarMensagemManualCliente(clienteAtual),
+                                  icon: const Icon(Icons.send_outlined),
+                                  label: const Text('Enviar mensagem agora'),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text('Nenhum log de mensagem para este cliente.'),
+                            ],
+                          );
+                        }
+                        return Column(
+                          children: [
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () => _enviarMensagemManualCliente(clienteAtual),
+                                icon: const Icon(Icons.send_outlined),
+                                label: const Text('Enviar mensagem agora'),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 220),
+                              child: ListView.separated(
+                                shrinkWrap: true,
+                                itemCount: logs.length,
+                                separatorBuilder: (_, _) => const SizedBox(height: 6),
+                                itemBuilder: (context, index) {
+                                  final log = logs[index];
+                                  final enviado = log.resultado == 'enviado';
+                                  return ListTile(
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                                    leading: Icon(
+                                      enviado
+                                          ? Icons.check_circle_outline
+                                          : Icons.error_outline,
+                                      color: enviado
+                                          ? theme.colorScheme.primary
+                                          : theme.colorScheme.error,
+                                    ),
+                                    title: Text(
+                                      '${log.canal.toUpperCase()} - ${_rotuloStatusMensagem(log.statusEntrega)}',
+                                    ),
+                                    subtitle: Text(
+                                      '${_dataHora.format(log.criadoEm.toLocal())}\nDestino: ${log.destino}',
+                                    ),
+                                    isThreeLine: true,
+                                    trailing: log.resultado == 'falhou'
+                                        ? IconButton(
+                                            tooltip: 'Ver erro detalhado',
+                                            onPressed: () =>
+                                                _verErroDetalhadoLogCliente(log),
+                                            icon: const Icon(Icons.error_outline),
+                                          )
+                                        : null,
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -1186,7 +1455,8 @@ class _TelefoneInputFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
-    final truncated = digits.length > 11 ? digits.substring(0, 11) : digits;
+    // Permite telefone local (ate 11) e numero com DDI BR (55 + DDD + numero = ate 13).
+    final truncated = digits.length > 13 ? digits.substring(0, 13) : digits;
     final masked = _maskTelefone(truncated);
     return TextEditingValue(
       text: masked,
@@ -1195,6 +1465,17 @@ class _TelefoneInputFormatter extends TextInputFormatter {
   }
 
   String _maskTelefone(String value) {
+    if (value.isEmpty) return '';
+    if (value.length > 11) {
+      final ddi = value.substring(0, 2);
+      final resto = value.substring(2);
+      final localMask = _maskTelefoneLocal(resto);
+      return '+$ddi $localMask';
+    }
+    return _maskTelefoneLocal(value);
+  }
+
+  String _maskTelefoneLocal(String value) {
     if (value.isEmpty) return '';
     if (value.length <= 2) return '($value';
     if (value.length <= 6) return '(${value.substring(0, 2)}) ${value.substring(2)}';

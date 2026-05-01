@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/cliente_repository.dart';
+import '../data/funcionario_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
@@ -17,6 +18,7 @@ class MainMenuPage extends StatelessWidget {
     required this.clienteRepository,
     required this.vendaRepository,
     required this.vendedorRepository,
+    required this.funcionarioRepository,
     required this.usuarioLogado,
     required this.onLogout,
   });
@@ -25,6 +27,7 @@ class MainMenuPage extends StatelessWidget {
   final ClienteRepository clienteRepository;
   final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
+  final FuncionarioRepository funcionarioRepository;
   final UsuarioSistema usuarioLogado;
   final VoidCallback onLogout;
 
@@ -60,6 +63,7 @@ class MainMenuPage extends StatelessWidget {
                       clienteRepository: clienteRepository,
                       vendaRepository: vendaRepository,
                       vendedorRepository: vendedorRepository,
+                      funcionarioRepository: funcionarioRepository,
                       usuarioLogado: usuarioLogado,
                     ),
                   ),

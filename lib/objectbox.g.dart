@@ -15,6 +15,7 @@ import 'package:objectbox/objectbox.dart' as obx;
 import 'package:objectbox_flutter_libs/objectbox_flutter_libs.dart';
 
 import 'model/cliente.dart';
+import 'model/funcionario.dart';
 import 'model/historico_entrega.dart';
 import 'model/item_venda.dart';
 import 'model/produto.dart';
@@ -698,6 +699,178 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(7, 3249171710221978790),
+    name: 'Funcionario',
+    lastPropertyId: const obx_int.IdUid(27, 9200179167574943727),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 8421766027808062743),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 7943140216547078444),
+        name: 'codigoInterno',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 6409507848063539459),
+        name: 'nomeCompleto',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 2813211527294797575),
+        name: 'cargo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 131187214661116311),
+        name: 'cpf',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 5870973830851317136),
+        name: 'rg',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 3828255038953442444),
+        name: 'pis',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 8734142986232409619),
+        name: 'telefone',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 2952580691541501287),
+        name: 'whatsapp',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 6465526601292761317),
+        name: 'email',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 3953356086256658695),
+        name: 'endereco',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 2146856962007703979),
+        name: 'numero',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(13, 3990248895520844298),
+        name: 'bairro',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(14, 555514062094817697),
+        name: 'cidade',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(15, 1980911091399453604),
+        name: 'uf',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(16, 9160938422859335505),
+        name: 'cep',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(17, 3961991769571344118),
+        name: 'observacoes',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(18, 8790406387877620386),
+        name: 'salario',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(19, 1771523007080930543),
+        name: 'diaPagamento',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(20, 5532033962013837299),
+        name: 'ativo',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(21, 2257788251864933108),
+        name: 'dataNascimento',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(22, 7353167628758132308),
+        name: 'dataAdmissao',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(23, 4778436190446951078),
+        name: 'criadoEm',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(24, 2798422611816583665),
+        name: 'descontoAtual',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(25, 4158307240181122670),
+        name: 'adiantamentoAtual',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(26, 7672997634675212495),
+        name: 'historicoFinanceiro',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(27, 9200179167574943727),
+        name: 'valesJson',
+        type: 9,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -743,7 +916,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(6, 8962194884287814119),
+    lastEntityId: const obx_int.IdUid(7, 3249171710221978790),
     lastIndexId: const obx_int.IdUid(5, 2420440196149968766),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
@@ -1604,6 +1777,204 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    Funcionario: obx_int.EntityDefinition<Funcionario>(
+      model: _entities[6],
+      toOneRelations: (Funcionario object) => [],
+      toManyRelations: (Funcionario object) => {},
+      getId: (Funcionario object) => object.id,
+      setId: (Funcionario object, int id) {
+        object.id = id;
+      },
+      objectToFB: (Funcionario object, fb.Builder fbb) {
+        final codigoInternoOffset = fbb.writeString(object.codigoInterno);
+        final nomeCompletoOffset = fbb.writeString(object.nomeCompleto);
+        final cargoOffset = fbb.writeString(object.cargo);
+        final cpfOffset = fbb.writeString(object.cpf);
+        final rgOffset = fbb.writeString(object.rg);
+        final pisOffset = fbb.writeString(object.pis);
+        final telefoneOffset = fbb.writeString(object.telefone);
+        final whatsappOffset = fbb.writeString(object.whatsapp);
+        final emailOffset = fbb.writeString(object.email);
+        final enderecoOffset = fbb.writeString(object.endereco);
+        final numeroOffset = fbb.writeString(object.numero);
+        final bairroOffset = fbb.writeString(object.bairro);
+        final cidadeOffset = fbb.writeString(object.cidade);
+        final ufOffset = fbb.writeString(object.uf);
+        final cepOffset = fbb.writeString(object.cep);
+        final observacoesOffset = fbb.writeString(object.observacoes);
+        final historicoFinanceiroOffset = fbb.writeString(
+          object.historicoFinanceiro,
+        );
+        final valesJsonOffset = fbb.writeString(object.valesJson);
+        fbb.startTable(28);
+        fbb.addInt64(0, object.id);
+        fbb.addOffset(1, codigoInternoOffset);
+        fbb.addOffset(2, nomeCompletoOffset);
+        fbb.addOffset(3, cargoOffset);
+        fbb.addOffset(4, cpfOffset);
+        fbb.addOffset(5, rgOffset);
+        fbb.addOffset(6, pisOffset);
+        fbb.addOffset(7, telefoneOffset);
+        fbb.addOffset(8, whatsappOffset);
+        fbb.addOffset(9, emailOffset);
+        fbb.addOffset(10, enderecoOffset);
+        fbb.addOffset(11, numeroOffset);
+        fbb.addOffset(12, bairroOffset);
+        fbb.addOffset(13, cidadeOffset);
+        fbb.addOffset(14, ufOffset);
+        fbb.addOffset(15, cepOffset);
+        fbb.addOffset(16, observacoesOffset);
+        fbb.addFloat64(17, object.salario);
+        fbb.addInt64(18, object.diaPagamento);
+        fbb.addBool(19, object.ativo);
+        fbb.addInt64(20, object.dataNascimento.millisecondsSinceEpoch);
+        fbb.addInt64(21, object.dataAdmissao.millisecondsSinceEpoch);
+        fbb.addInt64(22, object.criadoEm.millisecondsSinceEpoch);
+        fbb.addFloat64(23, object.descontoAtual);
+        fbb.addFloat64(24, object.adiantamentoAtual);
+        fbb.addOffset(25, historicoFinanceiroOffset);
+        fbb.addOffset(26, valesJsonOffset);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final codigoInternoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 6, '');
+        final nomeCompletoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final cargoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final cpfParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 12, '');
+        final rgParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 14, '');
+        final pisParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 16, '');
+        final telefoneParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 18, '');
+        final whatsappParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 20, '');
+        final emailParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 22, '');
+        final enderecoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 24, '');
+        final numeroParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 26, '');
+        final bairroParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 28, '');
+        final cidadeParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 30, '');
+        final ufParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 32, '');
+        final cepParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 34, '');
+        final observacoesParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 36, '');
+        final salarioParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          38,
+          0,
+        );
+        final descontoAtualParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          50,
+          0,
+        );
+        final adiantamentoAtualParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          52,
+          0,
+        );
+        final historicoFinanceiroParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 54, '');
+        final valesJsonParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 56, '');
+        final diaPagamentoParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          40,
+          0,
+        );
+        final ativoParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          42,
+          false,
+        );
+        final dataNascimentoParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 44, 0),
+          isUtc: true,
+        );
+        final dataAdmissaoParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 46, 0),
+          isUtc: true,
+        );
+        final criadoEmParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 48, 0),
+          isUtc: true,
+        );
+        final object = Funcionario(
+          id: idParam,
+          codigoInterno: codigoInternoParam,
+          nomeCompleto: nomeCompletoParam,
+          cargo: cargoParam,
+          cpf: cpfParam,
+          rg: rgParam,
+          pis: pisParam,
+          telefone: telefoneParam,
+          whatsapp: whatsappParam,
+          email: emailParam,
+          endereco: enderecoParam,
+          numero: numeroParam,
+          bairro: bairroParam,
+          cidade: cidadeParam,
+          uf: ufParam,
+          cep: cepParam,
+          observacoes: observacoesParam,
+          salario: salarioParam,
+          descontoAtual: descontoAtualParam,
+          adiantamentoAtual: adiantamentoAtualParam,
+          historicoFinanceiro: historicoFinanceiroParam,
+          valesJson: valesJsonParam,
+          diaPagamento: diaPagamentoParam,
+          ativo: ativoParam,
+          dataNascimento: dataNascimentoParam,
+          dataAdmissao: dataAdmissaoParam,
+          criadoEm: criadoEmParam,
+        );
+
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -2119,5 +2490,143 @@ class HistoricoEntrega_ {
   /// See [HistoricoEntrega.venda].
   static final venda = obx.QueryRelationToOne<HistoricoEntrega, Venda>(
     _entities[5].properties[5],
+  );
+}
+
+/// [Funcionario] entity fields to define ObjectBox queries.
+class Funcionario_ {
+  /// See [Funcionario.id].
+  static final id = obx.QueryIntegerProperty<Funcionario>(
+    _entities[6].properties[0],
+  );
+
+  /// See [Funcionario.codigoInterno].
+  static final codigoInterno = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[1],
+  );
+
+  /// See [Funcionario.nomeCompleto].
+  static final nomeCompleto = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[2],
+  );
+
+  /// See [Funcionario.cargo].
+  static final cargo = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[3],
+  );
+
+  /// See [Funcionario.cpf].
+  static final cpf = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[4],
+  );
+
+  /// See [Funcionario.rg].
+  static final rg = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[5],
+  );
+
+  /// See [Funcionario.pis].
+  static final pis = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[6],
+  );
+
+  /// See [Funcionario.telefone].
+  static final telefone = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[7],
+  );
+
+  /// See [Funcionario.whatsapp].
+  static final whatsapp = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[8],
+  );
+
+  /// See [Funcionario.email].
+  static final email = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[9],
+  );
+
+  /// See [Funcionario.endereco].
+  static final endereco = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[10],
+  );
+
+  /// See [Funcionario.numero].
+  static final numero = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[11],
+  );
+
+  /// See [Funcionario.bairro].
+  static final bairro = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[12],
+  );
+
+  /// See [Funcionario.cidade].
+  static final cidade = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[13],
+  );
+
+  /// See [Funcionario.uf].
+  static final uf = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[14],
+  );
+
+  /// See [Funcionario.cep].
+  static final cep = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[15],
+  );
+
+  /// See [Funcionario.observacoes].
+  static final observacoes = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[16],
+  );
+
+  /// See [Funcionario.salario].
+  static final salario = obx.QueryDoubleProperty<Funcionario>(
+    _entities[6].properties[17],
+  );
+
+  /// See [Funcionario.diaPagamento].
+  static final diaPagamento = obx.QueryIntegerProperty<Funcionario>(
+    _entities[6].properties[18],
+  );
+
+  /// See [Funcionario.ativo].
+  static final ativo = obx.QueryBooleanProperty<Funcionario>(
+    _entities[6].properties[19],
+  );
+
+  /// See [Funcionario.dataNascimento].
+  static final dataNascimento = obx.QueryDateProperty<Funcionario>(
+    _entities[6].properties[20],
+  );
+
+  /// See [Funcionario.dataAdmissao].
+  static final dataAdmissao = obx.QueryDateProperty<Funcionario>(
+    _entities[6].properties[21],
+  );
+
+  /// See [Funcionario.criadoEm].
+  static final criadoEm = obx.QueryDateProperty<Funcionario>(
+    _entities[6].properties[22],
+  );
+
+  /// See [Funcionario.descontoAtual].
+  static final descontoAtual = obx.QueryDoubleProperty<Funcionario>(
+    _entities[6].properties[23],
+  );
+
+  /// See [Funcionario.adiantamentoAtual].
+  static final adiantamentoAtual = obx.QueryDoubleProperty<Funcionario>(
+    _entities[6].properties[24],
+  );
+
+  /// See [Funcionario.historicoFinanceiro].
+  static final historicoFinanceiro = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[25],
+  );
+
+  /// See [Funcionario.valesJson].
+  static final valesJson = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[26],
   );
 }

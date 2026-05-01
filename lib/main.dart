@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'data/cliente_repository.dart';
+import 'data/funcionario_repository.dart';
 import 'data/objectbox.dart';
 import 'data/produto_repository.dart';
 import 'data/usuario_repository.dart';
@@ -186,6 +187,7 @@ class _MyAppState extends State<MyApp> {
               clienteRepository: ClienteRepository(widget.objectBox),
               vendaRepository: VendaRepository(widget.objectBox),
               vendedorRepository: VendedorRepository(widget.objectBox),
+              funcionarioRepository: FuncionarioRepository(widget.objectBox),
               usuarioLogado: _usuarioLogado!,
               onLogout: _sair,
             ),

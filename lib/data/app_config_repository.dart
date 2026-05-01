@@ -13,6 +13,10 @@ class EmpresaConfig {
     this.logoPath = '',
     this.limiteDivergenciaCaixa = 20,
     this.permitirVendaSemEstoque = true,
+    this.whatsappApiVersion = 'v20.0',
+    this.whatsappPhoneNumberId = '',
+    this.whatsappAccessToken = '',
+    this.mensageriaBackendUrl = '',
   });
 
   final String nomeLoja;
@@ -26,6 +30,10 @@ class EmpresaConfig {
   final String logoPath;
   final double limiteDivergenciaCaixa;
   final bool permitirVendaSemEstoque;
+  final String whatsappApiVersion;
+  final String whatsappPhoneNumberId;
+  final String whatsappAccessToken;
+  final String mensageriaBackendUrl;
 }
 
 class AppConfigRepository {
@@ -41,6 +49,10 @@ class AppConfigRepository {
   static const _kLogoPath = 'config_logo_path';
   static const _kLimiteDivergenciaCaixa = 'config_limite_divergencia_caixa';
   static const _kPermitirVendaSemEstoque = 'config_permitir_venda_sem_estoque';
+  static const _kWhatsappApiVersion = 'config_whatsapp_api_version';
+  static const _kWhatsappPhoneNumberId = 'config_whatsapp_phone_number_id';
+  static const _kWhatsappAccessToken = 'config_whatsapp_access_token';
+  static const _kMensageriaBackendUrl = 'config_mensageria_backend_url';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -61,6 +73,10 @@ class AppConfigRepository {
       logoPath: prefs.getString(_kLogoPath) ?? '',
       limiteDivergenciaCaixa: prefs.getDouble(_kLimiteDivergenciaCaixa) ?? 20,
       permitirVendaSemEstoque: prefs.getBool(_kPermitirVendaSemEstoque) ?? true,
+      whatsappApiVersion: prefs.getString(_kWhatsappApiVersion) ?? 'v20.0',
+      whatsappPhoneNumberId: prefs.getString(_kWhatsappPhoneNumberId) ?? '',
+      whatsappAccessToken: prefs.getString(_kWhatsappAccessToken) ?? '',
+      mensageriaBackendUrl: prefs.getString(_kMensageriaBackendUrl) ?? '',
     );
   }
 
@@ -87,5 +103,17 @@ class AppConfigRepository {
       config.limiteDivergenciaCaixa < 0 ? 0 : config.limiteDivergenciaCaixa,
     );
     await prefs.setBool(_kPermitirVendaSemEstoque, config.permitirVendaSemEstoque);
+    await prefs.setString(
+      _kWhatsappApiVersion,
+      config.whatsappApiVersion.trim().isEmpty
+          ? 'v20.0'
+          : config.whatsappApiVersion.trim(),
+    );
+    await prefs.setString(
+      _kWhatsappPhoneNumberId,
+      config.whatsappPhoneNumberId.trim(),
+    );
+    await prefs.setString(_kWhatsappAccessToken, config.whatsappAccessToken.trim());
+    await prefs.setString(_kMensageriaBackendUrl, config.mensageriaBackendUrl.trim());
   }
 }
