@@ -2,15 +2,25 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../main.dart';
 import '../data/cliente_repository.dart';
+import '../data/venda_repository.dart';
 import '../model/cliente.dart';
+import '../model/venda.dart';
 
 class ClientesPage extends StatefulWidget {
-  const ClientesPage({super.key, required this.clienteRepository});
+  const ClientesPage({
+    super.key,
+    required this.clienteRepository,
+    required this.vendaRepository,
+    this.retornarClienteAoSalvar = false,
+  });
 
   final ClienteRepository clienteRepository;
+  final VendaRepository vendaRepository;
+  final bool retornarClienteAoSalvar;
 
   @override
   State<ClientesPage> createState() => _ClientesPageState();
@@ -44,6 +54,9 @@ class _ClientesPageState extends State<ClientesPage> {
   late final _emailFormatter = _EmailInputFormatter();
   late final _limiteCreditoFormatter = _MoedaInputFormatter();
   final ScrollController _scrollController = ScrollController();
+  final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
+  final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
+  String _periodoHistorico = 'todo';
 
   @override
   void initState() {
@@ -393,7 +406,12 @@ class _ClientesPageState extends State<ClientesPage> {
       ativo: _ativo,
       criadoEm: existente?.criadoEm,
     );
-    widget.clienteRepository.salvar(cliente);
+    final clienteId = widget.clienteRepository.salvar(cliente);
+    final clienteSalvo = widget.clienteRepository.obterPorId(clienteId);
+    if (widget.retornarClienteAoSalvar && clienteSalvo != null) {
+      Navigator.pop(context, clienteSalvo);
+      return;
+    }
     _limparFormulario();
     setState(() {
       _status = 'Cliente salvo com sucesso.';
@@ -528,10 +546,71 @@ class _ClientesPageState extends State<ClientesPage> {
     );
   }
 
+  (DateTime?, DateTime?) _limitesPeriodoHistorico() {
+    final now = DateTime.now();
+    final fimDia = DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+    switch (_periodoHistorico) {
+      case 'ultimos_30':
+        return (
+          DateTime(
+            now.year,
+            now.month,
+            now.day,
+          ).subtract(const Duration(days: 29)),
+          fimDia,
+        );
+      case 'ultimos_90':
+        return (
+          DateTime(
+            now.year,
+            now.month,
+            now.day,
+          ).subtract(const Duration(days: 89)),
+          fimDia,
+        );
+      case 'ano_atual':
+        return (DateTime(now.year, 1, 1), fimDia);
+      case 'todo':
+      default:
+        return (null, null);
+    }
+  }
+
+  List<Venda> _comprasDoClienteAtual() {
+    final clienteId = _clienteEmEdicaoId;
+    if (clienteId == null) return const [];
+    final limites = _limitesPeriodoHistorico();
+    return widget.vendaRepository.listarComprasFinalizadasPorCliente(
+      clienteId,
+      inicio: limites.$1,
+      fim: limites.$2,
+    );
+  }
+
+  String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final emEdicao = _clienteEmEdicaoId != null;
+    final compras = _comprasDoClienteAtual();
+    final totalGasto = compras.fold<double>(0, (acc, v) => acc + v.total);
+    final ticketMedio = compras.isEmpty ? 0.0 : totalGasto / compras.length;
+    final ultimaCompra = compras.isEmpty ? null : compras.first;
+    final quantidadeItens = compras.fold<int>(
+      0,
+      (acc, compra) => acc + compra.itens.fold<int>(0, (soma, item) => soma + item.quantidade),
+    );
+    final topProdutosMap = <String, int>{};
+    for (final compra in compras) {
+      for (final item in compra.itens) {
+        final nome = item.nomeProduto.trim();
+        if (nome.isEmpty) continue;
+        topProdutosMap[nome] = (topProdutosMap[nome] ?? 0) + item.quantidade;
+      }
+    }
+    final topProdutos = topProdutosMap.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
     return Scaffold(
       appBar: AppBar(title: const Text('Cadastro de Clientes')),
       body: Padding(
@@ -850,6 +929,121 @@ class _ClientesPageState extends State<ClientesPage> {
                   title: const Text('Cliente ativo'),
                 ),
               ],
+            ),
+            const SizedBox(height: 10),
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.colorScheme.outlineVariant),
+              ),
+              child: ExpansionTile(
+                initiallyExpanded: false,
+                tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                leading: Icon(Icons.history_outlined, color: theme.colorScheme.primary),
+                title: Text(
+                  'Historico de Compras',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                childrenPadding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                children: [
+                  if (!emEdicao)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Salve o cliente para habilitar o historico de compras.',
+                        ),
+                      ),
+                    )
+                  else ...[
+                    DropdownButtonFormField<String>(
+                      initialValue: _periodoHistorico,
+                      decoration: const InputDecoration(
+                        labelText: 'Periodo do historico',
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'todo', child: Text('Todo o periodo')),
+                        DropdownMenuItem(value: 'ultimos_30', child: Text('Ultimos 30 dias')),
+                        DropdownMenuItem(value: 'ultimos_90', child: Text('Ultimos 90 dias')),
+                        DropdownMenuItem(value: 'ano_atual', child: Text('Ano atual')),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() {
+                          _periodoHistorico = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Total ja gasto na loja: ${_formatarMoeda(totalGasto)}',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text('Ticket medio: ${_formatarMoeda(ticketMedio)}'),
+                    Text('Total de itens comprados: $quantidadeItens'),
+                    Text(
+                      'Ultima compra: ${ultimaCompra == null ? 'Nao disponivel' : _dataHora.format(ultimaCompra.data.toLocal())}',
+                    ),
+                    const SizedBox(height: 8),
+                    Text('Compras registradas: ${compras.length}'),
+                    const SizedBox(height: 8),
+                    if (topProdutos.isNotEmpty) ...[
+                      Text(
+                        'Top produtos comprados',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      ...topProdutos.take(3).map(
+                        (entry) => Text('${entry.key} - ${entry.value} un'),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    const SizedBox(height: 10),
+                    if (compras.isEmpty)
+                      const Text('Este cliente ainda nao tem compras finalizadas.')
+                    else
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 260),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: compras.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 6),
+                          itemBuilder: (context, index) {
+                            final compra = compras[index];
+                            final nota = compra.numeroOrcamento > 0
+                                ? '#${compra.numeroOrcamento}'
+                                : 'ID ${compra.id}';
+                            return ListTile(
+                              dense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              leading: const Icon(Icons.receipt_long_outlined),
+                              title: Text('Nota/Orcamento: $nota'),
+                              subtitle: Text(_dataHora.format(compra.data.toLocal())),
+                              trailing: Text(
+                                _formatarMoeda(compra.total),
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             Row(

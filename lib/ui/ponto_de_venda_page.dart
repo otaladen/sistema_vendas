@@ -18,6 +18,7 @@ import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import 'clientes_page.dart';
 import 'produto_detalhe_venda_page.dart';
 
 class PontoDeVendaPage extends StatefulWidget {
@@ -40,6 +41,8 @@ class PontoDeVendaPage extends StatefulWidget {
 
 class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   static const int _validadeOrcamentoDias = 7;
+  static const int _selecaoSemClienteValor = -1;
+  static const int _selecaoNovoClienteValor = -2;
 
   /// Altura fixa por linha (~6 visíveis na área típica da lista sem scroll excessivo).
   static const double _alturaLinhaProduto = 56;
@@ -90,6 +93,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   bool _permitirVendaSemEstoque = true;
   int? _orcamentoEmEdicaoId;
   int? _orcamentoEmEdicaoNumero;
+  bool _mostrarAjudaAtalhos = false;
+  bool _painelCheckoutRecolhido = false;
+  bool _mostrarMaisOpcoesCheckout = false;
 
   @override
   void initState() {
@@ -626,6 +632,199 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     final id = _clienteSelecionadoId;
     if (id == null) return null;
     return _clientes.where((c) => c.id == id).firstOrNull;
+  }
+
+  String _rotuloClienteSelecionadoPdV() {
+    final cliente = _clienteSelecionado();
+    return cliente?.nomeRazao ?? 'Sem cliente';
+  }
+
+  Future<void> _selecionarClienteNoOrcamento(int? value) async {
+    if (value == null) {
+      setState(() {
+        _clienteSelecionadoId = null;
+        _tipoEntregaSelecionada = 'retirada';
+        _prioridadeEntregaSelecionada = 'normal';
+        _janelaEntregaSelecionada = 'nao_definida';
+        _dataEntregaMarcada = null;
+        _valorFreteController.clear();
+        _enderecoEntregaController.clear();
+        _observacaoEntregaController.clear();
+      });
+      return;
+    }
+    final cliente = _clientes.where((c) => c.id == value).firstOrNull;
+    if (cliente == null) return;
+    final entrega = await _abrirDialogEntregaCliente(cliente: cliente);
+    if (!mounted || entrega == null) {
+      return;
+    }
+    setState(() {
+      _clienteSelecionadoId = value;
+      _tipoEntregaSelecionada = 'entrega_loja';
+      _prioridadeEntregaSelecionada = 'normal';
+      _dataEntregaMarcada ??= DateTime.now();
+      _valorFreteController.text = entrega.valorFrete;
+      _enderecoEntregaController.text = entrega.endereco;
+      _observacaoEntregaController.text = entrega.observacao;
+    });
+  }
+
+  Future<void> _abrirCadastroNovoClienteNoPdv() async {
+    final clienteCriado = await Navigator.push<Cliente>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClientesPage(
+          clienteRepository: widget.clienteRepository,
+          vendaRepository: widget.vendaRepository,
+          retornarClienteAoSalvar: true,
+        ),
+      ),
+    );
+    if (!mounted || clienteCriado == null) {
+      return;
+    }
+    setState(() {
+      _clientes = widget.clienteRepository
+          .listarTodos()
+          .where((c) => c.ativo)
+          .toList();
+    });
+    await _selecionarClienteNoOrcamento(clienteCriado.id);
+  }
+
+  Future<void> _abrirSeletorClienteNoPdv() async {
+    final resultado = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) {
+        final pesquisaController = TextEditingController();
+        var filtrados = List<Cliente>.from(_clientes);
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Selecionar cliente'),
+              content: SizedBox(
+                width: 680,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: pesquisaController,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Buscar por nome, documento, telefone...',
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                      onChanged: (value) {
+                        final termo = value.trim().toLowerCase();
+                        final termoNumerico =
+                            value.replaceAll(RegExp(r'\D'), '');
+                        setDialogState(() {
+                          if (termo.isEmpty) {
+                            filtrados = List<Cliente>.from(_clientes);
+                            return;
+                          }
+                          filtrados = _clientes.where((cliente) {
+                            final campos = [
+                              cliente.nomeRazao,
+                              cliente.nomeFantasia,
+                              cliente.documento,
+                              cliente.telefone,
+                              cliente.whatsapp,
+                              cliente.email,
+                              cliente.cidade,
+                            ].map((e) => e.toLowerCase());
+                            final matchTexto = campos.any(
+                              (campo) => campo.contains(termo),
+                            );
+                            if (matchTexto) return true;
+                            if (termoNumerico.isEmpty) return false;
+                            final camposNumericos = [
+                              cliente.documento,
+                              cliente.telefone,
+                              cliente.whatsapp,
+                              cliente.cep,
+                            ].map((e) => e.replaceAll(RegExp(r'\D'), ''));
+                            return camposNumericos.any(
+                              (campoNumerico) =>
+                                  campoNumerico.contains(termoNumerico),
+                            );
+                          }).toList();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.person_off_outlined),
+                      title: const Text('Sem cliente'),
+                      onTap: () => Navigator.pop(
+                        dialogContext,
+                        _selecaoSemClienteValor,
+                      ),
+                    ),
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.person_add_alt_1_outlined),
+                      title: const Text('+ Novo cliente...'),
+                      onTap: () => Navigator.pop(
+                        dialogContext,
+                        _selecaoNovoClienteValor,
+                      ),
+                    ),
+                    const Divider(height: 12),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(context).size.height * 0.45,
+                      ),
+                      child: filtrados.isEmpty
+                          ? const Center(child: Text('Nenhum cliente encontrado.'))
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: filtrados.length,
+                              itemBuilder: (context, index) {
+                                final c = filtrados[index];
+                                final documento = c.documento.trim().isEmpty
+                                    ? '-'
+                                    : c.documento;
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(c.nomeRazao),
+                                  subtitle: Text(
+                                    'Doc: $documento | Tel: ${c.telefone.trim().isEmpty ? '-' : c.telefone}',
+                                  ),
+                                  onTap: () => Navigator.pop(dialogContext, c.id),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancelar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (!mounted || resultado == null) {
+      return;
+    }
+    if (resultado == _selecaoNovoClienteValor) {
+      await _abrirCadastroNovoClienteNoPdv();
+      return;
+    }
+    if (resultado == _selecaoSemClienteValor) {
+      await _selecionarClienteNoOrcamento(null);
+      return;
+    }
+    await _selecionarClienteNoOrcamento(resultado);
   }
 
   String _montarEnderecoEntregaCliente(Cliente cliente) {
@@ -1323,8 +1522,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           ).readAsBytes().catchError((_) => Uint8List(0))
         : Uint8List(0);
     final doc = pw.Document();
-    final dataHora = DateFormat('dd/MM/yyyy HH:mm').format(venda.data);
-    final validade = venda.data.add(Duration(days: _validadeOrcamentoDias));
+    final dataEmissao = DateTime.now();
+    final dataHora = DateFormat('dd/MM/yyyy HH:mm').format(dataEmissao);
+    final validade = dataEmissao.add(Duration(days: _validadeOrcamentoDias));
     final validadeFmt = DateFormat('dd/MM/yyyy').format(validade);
     final subtotalProdutos = (venda.total - venda.valorFrete)
         .clamp(0, double.infinity)
@@ -1387,11 +1587,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                 'Vendedor: ${_rotuloVendedorOrcamentoPdf(venda)}',
                 style: const pw.TextStyle(fontSize: 9),
               ),
-              if ((cliente?.documento.trim().isNotEmpty ?? false))
-                pw.Text(
-                  'Documento: ${cliente!.documento}',
-                  style: const pw.TextStyle(fontSize: 9),
-                ),
               if ((cliente?.telefone.trim().isNotEmpty ?? false))
                 pw.Text(
                   'Telefone: ${cliente!.telefone}',
@@ -1819,19 +2014,59 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                             _pesquisar(executarAtalhoRapido: true),
                       ),
                       const SizedBox(height: 6),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Preco: ${_rotuloPreco(_precoListaAtivo)} (F1–F3) · F5 recarrega · Ctrl+K limpa busca · '
-                          '${_produtos.length} produtos · Enter→lista · na lista: Numpad+ ou Shift+= adiciona 1 · '
-                          'Enter abre qtd · Esc volta à busca · F6 carrinho · F7 checkout · F10 ou Ctrl+S salvar · '
-                          'Ctrl+O ler orcamento · '
-                          'no carrinho: ↑↓ qtd · Ctrl+↑↓ linha · Del remove · Est vermelho = minimo · '
-                          'busca rapida: "2 cimento" adiciona 2 do primeiro item, "sku +" adiciona 1',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Preco: ${_rotuloPreco(_precoListaAtivo)} · ${_produtos.length} produtos',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _mostrarAjudaAtalhos = !_mostrarAjudaAtalhos;
+                              });
+                            },
+                            icon: Icon(
+                              _mostrarAjudaAtalhos
+                                  ? Icons.keyboard_arrow_up
+                                  : Icons.keyboard_arrow_down,
+                            ),
+                            label: Text(
+                              _mostrarAjudaAtalhos
+                                  ? 'Ocultar atalhos'
+                                  : 'Ajuda de atalhos',
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 12),
+                      AnimatedCrossFade(
+                        crossFadeState: _mostrarAjudaAtalhos
+                            ? CrossFadeState.showFirst
+                            : CrossFadeState.showSecond,
+                        duration: const Duration(milliseconds: 180),
+                        firstChild: Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(top: 4, bottom: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            'F1–F3 preco · F5 recarrega · Ctrl+K limpa busca · Enter -> lista · '
+                            'Numpad+ adiciona 1 · F6 carrinho · F7 checkout · Ctrl+O ler orcamento · '
+                            'F10/Ctrl+S salvar.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                        secondChild: const SizedBox.shrink(),
+                      ),
+                      const SizedBox(height: 8),
                       Expanded(
                         child: _produtos.isEmpty
                             ? Center(
@@ -1990,18 +2225,82 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                     ],
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  flex: 2,
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
+                const SizedBox(width: 10),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  width: _painelCheckoutRecolhido ? 64 : 470,
+                  child: _painelCheckoutRecolhido
+                      ? Card(
+                          child: Column(
+                            children: [
+                              IconButton(
+                                tooltip: 'Expandir checkout',
+                                onPressed: () {
+                                  setState(() {
+                                    _painelCheckoutRecolhido = false;
+                                  });
+                                },
+                                icon: const Icon(Icons.chevron_left),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '${_carrinho.length}',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              Text(
+                                'itens',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              const Divider(height: 20),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                child: Text(
+                                  _formatarMoeda(_totalGeralComFrete),
+                                  textAlign: TextAlign.center,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : Card(
+                          child: Theme(
+                      data: Theme.of(context).copyWith(
+                        visualDensity: VisualDensity.compact,
+                        inputDecorationTheme:
+                            Theme.of(context).inputDecorationTheme.copyWith(
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
+                                ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Orcamento em atendimento',
-                            style: Theme.of(context).textTheme.titleMedium,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Orcamento em atendimento',
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Recolher checkout',
+                                onPressed: () {
+                                  setState(() {
+                                    _painelCheckoutRecolhido = true;
+                                  });
+                                },
+                                icon: const Icon(Icons.chevron_right),
+                              ),
+                            ],
                           ),
                           if (_carrinho.isNotEmpty)
                             Padding(
@@ -2011,7 +2310,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
                           Expanded(
                             child: _carrinho.isEmpty
                                 ? const Center(
@@ -2162,77 +2461,32 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                     ),
                                   ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
                           Text(
                             'Subtotal produtos: ${_formatarMoeda(_totalOrcamento)}',
                             style: Theme.of(context).textTheme.bodyLarge,
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
                             'Frete: ${_formatarMoeda(_valorFreteAtual)}',
                             style: Theme.of(context).textTheme.bodyLarge,
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
                             'Total geral: ${_formatarMoeda(_totalGeralComFrete)}',
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<int?>(
-                            focusNode: _focusClientePdV,
-                            initialValue: _clienteSelecionadoId,
-                            decoration: const InputDecoration(
-                              labelText: 'Cliente (opcional)',
+                          const SizedBox(height: 6),
+                          InkWell(
+                            onTap: _abrirSeletorClienteNoPdv,
+                            borderRadius: BorderRadius.circular(12),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: 'Cliente (opcional)',
+                                suffixIcon: Icon(Icons.search),
+                              ),
+                              child: Text(_rotuloClienteSelecionadoPdV()),
                             ),
-                            items: [
-                              const DropdownMenuItem<int?>(
-                                value: null,
-                                child: Text('Sem cliente'),
-                              ),
-                              ..._clientes.map(
-                                (c) => DropdownMenuItem<int?>(
-                                  value: c.id,
-                                  child: Text(c.nomeRazao),
-                                ),
-                              ),
-                            ],
-                            onChanged: (value) async {
-                              if (value == null) {
-                                setState(() {
-                                  _clienteSelecionadoId = null;
-                                  _tipoEntregaSelecionada = 'retirada';
-                                  _prioridadeEntregaSelecionada = 'normal';
-                                  _janelaEntregaSelecionada = 'nao_definida';
-                                  _dataEntregaMarcada = null;
-                                  _valorFreteController.clear();
-                                  _enderecoEntregaController.clear();
-                                  _observacaoEntregaController.clear();
-                                });
-                                return;
-                              }
-                              final cliente = _clientes
-                                  .where((c) => c.id == value)
-                                  .firstOrNull;
-                              if (cliente == null) return;
-                              final entrega = await _abrirDialogEntregaCliente(
-                                cliente: cliente,
-                              );
-                              if (!mounted) return;
-                              if (entrega == null) {
-                                return;
-                              }
-                              setState(() {
-                                _clienteSelecionadoId = value;
-                                _tipoEntregaSelecionada = 'entrega_loja';
-                                _prioridadeEntregaSelecionada = 'normal';
-                                _dataEntregaMarcada ??= DateTime.now();
-                                _valorFreteController.text = entrega.valorFrete;
-                                _enderecoEntregaController.text =
-                                    entrega.endereco;
-                                _observacaoEntregaController.text =
-                                    entrega.observacao;
-                              });
-                            },
                           ),
                           const SizedBox(height: 8),
                           DropdownButtonFormField<int?>(
@@ -2303,246 +2557,260 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                               });
                             },
                           ),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            focusNode: _focusEntregaPdV,
-                            initialValue: _tipoEntregaSelecionada,
-                            decoration: const InputDecoration(
-                              labelText: 'Tipo de entrega',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'retirada',
-                                child: Text('Retirada na loja'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'entrega_loja',
-                                child: Text('Entrega da loja'),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              if (value == null) return;
+                          const SizedBox(height: 4),
+                          ExpansionTile(
+                            tilePadding: EdgeInsets.zero,
+                            childrenPadding: EdgeInsets.zero,
+                            initiallyExpanded: _mostrarMaisOpcoesCheckout,
+                            onExpansionChanged: (value) {
                               setState(() {
-                                _tipoEntregaSelecionada = value;
-                                if (_tipoEntregaSelecionada != 'entrega_loja') {
-                                  _prioridadeEntregaSelecionada = 'normal';
-                                  _janelaEntregaSelecionada = 'nao_definida';
-                                  _dataEntregaMarcada = null;
-                                  _valorFreteController.clear();
-                                  _enderecoEntregaController.clear();
-                                  _observacaoEntregaController.clear();
-                                }
+                                _mostrarMaisOpcoesCheckout = value;
                               });
                             },
-                          ),
-                          if (_tipoEntregaSelecionada == 'entrega_loja') ...[
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: DropdownButtonFormField<String>(
-                                    initialValue: _prioridadeEntregaSelecionada,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Prioridade da entrega',
+                            title: const Text('Mais opcoes (entrega, frete e parcelas)'),
+                            children: [
+                              const SizedBox(height: 4),
+                              DropdownButtonFormField<String>(
+                                focusNode: _focusEntregaPdV,
+                                initialValue: _tipoEntregaSelecionada,
+                                decoration: const InputDecoration(
+                                  labelText: 'Tipo de entrega',
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'retirada',
+                                    child: Text('Retirada na loja'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'entrega_loja',
+                                    child: Text('Entrega da loja'),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  if (value == null) return;
+                                  setState(() {
+                                    _tipoEntregaSelecionada = value;
+                                    if (_tipoEntregaSelecionada != 'entrega_loja') {
+                                      _prioridadeEntregaSelecionada = 'normal';
+                                      _janelaEntregaSelecionada = 'nao_definida';
+                                      _dataEntregaMarcada = null;
+                                      _valorFreteController.clear();
+                                      _enderecoEntregaController.clear();
+                                      _observacaoEntregaController.clear();
+                                    }
+                                  });
+                                },
+                              ),
+                              if (_tipoEntregaSelecionada == 'entrega_loja') ...[
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: DropdownButtonFormField<String>(
+                                        initialValue: _prioridadeEntregaSelecionada,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Prioridade da entrega',
+                                        ),
+                                        items: const [
+                                          DropdownMenuItem(
+                                            value: 'normal',
+                                            child: Text('Normal'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'urgente',
+                                            child: Text('Urgente'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'agendada',
+                                            child: Text('Agendada'),
+                                          ),
+                                        ],
+                                        onChanged: (value) {
+                                          if (value == null) return;
+                                          setState(() {
+                                            _prioridadeEntregaSelecionada = value;
+                                            if (_prioridadeEntregaSelecionada ==
+                                                    'agendada' &&
+                                                _janelaEntregaSelecionada ==
+                                                    'nao_definida') {
+                                              _janelaEntregaSelecionada = 'manha';
+                                            }
+                                          });
+                                        },
+                                      ),
                                     ),
-                                    items: const [
-                                      DropdownMenuItem(
-                                        value: 'normal',
-                                        child: Text('Normal'),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: DropdownButtonFormField<String>(
+                                        initialValue: _janelaEntregaSelecionada,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Janela',
+                                        ),
+                                        items: const [
+                                          DropdownMenuItem(
+                                            value: 'nao_definida',
+                                            child: Text('Nao definida'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'manha',
+                                            child: Text('Manha'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'tarde',
+                                            child: Text('Tarde'),
+                                          ),
+                                        ],
+                                        onChanged: (value) {
+                                          if (value == null) return;
+                                          setState(() {
+                                            _janelaEntregaSelecionada = value;
+                                          });
+                                        },
                                       ),
-                                      DropdownMenuItem(
-                                        value: 'urgente',
-                                        child: Text('Urgente'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'agendada',
-                                        child: Text('Agendada'),
-                                      ),
-                                    ],
-                                    onChanged: (value) {
-                                      if (value == null) return;
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final agora = DateTime.now();
+                                      final inicial = _dataEntregaMarcada ?? agora;
+                                      final escolhido = await showDatePicker(
+                                        context: context,
+                                        initialDate: inicial,
+                                        firstDate: DateTime(
+                                          agora.year,
+                                          agora.month,
+                                          agora.day,
+                                        ),
+                                        lastDate: DateTime(
+                                          agora.year + 3,
+                                          12,
+                                          31,
+                                        ),
+                                      );
+                                      if (!mounted || escolhido == null) return;
                                       setState(() {
-                                        _prioridadeEntregaSelecionada = value;
-                                        if (_prioridadeEntregaSelecionada ==
-                                                'agendada' &&
-                                            _janelaEntregaSelecionada ==
-                                                'nao_definida') {
-                                          _janelaEntregaSelecionada = 'manha';
-                                        }
+                                        _dataEntregaMarcada = escolhido;
                                       });
                                     },
+                                    icon: const Icon(Icons.event_outlined),
+                                    label: Text(
+                                      _dataEntregaMarcada == null
+                                          ? 'Definir data da entrega'
+                                          : 'Data da entrega: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: DropdownButtonFormField<String>(
-                                    initialValue: _janelaEntregaSelecionada,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Janela',
+                                const SizedBox(height: 8),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerLowest,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outlineVariant,
                                     ),
-                                    items: const [
-                                      DropdownMenuItem(
-                                        value: 'nao_definida',
-                                        child: Text('Nao definida'),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Entrega configurada',
+                                        style: Theme.of(context).textTheme.labelLarge,
                                       ),
-                                      DropdownMenuItem(
-                                        value: 'manha',
-                                        child: Text('Manha'),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _resumoEntrega(),
+                                        style: Theme.of(context).textTheme.bodySmall,
                                       ),
-                                      DropdownMenuItem(
-                                        value: 'tarde',
-                                        child: Text('Tarde'),
+                                      const SizedBox(height: 8),
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: OutlinedButton.icon(
+                                          onPressed: () async {
+                                            final cliente = _clienteSelecionado();
+                                            if (cliente == null) {
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Selecione um cliente para editar a entrega.',
+                                                  ),
+                                                ),
+                                              );
+                                              return;
+                                            }
+                                            final entrega =
+                                                await _abrirDialogEntregaCliente(
+                                                  cliente: cliente,
+                                                );
+                                            if (!mounted || entrega == null) return;
+                                            setState(() {
+                                              _tipoEntregaSelecionada =
+                                                  'entrega_loja';
+                                              _dataEntregaMarcada ??=
+                                                  DateTime.now();
+                                              _valorFreteController.text =
+                                                  entrega.valorFrete;
+                                              _enderecoEntregaController.text =
+                                                  entrega.endereco;
+                                              _observacaoEntregaController.text =
+                                                  entrega.observacao;
+                                            });
+                                          },
+                                          icon: const Icon(Icons.edit_outlined),
+                                          label: const Text(
+                                            'Editar dados da entrega',
+                                          ),
+                                        ),
                                       ),
                                     ],
-                                    onChanged: (value) {
-                                      if (value == null) return;
-                                      setState(() {
-                                        _janelaEntregaSelecionada = value;
-                                      });
-                                    },
                                   ),
                                 ),
                               ],
-                            ),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: () async {
-                                  final agora = DateTime.now();
-                                  final inicial = _dataEntregaMarcada ?? agora;
-                                  final escolhido = await showDatePicker(
-                                    context: context,
-                                    initialDate: inicial,
-                                    firstDate: DateTime(
-                                      agora.year,
-                                      agora.month,
-                                      agora.day,
-                                    ),
-                                    lastDate: DateTime(
-                                      agora.year + 3,
-                                      12,
-                                      31,
-                                    ),
-                                  );
-                                  if (!mounted || escolhido == null) return;
-                                  setState(() {
-                                    _dataEntregaMarcada = escolhido;
-                                  });
-                                },
-                                icon: const Icon(Icons.event_outlined),
-                                label: Text(
-                                  _dataEntregaMarcada == null
-                                      ? 'Definir data da entrega'
-                                      : 'Data da entrega: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
+                              const SizedBox(height: 8),
+                              DropdownButtonFormField<int>(
+                                focusNode: _focusParcelasPdV,
+                                initialValue: _parcelasSelecionadas,
+                                decoration: const InputDecoration(
+                                  labelText: 'Parcelas',
                                 ),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerLowest,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.outlineVariant,
+                                items: List.generate(
+                                  12,
+                                  (index) => DropdownMenuItem(
+                                    value: index + 1,
+                                    child: Text(_rotuloParcela(index + 1)),
+                                  ),
                                 ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Entrega configurada',
-                                    style: Theme.of(context).textTheme.labelLarge,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    _resumoEntrega(),
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: OutlinedButton.icon(
-                                      onPressed: () async {
-                                        final cliente = _clienteSelecionado();
-                                        if (cliente == null) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Selecione um cliente para editar a entrega.',
-                                              ),
-                                            ),
-                                          );
-                                          return;
+                                onChanged:
+                                    _formaPagamentoSelecionada == 'cartao_credito'
+                                    ? (value) {
+                                        if (value != null) {
+                                          setState(() {
+                                            _parcelasSelecionadas = value;
+                                          });
                                         }
-                                        final entrega =
-                                            await _abrirDialogEntregaCliente(
-                                              cliente: cliente,
-                                            );
-                                        if (!mounted || entrega == null) return;
-                                        setState(() {
-                                          _tipoEntregaSelecionada =
-                                              'entrega_loja';
-                                          _dataEntregaMarcada ??=
-                                              DateTime.now();
-                                          _valorFreteController.text =
-                                              entrega.valorFrete;
-                                          _enderecoEntregaController.text =
-                                              entrega.endereco;
-                                          _observacaoEntregaController.text =
-                                              entrega.observacao;
-                                        });
-                                      },
-                                      icon: const Icon(Icons.edit_outlined),
-                                      label: const Text(
-                                        'Editar dados da entrega',
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                                      }
+                                    : null,
                               ),
-                            ),
-                          ],
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<int>(
-                            focusNode: _focusParcelasPdV,
-                            initialValue: _parcelasSelecionadas,
-                            decoration: const InputDecoration(
-                              labelText: 'Parcelas',
-                            ),
-                            items: List.generate(
-                              12,
-                              (index) => DropdownMenuItem(
-                                value: index + 1,
-                                child: Text(_rotuloParcela(index + 1)),
-                              ),
-                            ),
-                            onChanged:
-                                _formaPagamentoSelecionada == 'cartao_credito'
-                                ? (value) {
-                                    if (value != null) {
-                                      setState(() {
-                                        _parcelasSelecionadas = value;
-                                      });
-                                    }
-                                  }
-                                : null,
+                              if (_formaPagamentoSelecionada ==
+                                  'cartao_credito') ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Selecionado: ${_rotuloParcela(_parcelasSelecionadas)}',
+                                ),
+                              ],
+                            ],
                           ),
-                          if (_formaPagamentoSelecionada ==
-                              'cartao_credito') ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              'Selecionado: ${_rotuloParcela(_parcelasSelecionadas)}',
-                            ),
-                          ],
                           if (_orcamentoEmEdicaoId != null) ...[
                             const SizedBox(height: 8),
                             Row(
@@ -2586,6 +2854,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                       ),
                     ),
                   ),
+                ),
                 ),
               ],
             ),

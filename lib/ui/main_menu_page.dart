@@ -58,6 +58,7 @@ class MainMenuPage extends StatelessWidget {
                     builder: (_) => CadastrosPage(
                       produtoRepository: produtoRepository,
                       clienteRepository: clienteRepository,
+                      vendaRepository: vendaRepository,
                       vendedorRepository: vendedorRepository,
                       usuarioLogado: usuarioLogado,
                     ),

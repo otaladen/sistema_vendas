@@ -76,6 +76,32 @@ class VendaRepository {
     return listarTodas().where((venda) => venda.status == 'orcamento').toList();
   }
 
+  List<Venda> listarComprasFinalizadasPorCliente(
+    int clienteId, {
+    DateTime? inicio,
+    DateTime? fim,
+  }) {
+    final inicioUtc = inicio?.toUtc();
+    final fimUtc = fim?.toUtc();
+    return listarTodas()
+        .where(
+          (venda) =>
+              venda.status == 'finalizada' &&
+              !venda.cancelada &&
+              venda.cliente.targetId == clienteId &&
+              (inicioUtc == null || !venda.data.toUtc().isBefore(inicioUtc)) &&
+              (fimUtc == null || !venda.data.toUtc().isAfter(fimUtc)),
+        )
+        .toList()
+      ..sort((a, b) => b.data.compareTo(a.data));
+  }
+
+  double totalGastoCliente(int clienteId) {
+    return listarComprasFinalizadasPorCliente(
+      clienteId,
+    ).fold<double>(0, (total, venda) => total + venda.total);
+  }
+
   List<Venda> listarPorPeriodo(PeriodoFiltro periodo) {
     final inicioUtc = periodo.inicio.toUtc();
     final fimUtc = periodo.fim.toUtc();

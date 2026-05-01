@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
+import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/usuario_sistema.dart';
 import 'clientes_page.dart';
@@ -15,12 +16,14 @@ class CadastrosPage extends StatelessWidget {
     super.key,
     required this.produtoRepository,
     required this.clienteRepository,
+    required this.vendaRepository,
     required this.vendedorRepository,
     required this.usuarioLogado,
   });
 
   final ProdutoRepository produtoRepository;
   final ClienteRepository clienteRepository;
+  final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
   final UsuarioSistema usuarioLogado;
 
@@ -62,7 +65,10 @@ class CadastrosPage extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (_) =>
-                          ClientesPage(clienteRepository: clienteRepository),
+                          ClientesPage(
+                            clienteRepository: clienteRepository,
+                            vendaRepository: vendaRepository,
+                          ),
                     ),
                   );
                     }
