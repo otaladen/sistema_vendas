@@ -8,7 +8,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../data/venda_repository.dart';
-import '../model/historico_entrega.dart';
 import '../model/venda.dart';
 
 class EntregasPage extends StatefulWidget {
@@ -513,9 +512,129 @@ class _EntregasPageState extends State<EntregasPage> {
     _carregarEntregas();
   }
 
+  bool _statusFinalizado(String status) {
+    return status == 'entregue' || status == 'cancelada';
+  }
+
+  bool _transicaoStatusPermitida(String atual, String novo) {
+    if (atual == novo) return true;
+    if (_statusFinalizado(atual)) return false;
+    if (novo == 'reagendada' || novo == 'cancelada') return true;
+    const ordem = {
+      'pendente': 0,
+      'roteirizada': 1,
+      'saiu_entrega': 2,
+      'entregue': 3,
+    };
+    final iAtual = ordem[atual];
+    final iNovo = ordem[novo];
+    if (iAtual == null || iNovo == null) return true;
+    // Permite manter, avançar uma etapa por vez ou voltar para pendente via reagendamento.
+    return iNovo == iAtual + 1 || (iNovo == 0 && atual == 'reagendada');
+  }
+
+  String _mensagemBloqueioTransicao(String atual, String novo) {
+    return 'Nao foi possivel mudar de "${_rotuloStatusEntrega(atual)}" para '
+        '"${_rotuloStatusEntrega(novo)}". Siga a sequencia: '
+        'Pendente -> Roteirizada -> Saiu para entrega -> Entregue.';
+  }
+
+  bool _checklistPodeAtualizar(
+    Venda venda, {
+    bool? separado,
+    bool? carregado,
+    bool? saiu,
+  }) {
+    final novoSeparado = separado ?? venda.cargaSeparada;
+    final novoCarregado = carregado ?? venda.cargaCarregada;
+    final novoSaiu = saiu ?? venda.cargaSaiu;
+    if (novoCarregado && !novoSeparado) return false;
+    if (novoSaiu && (!novoSeparado || !novoCarregado)) return false;
+    return true;
+  }
+
+  String _mensagemChecklistInvalido() {
+    return 'Siga a sequencia do checklist: Separado -> Carregado -> Saiu.';
+  }
+
+  int _entregasAtrasadas() {
+    final hoje = DateTime.now();
+    final baseHoje = DateTime(hoje.year, hoje.month, hoje.day);
+    return _entregas.where((venda) {
+      if (_statusFinalizado(venda.statusEntrega)) return false;
+      final marcada = venda.dataEntregaMarcada?.toLocal();
+      if (marcada == null) return false;
+      final baseMarcada = DateTime(marcada.year, marcada.month, marcada.day);
+      return baseMarcada.isBefore(baseHoje);
+    }).length;
+  }
+
+  int _entregasPendentesHoje() {
+    final hoje = DateTime.now();
+    final baseHoje = DateTime(hoje.year, hoje.month, hoje.day);
+    return _entregas.where((venda) {
+      if (_statusFinalizado(venda.statusEntrega)) return false;
+      final marcada = venda.dataEntregaMarcada?.toLocal();
+      if (marcada == null) return false;
+      final baseMarcada = DateTime(marcada.year, marcada.month, marcada.day);
+      return baseMarcada == baseHoje;
+    }).length;
+  }
+
+  Future<void> _abrirHistoricoEntrega(Venda venda) async {
+    final historico = widget.vendaRepository.listarHistoricoEntrega(venda.id);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Historico da entrega #${venda.numeroOrcamento}'),
+          content: SizedBox(
+            width: 620,
+            child: historico.isEmpty
+                ? const Text('Sem movimentacoes registradas.')
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: historico.length,
+                    separatorBuilder: (_, _) => const Divider(height: 8),
+                    itemBuilder: (context, index) {
+                      final item = historico[index];
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          '${_rotuloStatusEntrega(item.statusAnterior)} -> ${_rotuloStatusEntrega(item.statusNovo)}',
+                        ),
+                        subtitle: Text(
+                          '${DateFormat('dd/MM/yyyy HH:mm').format(item.dataHora.toLocal())} · ${item.usuario}',
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fechar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _atualizarStatusEntrega(Venda venda, String novoStatus) async {
     try {
       final statusAnterior = venda.statusEntrega;
+      if (!_transicaoStatusPermitida(statusAnterior, novoStatus)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_mensagemBloqueioTransicao(statusAnterior, novoStatus)),
+          ),
+        );
+        return;
+      }
       widget.vendaRepository.atualizarStatusEntrega(venda.id, novoStatus);
       widget.vendaRepository.registrarHistoricoStatusEntrega(
         vendaId: venda.id,
@@ -543,6 +662,18 @@ class _EntregasPageState extends State<EntregasPage> {
     bool? saiu,
   }) {
     try {
+      if (!_checklistPodeAtualizar(
+        venda,
+        separado: separado,
+        carregado: carregado,
+        saiu: saiu,
+      )) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_mensagemChecklistInvalido())),
+        );
+        return;
+      }
       widget.vendaRepository.atualizarChecklistCargaEntrega(
         venda.id,
         separado: separado,
@@ -731,6 +862,8 @@ class _EntregasPageState extends State<EntregasPage> {
       resumoPorDia.update(dataKey, (atual) => atual + 1, ifAbsent: () => 1);
     }
     final bairros = grouped.keys.toList()..sort((a, b) => a.compareTo(b));
+    final atrasadas = _entregasAtrasadas();
+    final pendentesHoje = _entregasPendentesHoje();
     final diasResumo = resumoPorDia.keys.toList()
       ..sort((a, b) {
         if (a == 'Sem data marcada') return 1;
@@ -840,6 +973,35 @@ class _EntregasPageState extends State<EntregasPage> {
               ),
             ),
             const SizedBox(height: 10),
+            if (_entregas.isNotEmpty)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      Chip(
+                        avatar: Icon(
+                          Icons.warning_amber_outlined,
+                          color: atrasadas > 0 ? Colors.red.shade700 : Colors.grey,
+                        ),
+                        label: Text('Atrasadas: $atrasadas'),
+                      ),
+                      Chip(
+                        avatar: Icon(
+                          Icons.today_outlined,
+                          color: pendentesHoje > 0
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.grey,
+                        ),
+                        label: Text('Pendentes hoje: $pendentesHoje'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (_entregas.isNotEmpty) const SizedBox(height: 10),
             if (_entregas.isNotEmpty)
               Card(
                 child: Padding(
@@ -1070,6 +1232,12 @@ class _EntregasPageState extends State<EntregasPage> {
                                             _abrirDetalhesItensVenda(venda),
                                         icon: const Icon(Icons.receipt_long),
                                         label: const Text('Ver itens'),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      OutlinedButton.icon(
+                                        onPressed: () => _abrirHistoricoEntrega(venda),
+                                        icon: const Icon(Icons.history),
+                                        label: const Text('Historico'),
                                       ),
                                       const SizedBox(width: 6),
                                       if (venda.statusEntrega != 'entregue')

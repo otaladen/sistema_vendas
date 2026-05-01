@@ -57,11 +57,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   final _focusPagamentoPdV = FocusNode(debugLabel: 'pdvPagamento');
   final _focusEntregaPdV = FocusNode(debugLabel: 'pdvEntrega');
   final _focusParcelasPdV = FocusNode(debugLabel: 'pdvParcelas');
-  final _focusValorFretePdV = FocusNode(debugLabel: 'pdvValorFrete');
-  final _focusEnderecoEntregaPdV = FocusNode(debugLabel: 'pdvEnderecoEntrega');
-  final _focusObsEntregaPdV = FocusNode(debugLabel: 'pdvObsEntrega');
+  /// Botão "Editar dados da entrega" (frete/endereço estão no dialogo).
+  final _focusEditarEntregaPdV = FocusNode(debugLabel: 'pdvEditarEntrega');
   final _focusSalvarOrcamentoPdV = FocusNode(debugLabel: 'pdvSalvarOrcamento');
   final _listaProdutosScrollController = ScrollController();
+  /// Ancora o painel direito para saber se o foco realmente esta no checkout (hasFocus dos nos falha).
+  final GlobalKey _keyPainelCheckoutPdV = GlobalKey();
   final _valorFreteController = TextEditingController();
   final _enderecoEntregaController = TextEditingController();
   final _observacaoEntregaController = TextEditingController();
@@ -97,9 +98,26 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   bool _painelCheckoutRecolhido = false;
   bool _mostrarMaisOpcoesCheckout = false;
 
+  /// Agrupa varios KeyDown do F7 no mesmo ciclo (Windows); senao executa dois passos de uma vez.
+  int _checkoutF7BurstId = 0;
+
+  void _agendarCheckoutF7Microtask(bool anterior) {
+    final querAnterior = anterior;
+    final id = ++_checkoutF7BurstId;
+    scheduleMicrotask(() {
+      if (!mounted || id != _checkoutF7BurstId) return;
+      if (querAnterior) {
+        _focarCampoCheckoutAnterior();
+      } else {
+        _focarProximoCampoCheckout();
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handlerCheckoutF7PdV);
     _carregarDadosIniciais();
     _carregarConfiguracaoVendaSemEstoque();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -120,6 +138,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handlerCheckoutF7PdV);
+    _checkoutF7BurstId = 0;
     _debouncePesquisa?.cancel();
     _listaProdutosScrollController.dispose();
     _listaProdutosFocus.dispose();
@@ -129,9 +149,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     _focusPagamentoPdV.dispose();
     _focusEntregaPdV.dispose();
     _focusParcelasPdV.dispose();
-    _focusValorFretePdV.dispose();
-    _focusEnderecoEntregaPdV.dispose();
-    _focusObsEntregaPdV.dispose();
+    _focusEditarEntregaPdV.dispose();
     _focusSalvarOrcamentoPdV.dispose();
     _pesquisaFocus.dispose();
     _pesquisaController.dispose();
@@ -337,35 +355,113 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       _focusEntregaPdV,
     ];
     if (_tipoEntregaSelecionada == 'entrega_loja') {
-      nodes.add(_focusValorFretePdV);
-      nodes.add(_focusEnderecoEntregaPdV);
-      nodes.add(_focusObsEntregaPdV);
+      nodes.add(_focusEditarEntregaPdV);
     }
     nodes.add(_focusParcelasPdV);
     nodes.add(_focusSalvarOrcamentoPdV);
     return nodes;
   }
 
-  void _focarProximoCampoCheckout() {
+  bool _focoPrimarioDentroDoPainelCheckout() {
+    final checkoutCtx = _keyPainelCheckoutPdV.currentContext;
+    final primaryCtx = FocusManager.instance.primaryFocus?.context;
+    if (checkoutCtx == null || primaryCtx == null) return false;
+    final checkoutRo = checkoutCtx.findRenderObject();
+    final primaryRo = primaryCtx.findRenderObject();
+    if (checkoutRo == null || primaryRo == null) return false;
+    RenderObject? walk = primaryRo;
+    while (walk != null) {
+      if (identical(walk, checkoutRo)) return true;
+      walk = walk.parent;
+    }
+    return false;
+  }
+
+  int _indiceFocoNaCadeiaCheckout(List<FocusNode> chain) {
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary != null) {
+      final porPrimario = chain.indexWhere((n) => identical(primary, n));
+      if (porPrimario >= 0) return porPrimario;
+    }
+    return chain.indexWhere((n) => n.hasFocus);
+  }
+
+  /// Unico handler para F7 (evita Shortcuts disparar duas vezes no desktop).
+  bool _handlerCheckoutF7PdV(KeyEvent event) {
+    if (!mounted) return false;
+    if (event.logicalKey != LogicalKeyboardKey.f7) return false;
+
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return false;
+
+    if (event is KeyRepeatEvent) {
+      return true;
+    }
+
+    if (event is! KeyDownEvent) return false;
+
+    _agendarCheckoutF7Microtask(_shiftPressionado());
+    return true;
+  }
+
+  void _aplicarFocoProximoCheckout() {
     final chain = _cadeiaFocoCheckout();
     if (chain.isEmpty) {
       return;
     }
-    final idx = chain.indexWhere((n) => n.hasFocus);
-    final next = idx < 0 ? 0 : (idx + 1) % chain.length;
+    if (!_focoPrimarioDentroDoPainelCheckout()) {
+      chain.first.requestFocus();
+      return;
+    }
+    final idx = _indiceFocoNaCadeiaCheckout(chain);
+    if (idx < 0) {
+      chain.first.requestFocus();
+      return;
+    }
+    final next = (idx + 1) % chain.length;
     chain[next].requestFocus();
   }
 
-  void _focarCampoCheckoutAnterior() {
+  void _aplicarFocoCheckoutAnterior() {
     final chain = _cadeiaFocoCheckout();
     if (chain.isEmpty) {
       return;
     }
-    final idx = chain.indexWhere((n) => n.hasFocus);
-    final prev = idx < 0
-        ? chain.length - 1
-        : (idx - 1 + chain.length) % chain.length;
+    if (!_focoPrimarioDentroDoPainelCheckout()) {
+      chain.last.requestFocus();
+      return;
+    }
+    final idx = _indiceFocoNaCadeiaCheckout(chain);
+    if (idx < 0) {
+      chain.last.requestFocus();
+      return;
+    }
+    final prev = (idx - 1 + chain.length) % chain.length;
     chain[prev].requestFocus();
+  }
+
+  void _focarProximoCampoCheckout() {
+    if (_painelCheckoutRecolhido) {
+      setState(() => _painelCheckoutRecolhido = false);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _aplicarFocoProximoCheckout();
+      });
+      return;
+    }
+    _aplicarFocoProximoCheckout();
+  }
+
+  void _focarCampoCheckoutAnterior() {
+    if (_painelCheckoutRecolhido) {
+      setState(() => _painelCheckoutRecolhido = false);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _aplicarFocoCheckoutAnterior();
+      });
+      return;
+    }
+    _aplicarFocoCheckoutAnterior();
   }
 
   void _focarCarrinhoAtalho() {
@@ -1860,9 +1956,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         ),
         SingleActivator(LogicalKeyboardKey.f5): PdvRecarregarProdutosIntent(),
         SingleActivator(LogicalKeyboardKey.f6): PdvFocarCarrinhoIntent(),
-        SingleActivator(LogicalKeyboardKey.f7): PdvCheckoutProximoIntent(),
-        SingleActivator(LogicalKeyboardKey.f7, shift: true):
-            PdvCheckoutAnteriorIntent(),
         SingleActivator(LogicalKeyboardKey.f10): PdvSalvarOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, control: true):
             PdvSalvarOrcamentoIntent(),
@@ -1899,18 +1992,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           PdvFocarCarrinhoIntent: CallbackAction<PdvFocarCarrinhoIntent>(
             onInvoke: (_) {
               _focarCarrinhoAtalho();
-              return null;
-            },
-          ),
-          PdvCheckoutProximoIntent: CallbackAction<PdvCheckoutProximoIntent>(
-            onInvoke: (_) {
-              _focarProximoCampoCheckout();
-              return null;
-            },
-          ),
-          PdvCheckoutAnteriorIntent: CallbackAction<PdvCheckoutAnteriorIntent>(
-            onInvoke: (_) {
-              _focarCampoCheckoutAnterior();
               return null;
             },
           ),
@@ -2227,6 +2308,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                 ),
                 const SizedBox(width: 10),
                 AnimatedContainer(
+                  key: _keyPainelCheckoutPdV,
                   duration: const Duration(milliseconds: 180),
                   curve: Curves.easeOut,
                   width: _painelCheckoutRecolhido ? 64 : 470,
@@ -2477,15 +2559,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 6),
-                          InkWell(
-                            onTap: _abrirSeletorClienteNoPdv,
-                            borderRadius: BorderRadius.circular(12),
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                labelText: 'Cliente (opcional)',
-                                suffixIcon: Icon(Icons.search),
+                          Focus(
+                            focusNode: _focusClientePdV,
+                            child: InkWell(
+                              onTap: _abrirSeletorClienteNoPdv,
+                              borderRadius: BorderRadius.circular(12),
+                              child: InputDecorator(
+                                decoration: const InputDecoration(
+                                  labelText: 'Cliente (opcional)',
+                                  suffixIcon: Icon(Icons.search),
+                                ),
+                                child: Text(_rotuloClienteSelecionadoPdV()),
                               ),
-                              child: Text(_rotuloClienteSelecionadoPdV()),
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -2734,42 +2819,45 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                       const SizedBox(height: 8),
                                       Align(
                                         alignment: Alignment.centerLeft,
-                                        child: OutlinedButton.icon(
-                                          onPressed: () async {
-                                            final cliente = _clienteSelecionado();
-                                            if (cliente == null) {
-                                              ScaffoldMessenger.of(
-                                                context,
-                                              ).showSnackBar(
-                                                const SnackBar(
-                                                  content: Text(
-                                                    'Selecione um cliente para editar a entrega.',
+                                        child: Focus(
+                                          focusNode: _focusEditarEntregaPdV,
+                                          child: OutlinedButton.icon(
+                                            onPressed: () async {
+                                              final cliente = _clienteSelecionado();
+                                              if (cliente == null) {
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      'Selecione um cliente para editar a entrega.',
+                                                    ),
                                                   ),
-                                                ),
-                                              );
-                                              return;
-                                            }
-                                            final entrega =
-                                                await _abrirDialogEntregaCliente(
-                                                  cliente: cliente,
                                                 );
-                                            if (!mounted || entrega == null) return;
-                                            setState(() {
-                                              _tipoEntregaSelecionada =
-                                                  'entrega_loja';
-                                              _dataEntregaMarcada ??=
-                                                  DateTime.now();
-                                              _valorFreteController.text =
-                                                  entrega.valorFrete;
-                                              _enderecoEntregaController.text =
-                                                  entrega.endereco;
-                                              _observacaoEntregaController.text =
-                                                  entrega.observacao;
-                                            });
-                                          },
-                                          icon: const Icon(Icons.edit_outlined),
-                                          label: const Text(
-                                            'Editar dados da entrega',
+                                                return;
+                                              }
+                                              final entrega =
+                                                  await _abrirDialogEntregaCliente(
+                                                    cliente: cliente,
+                                                  );
+                                              if (!mounted || entrega == null) return;
+                                              setState(() {
+                                                _tipoEntregaSelecionada =
+                                                    'entrega_loja';
+                                                _dataEntregaMarcada ??=
+                                                    DateTime.now();
+                                                _valorFreteController.text =
+                                                    entrega.valorFrete;
+                                                _enderecoEntregaController.text =
+                                                    entrega.endereco;
+                                                _observacaoEntregaController.text =
+                                                    entrega.observacao;
+                                              });
+                                            },
+                                            icon: const Icon(Icons.edit_outlined),
+                                            label: const Text(
+                                              'Editar dados da entrega',
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -3129,14 +3217,6 @@ class PdvRecarregarProdutosIntent extends Intent {
 
 class PdvFocarCarrinhoIntent extends Intent {
   const PdvFocarCarrinhoIntent();
-}
-
-class PdvCheckoutProximoIntent extends Intent {
-  const PdvCheckoutProximoIntent();
-}
-
-class PdvCheckoutAnteriorIntent extends Intent {
-  const PdvCheckoutAnteriorIntent();
 }
 
 class PdvSalvarOrcamentoIntent extends Intent {
