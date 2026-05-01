@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'data/cliente_repository.dart';
 import 'data/objectbox.dart';
 import 'data/produto_repository.dart';
+import 'data/usuario_repository.dart';
 import 'data/venda_repository.dart';
 import 'data/vendedor_repository.dart';
+import 'model/usuario_sistema.dart';
+import 'ui/login_page.dart';
 import 'ui/main_menu_page.dart';
 
 Future<void> main() async {
@@ -13,10 +16,30 @@ Future<void> main() async {
   runApp(MyApp(objectBox: objectBox));
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key, required this.objectBox});
 
   final ObjectBox objectBox;
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  UsuarioSistema? _usuarioLogado;
+  final UsuarioRepository _usuarioRepository = UsuarioRepository();
+
+  void _entrar(UsuarioSistema usuario) {
+    setState(() {
+      _usuarioLogado = usuario;
+    });
+  }
+
+  void _sair() {
+    setState(() {
+      _usuarioLogado = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -135,12 +158,19 @@ class MyApp extends StatelessWidget {
           ),
         ],
       ),
-      home: MainMenuPage(
-        produtoRepository: ProdutoRepository(objectBox),
-        clienteRepository: ClienteRepository(objectBox),
-        vendaRepository: VendaRepository(objectBox),
-        vendedorRepository: VendedorRepository(objectBox),
-      ),
+      home: _usuarioLogado == null
+          ? LoginPage(
+              usuarioRepository: _usuarioRepository,
+              onLoginSuccess: _entrar,
+            )
+          : MainMenuPage(
+              produtoRepository: ProdutoRepository(widget.objectBox),
+              clienteRepository: ClienteRepository(widget.objectBox),
+              vendaRepository: VendaRepository(widget.objectBox),
+              vendedorRepository: VendedorRepository(widget.objectBox),
+              usuarioLogado: _usuarioLogado!,
+              onLogout: _sair,
+            ),
     );
   }
 }

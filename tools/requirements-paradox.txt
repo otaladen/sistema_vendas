@@ -1,0 +1,3 @@
+# Conversao Paradox (.DB / tabela nativa) -> CSV UTF-8
+# pip install -r tools/requirements-paradox.txt
+pypxlib>=2.5

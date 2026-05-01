@@ -29,7 +29,7 @@ class EstoquePage extends StatelessWidget {
               title: Text('${produto.nome} (${produto.unidade})'),
               subtitle: Text(
                 'SKU: ${produto.codigoInterno} | Estoque: ${produto.estoque} | Minimo: ${produto.quantidadeMinima}\n'
-                'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | Venda: ${_formatarMoedaBRL(produto.precoVenda)}',
+                'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | Custo medio: ${_formatarMoedaBRL(produto.custoMedio)} | Venda: ${_formatarMoedaBRL(produto.precoVenda)}',
               ),
               isThreeLine: true,
               trailing: abaixoMinimo

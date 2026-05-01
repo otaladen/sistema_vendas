@@ -1,4 +1,5 @@
 import '../model/item_venda.dart';
+import '../model/historico_entrega.dart';
 import '../model/venda.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
@@ -40,12 +41,18 @@ class DadosEntregaOrcamento {
     required this.valorFrete,
     this.enderecoEntrega = '',
     this.observacaoEntrega = '',
+    this.prioridadeEntrega = 'normal',
+    this.janelaEntrega = 'nao_definida',
+    this.dataEntregaMarcada,
   });
 
   final String tipoEntrega; // retirada | entrega_loja
   final double valorFrete;
   final String enderecoEntrega;
   final String observacaoEntrega;
+  final String prioridadeEntrega; // normal | urgente | agendada
+  final String janelaEntrega; // manha | tarde | nao_definida
+  final DateTime? dataEntregaMarcada;
 }
 
 class VendaRepository {
@@ -175,6 +182,15 @@ class VendaRepository {
         statusEntrega: entrega.tipoEntrega == 'entrega_loja'
             ? 'pendente'
             : 'nao_aplicavel',
+        prioridadeEntrega: entrega.tipoEntrega == 'entrega_loja'
+            ? entrega.prioridadeEntrega
+            : 'normal',
+        janelaEntrega: entrega.tipoEntrega == 'entrega_loja'
+            ? entrega.janelaEntrega
+            : 'nao_definida',
+        dataEntregaMarcada: entrega.tipoEntrega == 'entrega_loja'
+            ? entrega.dataEntregaMarcada
+            : null,
       );
       if (clienteId != null) {
         final cliente = _db.clienteBox.get(clienteId);
@@ -289,6 +305,9 @@ class VendaRepository {
 
       venda.status = 'finalizada';
       venda.cancelada = false;
+      venda.motivoCancelamento = '';
+      venda.canceladaPor = '';
+      venda.canceladaEm = null;
       _db.vendaBox.put(venda);
     });
   }
@@ -390,6 +409,8 @@ class VendaRepository {
     DateTime? fim,
   }) {
     final termo = bairroTermo.trim().toLowerCase();
+    final inicioUtc = inicio?.toUtc();
+    final fimUtc = fim?.toUtc();
     return listarTodas().where((venda) {
       if (venda.status != 'finalizada') return false;
       if (venda.tipoEntrega != 'entrega_loja') return false;
@@ -398,8 +419,9 @@ class VendaRepository {
           venda.statusEntrega != statusEntrega) {
         return false;
       }
-      if (inicio != null && venda.data.isBefore(inicio)) return false;
-      if (fim != null && venda.data.isAfter(fim)) return false;
+      final dataVendaUtc = venda.data.toUtc();
+      if (inicioUtc != null && dataVendaUtc.isBefore(inicioUtc)) return false;
+      if (fimUtc != null && dataVendaUtc.isAfter(fimUtc)) return false;
       if (termo.isNotEmpty &&
           !venda.enderecoEntrega.toLowerCase().contains(termo)) {
         return false;
@@ -422,6 +444,73 @@ class VendaRepository {
       venda.statusEntrega = novoStatus;
       _db.vendaBox.put(venda);
     });
+  }
+
+  void atualizarPrioridadeEntrega(int vendaId, String novaPrioridade) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda/Orcamento $vendaId nao encontrado.');
+      }
+      final prioridade = switch (novaPrioridade) {
+        'urgente' => 'urgente',
+        'agendada' => 'agendada',
+        _ => 'normal',
+      };
+      venda.prioridadeEntrega = prioridade;
+      _db.vendaBox.put(venda);
+    });
+  }
+
+  void atualizarChecklistCargaEntrega(
+    int vendaId, {
+    bool? separado,
+    bool? carregado,
+    bool? saiu,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda/Orcamento $vendaId nao encontrado.');
+      }
+      if (venda.tipoEntrega != 'entrega_loja') {
+        throw StateError('Somente entregas da loja possuem checklist de carga.');
+      }
+      if (separado != null) venda.cargaSeparada = separado;
+      if (carregado != null) venda.cargaCarregada = carregado;
+      if (saiu != null) venda.cargaSaiu = saiu;
+      _db.vendaBox.put(venda);
+    });
+  }
+
+  void registrarHistoricoStatusEntrega({
+    required int vendaId,
+    required String statusAnterior,
+    required String statusNovo,
+    required String usuario,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) return;
+      final item = HistoricoEntrega(
+        statusAnterior: statusAnterior,
+        statusNovo: statusNovo,
+        usuario: usuario.trim().isEmpty ? 'sistema' : usuario.trim(),
+        dataHora: DateTime.now(),
+      );
+      item.venda.target = venda;
+      _db.historicoEntregaBox.put(item);
+    });
+  }
+
+  List<HistoricoEntrega> listarHistoricoEntrega(int vendaId) {
+    final query = _db.historicoEntregaBox
+        .query(HistoricoEntrega_.venda.equals(vendaId))
+        .order(HistoricoEntrega_.dataHora)
+        .build();
+    final itens = query.find();
+    query.close();
+    return itens;
   }
 
   /// Retirada futura (entrega pendente):
@@ -490,7 +579,13 @@ class VendaRepository {
     _db.vendaBox.put(venda);
   }
 
-  void cancelarVenda(int vendaId) {
+  void cancelarVenda(
+    int vendaId, {
+    String motivo = '',
+    String canceladaPor = '',
+  }) {
+    final motivoLimpo = motivo.trim();
+    final usuarioCancelamento = canceladaPor.trim();
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
       if (venda == null) {
@@ -502,6 +597,9 @@ class VendaRepository {
 
       if (venda.status == 'orcamento') {
         venda.cancelada = true;
+        venda.motivoCancelamento = motivoLimpo;
+        venda.canceladaPor = usuarioCancelamento;
+        venda.canceladaEm = DateTime.now();
         _db.vendaBox.put(venda);
         return;
       }
@@ -522,6 +620,9 @@ class VendaRepository {
       }
 
       venda.cancelada = true;
+      venda.motivoCancelamento = motivoLimpo;
+      venda.canceladaPor = usuarioCancelamento;
+      venda.canceladaEm = DateTime.now();
       _db.vendaBox.put(venda);
     });
   }

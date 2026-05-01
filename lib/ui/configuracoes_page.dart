@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -9,9 +10,12 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
+import '../data/venda_repository.dart';
 
 class ConfiguracoesPage extends StatefulWidget {
-  const ConfiguracoesPage({super.key});
+  const ConfiguracoesPage({super.key, required this.vendaRepository});
+
+  final VendaRepository vendaRepository;
 
   @override
   State<ConfiguracoesPage> createState() => _ConfiguracoesPageState();
@@ -24,6 +28,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _pastaPadraoPdfController = TextEditingController();
   final _rodapeNotaController = TextEditingController();
   final _rodapeOrcamentoController = TextEditingController();
+  final _limiteDivergenciaCaixaController = TextEditingController();
   final _configRepository = AppConfigRepository();
   String _modeloPdf = 'cupom';
   String _impressoraPadrao = '';
@@ -31,11 +36,19 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   List<Printer> _impressoras = [];
   bool _salvando = false;
   bool _prefsEmpresaAplicadas = false;
+  DateTime _agoraSistema = DateTime.now();
+  DateTime? _ultimaVendaFinalizada;
+  bool _horarioInconsistente = false;
+  String _diagnosticoHorario = '';
+  bool _backupEmAndamento = false;
+  bool _restauracaoEmAndamento = false;
+  String _ultimoBackupPath = '';
 
   @override
   void initState() {
     super.initState();
     _carregarConfig();
+    _carregarDiagnosticoHorario();
   }
 
   @override
@@ -46,6 +59,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _pastaPadraoPdfController.dispose();
     _rodapeNotaController.dispose();
     _rodapeOrcamentoController.dispose();
+    _limiteDivergenciaCaixaController.dispose();
     super.dispose();
   }
 
@@ -59,6 +73,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _pastaPadraoPdfController.text = config.pastaPadraoPdf;
       _rodapeNotaController.text = config.rodapeNota;
       _rodapeOrcamentoController.text = config.rodapeOrcamento;
+      _limiteDivergenciaCaixaController.text = config.limiteDivergenciaCaixa
+          .toStringAsFixed(2)
+          .replaceAll('.', ',');
       _modeloPdf = config.modeloPdf;
       _impressoraPadrao = config.impressoraPadrao;
       _logoPath = config.logoPath;
@@ -76,6 +93,55 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         _impressoras = [];
       });
     }
+  }
+
+  Future<void> _carregarDiagnosticoHorario() async {
+    final agora = DateTime.now();
+    final vendas = widget.vendaRepository.listarTodas();
+    DateTime? ultimaFinalizada;
+    for (final venda in vendas) {
+      if (venda.status == 'finalizada' && !venda.cancelada) {
+        if (ultimaFinalizada == null || venda.data.isAfter(ultimaFinalizada)) {
+          ultimaFinalizada = venda.data;
+        }
+      }
+    }
+    final inconsistente = ultimaFinalizada != null &&
+        agora.isBefore(ultimaFinalizada.subtract(const Duration(minutes: 2)));
+    if (!mounted) return;
+    setState(() {
+      _agoraSistema = agora;
+      _ultimaVendaFinalizada = ultimaFinalizada;
+      _horarioInconsistente = inconsistente;
+      _diagnosticoHorario = inconsistente
+          ? 'Horario do sistema esta atrasado em relacao a ultima venda finalizada. '
+                'Corrija data/hora no Windows antes de emitir novas notas.'
+          : 'Horario do sistema consistente para operacao de vendas e impressao.';
+    });
+  }
+
+  Future<void> _abrirAjusteDataHoraSO() async {
+    try {
+      if (Platform.isWindows) {
+        await Process.start('cmd', ['/c', 'start', 'ms-settings:dateandtime']);
+      } else if (Platform.isLinux) {
+        await Process.start('sh', ['-c', 'gnome-control-center datetime']);
+      } else if (Platform.isMacOS) {
+        await Process.start('open', [
+          'x-apple.systempreferences:com.apple.preference.datetime',
+        ]);
+      }
+    } catch (_) {
+      // ignore and inform via snackbar below
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Abra as configuracoes de data/hora do sistema operacional para ajustar.',
+        ),
+      ),
+    );
   }
 
   Future<void> _escolherPastaPadraoPdf() async {
@@ -135,6 +201,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           rodapeNota: _rodapeNotaController.text,
           rodapeOrcamento: _rodapeOrcamentoController.text,
           logoPath: _logoPath,
+          limiteDivergenciaCaixa:
+              _parseMoeda(_limiteDivergenciaCaixaController.text) ?? 20,
         ),
       );
       if (!mounted) return;
@@ -258,13 +326,297 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     }
   }
 
+  Future<Directory> _obterDiretorioBaseDados() async {
+    return Platform.isWindows
+        ? getApplicationSupportDirectory()
+        : getApplicationDocumentsDirectory();
+  }
+
+  Future<void> _criarBackupDados() async {
+    if (_backupEmAndamento) return;
+    final destinoRaiz = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Escolha a pasta para salvar o backup',
+    );
+    if (destinoRaiz == null || destinoRaiz.trim().isEmpty || !mounted) {
+      return;
+    }
+
+    setState(() => _backupEmAndamento = true);
+    try {
+      final baseDadosDir = await _obterDiretorioBaseDados();
+      if (!baseDadosDir.existsSync()) {
+        throw Exception('Pasta de dados local nao encontrada.');
+      }
+
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final pastaBackup = Directory(
+        p.join(destinoRaiz, 'backup_sistema_vendas_$timestamp'),
+      );
+      pastaBackup.createSync(recursive: true);
+      await _copiarDiretorioRecursivo(
+        origem: baseDadosDir,
+        destino: Directory(p.join(pastaBackup.path, 'dados_aplicacao')),
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _ultimoBackupPath = pastaBackup.path;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Backup concluido com sucesso.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Falha ao criar backup: $e')));
+    } finally {
+      if (mounted) {
+        setState(() => _backupEmAndamento = false);
+      }
+    }
+  }
+
+  Future<void> _copiarDiretorioRecursivo({
+    required Directory origem,
+    required Directory destino,
+  }) async {
+    if (!origem.existsSync()) return;
+    destino.createSync(recursive: true);
+    await for (final entidade in origem.list(recursive: false)) {
+      final nome = p.basename(entidade.path);
+      final destinoPath = p.join(destino.path, nome);
+      if (entidade is Directory) {
+        await _copiarDiretorioRecursivo(
+          origem: entidade,
+          destino: Directory(destinoPath),
+        );
+      } else if (entidade is File) {
+        await entidade.copy(destinoPath);
+      }
+    }
+  }
+
+  Future<void> _abrirPastaDados() async {
+    try {
+      final baseDir = await _obterDiretorioBaseDados();
+      if (!baseDir.existsSync()) {
+        throw Exception('Pasta de dados local nao encontrada.');
+      }
+      if (Platform.isWindows) {
+        await Process.start('explorer', [baseDir.path]);
+      } else if (Platform.isMacOS) {
+        await Process.start('open', [baseDir.path]);
+      } else if (Platform.isLinux) {
+        await Process.start('xdg-open', [baseDir.path]);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Nao foi possivel abrir a pasta de dados: $e')));
+    }
+  }
+
+  double? _parseMoeda(String texto) {
+    final normalizado = texto.trim().replaceAll('.', '').replaceAll(',', '.');
+    if (normalizado.isEmpty) return null;
+    return double.tryParse(normalizado);
+  }
+
+  Future<void> _restaurarBackupDados() async {
+    if (_restauracaoEmAndamento || _backupEmAndamento) return;
+    final confirmaController = TextEditingController();
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final textoValido =
+                confirmaController.text.trim().toUpperCase() == 'RESTAURAR';
+            return AlertDialog(
+              title: const Text('Restaurar backup'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Essa acao vai sobrescrever os dados locais atuais.\n\n'
+                    'Recomendado: criar um backup antes de restaurar.',
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Digite RESTAURAR para confirmar:',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: confirmaController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      hintText: 'RESTAURAR',
+                    ),
+                    onChanged: (_) => setDialogState(() {}),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: textoValido ? () => Navigator.pop(context, true) : null,
+                  child: const Text('Continuar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    confirmaController.dispose();
+    if (confirmar != true || !mounted) return;
+
+    final pastaSelecionada = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Escolha a pasta do backup',
+    );
+    if (pastaSelecionada == null || pastaSelecionada.trim().isEmpty || !mounted) {
+      return;
+    }
+
+    setState(() => _restauracaoEmAndamento = true);
+    try {
+      final origemSelecionada = Directory(pastaSelecionada);
+      final origemDadosAplicacao = Directory(
+        p.join(origemSelecionada.path, 'dados_aplicacao'),
+      );
+      final origemRestore = origemDadosAplicacao.existsSync()
+          ? origemDadosAplicacao
+          : origemSelecionada;
+      final baseDir = await _obterDiretorioBaseDados();
+
+      if (!origemRestore.existsSync()) {
+        throw Exception('Pasta de backup invalida.');
+      }
+      if (p.normalize(origemRestore.path) == p.normalize(baseDir.path)) {
+        throw Exception('A pasta de origem nao pode ser a mesma pasta de dados atual.');
+      }
+
+      await _limparDiretorio(baseDir);
+      await _copiarDiretorioRecursivo(origem: origemRestore, destino: baseDir);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Backup restaurado com sucesso. Feche e abra o app para recarregar os dados.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Falha ao restaurar backup: $e')));
+    } finally {
+      if (mounted) {
+        setState(() => _restauracaoEmAndamento = false);
+      }
+    }
+  }
+
+  Future<void> _limparDiretorio(Directory diretorio) async {
+    if (!diretorio.existsSync()) {
+      diretorio.createSync(recursive: true);
+      return;
+    }
+    await for (final entidade in diretorio.list(recursive: false)) {
+      if (entidade is Directory) {
+        await entidade.delete(recursive: true);
+      } else if (entidade is File) {
+        await entidade.delete();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final dtFmt = DateFormat('dd/MM/yyyy HH:mm:ss');
+    final agoraFmt = dtFmt.format(_agoraSistema);
+    final ultimaVendaFmt = _ultimaVendaFinalizada == null
+        ? 'Nenhuma venda finalizada ainda'
+        : dtFmt.format(_ultimaVendaFinalizada!.toLocal());
+    final offset = _agoraSistema.timeZoneOffset;
+    final sinal = offset.isNegative ? '-' : '+';
+    final h = offset.inHours.abs().toString().padLeft(2, '0');
+    final m = (offset.inMinutes.abs() % 60).toString().padLeft(2, '0');
+
     return Scaffold(
       appBar: AppBar(title: const Text('CONFIGURACOES')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Data e hora do sistema',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text('Agora (sistema): $agoraFmt'),
+                  Text(
+                    'Fuso horario: ${_agoraSistema.timeZoneName} (UTC$sinal$h:$m)',
+                  ),
+                  Text('Ultima venda finalizada: $ultimaVendaFmt'),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: _horarioInconsistente
+                          ? Colors.red.withValues(alpha: 0.08)
+                          : Colors.green.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _horarioInconsistente
+                            ? Colors.red.withValues(alpha: 0.45)
+                            : Colors.green.withValues(alpha: 0.45),
+                      ),
+                    ),
+                    child: Text(_diagnosticoHorario),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _carregarDiagnosticoHorario,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Atualizar diagnostico'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _abrirAjusteDataHoraSO,
+                          icon: const Icon(Icons.schedule),
+                          label: const Text('Ajustar no sistema'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -437,9 +789,45 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             ),
           ),
           const SizedBox(height: 10),
-          const _ConfigCard(
-            titulo: 'Vendas e Orcamentos',
-            descricao: 'Validade padrao do orcamento, regras de frete e entrega.',
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Caixa',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _limiteDivergenciaCaixaController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Limite de divergencia sem supervisor (R\$)',
+                      hintText: 'Ex.: 20,00',
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Defina o limite de divergencia para exigir autorizacao '
+                    'de supervisor (admin/financeiro) no fechamento do caixa.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _salvando ? null : _salvarConfig,
+                      icon: const Icon(Icons.save_outlined),
+                      label: Text(_salvando ? 'Salvando...' : 'Salvar regras do caixa'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 10),
           const _ConfigCard(
@@ -447,9 +835,68 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             descricao: 'Controle de acesso para caixa, vendedor e administrador.',
           ),
           const SizedBox(height: 10),
-          const _ConfigCard(
-            titulo: 'Backup e Dados',
-            descricao: 'Rotina de backup e restauracao do banco local.',
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Backup e Dados',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Crie backup completo dos dados locais da aplicacao e acesse a pasta do banco.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _backupEmAndamento ? null : _criarBackupDados,
+                      icon: const Icon(Icons.backup_outlined),
+                      label: Text(
+                        _backupEmAndamento ? 'Criando backup...' : 'Criar backup agora',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _abrirPastaDados,
+                      icon: const Icon(Icons.folder_open_outlined),
+                      label: const Text('Abrir pasta de dados'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _restauracaoEmAndamento || _backupEmAndamento
+                          ? null
+                          : _restaurarBackupDados,
+                      icon: const Icon(Icons.restore_outlined),
+                      label: Text(
+                        _restauracaoEmAndamento
+                            ? 'Restaurando backup...'
+                            : 'Restaurar backup',
+                      ),
+                    ),
+                  ),
+                  if (_ultimoBackupPath.trim().isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Ultimo backup: $_ultimoBackupPath',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ],
       ),

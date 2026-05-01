@@ -63,6 +63,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   final _observacaoEntregaController = TextEditingController();
   final _configRepository = AppConfigRepository();
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
+  Timer? _debouncePesquisa;
+  bool _pesquisaAguardandoDebounce = false;
   List<Produto> _produtos = [];
   List<Cliente> _clientes = [];
   List<Vendedor> _vendedoresAtivos = [];
@@ -81,6 +83,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   int? _clienteSelecionadoId;
   int? _vendedorSelecionadoId;
   String _tipoEntregaSelecionada = 'retirada';
+  String _prioridadeEntregaSelecionada = 'normal';
+  String _janelaEntregaSelecionada = 'nao_definida';
+  DateTime? _dataEntregaMarcada;
 
   @override
   void initState() {
@@ -94,6 +99,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
 
   @override
   void dispose() {
+    _debouncePesquisa?.cancel();
     _listaProdutosScrollController.dispose();
     _listaProdutosFocus.dispose();
     _carrinhoFocus.dispose();
@@ -114,17 +120,60 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     super.dispose();
   }
 
-  void _pesquisar() {
+  void _pesquisar({
+    bool executarAtalhoRapido = false,
+    bool focarListaAposPesquisar = true,
+  }) {
+    final comando = _PesquisaComando.parse(_pesquisaController.text);
+    var adicionouViaComandoRapido = false;
+    _debouncePesquisa?.cancel();
     setState(() {
-      _produtos = widget.produtoRepository.pesquisar(_pesquisaController.text);
+      _pesquisaAguardandoDebounce = false;
+      _produtos = widget.produtoRepository.pesquisar(
+        comando.termoBusca,
+        clienteId: _clienteSelecionadoId,
+        limite: 50,
+      );
       _indiceListaProduto = _produtos.isEmpty ? null : 0;
     });
+    if (executarAtalhoRapido && _produtos.isNotEmpty) {
+      final primeiro = _produtos.first;
+      if (comando.adicaoDireta) {
+        _adicionarComQuantidade(primeiro, 1);
+        adicionouViaComandoRapido = true;
+      } else if (comando.quantidadeDireta != null) {
+        _adicionarComQuantidade(primeiro, comando.quantidadeDireta!);
+        adicionouViaComandoRapido = true;
+      }
+      if (adicionouViaComandoRapido) {
+        setState(() {
+          _pesquisaController.clear();
+          _produtos = widget.produtoRepository.listarTodos();
+          _indiceListaProduto = _produtos.isEmpty ? null : 0;
+        });
+      }
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _scrollParaIndiceLista();
-      if (_produtos.isNotEmpty) {
+      if (adicionouViaComandoRapido) {
+        _pesquisaFocus.requestFocus();
+      } else if (focarListaAposPesquisar && _produtos.isNotEmpty) {
         _listaProdutosFocus.requestFocus();
       }
+    });
+  }
+
+  void _agendarPesquisaDebounce() {
+    _debouncePesquisa?.cancel();
+    if (!_pesquisaAguardandoDebounce && mounted) {
+      setState(() {
+        _pesquisaAguardandoDebounce = true;
+      });
+    }
+    _debouncePesquisa = Timer(const Duration(milliseconds: 160), () {
+      if (!mounted) return;
+      _pesquisar(focarListaAposPesquisar: false);
     });
   }
 
@@ -290,6 +339,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
 
   /// Adiciona 1 unidade com o preco ativo (F1/F2/F3); mescla linha identica.
   void _adicionarRapido(Produto produto) {
+    _adicionarComQuantidade(produto, 1);
+  }
+
+  void _adicionarComQuantidade(Produto produto, int quantidade) {
+    if (quantidade <= 0) return;
     final precoTipo = _precoListaAtivo;
     final unit = _precoPorTipo(produto, precoTipo);
     final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
@@ -304,7 +358,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       (e) => e.produto.id == produto.id && e.precoTipo == precoTipo,
     );
     if (idxExistente >= 0) {
-      final novoTotal = _carrinho[idxExistente].quantidade + 1;
+      final novoTotal = _carrinho[idxExistente].quantidade + quantidade;
       if (novoTotal > disp) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -315,16 +369,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         );
         return;
       }
+    } else if (quantidade > disp) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Estoque maximo para ${produto.nome}: $disp.')),
+      );
+      return;
     }
     setState(() {
       if (idxExistente >= 0) {
-        _carrinho[idxExistente].quantidade++;
+        _carrinho[idxExistente].quantidade += quantidade;
         _indiceLinhaCarrinho = idxExistente;
       } else {
         _carrinho.add(
           _OrcamentoItemDraft(
             produto: produto,
-            quantidade: 1,
+            quantidade: quantidade,
             precoTipo: precoTipo,
             precoUnitario: unit,
           ),
@@ -562,6 +621,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     if (frete.isNotEmpty && _parseValorMonetario(frete) > 0) {
       partes.add('Frete: ${_formatarMoeda(_parseValorMonetario(frete))}');
     }
+    if (_dataEntregaMarcada != null) {
+      partes.add(
+        'Data marcada: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
+      );
+    }
     return partes.isEmpty ? 'Sem dados de entrega informados.' : partes.join(' | ');
   }
 
@@ -599,12 +663,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   String _rotuloPreco(String precoTipo) {
     switch (precoTipo) {
       case 'preco2':
-        return 'Preco 2';
+        return 'À Vista';
       case 'preco3':
-        return 'Preco 3';
+        return 'Atacado';
       case 'preco1':
       default:
-        return 'Preco 1';
+        return 'A Prazo';
     }
   }
 
@@ -712,6 +776,27 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         );
         return;
       }
+      if (_tipoEntregaSelecionada == 'entrega_loja' &&
+          _prioridadeEntregaSelecionada == 'agendada' &&
+          _janelaEntregaSelecionada == 'nao_definida') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Para entrega agendada, selecione janela Manha ou Tarde.',
+            ),
+          ),
+        );
+        return;
+      }
+      if (_tipoEntregaSelecionada == 'entrega_loja' &&
+          _dataEntregaMarcada == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Defina a data combinada da entrega com o cliente.'),
+          ),
+        );
+        return;
+      }
       if (valorFrete < 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -743,6 +828,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           valorFrete: valorFrete,
           enderecoEntrega: _enderecoEntregaController.text.trim(),
           observacaoEntrega: _observacaoEntregaController.text.trim(),
+          prioridadeEntrega: _tipoEntregaSelecionada == 'entrega_loja'
+              ? _prioridadeEntregaSelecionada
+              : 'normal',
+          janelaEntrega: _tipoEntregaSelecionada == 'entrega_loja'
+              ? _janelaEntregaSelecionada
+              : 'nao_definida',
+          dataEntregaMarcada: _tipoEntregaSelecionada == 'entrega_loja'
+              ? _dataEntregaMarcada
+              : null,
         ),
         clienteId: _clienteSelecionadoId,
         vendedorId: _vendedorSelecionadoId,
@@ -755,6 +849,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         _clienteSelecionadoId = null;
         _vendedorSelecionadoId = null;
         _tipoEntregaSelecionada = 'retirada';
+        _prioridadeEntregaSelecionada = 'normal';
+        _janelaEntregaSelecionada = 'nao_definida';
+        _dataEntregaMarcada = null;
         _valorFreteController.clear();
         _enderecoEntregaController.clear();
         _observacaoEntregaController.clear();
@@ -1280,24 +1377,50 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                 tooltip: 'Limpar busca',
                                 onPressed: () {
                                   _pesquisaController.clear();
-                                  _carregarDadosIniciais();
+                                  _debouncePesquisa?.cancel();
+                                  setState(() {
+                                    _pesquisaAguardandoDebounce = false;
+                                  });
+                                  _pesquisar();
                                 },
                                 icon: const Icon(Icons.clear),
                               ),
                               IconButton(
                                 tooltip: 'Pesquisar',
-                                onPressed: _pesquisar,
+                                onPressed: () {
+                                  _debouncePesquisa?.cancel();
+                                  setState(() {
+                                    _pesquisaAguardandoDebounce = false;
+                                  });
+                                  _pesquisar(executarAtalhoRapido: true);
+                                },
                                 icon: const Icon(Icons.search),
                               ),
                               IconButton(
                                 tooltip: 'Recarregar produtos',
-                                onPressed: _carregarDadosIniciais,
+                                onPressed: () {
+                                  _debouncePesquisa?.cancel();
+                                  setState(() {
+                                    _pesquisaAguardandoDebounce = false;
+                                  });
+                                  _carregarDadosIniciais();
+                                },
                                 icon: const Icon(Icons.refresh),
                               ),
+                              if (_pesquisaAguardandoDebounce)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: Text(
+                                    'buscando...',
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ),
                             ],
                           ),
                         ),
-                        onSubmitted: (_) => _pesquisar(),
+                        onChanged: (_) => _agendarPesquisaDebounce(),
+                        onSubmitted: (_) =>
+                            _pesquisar(executarAtalhoRapido: true),
                       ),
                       const SizedBox(height: 6),
                       Align(
@@ -1306,7 +1429,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                           'Preco: ${_rotuloPreco(_precoListaAtivo)} (F1–F3) · F5 recarrega · Ctrl+K limpa busca · '
                           '${_produtos.length} produtos · Enter→lista · na lista: Numpad+ ou Shift+= adiciona 1 · '
                           'Enter abre qtd · Esc volta à busca · F6 carrinho · F7 checkout · F10 ou Ctrl+S salvar · '
-                          'no carrinho: ↑↓ qtd · Ctrl+↑↓ linha · Del remove · Est vermelho = minimo',
+                          'no carrinho: ↑↓ qtd · Ctrl+↑↓ linha · Del remove · Est vermelho = minimo · '
+                          'busca rapida: "2 cimento" adiciona 2 do primeiro item, "sku +" adiciona 1',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ),
@@ -1410,7 +1534,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                               ),
                                               IconButton(
                                                 tooltip:
-                                                    'Preco 2 ou 3, quantidade…',
+                                                    'À Vista ou Atacado, quantidade…',
                                                 visualDensity:
                                                     VisualDensity.compact,
                                                 padding: EdgeInsets.zero,
@@ -1667,6 +1791,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                 setState(() {
                                   _clienteSelecionadoId = null;
                                   _tipoEntregaSelecionada = 'retirada';
+                                  _prioridadeEntregaSelecionada = 'normal';
+                                  _janelaEntregaSelecionada = 'nao_definida';
+                                  _dataEntregaMarcada = null;
                                   _valorFreteController.clear();
                                   _enderecoEntregaController.clear();
                                   _observacaoEntregaController.clear();
@@ -1687,6 +1814,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                               setState(() {
                                 _clienteSelecionadoId = value;
                                 _tipoEntregaSelecionada = 'entrega_loja';
+                                _prioridadeEntregaSelecionada = 'normal';
+                                _dataEntregaMarcada ??= DateTime.now();
                                 _valorFreteController.text = entrega.valorFrete;
                                 _enderecoEntregaController.text =
                                     entrega.endereco;
@@ -1701,8 +1830,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                             initialValue: _vendedorSelecionadoId,
                             decoration: const InputDecoration(
                               labelText: 'Vendedor (opcional)',
-                              helperText:
-                                  'Balcao / comissao (diferente do cadastro de Funcionarios)',
                             ),
                             items: [
                               const DropdownMenuItem<int?>(
@@ -1788,6 +1915,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                               setState(() {
                                 _tipoEntregaSelecionada = value;
                                 if (_tipoEntregaSelecionada != 'entrega_loja') {
+                                  _prioridadeEntregaSelecionada = 'normal';
+                                  _janelaEntregaSelecionada = 'nao_definida';
+                                  _dataEntregaMarcada = null;
                                   _valorFreteController.clear();
                                   _enderecoEntregaController.clear();
                                   _observacaoEntregaController.clear();
@@ -1796,6 +1926,108 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                             },
                           ),
                           if (_tipoEntregaSelecionada == 'entrega_loja') ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: DropdownButtonFormField<String>(
+                                    initialValue: _prioridadeEntregaSelecionada,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Prioridade da entrega',
+                                    ),
+                                    items: const [
+                                      DropdownMenuItem(
+                                        value: 'normal',
+                                        child: Text('Normal'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'urgente',
+                                        child: Text('Urgente'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'agendada',
+                                        child: Text('Agendada'),
+                                      ),
+                                    ],
+                                    onChanged: (value) {
+                                      if (value == null) return;
+                                      setState(() {
+                                        _prioridadeEntregaSelecionada = value;
+                                        if (_prioridadeEntregaSelecionada ==
+                                                'agendada' &&
+                                            _janelaEntregaSelecionada ==
+                                                'nao_definida') {
+                                          _janelaEntregaSelecionada = 'manha';
+                                        }
+                                      });
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: DropdownButtonFormField<String>(
+                                    initialValue: _janelaEntregaSelecionada,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Janela',
+                                    ),
+                                    items: const [
+                                      DropdownMenuItem(
+                                        value: 'nao_definida',
+                                        child: Text('Nao definida'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'manha',
+                                        child: Text('Manha'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'tarde',
+                                        child: Text('Tarde'),
+                                      ),
+                                    ],
+                                    onChanged: (value) {
+                                      if (value == null) return;
+                                      setState(() {
+                                        _janelaEntregaSelecionada = value;
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () async {
+                                  final agora = DateTime.now();
+                                  final inicial = _dataEntregaMarcada ?? agora;
+                                  final escolhido = await showDatePicker(
+                                    context: context,
+                                    initialDate: inicial,
+                                    firstDate: DateTime(
+                                      agora.year,
+                                      agora.month,
+                                      agora.day,
+                                    ),
+                                    lastDate: DateTime(
+                                      agora.year + 3,
+                                      12,
+                                      31,
+                                    ),
+                                  );
+                                  if (!mounted || escolhido == null) return;
+                                  setState(() {
+                                    _dataEntregaMarcada = escolhido;
+                                  });
+                                },
+                                icon: const Icon(Icons.event_outlined),
+                                label: Text(
+                                  _dataEntregaMarcada == null
+                                      ? 'Definir data da entrega'
+                                      : 'Data da entrega: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
+                                ),
+                              ),
+                            ),
                             const SizedBox(height: 8),
                             Container(
                               width: double.infinity,
@@ -1849,6 +2081,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                         setState(() {
                                           _tipoEntregaSelecionada =
                                               'entrega_loja';
+                                          _dataEntregaMarcada ??=
+                                              DateTime.now();
                                           _valorFreteController.text =
                                               entrega.valorFrete;
                                           _enderecoEntregaController.text =
@@ -2136,9 +2370,9 @@ class _AdicionarAoOrcamentoDialogState
             initialValue: _precoTipo,
             decoration: const InputDecoration(labelText: 'Tipo de preco'),
             items: const [
-              DropdownMenuItem(value: 'preco1', child: Text('Preco 1')),
-              DropdownMenuItem(value: 'preco2', child: Text('Preco 2')),
-              DropdownMenuItem(value: 'preco3', child: Text('Preco 3')),
+              DropdownMenuItem(value: 'preco1', child: Text('A Prazo')),
+              DropdownMenuItem(value: 'preco2', child: Text('À Vista')),
+              DropdownMenuItem(value: 'preco3', child: Text('Atacado')),
             ],
             onChanged: (value) {
               if (value != null) {
@@ -2207,6 +2441,44 @@ class PdvSalvarOrcamentoIntent extends Intent {
 
 class PdvLimparPesquisaIntent extends Intent {
   const PdvLimparPesquisaIntent();
+}
+
+class _PesquisaComando {
+  const _PesquisaComando({
+    required this.termoBusca,
+    this.quantidadeDireta,
+    this.adicaoDireta = false,
+  });
+
+  final String termoBusca;
+  final int? quantidadeDireta;
+  final bool adicaoDireta;
+
+  static _PesquisaComando parse(String textoOriginal) {
+    final texto = textoOriginal.trim();
+    if (texto.isEmpty) {
+      return const _PesquisaComando(termoBusca: '');
+    }
+
+    final addDireto = RegExp(r'^\s*(.+?)\s*\+\s*$').firstMatch(texto);
+    if (addDireto != null) {
+      return _PesquisaComando(
+        termoBusca: addDireto.group(1)!.trim(),
+        adicaoDireta: true,
+      );
+    }
+
+    final quantidadeDireta = RegExp(r'^\s*(\d{1,3})\s+(.+)$').firstMatch(texto);
+    if (quantidadeDireta != null) {
+      final qtd = int.tryParse(quantidadeDireta.group(1)!);
+      final termo = quantidadeDireta.group(2)!.trim();
+      if (qtd != null && qtd > 0 && termo.isNotEmpty) {
+        return _PesquisaComando(termoBusca: termo, quantidadeDireta: qtd);
+      }
+    }
+
+    return _PesquisaComando(termoBusca: texto);
+  }
 }
 
 class _OrcamentoItemDraft {

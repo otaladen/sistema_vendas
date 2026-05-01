@@ -22,6 +22,7 @@ class Produto {
     this.estoqueReservado = 0,
     required this.quantidadeMinima,
     required this.precoCusto,
+    this.custoMedio = 0,
     this.preco1 = 0,
     this.preco2 = 0,
     this.preco3 = 0,
@@ -50,6 +51,8 @@ class Produto {
   int estoqueReservado;
   int quantidadeMinima;
   double precoCusto;
+  /// Custo medio de movimentacao (ex.: importacao Paradox TabEst1 / CustoMedio).
+  double custoMedio;
   double preco1;
   double preco2;
   double preco3;

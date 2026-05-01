@@ -1,7 +1,15 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../data/cliente_repository.dart';
+import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
@@ -15,11 +23,15 @@ class ListagemVendasPage extends StatefulWidget {
     required this.vendaRepository,
     required this.clienteRepository,
     required this.vendedorRepository,
+    required this.usuarioAtual,
+    required this.podeCancelarVendas,
   });
 
   final VendaRepository vendaRepository;
   final ClienteRepository clienteRepository;
   final VendedorRepository vendedorRepository;
+  final String usuarioAtual;
+  final bool podeCancelarVendas;
 
   @override
   State<ListagemVendasPage> createState() => _ListagemVendasPageState();
@@ -29,14 +41,16 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
   final _buscaController = TextEditingController();
+  final UsuarioRepository _usuarioRepository = UsuarioRepository();
 
   String _periodoPreset = 'ultimos_30';
   String _formaPagamento = 'todos';
   String _tipoEntrega = 'todos';
   String _entregaPendente = 'todos';
+  String _filtroCancelamento = 'ativas';
+  String _canceladaPorFiltro = 'todos';
   int? _clienteIdFiltro;
   int? _vendedorIdFiltro;
-  bool _incluirCanceladas = false;
 
   List<Venda> _resultados = [];
 
@@ -147,8 +161,16 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     final todas = widget.vendaRepository.listarTodas();
     Iterable<Venda> it = todas.where((v) => v.status == 'finalizada');
 
-    if (!_incluirCanceladas) {
+    if (_filtroCancelamento == 'ativas') {
       it = it.where((v) => !v.cancelada);
+    } else if (_filtroCancelamento == 'canceladas') {
+      it = it.where((v) => v.cancelada);
+    }
+    if (_canceladaPorFiltro != 'todos') {
+      final usuarioFiltro = _canceladaPorFiltro.trim().toLowerCase();
+      it = it.where(
+        (v) => v.cancelada && v.canceladaPor.trim().toLowerCase() == usuarioFiltro,
+      );
     }
 
     final range = _limitesPeriodo();
@@ -210,7 +232,15 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       });
     }
 
-    final lista = it.toList()..sort((a, b) => b.data.compareTo(a.data));
+    final lista = it.toList()
+      ..sort((a, b) {
+        if (_filtroCancelamento == 'canceladas') {
+          final aCanceladaEm = a.canceladaEm ?? a.data;
+          final bCanceladaEm = b.canceladaEm ?? b.data;
+          return bCanceladaEm.compareTo(aCanceladaEm);
+        }
+        return b.data.compareTo(a.data);
+      });
 
     setState(() {
       _resultados = lista;
@@ -223,12 +253,329 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       _formaPagamento = 'todos';
       _tipoEntrega = 'todos';
       _entregaPendente = 'todos';
+      _filtroCancelamento = 'ativas';
+      _canceladaPorFiltro = 'todos';
       _clienteIdFiltro = null;
       _vendedorIdFiltro = null;
-      _incluirCanceladas = false;
       _buscaController.clear();
     });
     _pesquisar();
+  }
+
+  String _csvEscape(String texto) => '"${texto.replaceAll('"', '""')}"';
+
+  Future<void> _exportarCancelamentosCsv() async {
+    final canceladas = _resultados.where((v) => v.cancelada).toList();
+    if (canceladas.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nao ha vendas canceladas para exportar.')),
+      );
+      return;
+    }
+    final linhas = <String>[
+      'venda_id,orcamento,data_venda,cancelada_em,cancelada_por,motivo,total',
+      ...canceladas.map((v) {
+        final dataVenda = DateFormat('dd/MM/yyyy HH:mm').format(v.data.toLocal());
+        final canceladaEm = v.canceladaEm == null
+            ? ''
+            : DateFormat('dd/MM/yyyy HH:mm').format(v.canceladaEm!.toLocal());
+        return [
+          v.id.toString(),
+          v.numeroOrcamento.toString(),
+          _csvEscape(dataVenda),
+          _csvEscape(canceladaEm),
+          _csvEscape(v.canceladaPor.trim().isEmpty ? 'Nao informado' : v.canceladaPor),
+          _csvEscape(v.motivoCancelamento),
+          v.total.toStringAsFixed(2).replaceAll('.', ','),
+        ].join(',');
+      }),
+    ];
+    final selectedPath = await FilePicker.platform.saveFile(
+      dialogTitle: 'Salvar relatorio de cancelamentos',
+      fileName: 'cancelamentos_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.csv',
+      type: FileType.custom,
+      allowedExtensions: const ['csv'],
+    );
+    if (selectedPath == null) return;
+    final normalizedPath = selectedPath.toLowerCase().endsWith('.csv')
+        ? selectedPath
+        : '$selectedPath.csv';
+    final file = File(normalizedPath);
+    await file.writeAsString(linhas.join('\n'), flush: true);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Relatorio salvo em: $normalizedPath')),
+    );
+  }
+
+  Future<Uint8List> _gerarCancelamentosPdfBytes(List<Venda> canceladas) async {
+    final doc = pw.Document();
+    final fmt = DateFormat('dd/MM/yyyy HH:mm');
+    final totalCancelado = canceladas.fold<double>(0, (acc, v) => acc + v.total);
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(20),
+        build: (context) {
+          return [
+            pw.Text(
+              'Relatorio de Cancelamentos',
+              style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text('Gerado em: ${fmt.format(DateTime.now())}'),
+            pw.Text('Quantidade: ${canceladas.length}'),
+            pw.Text(
+              'Total cancelado: ${_formatarMoeda(totalCancelado)}',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 10),
+            ...canceladas.map((v) {
+              final emVenda = fmt.format(v.data.toLocal());
+              final emCancelada = v.canceladaEm == null
+                  ? 'Nao informado'
+                  : fmt.format(v.canceladaEm!.toLocal());
+              final por = v.canceladaPor.trim().isEmpty
+                  ? 'Nao informado'
+                  : v.canceladaPor.trim();
+              final motivo = v.motivoCancelamento.trim().isEmpty
+                  ? 'Nao informado'
+                  : v.motivoCancelamento.trim();
+              return pw.Container(
+                margin: const pw.EdgeInsets.only(bottom: 6),
+                padding: const pw.EdgeInsets.all(8),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey400),
+                  borderRadius: pw.BorderRadius.circular(4),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'Orcamento #${v.numeroOrcamento} | Venda ID ${v.id}',
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.Text('Data venda: $emVenda'),
+                    pw.Text('Cancelada em: $emCancelada'),
+                    pw.Text('Cancelada por: $por'),
+                    pw.Text('Motivo: $motivo'),
+                    pw.Text('Total: ${_formatarMoeda(v.total)}'),
+                  ],
+                ),
+              );
+            }),
+          ];
+        },
+      ),
+    );
+    return doc.save();
+  }
+
+  Future<void> _exportarCancelamentosPdf() async {
+    final canceladas = _resultados.where((v) => v.cancelada).toList();
+    if (canceladas.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nao ha vendas canceladas para exportar.')),
+      );
+      return;
+    }
+    final acao = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Relatorio de cancelamentos'),
+          content: const Text('Deseja imprimir ou salvar em PDF?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'fechar'),
+              child: const Text('Fechar'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.pop(context, 'salvar'),
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+              label: const Text('Salvar PDF'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context, 'imprimir'),
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('Imprimir'),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || acao == null || acao == 'fechar') return;
+    final pdfBytes = await _gerarCancelamentosPdfBytes(canceladas);
+    if (acao == 'imprimir') {
+      await Printing.layoutPdf(onLayout: (_) async => pdfBytes);
+      return;
+    }
+    final selectedPath = await FilePicker.platform.saveFile(
+      dialogTitle: 'Salvar relatorio de cancelamentos (PDF)',
+      fileName:
+          'cancelamentos_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.pdf',
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+    );
+    if (selectedPath == null) return;
+    final normalizedPath = selectedPath.toLowerCase().endsWith('.pdf')
+        ? selectedPath
+        : '$selectedPath.pdf';
+    await File(normalizedPath).writeAsBytes(pdfBytes, flush: true);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Relatorio PDF salvo em: $normalizedPath')),
+    );
+  }
+
+  Future<(bool autorizado, String usuarioAutorizador)>
+  _autorizarCancelamento() async {
+    if (widget.podeCancelarVendas) {
+      return (true, widget.usuarioAtual);
+    }
+    final loginController = TextEditingController();
+    final senhaController = TextEditingController();
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Autorizacao para cancelamento'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Informe usuario com permissao (admin/financeiro/manutencao de caixa).',
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: loginController,
+                  decoration: const InputDecoration(labelText: 'Login'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: senhaController,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Senha'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Autorizar'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmar != true) {
+      loginController.dispose();
+      senhaController.dispose();
+      return (false, '');
+    }
+    final login = loginController.text.trim();
+    final senha = senhaController.text.trim();
+    loginController.dispose();
+    senhaController.dispose();
+    final usuario = await _usuarioRepository.autenticar(login, senha);
+    final autorizado = usuario != null &&
+        usuario.ativo &&
+        (usuario.admin ||
+            usuario.podeFinanceiro ||
+            usuario.podeManutencaoAuditoriaCaixa);
+    if (!autorizado) {
+      return (false, '');
+    }
+    return (true, usuario.login);
+  }
+
+  Future<void> _cancelarVenda(Venda venda) async {
+    if (venda.cancelada) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Venda ja esta cancelada.')),
+      );
+      return;
+    }
+    final autorizado = await _autorizarCancelamento();
+    if (!mounted || !autorizado.$1) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cancelamento nao autorizado.')),
+        );
+      }
+      return;
+    }
+    final motivoController = TextEditingController();
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Confirmar cancelamento'),
+          content: SizedBox(
+            width: 460,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Cancelar Orcamento #${venda.numeroOrcamento} / Venda ID ${venda.id}?',
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: motivoController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Motivo (opcional)',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Voltar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Confirmar cancelamento'),
+            ),
+          ],
+        );
+      },
+    );
+    final motivo = motivoController.text.trim();
+    motivoController.dispose();
+    if (confirmar != true) return;
+    try {
+      widget.vendaRepository.cancelarVenda(
+        venda.id,
+        motivo: motivo,
+        canceladaPor: autorizado.$2,
+      );
+      _pesquisar();
+      if (!mounted) return;
+      final sufixoMotivo = motivo.isEmpty ? '' : ' Motivo: $motivo';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Venda ${venda.id} cancelada por ${autorizado.$2}.$sufixoMotivo',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel cancelar venda: $e')),
+      );
+    }
   }
 
   @override
@@ -238,6 +585,13 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         .where((c) => c.ativo)
         .toList();
     final vendedores = widget.vendedorRepository.listarAtivos();
+    final usuariosCancelamento = widget.vendaRepository
+        .listarTodas()
+        .where((v) => v.cancelada && v.canceladaPor.trim().isNotEmpty)
+        .map((v) => v.canceladaPor.trim())
+        .toSet()
+        .toList()
+      ..sort();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Listagem de Vendas')),
@@ -266,6 +620,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                           width: 220,
                           child: DropdownButtonFormField<String>(
                             initialValue: _periodoPreset,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'Periodo',
                             ),
@@ -305,9 +660,40 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                           ),
                         ),
                         SizedBox(
+                          width: 220,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _canceladaPorFiltro,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Cancelada por',
+                            ),
+                            items: [
+                              const DropdownMenuItem(
+                                value: 'todos',
+                                child: Text('Todos'),
+                              ),
+                              ...usuariosCancelamento.map(
+                                (u) => DropdownMenuItem(
+                                  value: u,
+                                  child: Text(
+                                    u,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) {
+                                setState(() => _canceladaPorFiltro = v);
+                              }
+                            },
+                          ),
+                        ),
+                        SizedBox(
                           width: 200,
                           child: DropdownButtonFormField<String>(
                             initialValue: _formaPagamento,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'Pagamento',
                             ),
@@ -340,6 +726,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                           width: 200,
                           child: DropdownButtonFormField<String>(
                             initialValue: _tipoEntrega,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'Entrega',
                             ),
@@ -366,6 +753,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                           width: 200,
                           child: DropdownButtonFormField<String>(
                             initialValue: _entregaPendente,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'Retirada futura',
                             ),
@@ -393,6 +781,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                           width: 240,
                           child: DropdownButtonFormField<int?>(
                             initialValue: _clienteIdFiltro,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'Cliente',
                             ),
@@ -419,6 +808,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                           width: 220,
                           child: DropdownButtonFormField<int?>(
                             initialValue: _vendedorIdFiltro,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'Vendedor',
                             ),
@@ -443,18 +833,45 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 setState(() => _vendedorIdFiltro = v),
                           ),
                         ),
-                        FilterChip(
-                          label: const Text('Incluir canceladas'),
-                          selected: _incluirCanceladas,
-                          onSelected: (v) =>
-                              setState(() => _incluirCanceladas = v),
+                        SizedBox(
+                          width: 220,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _filtroCancelamento,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Cancelamento',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'ativas',
+                                child: Text('Nao canceladas'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'canceladas',
+                                child: Text('Somente canceladas'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'todas',
+                                child: Text('Todas'),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) {
+                                setState(() => _filtroCancelamento = v);
+                              }
+                            },
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    Row(
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Expanded(
+                        SizedBox(
+                          width: 860,
                           child: TextField(
                             controller: _buscaController,
                             decoration: const InputDecoration(
@@ -467,16 +884,38 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                             onSubmitted: (_) => _pesquisar(),
                           ),
                         ),
-                        const SizedBox(width: 12),
                         FilledButton.icon(
                           onPressed: _pesquisar,
                           icon: const Icon(Icons.filter_alt_outlined),
                           label: const Text('Pesquisar'),
                         ),
-                        const SizedBox(width: 8),
                         OutlinedButton(
                           onPressed: _limparFiltros,
                           child: const Text('Limpar'),
+                        ),
+                        PopupMenuButton<String>(
+                          onSelected: (value) {
+                            if (value == 'csv') {
+                              _exportarCancelamentosCsv();
+                            } else if (value == 'pdf') {
+                              _exportarCancelamentosPdf();
+                            }
+                          },
+                          itemBuilder: (context) => const [
+                            PopupMenuItem<String>(
+                              value: 'csv',
+                              child: Text('Exportar CSV'),
+                            ),
+                            PopupMenuItem<String>(
+                              value: 'pdf',
+                              child: Text('Exportar/Imprimir PDF'),
+                            ),
+                          ],
+                          child: OutlinedButton.icon(
+                            onPressed: null,
+                            icon: const Icon(Icons.download_outlined),
+                            label: const Text('Exportar'),
+                          ),
                         ),
                       ],
                     ),
@@ -541,12 +980,44 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                   'Retirada futura: ${v.entregaPendente ? 'Sim' : 'Nao'} | '
                                   'Itens: ${v.itens.length}',
                                 ),
+                                if (v.cancelada)
+                                  Text(
+                                    'Cancelada por: ${v.canceladaPor.isEmpty ? 'Nao informado' : v.canceladaPor}'
+                                    '${v.canceladaEm == null ? '' : ' | Em: ${_dataHora.format(v.canceladaEm!.toLocal())}'}'
+                                    '${v.motivoCancelamento.isEmpty ? '' : ' | Motivo: ${v.motivoCancelamento}'}',
+                                  ),
                               ],
                             ),
-                            trailing: Text(
-                              _formatarMoeda(v.total),
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.bold),
+                            trailing: SizedBox(
+                              width: 154,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _formatarMoeda(v.total),
+                                      textAlign: TextAlign.right,
+                                      style: Theme.of(context).textTheme.titleMedium
+                                          ?.copyWith(fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  PopupMenuButton<String>(
+                                    tooltip: 'Acoes',
+                                    onSelected: (value) {
+                                      if (value == 'cancelar') {
+                                        _cancelarVenda(v);
+                                      }
+                                    },
+                                    itemBuilder: (context) => [
+                                      PopupMenuItem<String>(
+                                        value: 'cancelar',
+                                        enabled: !v.cancelada,
+                                        child: const Text('Cancelar venda'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         );

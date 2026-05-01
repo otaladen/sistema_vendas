@@ -83,7 +83,7 @@ class _ClientesPageState extends State<ClientesPage> {
             return AlertDialog(
               title: const Text('Pesquisar cliente'),
               content: SizedBox(
-                width: 520,
+                width: 760,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -96,6 +96,7 @@ class _ClientesPageState extends State<ClientesPage> {
                       ),
                       onChanged: (value) {
                         final termo = value.trim().toLowerCase();
+                        final termoNumerico = _somenteDigitos(value);
                         setDialogState(() {
                           resultados = clientesBase.where((cliente) {
                             final campos = [
@@ -107,13 +108,28 @@ class _ClientesPageState extends State<ClientesPage> {
                               cliente.email,
                               cliente.cidade,
                             ].map((e) => e.toLowerCase());
-                            return campos.any((campo) => campo.contains(termo));
+                            final matchTexto = campos.any((campo) => campo.contains(termo));
+                            if (matchTexto) return true;
+                            if (termoNumerico.isEmpty) return false;
+                            final camposNumericos = [
+                              cliente.documento,
+                              cliente.telefone,
+                              cliente.whatsapp,
+                              cliente.cep,
+                            ].map(_somenteDigitos);
+                            return camposNumericos.any(
+                              (campoNumerico) => campoNumerico.contains(termoNumerico),
+                            );
                           }).toList();
                         });
                       },
                     ),
                     const SizedBox(height: 12),
-                    Flexible(
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: 220,
+                        maxHeight: MediaQuery.of(context).size.height * 0.58,
+                      ),
                       child: resultados.isEmpty
                           ? const Center(child: Text('Nenhum cliente encontrado.'))
                           : ListView.builder(
@@ -122,13 +138,21 @@ class _ClientesPageState extends State<ClientesPage> {
                               itemBuilder: (context, index) {
                                 final cliente = resultados[index];
                                 return ListTile(
-                                  dense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 4,
+                                  ),
                                   title: Text(cliente.nomeRazao),
                                   subtitle: Text(
                                     '${cliente.tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ'}: '
                                     '${cliente.documento.isEmpty ? '-' : cliente.documento} | '
                                     'Cidade: ${cliente.cidade.isEmpty ? '-' : cliente.cidade}',
+                                    style: Theme.of(context).textTheme.bodyMedium,
                                   ),
+                                  titleTextStyle: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w600),
                                   onTap: () => Navigator.pop(context, cliente),
                                 );
                               },
@@ -201,12 +225,14 @@ class _ClientesPageState extends State<ClientesPage> {
       tipoPessoa: _tipoPessoa,
       nomeRazao: nomeRazao,
       nomeFantasia: _nomeFantasiaController.text.trim(),
-      documento: _documentoController.text.trim(),
-      inscricaoEstadual: _tipoPessoa == 'juridica' ? _inscricaoController.text.trim() : '',
-      telefone: _telefoneController.text.trim(),
-      whatsapp: _whatsappController.text.trim(),
+      documento: _somenteDigitos(_documentoController.text),
+      inscricaoEstadual: _tipoPessoa == 'juridica'
+          ? _inscricaoController.text.trim().toUpperCase()
+          : '',
+      telefone: _somenteDigitos(_telefoneController.text),
+      whatsapp: _somenteDigitos(_whatsappController.text),
       email: _emailController.text.trim().toLowerCase(),
-      cep: _cepController.text.trim(),
+      cep: _somenteDigitos(_cepController.text),
       endereco: _enderecoController.text.trim(),
       numero: _numeroController.text.trim(),
       bairro: _bairroController.text.trim(),
@@ -223,6 +249,10 @@ class _ClientesPageState extends State<ClientesPage> {
     setState(() {
       _status = 'Cliente salvo com sucesso.';
     });
+  }
+
+  String _somenteDigitos(String valor) {
+    return valor.replaceAll(RegExp(r'\D'), '');
   }
 
   void _editarCliente(Cliente c) {
@@ -248,6 +278,105 @@ class _ClientesPageState extends State<ClientesPage> {
       _ativo = c.ativo;
       _status = 'Editando cliente: ${c.nomeRazao}';
     });
+    _padronizarMascarasCamposCliente();
+  }
+
+  List<Cliente> _clientesOrdenadosPorCadastro() {
+    final clientes = widget.clienteRepository.listarTodos();
+    clientes.sort((a, b) => a.id.compareTo(b.id));
+    return clientes;
+  }
+
+  int _indiceClienteAtual(List<Cliente> clientes) {
+    final atualId = _clienteEmEdicaoId;
+    if (atualId == null) return -1;
+    return clientes.indexWhere((c) => c.id == atualId);
+  }
+
+  void _abrirClientePorIndice(int indice) {
+    final clientes = _clientesOrdenadosPorCadastro();
+    if (clientes.isEmpty) {
+      setState(() {
+        _status = 'Nao ha clientes cadastrados para navegar.';
+      });
+      return;
+    }
+    final indiceValido = indice.clamp(0, clientes.length - 1);
+    _editarCliente(clientes[indiceValido]);
+  }
+
+  void _irParaPrimeiroCliente() {
+    _abrirClientePorIndice(0);
+  }
+
+  void _irParaUltimoCliente() {
+    final clientes = _clientesOrdenadosPorCadastro();
+    if (clientes.isEmpty) {
+      setState(() {
+        _status = 'Nao ha clientes cadastrados para navegar.';
+      });
+      return;
+    }
+    _abrirClientePorIndice(clientes.length - 1);
+  }
+
+  void _irParaClienteAnterior() {
+    final clientes = _clientesOrdenadosPorCadastro();
+    if (clientes.isEmpty) {
+      setState(() {
+        _status = 'Nao ha clientes cadastrados para navegar.';
+      });
+      return;
+    }
+    final indiceAtual = _indiceClienteAtual(clientes);
+    if (indiceAtual <= 0) {
+      _abrirClientePorIndice(0);
+      return;
+    }
+    _abrirClientePorIndice(indiceAtual - 1);
+  }
+
+  void _irParaProximoCliente() {
+    final clientes = _clientesOrdenadosPorCadastro();
+    if (clientes.isEmpty) {
+      setState(() {
+        _status = 'Nao ha clientes cadastrados para navegar.';
+      });
+      return;
+    }
+    final indiceAtual = _indiceClienteAtual(clientes);
+    if (indiceAtual < 0) {
+      _abrirClientePorIndice(0);
+      return;
+    }
+    if (indiceAtual >= clientes.length - 1) {
+      _abrirClientePorIndice(clientes.length - 1);
+      return;
+    }
+    _abrirClientePorIndice(indiceAtual + 1);
+  }
+
+  void _padronizarMascarasCamposCliente() {
+    _documentoController.value = _cpfCnpjFormatter.formatEditUpdate(
+      const TextEditingValue(),
+      TextEditingValue(text: _documentoController.text),
+    );
+    _telefoneController.value = _telefoneFormatter.formatEditUpdate(
+      const TextEditingValue(),
+      TextEditingValue(text: _telefoneController.text),
+    );
+    _whatsappController.value = _telefoneFormatter.formatEditUpdate(
+      const TextEditingValue(),
+      TextEditingValue(text: _whatsappController.text),
+    );
+    _cepController.value = _cepFormatter.formatEditUpdate(
+      const TextEditingValue(),
+      TextEditingValue(text: _cepController.text),
+    );
+    _limiteController.value = _limiteCreditoFormatter.formatEditUpdate(
+      const TextEditingValue(),
+      TextEditingValue(text: _limiteController.text),
+    );
   }
 
   @override
@@ -322,6 +451,38 @@ class _ClientesPageState extends State<ClientesPage> {
                 label: const Text('Pesquisar cliente'),
               ),
             ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _irParaPrimeiroCliente,
+                    child: const Text('|< Primeiro'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _irParaClienteAnterior,
+                    child: const Text('< Anterior'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _irParaProximoCliente,
+                    child: const Text('Proximo >'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _irParaUltimoCliente,
+                    child: const Text('Ultimo >|'),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 14),
             _buildSectionCard(
               context: context,
@@ -350,11 +511,13 @@ class _ClientesPageState extends State<ClientesPage> {
                 const SizedBox(height: 10),
                 TextField(
                   controller: _nomeRazaoController,
+                  textCapitalization: TextCapitalization.words,
                   decoration: const InputDecoration(labelText: 'Nome / Razao social'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: _nomeFantasiaController,
+                  textCapitalization: TextCapitalization.words,
                   decoration: const InputDecoration(labelText: 'Nome fantasia (opcional)'),
                 ),
                 const SizedBox(height: 10),
@@ -376,6 +539,11 @@ class _ClientesPageState extends State<ClientesPage> {
                         child: TextField(
                           controller: _inscricaoController,
                           decoration: const InputDecoration(labelText: 'Inscricao Estadual'),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Za-z]')),
+                            LengthLimitingTextInputFormatter(20),
+                          ],
                         ),
                       ),
                     ],
@@ -415,6 +583,7 @@ class _ClientesPageState extends State<ClientesPage> {
                   controller: _emailController,
                   decoration: const InputDecoration(labelText: 'Email'),
                   keyboardType: TextInputType.emailAddress,
+                        textCapitalization: TextCapitalization.none,
                   inputFormatters: [_emailFormatter],
                 ),
               ],
@@ -440,6 +609,7 @@ class _ClientesPageState extends State<ClientesPage> {
                       flex: 2,
                       child: TextField(
                         controller: _enderecoController,
+                        textCapitalization: TextCapitalization.words,
                         decoration: const InputDecoration(labelText: 'Endereco'),
                       ),
                     ),
@@ -448,6 +618,9 @@ class _ClientesPageState extends State<ClientesPage> {
                       child: TextField(
                         controller: _numeroController,
                         decoration: const InputDecoration(labelText: 'Numero'),
+                        inputFormatters: [
+                          LengthLimitingTextInputFormatter(10),
+                        ],
                       ),
                     ),
                   ],
@@ -458,6 +631,7 @@ class _ClientesPageState extends State<ClientesPage> {
                     Expanded(
                       child: TextField(
                         controller: _bairroController,
+                        textCapitalization: TextCapitalization.words,
                         decoration: const InputDecoration(labelText: 'Bairro'),
                       ),
                     ),
@@ -465,6 +639,7 @@ class _ClientesPageState extends State<ClientesPage> {
                     Expanded(
                       child: TextField(
                         controller: _cidadeController,
+                        textCapitalization: TextCapitalization.words,
                         decoration: const InputDecoration(labelText: 'Cidade'),
                       ),
                     ),
@@ -497,6 +672,7 @@ class _ClientesPageState extends State<ClientesPage> {
                     Expanded(
                       child: TextField(
                         controller: _referenciaController,
+                        textCapitalization: TextCapitalization.sentences,
                         decoration: const InputDecoration(labelText: 'Referencia'),
                       ),
                     ),
@@ -515,6 +691,7 @@ class _ClientesPageState extends State<ClientesPage> {
                 TextField(
                   controller: _observacoesController,
                   maxLines: 2,
+                  textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(labelText: 'Observacoes'),
                 ),
                 SwitchListTile(

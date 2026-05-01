@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
+import '../data/usuario_repository.dart';
 import '../data/vendedor_repository.dart';
+import '../model/usuario_sistema.dart';
 import 'clientes_page.dart';
 import 'produtos_page.dart';
+import 'usuarios_page.dart';
 import 'vendedores_page.dart';
 
 class CadastrosPage extends StatelessWidget {
@@ -13,11 +16,13 @@ class CadastrosPage extends StatelessWidget {
     required this.produtoRepository,
     required this.clienteRepository,
     required this.vendedorRepository,
+    required this.usuarioLogado,
   });
 
   final ProdutoRepository produtoRepository;
   final ClienteRepository clienteRepository;
   final VendedorRepository vendedorRepository;
+  final UsuarioSistema usuarioLogado;
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +36,9 @@ class CadastrosPage extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {
+                onPressed:
+                    (usuarioLogado.admin || usuarioLogado.podeCadastros)
+                    ? () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -39,7 +46,8 @@ class CadastrosPage extends StatelessWidget {
                           ProdutosPage(produtoRepository: produtoRepository),
                     ),
                   );
-                },
+                    }
+                    : null,
                 child: const Text('Produtos'),
               ),
             ),
@@ -47,7 +55,9 @@ class CadastrosPage extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {
+                onPressed:
+                    (usuarioLogado.admin || usuarioLogado.podeCadastros)
+                    ? () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -55,7 +65,8 @@ class CadastrosPage extends StatelessWidget {
                           ClientesPage(clienteRepository: clienteRepository),
                     ),
                   );
-                },
+                    }
+                    : null,
                 child: const Text('Clientes'),
               ),
             ),
@@ -63,7 +74,9 @@ class CadastrosPage extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {
+                onPressed:
+                    (usuarioLogado.admin || usuarioLogado.podeCadastros)
+                    ? () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -72,8 +85,28 @@ class CadastrosPage extends StatelessWidget {
                       ),
                     ),
                   );
-                },
+                    }
+                    : null,
                 child: const Text('Vendedores'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: usuarioLogado.admin
+                    ? () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => UsuariosPage(
+                        usuarioRepository: UsuarioRepository(),
+                      ),
+                    ),
+                  );
+                    }
+                    : null,
+                child: const Text('Usuarios'),
               ),
             ),
           ],

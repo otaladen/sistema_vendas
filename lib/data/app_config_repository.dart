@@ -11,6 +11,7 @@ class EmpresaConfig {
     this.rodapeNota = 'Documento nao fiscal',
     this.rodapeOrcamento = 'Este orcamento nao possui valor fiscal.',
     this.logoPath = '',
+    this.limiteDivergenciaCaixa = 20,
   });
 
   final String nomeLoja;
@@ -22,6 +23,7 @@ class EmpresaConfig {
   final String rodapeNota;
   final String rodapeOrcamento;
   final String logoPath;
+  final double limiteDivergenciaCaixa;
 }
 
 class AppConfigRepository {
@@ -35,6 +37,7 @@ class AppConfigRepository {
   static const _kRodapeNota = 'config_rodape_nota';
   static const _kRodapeOrcamento = 'config_rodape_orcamento';
   static const _kLogoPath = 'config_logo_path';
+  static const _kLimiteDivergenciaCaixa = 'config_limite_divergencia_caixa';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -53,6 +56,7 @@ class AppConfigRepository {
           prefs.getString(_kRodapeOrcamento) ??
           'Este orcamento nao possui valor fiscal.',
       logoPath: prefs.getString(_kLogoPath) ?? '',
+      limiteDivergenciaCaixa: prefs.getDouble(_kLimiteDivergenciaCaixa) ?? 20,
     );
   }
 
@@ -74,5 +78,9 @@ class AppConfigRepository {
     await prefs.setString(_kRodapeOrcamento, rodapeOrcamento);
     await prefs.setString(_kRodapeDocumento, rodapeNota);
     await prefs.setString(_kLogoPath, config.logoPath.trim());
+    await prefs.setDouble(
+      _kLimiteDivergenciaCaixa,
+      config.limiteDivergenciaCaixa < 0 ? 0 : config.limiteDivergenciaCaixa,
+    );
   }
 }

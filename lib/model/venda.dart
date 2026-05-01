@@ -1,6 +1,7 @@
 import 'package:objectbox/objectbox.dart';
 
 import 'cliente.dart';
+import 'historico_entrega.dart';
 import 'item_venda.dart';
 import 'vendedor.dart';
 
@@ -21,8 +22,17 @@ class Venda {
     this.enderecoEntrega = '',
     this.observacaoEntrega = '',
     this.statusEntrega = 'nao_aplicavel',
+    this.prioridadeEntrega = 'normal',
+    this.janelaEntrega = 'nao_definida',
+    this.dataEntregaMarcada,
+    this.cargaSeparada = false,
+    this.cargaCarregada = false,
+    this.cargaSaiu = false,
     this.entregaPendente = false,
     this.cancelada = false,
+    this.motivoCancelamento = '',
+    this.canceladaPor = '',
+    this.canceladaEm,
   }) : data = data ?? DateTime.now();
 
   @Id()
@@ -42,12 +52,26 @@ class Venda {
   String enderecoEntrega;
   String observacaoEntrega;
   String statusEntrega;
+  String prioridadeEntrega;
+  String janelaEntrega;
+  @Property(type: PropertyType.dateUtc)
+  DateTime? dataEntregaMarcada;
+  bool cargaSeparada;
+  bool cargaCarregada;
+  bool cargaSaiu;
   bool entregaPendente;
   bool cancelada;
+  String motivoCancelamento;
+  String canceladaPor;
+  @Property(type: PropertyType.dateUtc)
+  DateTime? canceladaEm;
 
   final cliente = ToOne<Cliente>();
   final vendedor = ToOne<Vendedor>();
 
   @Backlink('venda')
   final itens = ToMany<ItemVenda>();
+
+  @Backlink('venda')
+  final historicoEntrega = ToMany<HistoricoEntrega>();
 }

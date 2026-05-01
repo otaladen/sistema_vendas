@@ -17,12 +17,18 @@ class VendasPage extends StatelessWidget {
     required this.clienteRepository,
     required this.vendaRepository,
     required this.vendedorRepository,
+    required this.usuarioAtual,
+    required this.podeManutencaoAuditoriaCaixa,
+    required this.podeCancelarVendas,
   });
 
   final ProdutoRepository produtoRepository;
   final ClienteRepository clienteRepository;
   final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
+  final String usuarioAtual;
+  final bool podeManutencaoAuditoriaCaixa;
+  final bool podeCancelarVendas;
 
   void _mostrarTokenSenhaDoDia(BuildContext context) {
     final vendaService = VendaService(vendaRepository);
@@ -92,6 +98,8 @@ class VendasPage extends StatelessWidget {
                         produtoRepository: produtoRepository,
                         vendaRepository: vendaRepository,
                         vendedorRepository: vendedorRepository,
+                        usuarioAtual: usuarioAtual,
+                        podeManutencaoAuditoriaCaixa: podeManutencaoAuditoriaCaixa,
                       ),
                     ),
                   );
@@ -109,7 +117,10 @@ class VendasPage extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (_) =>
-                          EntregasPage(vendaRepository: vendaRepository),
+                          EntregasPage(
+                            vendaRepository: vendaRepository,
+                            usuarioAtual: usuarioAtual,
+                          ),
                     ),
                   );
                 },
@@ -129,6 +140,8 @@ class VendasPage extends StatelessWidget {
                         vendaRepository: vendaRepository,
                         clienteRepository: clienteRepository,
                         vendedorRepository: vendedorRepository,
+                        usuarioAtual: usuarioAtual,
+                        podeCancelarVendas: podeCancelarVendas,
                       ),
                     ),
                   );
