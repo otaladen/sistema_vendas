@@ -17,6 +17,7 @@ import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
+import '../domain/pagamento_orcamento.dart';
 import '../domain/venda_service.dart';
 import '../model/cliente.dart';
 import '../model/venda.dart';
@@ -30,6 +31,7 @@ class CaixaPage extends StatefulWidget {
     required this.vendaRepository,
     required this.vendedorRepository,
     required this.usuarioAtual,
+    required this.podeLeituraParcialCaixa,
     required this.podeManutencaoAuditoriaCaixa,
   });
 
@@ -38,6 +40,7 @@ class CaixaPage extends StatefulWidget {
   final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
   final String usuarioAtual;
+  final bool podeLeituraParcialCaixa;
   final bool podeManutencaoAuditoriaCaixa;
 
   @override
@@ -73,7 +76,12 @@ class _CaixaPageState extends State<CaixaPage> {
   double _totalSuprimentos = 0;
   double _totalSangrias = 0;
   double _limiteDivergenciaSemSupervisor = 20;
+  bool _mostrarCampoDescontoCaixa = true;
   bool _permitirVendaSemEstoque = true;
+  int? _mistoPreparadoParaId;
+  List<PagamentoOrcamentoLinha> _mistoLinhasModelo = [];
+  final List<TextEditingController> _mistoValorControllers = [];
+  final List<FocusNode> _mistoValorFocusNodes = [];
 
   @override
   void initState() {
@@ -94,7 +102,12 @@ class _CaixaPageState extends State<CaixaPage> {
     if (!mounted) return;
     setState(() {
       _limiteDivergenciaSemSupervisor = config.limiteDivergenciaCaixa;
+      _mostrarCampoDescontoCaixa = config.mostrarCampoDescontoCaixa;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
+      if (!_mostrarCampoDescontoCaixa) {
+        _descontoController.clear();
+        _tipoDesconto = 'percentual';
+      }
     });
   }
 
@@ -115,6 +128,10 @@ class _CaixaPageState extends State<CaixaPage> {
         _itemSelecionadoId = null;
         _mostrarCampoSenhaRetirada = false;
         _senhaRetiradaController.clear();
+        _disposeMistoEdicao();
+      } else if (_mistoPreparadoParaId != _selecionado!.id) {
+        _prepararEdicaoMisto(_selecionado!);
+        _sincronizarRecebidoPdVComOrcamento();
       }
     });
   }
@@ -197,25 +214,35 @@ class _CaixaPageState extends State<CaixaPage> {
     if (selecionado == null || !mounted) return;
     setState(() {
       _selecionado = selecionado;
-      _valorRecebidoController.clear();
-      _valorRecebido = null;
       _descontoController.clear();
       _tipoDesconto = 'percentual';
       _itemSelecionadoId = null;
+      _prepararEdicaoMisto(selecionado);
+      _sincronizarRecebidoPdVComOrcamento();
     });
-    _focarValorRecebidoSeDinheiro();
+    _focarEntradaPrincipalCaixa();
   }
 
-  void _focarValorRecebidoSeDinheiro() {
+  /// No misto, foca o primeiro valor do painel de conferencia; em dinheiro puro, foca o campo de especie.
+  void _focarEntradaPrincipalCaixa() {
     final selecionado = _selecionado;
-    if (selecionado == null || selecionado.formaPagamento != 'dinheiro') {
+    if (selecionado == null) return;
+    if (selecionado.formaPagamento == 'misto' &&
+        _mistoValorFocusNodes.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _mistoValorFocusNodes.first.requestFocus();
+        }
+      });
       return;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _valorRecebidoFocusNode.requestFocus();
-      }
-    });
+    if (_caixaPrecisaValorRecebidoDinheiro(selecionado)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _valorRecebidoFocusNode.requestFocus();
+        }
+      });
+    }
   }
 
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
@@ -553,6 +580,7 @@ class _CaixaPageState extends State<CaixaPage> {
                           Text('Suprimentos: ${resumo['suprimentos'] ?? 0}'),
                           Text('Sangrias: ${resumo['sangrias'] ?? 0}'),
                           Text('Fechamentos: ${resumo['fechamentos'] ?? 0}'),
+                          Text('Leituras parciais: ${resumo['leituras_parciais'] ?? 0}'),
                           Text('Negados: ${resumo['negados'] ?? 0}'),
                         ],
                       ),
@@ -714,6 +742,11 @@ class _CaixaPageState extends State<CaixaPage> {
               label: const Text('Fechamento'),
             ),
             OutlinedButton.icon(
+              onPressed: widget.podeLeituraParcialCaixa ? _mostrarLeituraParcial : null,
+              icon: const Icon(Icons.analytics_outlined),
+              label: const Text('Leitura parcial'),
+            ),
+            OutlinedButton.icon(
               onPressed: _abrirHistoricoAuditoria,
               icon: const Icon(Icons.fact_check_outlined),
               label: const Text('Auditoria'),
@@ -752,6 +785,7 @@ class _CaixaPageState extends State<CaixaPage> {
       'suprimentos': contar('suprimento'),
       'sangrias': contar('sangria'),
       'fechamentos': contar('fechamento_caixa'),
+      'leituras_parciais': contar('leitura_parcial_caixa'),
       'negados': contar('fechamento_negado_divergencia'),
     };
   }
@@ -1035,6 +1069,28 @@ class _CaixaPageState extends State<CaixaPage> {
       if (venda.status != 'finalizada' || venda.cancelada) continue;
       if (abertura != null && venda.data.isBefore(abertura)) continue;
       if (venda.data.isAfter(agora)) continue;
+      if (venda.formaPagamento == 'misto' &&
+          venda.pagamentosJson.trim().isNotEmpty) {
+        for (final l in PagamentoOrcamentoCodec.decode(venda.pagamentosJson)) {
+          switch (l.meio) {
+            case 'pix':
+              pix += l.valor;
+              break;
+            case 'cartao_debito':
+              debito += l.valor;
+              break;
+            case 'cartao_credito':
+              credito += l.valor;
+              break;
+            case 'dinheiro':
+              dinheiro += l.valor;
+              break;
+            default:
+              break;
+          }
+        }
+        continue;
+      }
       switch (venda.formaPagamento) {
         case 'pix':
           pix += venda.total;
@@ -1059,6 +1115,114 @@ class _CaixaPageState extends State<CaixaPage> {
       'debito': debito,
       'credito': credito,
     };
+  }
+
+  ({double totalVendas, int quantidadeVendas}) _totalVendasNoPeriodoCaixa() {
+    final abertura = _aberturaCaixaEm;
+    final agora = DateTime.now();
+    var totalVendas = 0.0;
+    var quantidadeVendas = 0;
+    for (final venda in widget.vendaRepository.listarTodas()) {
+      if (venda.status != 'finalizada' || venda.cancelada) continue;
+      if (abertura != null && venda.data.isBefore(abertura)) continue;
+      if (venda.data.isAfter(agora)) continue;
+      totalVendas += venda.total;
+      quantidadeVendas++;
+    }
+    return (totalVendas: totalVendas, quantidadeVendas: quantidadeVendas);
+  }
+
+  Future<void> _mostrarLeituraParcial() async {
+    if (!widget.podeLeituraParcialCaixa) {
+      return;
+    }
+    if (!_caixaAberto) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Abra o caixa para consultar a leitura parcial.'),
+        ),
+      );
+      return;
+    }
+    final esperados = _totaisEsperadosFechamento();
+    final vendas = _totalVendasNoPeriodoCaixa();
+    await _registrarAuditoriaCaixa(
+      'leitura_parcial_caixa',
+      detalhes: {
+        'totalVendas': vendas.totalVendas,
+        'quantidadeVendas': vendas.quantidadeVendas,
+        'esperadoDinheiro': esperados['dinheiro'] ?? 0,
+        'esperadoPix': esperados['pix'] ?? 0,
+        'esperadoDebito': esperados['debito'] ?? 0,
+        'esperadoCredito': esperados['credito'] ?? 0,
+      },
+    );
+    if (!mounted) return;
+    final aberturaFmt = _aberturaCaixaEm == null
+        ? '-'
+        : DateFormat('dd/MM/yyyy HH:mm').format(_aberturaCaixaEm!.toLocal());
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Leitura parcial do caixa'),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 420,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Resumo desde a abertura ($aberturaFmt) ate agora, '
+                    'sem fechar o caixa.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Vendas finalizadas',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  Text('Quantidade: ${vendas.quantidadeVendas}'),
+                  Text('Total em vendas: ${_formatarMoeda(vendas.totalVendas)}'),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Recebimentos por forma de pagamento (esperado)',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Dinheiro na gaveta (fundo + vendas em dinheiro + '
+                    'suprimentos - sangrias): ${_formatarMoeda(esperados['dinheiro'] ?? 0)}',
+                  ),
+                  Text('PIX: ${_formatarMoeda(esperados['pix'] ?? 0)}'),
+                  Text(
+                    'Cartao debito: ${_formatarMoeda(esperados['debito'] ?? 0)}',
+                  ),
+                  Text(
+                    'Cartao credito: ${_formatarMoeda(esperados['credito'] ?? 0)}',
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Fundo inicial: ${_formatarMoeda(_fundoTrocoAbertura)} | '
+                    'Suprimentos: ${_formatarMoeda(_totalSuprimentos)} | '
+                    'Sangrias: ${_formatarMoeda(_totalSangrias)}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fechar'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _fecharCaixa() async {
@@ -1451,6 +1615,9 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   double _descontoAplicado(Venda venda) {
+    if (!_mostrarCampoDescontoCaixa) {
+      return 0;
+    }
     final valorDigitado = _parseValor(_descontoController.text) ?? 0;
     if (valorDigitado <= 0) {
       return 0;
@@ -1467,6 +1634,245 @@ class _CaixaPageState extends State<CaixaPage> {
     return (venda.total - desconto).clamp(0, double.infinity).toDouble();
   }
 
+  /// Linhas do misto com valores proporcionais ao [totalComDesconto] exibido no caixa.
+  List<PagamentoOrcamentoLinha> _linhasPagamentoEscaladasCaixa(
+    Venda v,
+    double totalComDesconto,
+  ) {
+    if (v.formaPagamento != 'misto' || v.pagamentosJson.trim().isEmpty) {
+      return const [];
+    }
+    final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
+    final soma = PagamentoOrcamentoCodec.soma(linhas);
+    if (soma <= 0.001) return const [];
+    final fator = totalComDesconto / soma;
+    return linhas
+        .map(
+          (l) => PagamentoOrcamentoLinha(
+            meio: l.meio,
+            valor: (l.valor * fator),
+            parcelas: l.parcelas,
+          ),
+        )
+        .toList();
+  }
+
+  void _disposeMistoEdicao() {
+    for (final c in _mistoValorControllers) {
+      c.dispose();
+    }
+    _mistoValorControllers.clear();
+    for (final f in _mistoValorFocusNodes) {
+      f.dispose();
+    }
+    _mistoValorFocusNodes.clear();
+    _mistoLinhasModelo.clear();
+    _mistoPreparadoParaId = null;
+  }
+
+  /// Prepara campos do misto para conferencia manual no caixa.
+  /// Os valores iniciam zerados para o operador digitar o recebido.
+  void _prepararEdicaoMisto(Venda v) {
+    _disposeMistoEdicao();
+    if (v.formaPagamento != 'misto' || v.pagamentosJson.trim().isEmpty) {
+      return;
+    }
+    final tv = _totalComDesconto(v);
+    final scaled = _linhasPagamentoEscaladasCaixa(v, tv);
+    _mistoLinhasModelo = List<PagamentoOrcamentoLinha>.from(scaled);
+    for (final _ in scaled) {
+      _mistoValorControllers.add(TextEditingController(text: '0,00'));
+      _mistoValorFocusNodes.add(FocusNode());
+    }
+    _mistoPreparadoParaId = v.id;
+  }
+
+  List<PagamentoOrcamentoLinha> _linhasMistoDoFormulario() {
+    if (_mistoLinhasModelo.length != _mistoValorControllers.length) {
+      return const [];
+    }
+    final out = <PagamentoOrcamentoLinha>[];
+    for (var i = 0; i < _mistoLinhasModelo.length; i++) {
+      final m = _mistoLinhasModelo[i];
+      final valor = _parseValor(_mistoValorControllers[i].text) ?? 0;
+      out.add(
+        PagamentoOrcamentoLinha(
+          meio: m.meio,
+          valor: valor,
+          parcelas: m.parcelas,
+        ),
+      );
+    }
+    return out;
+  }
+
+  String? _validarConferenciaMistoIgualOrcamento(Venda venda, double totalComDesconto) {
+    final informado = _linhasMistoDoFormulario();
+    final esperado = _linhasPagamentoEscaladasCaixa(venda, totalComDesconto);
+    if (informado.length != esperado.length) {
+      return 'Pagamento misto invalido para conferencia no caixa.';
+    }
+    for (var i = 0; i < esperado.length; i++) {
+      final linhaEsperada = esperado[i];
+      final linhaInformada = informado[i];
+      final mesmoMeio = linhaEsperada.meio == linhaInformada.meio;
+      final mesmasParcelas = linhaEsperada.parcelas == linhaInformada.parcelas;
+      if (!mesmoMeio || !mesmasParcelas) {
+        return 'Forma de pagamento alterada no caixa. Use o mesmo resumo do pedido.';
+      }
+      if ((linhaInformada.valor - linhaEsperada.valor).abs() > _tolMistoPagamento) {
+        final sufixoParcelas = linhaEsperada.meio == 'cartao_credito'
+            ? ' (${linhaEsperada.parcelas}x)'
+            : '';
+        return 'Valor divergente em ${_rotuloFormaPagamento(linhaEsperada.meio)}$sufixoParcelas. '
+            'Esperado: ${_formatarMoeda(linhaEsperada.valor)}.';
+      }
+    }
+    return null;
+  }
+
+  static const double _tolMistoPagamento = 0.05;
+
+  /// Reduz linhas do formulario do caixa para somar [targetTotal] (valor da venda).
+  /// Quando o cliente paga a mais (ex.: entrega nota maior em dinheiro), o excesso
+  /// vira troco e nao entra na soma gravada no orcamento.
+  List<PagamentoOrcamentoLinha> _normalizarLinhasMistoGravacao(
+    List<PagamentoOrcamentoLinha> form,
+    double targetTotal,
+  ) {
+    if (form.isEmpty) return form;
+    final soma = PagamentoOrcamentoCodec.soma(form);
+    if (soma <= targetTotal + _tolMistoPagamento) {
+      return List<PagamentoOrcamentoLinha>.from(form);
+    }
+    final nd = <PagamentoOrcamentoLinha>[];
+    for (final l in form) {
+      if (l.meio != 'dinheiro') {
+        nd.add(l);
+      }
+    }
+    final sNd = PagamentoOrcamentoCodec.soma(nd);
+    if (sNd < targetTotal - 1e-6) {
+      final dVenda = targetTotal - sNd;
+      return [
+        ...nd.map(
+          (l) => PagamentoOrcamentoLinha(
+            meio: l.meio,
+            valor: l.valor,
+            parcelas: l.parcelas,
+          ),
+        ),
+        PagamentoOrcamentoLinha(meio: 'dinheiro', valor: dVenda, parcelas: 1),
+      ];
+    }
+    return _escalarLinhasParaTotalMisto(nd, targetTotal);
+  }
+
+  List<PagamentoOrcamentoLinha> _escalarLinhasParaTotalMisto(
+    List<PagamentoOrcamentoLinha> linhas,
+    double targetTotal,
+  ) {
+    if (linhas.isEmpty) return linhas;
+    final soma = PagamentoOrcamentoCodec.soma(linhas);
+    if (soma <= 0.001) return linhas;
+    final fator = targetTotal / soma;
+    final out = <PagamentoOrcamentoLinha>[];
+    for (final l in linhas) {
+      out.add(
+        PagamentoOrcamentoLinha(
+          meio: l.meio,
+          valor: l.valor * fator,
+          parcelas: l.parcelas,
+        ),
+      );
+    }
+    var soma2 = PagamentoOrcamentoCodec.soma(out);
+    final diff = targetTotal - soma2;
+    if (out.isNotEmpty && diff.abs() > 1e-4) {
+      final i = out.length - 1;
+      final u = out[i];
+      out[i] = PagamentoOrcamentoLinha(
+        meio: u.meio,
+        valor: (u.valor + diff).clamp(0, double.infinity),
+        parcelas: u.parcelas,
+      );
+    }
+    return out;
+  }
+
+  /// Parte em dinheiro apos desconto do caixa (escala proporcional ao total).
+  double _parteDinheiroNaFinalizacao(Venda v, double totalComDesconto) {
+    if (v.formaPagamento != 'misto') {
+      return v.formaPagamento == 'dinheiro' ? totalComDesconto : 0;
+    }
+    final linhasForm = _linhasMistoDoFormulario();
+    if (linhasForm.isNotEmpty) {
+      return PagamentoOrcamentoCodec.somaPorMeio(linhasForm, 'dinheiro');
+    }
+    final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
+    final soma = PagamentoOrcamentoCodec.soma(linhas);
+    if (soma <= 0.001) return 0;
+    final parte = PagamentoOrcamentoCodec.somaPorMeio(linhas, 'dinheiro');
+    return parte * (totalComDesconto / soma);
+  }
+
+  /// Campo separado de especie/troco: apenas venda 100% em dinheiro.
+  /// No pagamento misto, valores e conferencia ficam no painel misto.
+  bool _caixaPrecisaValorRecebidoDinheiro(Venda v) {
+    return v.formaPagamento == 'dinheiro';
+  }
+
+  /// Preenche valor recebido com a parte em dinheiro ja definida no PDV (apos desconto).
+  void _sincronizarRecebidoPdVComOrcamento() {
+    final v = _selecionado;
+    if (v == null) return;
+    if (v.formaPagamento == 'misto') {
+      final linhas = _linhasMistoDoFormulario();
+      final d = PagamentoOrcamentoCodec.somaPorMeio(linhas, 'dinheiro');
+      if (d > 0.001) {
+        final texto = d.toStringAsFixed(2).replaceAll('.', ',');
+        _valorRecebidoController.value = TextEditingValue(
+          text: texto,
+          selection: TextSelection.collapsed(offset: texto.length),
+        );
+        _valorRecebido = d;
+      } else {
+        _valorRecebidoController.clear();
+        _valorRecebido = null;
+      }
+      return;
+    }
+    final tv = _totalComDesconto(v);
+    final parte = _parteDinheiroNaFinalizacao(v, tv);
+    if (parte > 0.001) {
+      final texto = parte.toStringAsFixed(2).replaceAll('.', ',');
+      _valorRecebidoController.value = TextEditingValue(
+        text: texto,
+        selection: TextSelection.collapsed(offset: texto.length),
+      );
+      _valorRecebido = parte;
+    } else {
+      _valorRecebidoController.clear();
+      _valorRecebido = null;
+    }
+  }
+
+  String _rotuloPagamentoCabecalho(Venda v) {
+    if (v.formaPagamento != 'misto' || v.pagamentosJson.trim().isEmpty) {
+      return '${_rotuloFormaPagamento(v.formaPagamento)}'
+          '${v.formaPagamento == 'cartao_credito' ? ' | ${v.quantidadeParcelas}x' : ''}';
+    }
+    final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
+    if (linhas.isEmpty) return 'Misto';
+    return linhas
+        .map(
+          (l) =>
+              '${_rotuloFormaPagamento(l.meio)} ${_formatarMoeda(l.valor)}'
+              '${l.meio == 'cartao_credito' ? ' ${l.parcelas}x' : ''}',
+        )
+        .join(' + ');
+  }
+
   String _rotuloFormaPagamento(String forma) {
     switch (forma) {
       case 'pix':
@@ -1479,6 +1885,8 @@ class _CaixaPageState extends State<CaixaPage> {
         return 'Fiado';
       case 'transferencia':
         return 'Transferencia';
+      case 'misto':
+        return 'Misto';
       case 'dinheiro':
       default:
         return 'Dinheiro';
@@ -1618,50 +2026,114 @@ class _CaixaPageState extends State<CaixaPage> {
     final totalVenda = _totalComDesconto(venda);
     final formaPagamento = venda.formaPagamento;
     final parcelas = venda.quantidadeParcelas;
-    final totalRecebido = formaPagamento == 'dinheiro'
-        ? (_valorRecebido ?? 0)
-        : totalVenda;
-    final trocoFinal = formaPagamento == 'dinheiro'
-        ? (totalRecebido - totalVenda).clamp(0, double.infinity).toDouble()
-        : 0.0;
+    late final double totalRecebido;
+    late final double trocoFinal;
+    if (venda.formaPagamento == 'misto') {
+      final linhasBruto = _linhasMistoDoFormulario();
+      final somaBruto = PagamentoOrcamentoCodec.soma(linhasBruto);
+      totalRecebido = somaBruto;
+      trocoFinal =
+          (somaBruto - totalVenda).clamp(0, double.infinity).toDouble();
+    } else {
+      final parteDinheiro = _parteDinheiroNaFinalizacao(venda, totalVenda);
+      totalRecebido = parteDinheiro > 0.001
+          ? (_valorRecebido ?? 0)
+          : totalVenda;
+      trocoFinal = parteDinheiro > 0.001
+          ? ((_valorRecebido ?? 0) - parteDinheiro)
+              .clamp(0, double.infinity)
+              .toDouble()
+          : 0.0;
+    }
     final itensCount = venda.itens.length;
 
-    if (venda.formaPagamento == 'dinheiro') {
-      final recebido = _valorRecebido ?? 0;
-      if (recebido < totalVenda) {
+    if (venda.formaPagamento == 'misto') {
+      final linhasBruto = _linhasMistoDoFormulario();
+      final soma = PagamentoOrcamentoCodec.soma(linhasBruto);
+      final divergenciaMisto = _validarConferenciaMistoIgualOrcamento(
+        venda,
+        totalVenda,
+      );
+      if (divergenciaMisto != null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Valor recebido insuficiente para finalizar em dinheiro.',
-            ),
-          ),
+          SnackBar(content: Text(divergenciaMisto)),
         );
         return;
       }
-    }
-    if (venda.formaPagamento == 'cartao_credito') {
-      final valorParcela = venda.quantidadeParcelas > 0
-          ? (totalVenda / venda.quantidadeParcelas)
-          : totalVenda;
-      if (valorParcela < _valorMinimoParcela) {
+      if (soma < totalVenda - _tolMistoPagamento) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Parcela minima de ${_formatarMoeda(_valorMinimoParcela)} nao atingida. Ajuste as parcelas.',
+              'Pagamento misto: total informado (${_formatarMoeda(soma)}) e inferior '
+              'ao valor a pagar (${_formatarMoeda(totalVenda)}).',
             ),
           ),
         );
         return;
       }
-    }
-    if (venda.formaPagamento == 'cartao_debito' &&
-        venda.quantidadeParcelas != 1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cartao de debito deve ser sempre a vista (1x).'),
-        ),
-      );
-      return;
+      final linhas = _normalizarLinhasMistoGravacao(linhasBruto, totalVenda);
+      for (final l in linhas) {
+        if (l.meio == 'cartao_credito') {
+          final valorParcela =
+              l.parcelas > 0 ? l.valor / l.parcelas : l.valor;
+          if (valorParcela < _valorMinimoParcela) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Parcela minima de ${_formatarMoeda(_valorMinimoParcela)} no cartao de credito.',
+                ),
+              ),
+            );
+            return;
+          }
+        }
+        if (l.meio == 'cartao_debito' && l.parcelas != 1) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Cartao de debito deve ser a vista em cada linha.'),
+            ),
+          );
+          return;
+        }
+      }
+    } else {
+      if (venda.formaPagamento == 'dinheiro') {
+        final recebido = _valorRecebido ?? 0;
+        if (recebido < totalVenda) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Valor recebido insuficiente para finalizar em dinheiro.',
+              ),
+            ),
+          );
+          return;
+        }
+      }
+      if (venda.formaPagamento == 'cartao_credito') {
+        final valorParcela = venda.quantidadeParcelas > 0
+            ? (totalVenda / venda.quantidadeParcelas)
+            : totalVenda;
+        if (valorParcela < _valorMinimoParcela) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Parcela minima de ${_formatarMoeda(_valorMinimoParcela)} nao atingida. Ajuste as parcelas.',
+              ),
+            ),
+          );
+          return;
+        }
+      }
+      if (venda.formaPagamento == 'cartao_debito' &&
+          venda.quantidadeParcelas != 1) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cartao de debito deve ser sempre a vista (1x).'),
+          ),
+        );
+        return;
+      }
     }
     final confirmarFinalizacao = await _mostrarResumoFechamentoVenda(
       numeroOrcamento: venda.numeroOrcamento,
@@ -1683,6 +2155,17 @@ class _CaixaPageState extends State<CaixaPage> {
           descontoAplicado,
         );
       }
+      if (venda.formaPagamento == 'misto') {
+        final linhasBruto = _linhasMistoDoFormulario();
+        if (linhasBruto.isNotEmpty) {
+          final linhasConf =
+              _normalizarLinhasMistoGravacao(linhasBruto, totalVenda);
+          widget.vendaRepository.substituirPagamentosMistoOrcamento(
+            venda.id,
+            linhasConf,
+          );
+        }
+      }
       widget.vendaRepository.converterOrcamentoParaVenda(
         venda.id,
         permitirVendaSemEstoque: _permitirVendaSemEstoque,
@@ -1701,6 +2184,7 @@ class _CaixaPageState extends State<CaixaPage> {
       }
       _carregarOrcamentos();
       if (!mounted) return;
+      _disposeMistoEdicao();
       setState(() {
         _selecionado = null;
         _itemSelecionadoId = null;
@@ -1711,7 +2195,7 @@ class _CaixaPageState extends State<CaixaPage> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Orcamento #${venda.numeroOrcamento} finalizado.'),
+          content: Text('Venda #${venda.numeroOrcamento} finalizada.'),
         ),
       );
       await _mostrarAcoesNotaPosVenda(
@@ -1833,7 +2317,7 @@ class _CaixaPageState extends State<CaixaPage> {
               pw.SizedBox(height: 6),
               pw.Divider(),
               pw.Text(
-                'ORCAMENTO #${venda.numeroOrcamento}',
+                'VENDA #${venda.numeroOrcamento}',
                 style: pw.TextStyle(
                   fontSize: 10,
                   fontWeight: pw.FontWeight.bold,
@@ -2000,8 +2484,8 @@ class _CaixaPageState extends State<CaixaPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Nota da venda'),
-          content: const Text('Deseja imprimir a nota agora ou gerar PDF?'),
+          title: const Text('Cupom da venda'),
+          content: const Text('Deseja imprimir o cupom agora ou gerar PDF?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, 'fechar'),
@@ -2010,7 +2494,7 @@ class _CaixaPageState extends State<CaixaPage> {
             OutlinedButton.icon(
               onPressed: () => Navigator.pop(context, 'pdf'),
               icon: const Icon(Icons.picture_as_pdf_outlined),
-              label: const Text('Mandar nota em PDF'),
+              label: const Text('Mandar cupom em PDF'),
             ),
             OutlinedButton.icon(
               onPressed: () => Navigator.pop(context, 'direto'),
@@ -2020,7 +2504,7 @@ class _CaixaPageState extends State<CaixaPage> {
             ElevatedButton.icon(
               onPressed: () => Navigator.pop(context, 'imprimir'),
               icon: const Icon(Icons.print_outlined),
-              label: const Text('Imprimir nota'),
+              label: const Text('Imprimir cupom'),
             ),
           ],
         );
@@ -2052,7 +2536,7 @@ class _CaixaPageState extends State<CaixaPage> {
         await Printing.directPrintPdf(
           printer: printer,
           onLayout: (_) async => pdfBytes,
-          name: 'Nota Orcamento ${venda.numeroOrcamento}',
+          name: 'Venda ${venda.numeroOrcamento}',
           format: config.modeloPdf == 'a4'
               ? PdfPageFormat.a4
               : PdfPageFormat(80 * PdfPageFormat.mm, double.infinity),
@@ -2061,7 +2545,7 @@ class _CaixaPageState extends State<CaixaPage> {
       }
       final path = await _escolherSalvarPdf(
         bytes: pdfBytes,
-        suggestedFileName: 'nota_orcamento_${venda.numeroOrcamento}.pdf',
+        suggestedFileName: 'venda_${venda.numeroOrcamento}.pdf',
         initialDirectory: config.pastaPadraoPdf.trim().isEmpty
             ? null
             : config.pastaPadraoPdf.trim(),
@@ -2094,7 +2578,7 @@ class _CaixaPageState extends State<CaixaPage> {
       builder: (context) {
         final semantic = Theme.of(context).extension<AppSemanticColors>();
         return AlertDialog(
-          title: Text('Venda finalizada - Orcamento #$numeroOrcamento'),
+          title: Text('Venda #$numeroOrcamento finalizada'),
           content: SizedBox(
             width: 520,
             child: Column(
@@ -2312,6 +2796,7 @@ class _CaixaPageState extends State<CaixaPage> {
     _valorRecebidoFocusNode.dispose();
     _orcamentosScrollController.dispose();
     _itensScrollController.dispose();
+    _disposeMistoEdicao();
     super.dispose();
   }
 
@@ -2333,10 +2818,36 @@ class _CaixaPageState extends State<CaixaPage> {
     final subtotalProdutos = (totalSelecionado - freteSelecionado)
         .clamp(0, double.infinity)
         .toDouble();
-    final troco = (((_valorRecebido ?? 0) - totalComDesconto).clamp(
-      0,
-      double.infinity,
-    )).toDouble();
+    final parteDinheiroResumo = selecionado == null
+        ? 0.0
+        : _parteDinheiroNaFinalizacao(selecionado, totalComDesconto);
+    final linhasMistoCaixa = selecionado != null &&
+            selecionado.formaPagamento == 'misto'
+        ? (_mistoValorControllers.isNotEmpty
+            ? _linhasMistoDoFormulario()
+            : _linhasPagamentoEscaladasCaixa(selecionado, totalComDesconto))
+        : <PagamentoOrcamentoLinha>[];
+    final somaMistoCaixa = linhasMistoCaixa.isEmpty
+        ? 0.0
+        : PagamentoOrcamentoCodec.soma(linhasMistoCaixa);
+    final troco = selecionado == null
+        ? 0.0
+        : selecionado.formaPagamento == 'misto'
+            ? (somaMistoCaixa - totalComDesconto)
+                .clamp(0.0, double.infinity)
+                .toDouble()
+            : (parteDinheiroResumo > 0.001
+                ? ((_valorRecebido ?? 0) - parteDinheiroResumo)
+                    .clamp(0, double.infinity)
+                    .toDouble()
+                : 0.0);
+    final valorTotalRecebidoCard = selecionado == null
+        ? 0.0
+        : selecionado.formaPagamento == 'misto' && linhasMistoCaixa.isNotEmpty
+            ? somaMistoCaixa
+            : (_caixaPrecisaValorRecebidoDinheiro(selecionado)
+                ? (_valorRecebido ?? 0)
+                : totalComDesconto);
     return Shortcuts(
       shortcuts: <LogicalKeySet, Intent>{
         LogicalKeySet(LogicalKeyboardKey.numpadAdd):
@@ -2514,8 +3025,7 @@ class _CaixaPageState extends State<CaixaPage> {
                                               children: [
                                                 Expanded(
                                                   child: Text(
-                                                    'Pagamento: ${_rotuloFormaPagamento(selecionado.formaPagamento)}'
-                                                    '${selecionado.formaPagamento == 'cartao_credito' ? ' | ${selecionado.quantidadeParcelas}x' : ''}',
+                                                    'Pagamento: ${_rotuloPagamentoCabecalho(selecionado)}',
                                                   ),
                                                 ),
                                                 Text(
@@ -2594,11 +3104,11 @@ class _CaixaPageState extends State<CaixaPage> {
                                             ),
                                           ],
                                           const SizedBox(height: 8),
-                                          SizedBox(
-                                            height: isCompact
-                                                ? (constraints.maxHeight * 0.18).clamp(110.0, 165.0)
-                                                : (constraints.maxHeight * 0.30).clamp(170.0, 280.0),
+                                          Expanded(
+                                            flex: 2,
                                             child: Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.stretch,
                                               children: [
                                                 Expanded(
                                                   child: Card(
@@ -2904,10 +3414,39 @@ class _CaixaPageState extends State<CaixaPage> {
                                               ],
                                             ),
                                           ),
+                                          Expanded(
+                                            flex: 3,
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.stretch,
+                                              children: [
+                                                Expanded(
+                                                  child: SingleChildScrollView(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                      bottom: 8,
+                                                    ),
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
                                           const SizedBox(height: 4),
                                           _buildBotaoGestaoCaixa(context),
-                                          const SizedBox(height: 4),
-                                          if (!isCompact) ...[
+                                          const SizedBox(height: 12),
+                                          if (selecionado.formaPagamento ==
+                                                  'misto' &&
+                                              linhasMistoCaixa.isNotEmpty) ...[
+                                            _buildPainelPagamentosMistoNoCaixa(
+                                              context,
+                                              venda: selecionado,
+                                              totalComDesconto: totalComDesconto,
+                                              descontoCaixaAplicado:
+                                                  descontoSelecionado > 0.001,
+                                            ),
+                                            const SizedBox(height: 12),
+                                          ],
+                                          if (!isCompact && _mostrarCampoDescontoCaixa) ...[
                                             Container(
                                               width: double.infinity,
                                               padding: const EdgeInsets.all(8),
@@ -2939,6 +3478,16 @@ class _CaixaPageState extends State<CaixaPage> {
                                                     onSelectionChanged: (values) {
                                                       setState(() {
                                                         _tipoDesconto = values.first;
+                                                        if (_selecionado !=
+                                                                null &&
+                                                            _selecionado!
+                                                                    .formaPagamento ==
+                                                                'misto') {
+                                                          _prepararEdicaoMisto(
+                                                            _selecionado!,
+                                                          );
+                                                        }
+                                                        _sincronizarRecebidoPdVComOrcamento();
                                                       });
                                                     },
                                                   ),
@@ -2964,7 +3513,18 @@ class _CaixaPageState extends State<CaixaPage> {
                                                             : 'Ex.: 25,00',
                                                       ),
                                                       onChanged: (_) {
-                                                        setState(() {});
+                                                        setState(() {
+                                                          if (_selecionado !=
+                                                                  null &&
+                                                              _selecionado!
+                                                                      .formaPagamento ==
+                                                                  'misto') {
+                                                            _prepararEdicaoMisto(
+                                                              _selecionado!,
+                                                            );
+                                                          }
+                                                          _sincronizarRecebidoPdVComOrcamento();
+                                                        });
                                                       },
                                                     ),
                                                   ),
@@ -2985,7 +3545,9 @@ class _CaixaPageState extends State<CaixaPage> {
                                                 ],
                                               ),
                                             ),
-                                            const SizedBox(height: 4),
+                                            const SizedBox(height: 10),
+                                          ],
+                                          if (!isCompact) ...[
                                             Row(
                                               children: [
                                                 Expanded(
@@ -3007,14 +3569,16 @@ class _CaixaPageState extends State<CaixaPage> {
                                                     ),
                                                   ),
                                                 ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: _buildResumoCard(
-                                                    context,
-                                                    label: 'DESCONTO',
-                                                    valor: '- ${_formatarMoeda(descontoSelecionado)}',
+                                                if (_mostrarCampoDescontoCaixa) ...[
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: _buildResumoCard(
+                                                      context,
+                                                      label: 'DESCONTO',
+                                                      valor: '- ${_formatarMoeda(descontoSelecionado)}',
+                                                    ),
                                                   ),
-                                                ),
+                                                ],
                                                 const SizedBox(width: 8),
                                                 Expanded(
                                                   child: _buildResumoCard(
@@ -3029,9 +3593,13 @@ class _CaixaPageState extends State<CaixaPage> {
                                                 Expanded(
                                                   child: _buildResumoCard(
                                                     context,
-                                                    label: 'TOTAL RECEBIDO',
+                                                    label: selecionado
+                                                                .formaPagamento ==
+                                                            'misto'
+                                                        ? 'SOMA DOS MEIOS'
+                                                        : 'TOTAL RECEBIDO',
                                                     valor: _formatarMoeda(
-                                                      _valorRecebido ?? 0,
+                                                      valorTotalRecebidoCard,
                                                     ),
                                                   ),
                                                 ),
@@ -3046,10 +3614,18 @@ class _CaixaPageState extends State<CaixaPage> {
                                                 ),
                                               ],
                                             ),
-                                            const SizedBox(height: 4),
+                                            SizedBox(
+                                              height:
+                                                  _caixaPrecisaValorRecebidoDinheiro(
+                                                    selecionado,
+                                                  )
+                                                      ? 16
+                                                      : 10,
+                                            ),
                                           ],
-                                          if (selecionado.formaPagamento ==
-                                              'dinheiro')
+                                          if (_caixaPrecisaValorRecebidoDinheiro(
+                                            selecionado,
+                                          ))
                                             TextField(
                                               controller:
                                                   _valorRecebidoController,
@@ -3059,9 +3635,12 @@ class _CaixaPageState extends State<CaixaPage> {
                                                   const TextInputType.numberWithOptions(
                                                     decimal: true,
                                                   ),
-                                              decoration: const InputDecoration(
+                                              decoration: InputDecoration(
                                                 labelText:
-                                                    'Valor recebido (dinheiro)',
+                                                    selecionado.formaPagamento ==
+                                                            'misto'
+                                                        ? 'Valor recebido em dinheiro (troco sobre especie)'
+                                                        : 'Valor recebido (dinheiro)',
                                                 hintText: 'Ex.: 100,00',
                                               ),
                                               onChanged: (value) {
@@ -3115,24 +3694,7 @@ class _CaixaPageState extends State<CaixaPage> {
                                                       context,
                                                     ).textTheme.bodySmall,
                                                   ),
-                                                  const SizedBox(height: 6),
-                                                  SizedBox(
-                                                    width: double.infinity,
-                                                    child: ElevatedButton.icon(
-                                                      onPressed: () =>
-                                                          _finalizarOrcamento(
-                                                            selecionado,
-                                                          ),
-                                                      icon: const Icon(
-                                                        Icons
-                                                            .check_circle_outline,
-                                                      ),
-                                                      label: const Text(
-                                                        'Finalizar venda (Enter)',
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 4),
+                                                  const SizedBox(height: 8),
                                                   Align(
                                                     alignment:
                                                         Alignment.centerLeft,
@@ -3202,18 +3764,60 @@ class _CaixaPageState extends State<CaixaPage> {
                                                   ],
                                                 ],
                                               ),
-                                            )
-                                          else
-                                            SizedBox(
-                                              width: double.infinity,
-                                              child: ElevatedButton.icon(
-                                                onPressed: () =>
-                                                    _finalizarOrcamento(selecionado),
-                                                icon: const Icon(Icons.check_circle_outline),
-                                                label: const Text('Finalizar venda (Enter)'),
+                                            ),
+                                                ],
                                               ),
                                             ),
-                                          ],
+                                          ),
+                                                SafeArea(
+                                                  top: false,
+                                                  minimum: EdgeInsets.zero,
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                      top: 6,
+                                                    ),
+                                                    child: Material(
+                                                      elevation: 4,
+                                                      shadowColor: Colors.black26,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .surface,
+                                                      child: Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                          horizontal: 4,
+                                                          vertical: 8,
+                                                        ),
+                                                        child: SizedBox(
+                                                          width:
+                                                              double.infinity,
+                                                          height: 48,
+                                                          child:
+                                                              ElevatedButton
+                                                                  .icon(
+                                                            onPressed: () =>
+                                                                _finalizarOrcamento(
+                                                              selecionado,
+                                                            ),
+                                                            icon: const Icon(
+                                                              Icons
+                                                                  .check_circle_outline,
+                                                            ),
+                                                            label: const Text(
+                                                              'Finalizar venda (Enter)',
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
                                         );
                                         },
                                     ),
@@ -3309,6 +3913,17 @@ class _CaixaPageState extends State<CaixaPage> {
                   ),
                 ),
                 OutlinedButton.icon(
+                  onPressed: widget.podeLeituraParcialCaixa ? _mostrarLeituraParcial : null,
+                  icon: const Icon(Icons.analytics_outlined),
+                  label: const Text('Leitura parcial'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 34),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+                OutlinedButton.icon(
                   onPressed: _abrirHistoricoAuditoria,
                   icon: const Icon(Icons.fact_check_outlined),
                   label: const Text('Auditoria'),
@@ -3391,6 +4006,11 @@ class _CaixaPageState extends State<CaixaPage> {
             label: const Text('Fechamento'),
           ),
           OutlinedButton.icon(
+            onPressed: widget.podeLeituraParcialCaixa ? _mostrarLeituraParcial : null,
+            icon: const Icon(Icons.analytics_outlined),
+            label: const Text('Leitura parcial'),
+          ),
+          OutlinedButton.icon(
             onPressed: _abrirHistoricoAuditoria,
             icon: const Icon(Icons.fact_check_outlined),
             label: const Text('Auditoria'),
@@ -3467,18 +4087,248 @@ class _CaixaPageState extends State<CaixaPage> {
                           onTap: () {
                             setState(() {
                               _selecionado = orc;
-                              _valorRecebidoController.clear();
-                              _valorRecebido = null;
                               _descontoController.clear();
                               _tipoDesconto = 'percentual';
                               _itemSelecionadoId = null;
+                              _prepararEdicaoMisto(orc);
+                              _sincronizarRecebidoPdVComOrcamento();
                             });
-                            _focarValorRecebidoSeDinheiro();
+                            _focarEntradaPrincipalCaixa();
                           },
                         );
                       },
                     ),
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPainelPagamentosMistoNoCaixa(
+    BuildContext context, {
+    required Venda venda,
+    required double totalComDesconto,
+    required bool descontoCaixaAplicado,
+  }) {
+    if (_mistoValorControllers.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final linhasLidas = _linhasMistoDoFormulario();
+    final somaAtual = linhasLidas.isEmpty
+        ? 0.0
+        : PagamentoOrcamentoCodec.soma(linhasLidas);
+    final parteDinheiroForm = linhasLidas.isEmpty
+        ? 0.0
+        : PagamentoOrcamentoCodec.somaPorMeio(linhasLidas, 'dinheiro');
+    final pagamentoInsuficiente =
+        somaAtual < totalComDesconto - _tolMistoPagamento;
+    final trocoSobreTotal =
+        (somaAtual - totalComDesconto).clamp(0.0, double.infinity).toDouble();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.account_balance_wallet_outlined,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Pagamento misto (conferir / ajustar)',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _prepararEdicaoMisto(venda);
+                    _sincronizarRecebidoPdVComOrcamento();
+                  });
+                  _focarEntradaPrincipalCaixa();
+                },
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text('Restaurar PDV'),
+              ),
+            ],
+          ),
+          if (descontoCaixaAplicado) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Valores abaixo ja consideram o desconto aplicado no caixa.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          for (var i = 0; i < _mistoValorControllers.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      '${_rotuloFormaPagamento(_mistoLinhasModelo[i].meio)}'
+                      '${_mistoLinhasModelo[i].meio == 'cartao_credito' ? ' · ${_mistoLinhasModelo[i].parcelas}x' : ''}',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 132,
+                    child: TextField(
+                      controller: _mistoValorControllers[i],
+                      focusNode:
+                          i < _mistoValorFocusNodes.length
+                              ? _mistoValorFocusNodes[i]
+                              : null,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      textAlign: TextAlign.right,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        labelText: 'Valor',
+                        prefixText: 'R\$ ',
+                      ),
+                      onChanged: (_) {
+                        setState(() {
+                          _sincronizarRecebidoPdVComOrcamento();
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Divider(height: 1, color: theme.colorScheme.outlineVariant),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Soma dos meios',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  _formatarMoeda(somaAtual),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: pagamentoInsuficiente
+                        ? theme.colorScheme.error
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Total a pagar',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                Text(
+                  _formatarMoeda(totalComDesconto),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (pagamentoInsuficiente)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'A soma ainda nao cobre o total a pagar. Aumente um dos meios.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ),
+          if (!pagamentoInsuficiente && trocoSobreTotal > 0.02)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.payments_outlined,
+                      size: 20,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Troco (valor entregue alem do total)',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      _formatarMoeda(trocoSobreTotal),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(height: 8),
+          Text(
+            parteDinheiroForm > 0.001
+                ? 'Parcelas do cartao seguem o PDV. Em dinheiro, informe o que o '
+                    'cliente entregou; o troco aparece acima quando passar do total.'
+                : 'Parcelas do cartao seguem o PDV.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),

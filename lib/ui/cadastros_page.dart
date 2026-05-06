@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/cliente_repository.dart';
 import '../data/funcionario_repository.dart';
+import '../data/motorista_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
@@ -9,6 +10,7 @@ import '../data/vendedor_repository.dart';
 import '../model/usuario_sistema.dart';
 import 'clientes_page.dart';
 import 'funcionarios_page.dart';
+import 'motoristas_page.dart';
 import 'produtos_page.dart';
 import 'usuarios_page.dart';
 import 'vendedores_page.dart';
@@ -21,6 +23,7 @@ class CadastrosPage extends StatelessWidget {
     required this.vendaRepository,
     required this.vendedorRepository,
     required this.funcionarioRepository,
+    required this.motoristaRepository,
     required this.usuarioLogado,
   });
 
@@ -29,6 +32,7 @@ class CadastrosPage extends StatelessWidget {
   final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
   final FuncionarioRepository funcionarioRepository;
+  final MotoristaRepository motoristaRepository;
   final UsuarioSistema usuarioLogado;
 
   @override
@@ -56,6 +60,26 @@ class CadastrosPage extends StatelessWidget {
                     }
                     : null,
                 child: const Text('Produtos'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed:
+                    (usuarioLogado.admin || usuarioLogado.podeCadastros)
+                    ? () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MotoristasPage(
+                        motoristaRepository: motoristaRepository,
+                      ),
+                    ),
+                  );
+                    }
+                    : null,
+                child: const Text('Motoristas'),
               ),
             ),
             const SizedBox(height: 12),

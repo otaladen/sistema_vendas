@@ -18,6 +18,7 @@ import 'model/cliente.dart';
 import 'model/funcionario.dart';
 import 'model/historico_entrega.dart';
 import 'model/item_venda.dart';
+import 'model/motorista.dart';
 import 'model/produto.dart';
 import 'model/venda.dart';
 import 'model/vendedor.dart';
@@ -252,7 +253,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(27, 1438916366591562606),
+    lastPropertyId: const obx_int.IdUid(29, 91951873385185917),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -421,6 +422,18 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(27, 1438916366591562606),
         name: 'canceladaEm',
         type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(28, 5283079864891234155),
+        name: 'pagamentosJson',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(29, 91951873385185917),
+        name: 'motoristaEntrega',
+        type: 9,
         flags: 0,
       ),
     ],
@@ -871,6 +884,46 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(8, 3546637958251126967),
+    name: 'Motorista',
+    lastPropertyId: const obx_int.IdUid(5, 6874770349840271468),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 9154550035482299243),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 7110726591828941183),
+        name: 'nome',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 1294304417758967385),
+        name: 'telefone',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 3901757347579355748),
+        name: 'ativo',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 6874770349840271468),
+        name: 'criadoEm',
+        type: 10,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -916,7 +969,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(7, 3249171710221978790),
+    lastEntityId: const obx_int.IdUid(8, 3546637958251126967),
     lastIndexId: const obx_int.IdUid(5, 2420440196149968766),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
@@ -1241,7 +1294,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           object.motivoCancelamento,
         );
         final canceladaPorOffset = fbb.writeString(object.canceladaPor);
-        fbb.startTable(28);
+        final pagamentosJsonOffset = fbb.writeString(object.pagamentosJson);
+        final motoristaEntregaOffset = fbb.writeString(object.motoristaEntrega);
+        fbb.startTable(30);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -1269,6 +1324,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(24, motivoCancelamentoOffset);
         fbb.addOffset(25, canceladaPorOffset);
         fbb.addInt64(26, object.canceladaEm?.millisecondsSinceEpoch);
+        fbb.addOffset(27, pagamentosJsonOffset);
+        fbb.addOffset(28, motoristaEntregaOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1328,6 +1385,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           22,
           0,
         );
+        final pagamentosJsonParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 58, '');
         final tipoEntregaParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 26, '');
@@ -1343,6 +1403,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final observacaoEntregaParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 32, '');
+        final motoristaEntregaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 60, '');
         final statusEntregaParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 34, '');
@@ -1410,10 +1473,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
           numeroOrcamento: numeroOrcamentoParam,
           formaPagamento: formaPagamentoParam,
           quantidadeParcelas: quantidadeParcelasParam,
+          pagamentosJson: pagamentosJsonParam,
           tipoEntrega: tipoEntregaParam,
           valorFrete: valorFreteParam,
           enderecoEntrega: enderecoEntregaParam,
           observacaoEntrega: observacaoEntregaParam,
+          motoristaEntrega: motoristaEntregaParam,
           statusEntrega: statusEntregaParam,
           prioridadeEntrega: prioridadeEntregaParam,
           janelaEntrega: janelaEntregaParam,
@@ -1975,6 +2040,62 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    Motorista: obx_int.EntityDefinition<Motorista>(
+      model: _entities[7],
+      toOneRelations: (Motorista object) => [],
+      toManyRelations: (Motorista object) => {},
+      getId: (Motorista object) => object.id,
+      setId: (Motorista object, int id) {
+        object.id = id;
+      },
+      objectToFB: (Motorista object, fb.Builder fbb) {
+        final nomeOffset = fbb.writeString(object.nome);
+        final telefoneOffset = fbb.writeString(object.telefone);
+        fbb.startTable(6);
+        fbb.addInt64(0, object.id);
+        fbb.addOffset(1, nomeOffset);
+        fbb.addOffset(2, telefoneOffset);
+        fbb.addBool(3, object.ativo);
+        fbb.addInt64(4, object.criadoEm.millisecondsSinceEpoch);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final nomeParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 6, '');
+        final telefoneParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final ativoParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          10,
+          false,
+        );
+        final criadoEmParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 12, 0),
+          isUtc: true,
+        );
+        final object = Motorista(
+          id: idParam,
+          nome: nomeParam,
+          telefone: telefoneParam,
+          ativo: ativoParam,
+          criadoEm: criadoEmParam,
+        );
+
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -2282,6 +2403,16 @@ class Venda_ {
   /// See [Venda.canceladaEm].
   static final canceladaEm = obx.QueryDateProperty<Venda>(
     _entities[2].properties[26],
+  );
+
+  /// See [Venda.pagamentosJson].
+  static final pagamentosJson = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[27],
+  );
+
+  /// See [Venda.motoristaEntrega].
+  static final motoristaEntrega = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[28],
   );
 
   /// see [Venda.itens]
@@ -2628,5 +2759,33 @@ class Funcionario_ {
   /// See [Funcionario.valesJson].
   static final valesJson = obx.QueryStringProperty<Funcionario>(
     _entities[6].properties[26],
+  );
+}
+
+/// [Motorista] entity fields to define ObjectBox queries.
+class Motorista_ {
+  /// See [Motorista.id].
+  static final id = obx.QueryIntegerProperty<Motorista>(
+    _entities[7].properties[0],
+  );
+
+  /// See [Motorista.nome].
+  static final nome = obx.QueryStringProperty<Motorista>(
+    _entities[7].properties[1],
+  );
+
+  /// See [Motorista.telefone].
+  static final telefone = obx.QueryStringProperty<Motorista>(
+    _entities[7].properties[2],
+  );
+
+  /// See [Motorista.ativo].
+  static final ativo = obx.QueryBooleanProperty<Motorista>(
+    _entities[7].properties[3],
+  );
+
+  /// See [Motorista.criadoEm].
+  static final criadoEm = obx.QueryDateProperty<Motorista>(
+    _entities[7].properties[4],
   );
 }

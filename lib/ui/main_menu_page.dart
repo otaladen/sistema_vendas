@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../data/cliente_repository.dart';
 import '../data/funcionario_repository.dart';
+import '../data/motorista_repository.dart';
+import '../data/sync/lan_sync_scheduler.dart';
 import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
@@ -11,7 +13,7 @@ import 'configuracoes_page.dart';
 import 'estoque_page.dart';
 import 'vendas_page.dart';
 
-class MainMenuPage extends StatelessWidget {
+class MainMenuPage extends StatefulWidget {
   const MainMenuPage({
     super.key,
     required this.produtoRepository,
@@ -19,8 +21,10 @@ class MainMenuPage extends StatelessWidget {
     required this.vendaRepository,
     required this.vendedorRepository,
     required this.funcionarioRepository,
+    required this.motoristaRepository,
     required this.usuarioLogado,
     required this.onLogout,
+    required this.lanSyncScheduler,
   });
 
   final ProdutoRepository produtoRepository;
@@ -28,8 +32,23 @@ class MainMenuPage extends StatelessWidget {
   final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
   final FuncionarioRepository funcionarioRepository;
+  final MotoristaRepository motoristaRepository;
   final UsuarioSistema usuarioLogado;
   final VoidCallback onLogout;
+  final LanSyncScheduler lanSyncScheduler;
+
+  @override
+  State<MainMenuPage> createState() => _MainMenuPageState();
+}
+
+class _MainMenuPageState extends State<MainMenuPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.lanSyncScheduler.iniciar();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,11 +56,11 @@ class MainMenuPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('MENU PRINCIPAL'),
         actions: [
-          Center(child: Text(usuarioLogado.login)),
+          Center(child: Text(widget.usuarioLogado.login)),
           const SizedBox(width: 8),
           IconButton(
             tooltip: 'Sair',
-            onPressed: onLogout,
+            onPressed: widget.onLogout,
             icon: const Icon(Icons.logout),
           ),
         ],
@@ -53,18 +72,20 @@ class MainMenuPage extends StatelessWidget {
           children: [
             _MenuButton(
               titulo: 'Cadastros',
-              habilitado: usuarioLogado.admin || usuarioLogado.podeCadastros,
+              habilitado:
+                  widget.usuarioLogado.admin || widget.usuarioLogado.podeCadastros,
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => CadastrosPage(
-                      produtoRepository: produtoRepository,
-                      clienteRepository: clienteRepository,
-                      vendaRepository: vendaRepository,
-                      vendedorRepository: vendedorRepository,
-                      funcionarioRepository: funcionarioRepository,
-                      usuarioLogado: usuarioLogado,
+                      produtoRepository: widget.produtoRepository,
+                      clienteRepository: widget.clienteRepository,
+                      vendaRepository: widget.vendaRepository,
+                      vendedorRepository: widget.vendedorRepository,
+                      funcionarioRepository: widget.funcionarioRepository,
+                      motoristaRepository: widget.motoristaRepository,
+                      usuarioLogado: widget.usuarioLogado,
                     ),
                   ),
                 );
@@ -73,13 +94,14 @@ class MainMenuPage extends StatelessWidget {
             const SizedBox(height: 12),
             _MenuButton(
               titulo: 'Estoque',
-              habilitado: usuarioLogado.admin || usuarioLogado.podeEstoque,
+              habilitado:
+                  widget.usuarioLogado.admin || widget.usuarioLogado.podeEstoque,
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) =>
-                        EstoquePage(produtoRepository: produtoRepository),
+                        EstoquePage(produtoRepository: widget.produtoRepository),
                   ),
                 );
               },
@@ -87,24 +109,32 @@ class MainMenuPage extends StatelessWidget {
             const SizedBox(height: 12),
             _MenuButton(
               titulo: 'Vendas',
-              habilitado: usuarioLogado.admin || usuarioLogado.podeVendas,
+              habilitado:
+                  widget.usuarioLogado.admin || widget.usuarioLogado.podeVendas,
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => VendasPage(
-                      produtoRepository: produtoRepository,
-                      clienteRepository: clienteRepository,
-                      vendaRepository: vendaRepository,
-                      vendedorRepository: vendedorRepository,
-                      usuarioAtual: usuarioLogado.login,
+                      produtoRepository: widget.produtoRepository,
+                      clienteRepository: widget.clienteRepository,
+                      vendaRepository: widget.vendaRepository,
+                      vendedorRepository: widget.vendedorRepository,
+                      usuarioAtual: widget.usuarioLogado.login,
+                      podeLeituraParcialCaixa:
+                          widget.usuarioLogado.admin ||
+                          widget.usuarioLogado.podeLeituraParcialCaixa,
                       podeManutencaoAuditoriaCaixa:
-                          usuarioLogado.admin ||
-                          usuarioLogado.podeManutencaoAuditoriaCaixa,
+                          widget.usuarioLogado.admin ||
+                          widget.usuarioLogado.podeManutencaoAuditoriaCaixa,
                       podeCancelarVendas:
-                          usuarioLogado.admin ||
-                          usuarioLogado.podeFinanceiro ||
-                          usuarioLogado.podeManutencaoAuditoriaCaixa,
+                          widget.usuarioLogado.admin ||
+                          widget.usuarioLogado.podeFinanceiro ||
+                          widget.usuarioLogado.podeManutencaoAuditoriaCaixa,
+                      motoristaRepository: widget.motoristaRepository,
+                      podeGerenciarEntregas:
+                          widget.usuarioLogado.admin ||
+                          widget.usuarioLogado.podeEntregas,
                     ),
                   ),
                 );
@@ -114,13 +144,16 @@ class MainMenuPage extends StatelessWidget {
             _MenuButton(
               titulo: 'Configurações',
               habilitado:
-                  usuarioLogado.admin || usuarioLogado.podeConfiguracoes,
+                  widget.usuarioLogado.admin ||
+                  widget.usuarioLogado.podeConfiguracoes,
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        ConfiguracoesPage(vendaRepository: vendaRepository),
+                    builder: (_) => ConfiguracoesPage(
+                      vendaRepository: widget.vendaRepository,
+                      lanSyncScheduler: widget.lanSyncScheduler,
+                    ),
                   ),
                 );
               },

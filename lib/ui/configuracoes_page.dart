@@ -11,14 +11,20 @@ import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
 import '../data/mensageria_repository.dart';
+import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../model/mensagem_log.dart';
 import '../model/mensagem_template.dart';
 
 class ConfiguracoesPage extends StatefulWidget {
-  const ConfiguracoesPage({super.key, required this.vendaRepository});
+  const ConfiguracoesPage({
+    super.key,
+    required this.vendaRepository,
+    this.lanSyncScheduler,
+  });
 
   final VendaRepository vendaRepository;
+  final LanSyncScheduler? lanSyncScheduler;
 
   @override
   State<ConfiguracoesPage> createState() => _ConfiguracoesPageState();
@@ -52,6 +58,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _restauracaoEmAndamento = false;
   String _ultimoBackupPath = '';
   bool _permitirVendaSemEstoque = true;
+  bool _mostrarCampoDescontoCaixa = true;
   List<MensagemTemplate> _templatesMensagem = [];
   int _filaPendente = 0;
   int _logsTotais = 0;
@@ -63,7 +70,11 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   String _filtroCanalLog = 'todos';
   final _filtroTextoLogController = TextEditingController();
   final _webhookPayloadController = TextEditingController();
+  final _redeServidorUrlController = TextEditingController();
   List<MensagemLog> _logsFiltrados = [];
+  bool _redeSincronizacaoAtiva = false;
+  bool _testandoRede = false;
+  bool _sincronizandoManual = false;
 
   String _rotuloStatusMensagem(String status) {
     switch (status) {
@@ -105,6 +116,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _mensageriaBackendUrlController.dispose();
     _filtroTextoLogController.dispose();
     _webhookPayloadController.dispose();
+    _redeServidorUrlController.dispose();
     super.dispose();
   }
 
@@ -125,10 +137,13 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _impressoraPadrao = config.impressoraPadrao;
       _logoPath = config.logoPath;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
+      _mostrarCampoDescontoCaixa = config.mostrarCampoDescontoCaixa;
       _whatsApiVersionController.text = config.whatsappApiVersion;
       _whatsPhoneIdController.text = config.whatsappPhoneNumberId;
       _whatsTokenController.text = config.whatsappAccessToken;
       _mensageriaBackendUrlController.text = config.mensageriaBackendUrl;
+      _redeSincronizacaoAtiva = config.redeSincronizacaoAtiva;
+      _redeServidorUrlController.text = config.redeServidorUrl;
       _prefsEmpresaAplicadas = true;
     });
     try {
@@ -339,11 +354,14 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           logoPath: _logoPath,
           limiteDivergenciaCaixa:
               _parseMoeda(_limiteDivergenciaCaixaController.text) ?? 20,
+          mostrarCampoDescontoCaixa: _mostrarCampoDescontoCaixa,
           permitirVendaSemEstoque: _permitirVendaSemEstoque,
           whatsappApiVersion: _whatsApiVersionController.text,
           whatsappPhoneNumberId: _whatsPhoneIdController.text,
           whatsappAccessToken: _whatsTokenController.text,
           mensageriaBackendUrl: _mensageriaBackendUrlController.text,
+          redeSincronizacaoAtiva: _redeSincronizacaoAtiva,
+          redeServidorUrl: _redeServidorUrlController.text,
         ),
       );
       if (!mounted) return;
@@ -354,6 +372,124 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       if (mounted) {
         setState(() => _salvando = false);
       }
+    }
+  }
+
+  Uri? _parseUriServidorRede(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    final comEsquema = s.contains('://') ? s : 'http://$s';
+    return Uri.tryParse(comEsquema);
+  }
+
+  Future<void> _testarConexaoServidorRede() async {
+    final uri = _parseUriServidorRede(_redeServidorUrlController.text);
+    if (uri == null || uri.host.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Informe o endereco do servidor (ex.: 192.168.1.10:8787 ou http://servidor:8787).',
+          ),
+        ),
+      );
+      return;
+    }
+    final porta = uri.hasPort
+        ? uri.port
+        : (uri.scheme == 'https' ? 443 : 80);
+    setState(() => _testandoRede = true);
+    try {
+      await Socket.connect(uri.host, porta, timeout: const Duration(seconds: 6));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Conexao TCP OK com ${uri.host}:$porta. '
+            'Se o servico de sincronizacao ainda nao estiver rodando neste PC, '
+            'instale-o ou ajuste a porta.',
+          ),
+        ),
+      );
+    } on SocketException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Nao foi possivel alcancar ${uri.host}:$porta na rede. '
+            'Verifique IP, cabo/Wi-Fi, firewall do Windows e se o servidor esta ligado. '
+            '(${e.message})',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao testar: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _testandoRede = false);
+    }
+  }
+
+  Future<void> _salvarConfigRede() async {
+    setState(() => _salvando = true);
+    try {
+      final atual = await _configRepository.carregarEmpresaConfig();
+      await _configRepository.salvarEmpresaConfig(
+        atual.copyWith(
+          redeSincronizacaoAtiva: _redeSincronizacaoAtiva,
+          redeServidorUrl: _redeServidorUrlController.text.trim(),
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Configuracoes de rede salvas.')),
+      );
+    } finally {
+      if (mounted) setState(() => _salvando = false);
+    }
+  }
+
+  Future<void> _sincronizacaoManualAgora() async {
+    final agendador = widget.lanSyncScheduler;
+    if (agendador == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Agendador de sync nao disponivel nesta tela.'),
+        ),
+      );
+      return;
+    }
+    final config = await _configRepository.carregarEmpresaConfig();
+    if (!config.redeSincronizacaoAtiva ||
+        config.redeServidorUrl.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Ative "Usar servidor na rede local", informe o endereco e salve antes.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() => _sincronizandoManual = true);
+    try {
+      final erro = await agendador.sincronizarAgora();
+      if (!mounted) return;
+      if (erro != null && erro.trim().isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sync: $erro'), backgroundColor: Colors.red),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sincronizacao concluida.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sincronizandoManual = false);
     }
   }
 
@@ -1529,6 +1665,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                   const SizedBox(height: 12),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
+                    value: _mostrarCampoDescontoCaixa,
+                    onChanged: (value) {
+                      setState(() {
+                        _mostrarCampoDescontoCaixa = value;
+                      });
+                    },
+                    title: const Text('Mostrar desconto rapido no Caixa'),
+                    subtitle: const Text(
+                      'Desligue para ocultar o campo de desconto na tela do Caixa. '
+                      'O total segue sem desconto adicional pelo operador.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
                     value: _permitirVendaSemEstoque,
                     onChanged: (value) {
                       setState(() {
@@ -1554,9 +1705,116 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             ),
           ),
           const SizedBox(height: 10),
-          const _ConfigCard(
-            titulo: 'Usuarios e Permissoes',
-            descricao: 'Controle de acesso para caixa, vendedor e administrador.',
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Rede e sincronizacao (LAN)',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Para varios PCs na mesma loja, o modelo usual e um computador '
+                    '(ou servidor) rodando um servico com banco/API na rede local; '
+                    'os demais apontam para o endereco IP e porta desse servico. '
+                    'Todos devem estar no mesmo roteador/rede (Ethernet ou Wi-Fi), '
+                    'com IPs na mesma faixa (ex.: 192.168.x.x). No PC servidor, '
+                    'libere a porta no Firewall do Windows para conexoes de entrada.\n\n'
+                    'SERVIDOR: na pasta sync_server, gere o .exe com build_windows_exe.bat e '
+                    'inicie com executar_servidor.bat (ou sistema_vendas_sync_server.exe). '
+                    'Para iniciar com o Windows: PowerShell admin → criar_tarefa_inicializacao.ps1. '
+                    'CLIENTES: mesmo endereco (ex.: 192.168.0.10:8787).',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 10),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    value: _redeSincronizacaoAtiva,
+                    onChanged: (v) => setState(() => _redeSincronizacaoAtiva = v),
+                    title: const Text('Usar servidor de dados na rede local'),
+                    subtitle: const Text(
+                      'Quando ativo, o sistema podera sincronizar com o endereco abaixo '
+                      '(requer servico de sincronizacao instalado no servidor).',
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: _redeServidorUrlController,
+                    decoration: const InputDecoration(
+                      labelText: 'Endereco do servidor na rede',
+                      hintText: 'Ex.: 192.168.0.15:8787 ou http://servidor-loja:9000',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: (_salvando || _testandoRede)
+                              ? null
+                              : _testarConexaoServidorRede,
+                          icon: _testandoRede
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.wifi_tethering_outlined),
+                          label: Text(
+                            _testandoRede ? 'Testando...' : 'Testar alcance na rede',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _salvando ? null : _salvarConfigRede,
+                          icon: const Icon(Icons.save_outlined),
+                          label: Text(_salvando ? 'Salvando...' : 'Salvar rede'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: (_sincronizandoManual || _salvando)
+                          ? null
+                          : _sincronizacaoManualAgora,
+                      icon: _sincronizandoManual
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cloud_sync_outlined),
+                      label: Text(
+                        _sincronizandoManual
+                            ? 'Sincronizando...'
+                            : 'Sincronizar dados agora (pull + push)',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'O teste apenas verifica se o PC alcanca IP e porta na rede (TCP). '
+                    'A sincronizacao completa dos dados depende do servico no servidor.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 10),
           Card(
@@ -1623,24 +1881,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ConfigCard extends StatelessWidget {
-  const _ConfigCard({required this.titulo, required this.descricao});
-
-  final String titulo;
-  final String descricao;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: const Icon(Icons.settings_outlined),
-        title: Text(titulo),
-        subtitle: Text(descricao),
       ),
     );
   }

@@ -8,6 +8,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../domain/pagamento_orcamento.dart';
 import '../data/app_config_repository.dart';
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
@@ -20,6 +21,20 @@ import '../model/venda.dart';
 import '../model/vendedor.dart';
 import 'clientes_page.dart';
 import 'produto_detalhe_venda_page.dart';
+
+class _LinhaPagamentoMistoPdV {
+  _LinhaPagamentoMistoPdV({
+    required this.meio,
+    required this.valorController,
+    this.parcelas = 1,
+  });
+
+  String meio;
+  final TextEditingController valorController;
+  int parcelas;
+
+  void dispose() => valorController.dispose();
+}
 
 class PontoDeVendaPage extends StatefulWidget {
   const PontoDeVendaPage({
@@ -44,8 +59,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   static const int _selecaoSemClienteValor = -1;
   static const int _selecaoNovoClienteValor = -2;
 
-  /// Altura fixa por linha (~6 visíveis na área típica da lista sem scroll excessivo).
+  /// Altura base por linha; em modo pesquisa em destaque fica mais compacta.
   static const double _alturaLinhaProduto = 56;
+  static const double _alturaLinhaProdutoCompacta = 48;
   final _pesquisaController = TextEditingController();
   final _pesquisaFocus = FocusNode(debugLabel: 'pesquisaPdV');
   final _listaProdutosFocus = FocusNode(debugLabel: 'listaProdutosPdV');
@@ -57,10 +73,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   final _focusPagamentoPdV = FocusNode(debugLabel: 'pdvPagamento');
   final _focusEntregaPdV = FocusNode(debugLabel: 'pdvEntrega');
   final _focusParcelasPdV = FocusNode(debugLabel: 'pdvParcelas');
+
   /// Botão "Editar dados da entrega" (frete/endereço estão no dialogo).
   final _focusEditarEntregaPdV = FocusNode(debugLabel: 'pdvEditarEntrega');
   final _focusSalvarOrcamentoPdV = FocusNode(debugLabel: 'pdvSalvarOrcamento');
   final _listaProdutosScrollController = ScrollController();
+
   /// Ancora o painel direito para saber se o foco realmente esta no checkout (hasFocus dos nos falha).
   final GlobalKey _keyPainelCheckoutPdV = GlobalKey();
   final _valorFreteController = TextEditingController();
@@ -85,6 +103,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   String _precoListaAtivo = 'preco1';
   String _formaPagamentoSelecionada = 'dinheiro';
   int _parcelasSelecionadas = 1;
+  bool _pagamentoMistoPdV = false;
+  final List<_LinhaPagamentoMistoPdV> _linhasPagamentoMisto = [];
+  static const double _valorMinimoParcelaCreditoPdV = 5.0;
   int? _clienteSelecionadoId;
   int? _vendedorSelecionadoId;
   String _tipoEntregaSelecionada = 'retirada';
@@ -95,8 +116,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   int? _orcamentoEmEdicaoId;
   int? _orcamentoEmEdicaoNumero;
   bool _mostrarAjudaAtalhos = false;
+
   bool _painelCheckoutRecolhido = false;
-  bool _mostrarMaisOpcoesCheckout = false;
+
+  /// Destaca a área de pesquisa; checkout fica esmaecido ao fundo (F4 alterna).
+  bool _modoFocoPesquisa = false;
+  bool? _checkoutExpandidoAntesModoPesquisa;
 
   /// Agrupa varios KeyDown do F7 no mesmo ciclo (Windows); senao executa dois passos de uma vez.
   int _checkoutF7BurstId = 0;
@@ -156,7 +181,78 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     _valorFreteController.dispose();
     _enderecoEntregaController.dispose();
     _observacaoEntregaController.dispose();
+    _disposeLinhasPagamentoMisto();
     super.dispose();
+  }
+
+  void _disposeLinhasPagamentoMisto() {
+    for (final l in _linhasPagamentoMisto) {
+      l.dispose();
+    }
+    _linhasPagamentoMisto.clear();
+  }
+
+  void _inicializarLinhasMistoPadrao() {
+    _disposeLinhasPagamentoMisto();
+    _linhasPagamentoMisto.addAll([
+      _LinhaPagamentoMistoPdV(
+        meio: 'dinheiro',
+        valorController: TextEditingController(),
+      ),
+      _LinhaPagamentoMistoPdV(
+        meio: 'pix',
+        valorController: TextEditingController(),
+      ),
+    ]);
+  }
+
+  double _somaDigitadaMistoPdV() {
+    var s = 0.0;
+    for (final l in _linhasPagamentoMisto) {
+      s += _parseValorMonetario(l.valorController.text);
+    }
+    return s;
+  }
+
+  List<PagamentoOrcamentoLinha>? _montarLinhasMistoParaSalvar(
+    double totalEsperado,
+  ) {
+    if (!_pagamentoMistoPdV) return null;
+    final out = <PagamentoOrcamentoLinha>[];
+    for (final l in _linhasPagamentoMisto) {
+      final v = _parseValorMonetario(l.valorController.text);
+      if (v <= 0) continue;
+      final par =
+          l.meio == 'cartao_credito' ? l.parcelas.clamp(1, 12) : 1;
+      if (l.meio == 'cartao_debito' && par != 1) {
+        throw StateError('Cartao de debito so a vista.');
+      }
+      out.add(
+        PagamentoOrcamentoLinha(meio: l.meio, valor: v, parcelas: par),
+      );
+    }
+    if (out.length < 2) {
+      throw StateError(
+        'Pagamento misto: informe ao menos duas linhas com valor.',
+      );
+    }
+    final soma = PagamentoOrcamentoCodec.soma(out);
+    if ((soma - totalEsperado).abs() > 0.02) {
+      throw StateError(
+        'Soma dos meios (${_formatarMoeda(soma)}) deve ser ${_formatarMoeda(totalEsperado)}.',
+      );
+    }
+    for (final p in out) {
+      if (p.meio == 'cartao_credito') {
+        final vp = p.parcelas > 0 ? p.valor / p.parcelas : p.valor;
+        if (vp < _valorMinimoParcelaCreditoPdV) {
+          throw StateError(
+            'Parcela minima no cartao de credito: ${_formatarMoeda(_valorMinimoParcelaCreditoPdV)}.',
+          );
+        }
+      }
+    }
+    return out;
   }
 
   void _pesquisar({
@@ -232,7 +328,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     final i = _indiceListaProduto;
     if (i == null || !_listaProdutosScrollController.hasClients) return;
     final maxOffset = _listaProdutosScrollController.position.maxScrollExtent;
-    final target = (i * _alturaLinhaProduto).clamp(0.0, maxOffset);
+    final target = (i * _alturaLinhaListaPdV).clamp(0.0, maxOffset);
     _listaProdutosScrollController.jumpTo(target);
   }
 
@@ -348,16 +444,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       (_shiftPressionado() && event.logicalKey == LogicalKeyboardKey.equal);
 
   List<FocusNode> _cadeiaFocoCheckout() {
-    final nodes = <FocusNode>[
-      _focusClientePdV,
-      _focusVendedorPdV,
-      _focusPagamentoPdV,
-      _focusEntregaPdV,
-    ];
-    if (_tipoEntregaSelecionada == 'entrega_loja') {
-      nodes.add(_focusEditarEntregaPdV);
+    final nodes = <FocusNode>[];
+    if (_carrinho.isNotEmpty) {
+      nodes.add(_carrinhoFocus);
     }
-    nodes.add(_focusParcelasPdV);
     nodes.add(_focusSalvarOrcamentoPdV);
     return nodes;
   }
@@ -441,6 +531,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   }
 
   void _focarProximoCampoCheckout() {
+    _sairModoFocoPesquisaParaCheckoutOuCarrinho();
     if (_painelCheckoutRecolhido) {
       setState(() => _painelCheckoutRecolhido = false);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -453,6 +544,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   }
 
   void _focarCampoCheckoutAnterior() {
+    _sairModoFocoPesquisaParaCheckoutOuCarrinho();
     if (_painelCheckoutRecolhido) {
       setState(() => _painelCheckoutRecolhido = false);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -465,6 +557,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   }
 
   void _focarCarrinhoAtalho() {
+    _sairModoFocoPesquisaParaCheckoutOuCarrinho();
     if (_carrinho.isNotEmpty) {
       setState(() {
         _indiceLinhaCarrinho = (_indiceLinhaCarrinho ?? _carrinho.length - 1)
@@ -488,6 +581,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       if (!mounted) {
         return;
       }
+      _pesquisaFocus.requestFocus();
+    });
+  }
+
+  /// Do painel do orçamento: foca o campo de pesquisa à esquerda (orçamento rápido).
+  void _irParaPesquisaProdutos() {
+    setState(() {
+      if (_modoFocoPesquisa) {
+        _modoFocoPesquisa = false;
+        _checkoutExpandidoAntesModoPesquisa = null;
+      }
+      _painelCheckoutRecolhido = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       _pesquisaFocus.requestFocus();
     });
   }
@@ -527,7 +635,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         }
       } else if (quantidade > disp) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Estoque maximo para ${produto.nome}: $disp.')),
+          SnackBar(
+            content: Text('Estoque maximo para ${produto.nome}: $disp.'),
+          ),
         );
         return;
       }
@@ -751,22 +861,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     }
     final cliente = _clientes.where((c) => c.id == value).firstOrNull;
     if (cliente == null) return;
-    final entrega = await _abrirDialogEntregaCliente(cliente: cliente);
-    if (!mounted || entrega == null) {
-      return;
-    }
     setState(() {
       _clienteSelecionadoId = value;
-      _tipoEntregaSelecionada = 'entrega_loja';
-      _prioridadeEntregaSelecionada = 'normal';
-      _dataEntregaMarcada ??= DateTime.now();
-      _valorFreteController.text = entrega.valorFrete;
-      _enderecoEntregaController.text = entrega.endereco;
-      _observacaoEntregaController.text = entrega.observacao;
     });
   }
 
-  Future<void> _abrirCadastroNovoClienteNoPdv() async {
+  Future<void> _abrirCadastroNovoClienteNoPdv({
+    StateSetter? setDialogState,
+  }) async {
     final clienteCriado = await Navigator.push<Cliente>(
       context,
       MaterialPageRoute(
@@ -787,9 +889,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           .toList();
     });
     await _selecionarClienteNoOrcamento(clienteCriado.id);
+    setDialogState?.call(() {});
   }
 
-  Future<void> _abrirSeletorClienteNoPdv() async {
+  Future<void> _abrirSeletorClienteNoPdv({StateSetter? setDialogState}) async {
     final resultado = await showDialog<int>(
       context: context,
       builder: (dialogContext) {
@@ -813,8 +916,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                       ),
                       onChanged: (value) {
                         final termo = value.trim().toLowerCase();
-                        final termoNumerico =
-                            value.replaceAll(RegExp(r'\D'), '');
+                        final termoNumerico = value.replaceAll(
+                          RegExp(r'\D'),
+                          '',
+                        );
                         setDialogState(() {
                           if (termo.isEmpty) {
                             filtrados = List<Cliente>.from(_clientes);
@@ -854,10 +959,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                       dense: true,
                       leading: const Icon(Icons.person_off_outlined),
                       title: const Text('Sem cliente'),
-                      onTap: () => Navigator.pop(
-                        dialogContext,
-                        _selecaoSemClienteValor,
-                      ),
+                      onTap: () =>
+                          Navigator.pop(dialogContext, _selecaoSemClienteValor),
                     ),
                     ListTile(
                       dense: true,
@@ -874,7 +977,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                         maxHeight: MediaQuery.of(context).size.height * 0.45,
                       ),
                       child: filtrados.isEmpty
-                          ? const Center(child: Text('Nenhum cliente encontrado.'))
+                          ? const Center(
+                              child: Text('Nenhum cliente encontrado.'),
+                            )
                           : ListView.builder(
                               shrinkWrap: true,
                               itemCount: filtrados.length,
@@ -889,7 +994,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                   subtitle: Text(
                                     'Doc: $documento | Tel: ${c.telefone.trim().isEmpty ? '-' : c.telefone}',
                                   ),
-                                  onTap: () => Navigator.pop(dialogContext, c.id),
+                                  onTap: () =>
+                                      Navigator.pop(dialogContext, c.id),
                                 );
                               },
                             ),
@@ -913,14 +1019,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       return;
     }
     if (resultado == _selecaoNovoClienteValor) {
-      await _abrirCadastroNovoClienteNoPdv();
+      await _abrirCadastroNovoClienteNoPdv(setDialogState: setDialogState);
       return;
     }
     if (resultado == _selecaoSemClienteValor) {
       await _selecionarClienteNoOrcamento(null);
+      setDialogState?.call(() {});
       return;
     }
     await _selecionarClienteNoOrcamento(resultado);
+    setDialogState?.call(() {});
   }
 
   String _montarEnderecoEntregaCliente(Cliente cliente) {
@@ -979,7 +1087,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         'Data marcada: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
       );
     }
-    return partes.isEmpty ? 'Sem dados de entrega informados.' : partes.join(' | ');
+    return partes.isEmpty
+        ? 'Sem dados de entrega informados.'
+        : partes.join(' | ');
   }
 
   Future<_EntregaDialogResult?> _abrirDialogEntregaCliente({
@@ -1113,11 +1223,576 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     _voltarFocoParaPesquisa();
   }
 
-  Future<void> _salvarOrcamento() async {
+  static const List<String> _meiosPagamentoMistoPdV = [
+    'dinheiro',
+    'pix',
+    'cartao_credito',
+    'cartao_debito',
+    'transferencia',
+  ];
+
+  Widget _buildPainelPagamentoMistoPdV(StateSetter setDialogState) {
+    final restante = _totalGeralComFrete - _somaDigitadaMistoPdV();
+    final ok = restante.abs() < 0.02;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ...List.generate(_linhasPagamentoMisto.length, (i) {
+          final linha = _linhasPagamentoMisto[i];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: linha.meio,
+                    decoration: const InputDecoration(labelText: 'Meio'),
+                    items: _meiosPagamentoMistoPdV
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m,
+                            child: Text(_rotuloFormaPagamento(m)),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      _atualizarCheckoutFechamento(setDialogState, () {
+                        linha.meio = v;
+                        if (v != 'cartao_credito') linha.parcelas = 1;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: linha.valorController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Valor',
+                      hintText: '0,00',
+                    ),
+                    onChanged: (_) => setDialogState(() {}),
+                  ),
+                ),
+                if (linha.meio == 'cartao_credito') ...[
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 92,
+                    child: DropdownButtonFormField<int>(
+                      initialValue: linha.parcelas.clamp(1, 12),
+                      decoration: const InputDecoration(labelText: 'Parc.'),
+                      items: List.generate(
+                        12,
+                        (k) => DropdownMenuItem(
+                          value: k + 1,
+                          child: Text('${k + 1}x'),
+                        ),
+                      ),
+                      onChanged: (p) {
+                        if (p != null) {
+                          _atualizarCheckoutFechamento(setDialogState, () {
+                            linha.parcelas = p;
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                ],
+                IconButton(
+                  tooltip: 'Remover linha',
+                  onPressed: _linhasPagamentoMisto.length <= 2
+                      ? null
+                      : () {
+                          _atualizarCheckoutFechamento(setDialogState, () {
+                            final rem = _linhasPagamentoMisto.removeAt(i);
+                            rem.dispose();
+                          });
+                        },
+                  icon: const Icon(Icons.remove_circle_outline),
+                ),
+              ],
+            ),
+          );
+        }),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () {
+              _atualizarCheckoutFechamento(setDialogState, () {
+                _linhasPagamentoMisto.add(
+                  _LinhaPagamentoMistoPdV(
+                    meio: 'cartao_credito',
+                    valorController: TextEditingController(),
+                    parcelas: 1,
+                  ),
+                );
+              });
+            },
+            icon: const Icon(Icons.add),
+            label: const Text('Adicionar meio'),
+          ),
+        ),
+        Text(
+          ok
+              ? 'Pagamento fecha com o total geral.'
+              : 'Restante: ${_formatarMoeda(restante)}',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: ok
+                    ? Colors.green.shade800
+                    : Theme.of(context).colorScheme.primary,
+              ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _abrirPassoFechamentoVenda() async {
     if (_carrinho.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Adicione ao menos um item no orcamento.'),
+          content: Text('Adicione ao menos um item na venda.'),
+        ),
+      );
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                _orcamentoEmEdicaoId != null
+                    ? 'Concluir atualizacao da venda'
+                    : 'Dados para enviar ao caixa',
+              ),
+              content: SizedBox(
+                width: 520,
+                child: SingleChildScrollView(
+                  child: Theme(
+                    data: Theme.of(context).copyWith(
+                      visualDensity: VisualDensity.compact,
+                      inputDecorationTheme:
+                          Theme.of(context).inputDecorationTheme.copyWith(
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
+                                ),
+                              ),
+                    ),
+                    child: _buildFormularioFechamentoVenda(
+                      setDialogState: setDialogState,
+                    ),
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Voltar'),
+                ),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await _salvarOrcamento(
+                      fechamentoDialogContext: dialogContext,
+                    );
+                  },
+                  icon: const Icon(Icons.save_outlined),
+                  label: Text(
+                    _orcamentoEmEdicaoId != null
+                        ? 'Confirmar atualizacao'
+                        : 'Confirmar e enviar ao caixa',
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// O dialog de fechamento e uma rota overlay; `setState` na pagina nao redesenha o
+  /// AlertDialog. Este helper atualiza o estado da pagina e forca o rebuild do dialog.
+  void _atualizarCheckoutFechamento(
+    StateSetter setDialogState,
+    VoidCallback fn,
+  ) {
+    setState(fn);
+    setDialogState(() {});
+  }
+
+  Widget _buildFormularioFechamentoVenda({
+    required StateSetter setDialogState,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Subtotal produtos: ${_formatarMoeda(_totalOrcamento)}',
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Frete: ${_formatarMoeda(_valorFreteAtual)}',
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Total geral: ${_formatarMoeda(_totalGeralComFrete)}',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 6),
+        Focus(
+          focusNode: _focusClientePdV,
+          child: InkWell(
+            onTap: () =>
+                _abrirSeletorClienteNoPdv(setDialogState: setDialogState),
+            borderRadius: BorderRadius.circular(12),
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Cliente (opcional)',
+                suffixIcon: Icon(Icons.search),
+              ),
+              child: Text(_rotuloClienteSelecionadoPdV()),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<int?>(
+          focusNode: _focusVendedorPdV,
+          initialValue: _vendedorSelecionadoId,
+          decoration: const InputDecoration(
+            labelText: 'Vendedor (opcional)',
+          ),
+          items: [
+            const DropdownMenuItem<int?>(
+              value: null,
+              child: Text('Sem vendedor'),
+            ),
+            ..._vendedoresAtivos.map(
+              (v) => DropdownMenuItem<int?>(
+                value: v.id,
+                child: Text(_rotuloItemVendedorPdV(v)),
+              ),
+            ),
+          ],
+          onChanged: (value) {
+            _atualizarCheckoutFechamento(
+              setDialogState,
+              () => _vendedorSelecionadoId = value,
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: _pagamentoMistoPdV,
+          onChanged: (on) {
+            _atualizarCheckoutFechamento(setDialogState, () {
+              _pagamentoMistoPdV = on;
+              if (on) {
+                _inicializarLinhasMistoPadrao();
+              } else {
+                _disposeLinhasPagamentoMisto();
+              }
+            });
+          },
+          title: const Text('Pagamento misto'),
+          subtitle: const Text(
+            'Defina cada meio aqui; no caixa o operador so confere e finaliza.',
+          ),
+        ),
+        if (!_pagamentoMistoPdV) ...[
+          DropdownButtonFormField<String>(
+            focusNode: _focusPagamentoPdV,
+            initialValue: _formaPagamentoSelecionada,
+            decoration: const InputDecoration(
+              labelText: 'Forma de pagamento',
+            ),
+            items: const [
+              DropdownMenuItem(value: 'dinheiro', child: Text('Dinheiro')),
+              DropdownMenuItem(value: 'pix', child: Text('PIX')),
+              DropdownMenuItem(
+                value: 'cartao_credito',
+                child: Text('Cartao de credito'),
+              ),
+              DropdownMenuItem(
+                value: 'cartao_debito',
+                child: Text('Cartao de debito'),
+              ),
+              DropdownMenuItem(value: 'fiado', child: Text('Fiado')),
+              DropdownMenuItem(
+                value: 'transferencia',
+                child: Text('Transferencia'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              _atualizarCheckoutFechamento(setDialogState, () {
+                _formaPagamentoSelecionada = value;
+                if (_formaPagamentoSelecionada != 'cartao_credito') {
+                  _parcelasSelecionadas = 1;
+                }
+              });
+            },
+          ),
+          if (_formaPagamentoSelecionada == 'cartao_credito') ...[
+            const SizedBox(height: 8),
+            DropdownButtonFormField<int>(
+              key: ValueKey<String>(_formaPagamentoSelecionada),
+              focusNode: _focusParcelasPdV,
+              initialValue: _parcelasSelecionadas,
+              decoration: const InputDecoration(labelText: 'Parcelas'),
+              items: List.generate(
+                12,
+                (index) => DropdownMenuItem(
+                  value: index + 1,
+                  child: Text(_rotuloParcela(index + 1)),
+                ),
+              ),
+              onChanged: (value) {
+                if (value != null) {
+                  _atualizarCheckoutFechamento(
+                    setDialogState,
+                    () => _parcelasSelecionadas = value,
+                  );
+                }
+              },
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Selecionado: ${_rotuloParcela(_parcelasSelecionadas)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ] else ...[
+          const SizedBox(height: 6),
+          _buildPainelPagamentoMistoPdV(setDialogState),
+        ],
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+              focusNode: _focusEntregaPdV,
+              initialValue: _tipoEntregaSelecionada,
+              decoration: const InputDecoration(
+                labelText: 'Tipo de entrega',
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: 'retirada',
+                  child: Text('Retirada na loja'),
+                ),
+                DropdownMenuItem(
+                  value: 'entrega_loja',
+                  child: Text('Entrega da loja'),
+                ),
+              ],
+              onChanged: (value) {
+                if (value == null) return;
+                _atualizarCheckoutFechamento(setDialogState, () {
+                  _tipoEntregaSelecionada = value;
+                  if (_tipoEntregaSelecionada != 'entrega_loja') {
+                    _prioridadeEntregaSelecionada = 'normal';
+                    _janelaEntregaSelecionada = 'nao_definida';
+                    _dataEntregaMarcada = null;
+                    _valorFreteController.clear();
+                    _enderecoEntregaController.clear();
+                    _observacaoEntregaController.clear();
+                  }
+                });
+              },
+        ),
+        if (_tipoEntregaSelecionada == 'entrega_loja') ...[
+          const SizedBox(height: 8),
+          Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _prioridadeEntregaSelecionada,
+                      decoration: const InputDecoration(
+                        labelText: 'Prioridade da entrega',
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                        DropdownMenuItem(
+                          value: 'urgente',
+                          child: Text('Urgente'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'agendada',
+                          child: Text('Agendada'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        _atualizarCheckoutFechamento(setDialogState, () {
+                          _prioridadeEntregaSelecionada = value;
+                          if (_prioridadeEntregaSelecionada == 'agendada' &&
+                              _janelaEntregaSelecionada == 'nao_definida') {
+                            _janelaEntregaSelecionada = 'manha';
+                          }
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _janelaEntregaSelecionada,
+                      decoration: const InputDecoration(labelText: 'Janela'),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'nao_definida',
+                          child: Text('Nao definida'),
+                        ),
+                        DropdownMenuItem(value: 'manha', child: Text('Manha')),
+                        DropdownMenuItem(value: 'tarde', child: Text('Tarde')),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        _atualizarCheckoutFechamento(
+                          setDialogState,
+                          () => _janelaEntregaSelecionada = value,
+                        );
+                      },
+                    ),
+                  ),
+                ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final agora = DateTime.now();
+                    final inicial = _dataEntregaMarcada ?? agora;
+                    final escolhido = await showDatePicker(
+                      context: context,
+                      initialDate: inicial,
+                      firstDate: DateTime(agora.year, agora.month, agora.day),
+                      lastDate: DateTime(agora.year + 3, 12, 31),
+                    );
+                    if (!mounted || escolhido == null) return;
+                    _atualizarCheckoutFechamento(
+                      setDialogState,
+                      () => _dataEntregaMarcada = escolhido,
+                    );
+                  },
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text(
+                    _dataEntregaMarcada == null
+                        ? 'Definir data da entrega'
+                        : 'Data da entrega: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
+                  ),
+                ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Entrega configurada',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _resumoEntrega(),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Focus(
+                        focusNode: _focusEditarEntregaPdV,
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final cliente = _clienteSelecionado();
+                            if (cliente == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Selecione um cliente para editar a entrega.',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            final entrega = await _abrirDialogEntregaCliente(
+                              cliente: cliente,
+                            );
+                            if (!mounted || entrega == null) return;
+                            _atualizarCheckoutFechamento(setDialogState, () {
+                              _tipoEntregaSelecionada = 'entrega_loja';
+                              _dataEntregaMarcada ??= DateTime.now();
+                              _valorFreteController.text = entrega.valorFrete;
+                              _enderecoEntregaController.text = entrega.endereco;
+                              _observacaoEntregaController.text =
+                                  entrega.observacao;
+                            });
+                          },
+                          icon: const Icon(Icons.edit_outlined),
+                          label: const Text('Editar dados da entrega'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+          ),
+        ],
+        if (_orcamentoEmEdicaoId != null) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Editando venda #${_orcamentoEmEdicaoNumero ?? '-'}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  _atualizarCheckoutFechamento(setDialogState, () {
+                    _orcamentoEmEdicaoId = null;
+                    _orcamentoEmEdicaoNumero = null;
+                  });
+                },
+                child: const Text('Cancelar edicao'),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _salvarOrcamento({BuildContext? fechamentoDialogContext}) async {
+    if (_carrinho.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Adicione ao menos um item na venda.'),
         ),
       );
       return;
@@ -1174,11 +1849,25 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
             ),
           )
           .toList();
+      List<PagamentoOrcamentoLinha>? linhasMisto;
+      try {
+        linhasMisto = _montarLinhasMistoParaSalvar(_totalGeralComFrete);
+      } on StateError catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+        return;
+      }
       final pagamento = DadosPagamentoOrcamento(
-        formaPagamento: _formaPagamentoSelecionada,
-        quantidadeParcelas: _formaPagamentoSelecionada == 'cartao_credito'
-            ? _parcelasSelecionadas
-            : 1,
+        formaPagamento:
+            _pagamentoMistoPdV ? 'misto' : _formaPagamentoSelecionada,
+        quantidadeParcelas: _pagamentoMistoPdV
+            ? 1
+            : (_formaPagamentoSelecionada == 'cartao_credito'
+                ? _parcelasSelecionadas
+                : 1),
+        linhasMisto: linhasMisto,
       );
       final entrega = DadosEntregaOrcamento(
         tipoEntrega: _tipoEntregaSelecionada,
@@ -1217,9 +1906,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         );
       }
       final vendaSalva = widget.vendaRepository.obterPorId(orcamentoId);
-      final numeroOrcamentoSalvo = vendaSalva?.numeroOrcamento ?? _orcamentoEmEdicaoNumero;
+      final numeroOrcamentoSalvo =
+          vendaSalva?.numeroOrcamento ?? _orcamentoEmEdicaoNumero;
       setState(() {
         _carrinho.clear();
+        _pagamentoMistoPdV = false;
+        _disposeLinhasPagamentoMisto();
         _formaPagamentoSelecionada = 'dinheiro';
         _parcelasSelecionadas = 1;
         _clienteSelecionadoId = null;
@@ -1234,13 +1926,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         _orcamentoEmEdicaoId = null;
         _orcamentoEmEdicaoNumero = null;
       });
+      if (fechamentoDialogContext != null &&
+          fechamentoDialogContext.mounted) {
+        Navigator.of(fechamentoDialogContext).pop();
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             orcamentoEdicaoId != null
-                ? 'Orcamento #$numeroOrcamentoSalvo atualizado com sucesso.'
-                : 'Orcamento #$orcamentoId salvo para o caixa.',
+                ? 'Venda #$numeroOrcamentoSalvo atualizada com sucesso.'
+                : 'Venda #$orcamentoId salva para o caixa.',
           ),
         ),
       );
@@ -1251,7 +1947,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao salvar orcamento: $e')));
+      ).showSnackBar(SnackBar(content: Text('Erro ao salvar venda: $e')));
     }
   }
 
@@ -1368,7 +2064,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     final pendentes = widget.vendaRepository.listarOrcamentosPendentes();
     if (pendentes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nao ha orcamentos pendentes para leitura.')),
+        const SnackBar(
+          content: Text('Nao ha orcamentos pendentes para leitura.'),
+        ),
       );
       return;
     }
@@ -1398,9 +2096,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                         final termo = value.trim().toLowerCase();
                         setDialogState(() {
                           resultados = pendentes.where((orc) {
-                            final cliente = _clienteDaVenda(orc)?.nomeRazao ?? '';
-                            final vendedor = _rotuloVendedorUmLinhaOrcamento(orc);
-                            return orc.numeroOrcamento.toString().contains(termo) ||
+                            final cliente =
+                                _clienteDaVenda(orc)?.nomeRazao ?? '';
+                            final vendedor = _rotuloVendedorUmLinhaOrcamento(
+                              orc,
+                            );
+                            return orc.numeroOrcamento.toString().contains(
+                                  termo,
+                                ) ||
                                 cliente.toLowerCase().contains(termo) ||
                                 vendedor.toLowerCase().contains(termo);
                           }).toList();
@@ -1414,16 +2117,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                         maxHeight: MediaQuery.of(context).size.height * 0.58,
                       ),
                       child: resultados.isEmpty
-                          ? const Center(child: Text('Nenhum orcamento encontrado.'))
+                          ? const Center(
+                              child: Text('Nenhum orcamento encontrado.'),
+                            )
                           : ListView.builder(
                               shrinkWrap: true,
                               itemCount: resultados.length,
                               itemBuilder: (context, index) {
                                 final orc = resultados[index];
                                 final cliente =
-                                    _clienteDaVenda(orc)?.nomeRazao ?? 'Sem cliente';
+                                    _clienteDaVenda(orc)?.nomeRazao ??
+                                    'Sem cliente';
                                 return ListTile(
-                                  title: Text('Orcamento #${orc.numeroOrcamento}'),
+                                  title: Text(
+                                    'Orcamento #${orc.numeroOrcamento}',
+                                  ),
                                   subtitle: Text(
                                     '$cliente | Itens: ${orc.itens.length} | Total: ${_formatarMoeda(orc.total)}',
                                   ),
@@ -1490,11 +2198,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     final vendedorIdCarregado = orcamentoCompleto.vendedor.targetId == 0
         ? null
         : orcamentoCompleto.vendedor.targetId;
-    final clienteIdValido = clienteIdCarregado != null &&
+    final clienteIdValido =
+        clienteIdCarregado != null &&
             _clientes.any((c) => c.id == clienteIdCarregado)
         ? clienteIdCarregado
         : null;
-    final vendedorIdValido = vendedorIdCarregado != null &&
+    final vendedorIdValido =
+        vendedorIdCarregado != null &&
             _vendedoresAtivos.any((v) => v.id == vendedorIdCarregado)
         ? vendedorIdCarregado
         : null;
@@ -1519,16 +2229,40 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       _indiceLinhaCarrinho = _carrinho.isEmpty ? null : 0;
       _clienteSelecionadoId = clienteIdValido;
       _vendedorSelecionadoId = vendedorIdValido;
-      _formaPagamentoSelecionada = orcamentoCompleto.formaPagamento;
-      _parcelasSelecionadas = orcamentoCompleto.quantidadeParcelas <= 0
-          ? 1
-          : orcamentoCompleto.quantidadeParcelas;
+      _disposeLinhasPagamentoMisto();
+      if (orcamentoCompleto.formaPagamento == 'misto' &&
+          orcamentoCompleto.pagamentosJson.trim().isNotEmpty) {
+        _pagamentoMistoPdV = true;
+        for (final ln
+            in PagamentoOrcamentoCodec.decode(orcamentoCompleto.pagamentosJson)) {
+          _linhasPagamentoMisto.add(
+            _LinhaPagamentoMistoPdV(
+              meio: ln.meio,
+              valorController: TextEditingController(
+                text: ln.valor > 0
+                    ? ln.valor.toStringAsFixed(2).replaceAll('.', ',')
+                    : '',
+              ),
+              parcelas: ln.parcelas <= 0 ? 1 : ln.parcelas,
+            ),
+          );
+        }
+        _formaPagamentoSelecionada = 'dinheiro';
+        _parcelasSelecionadas = 1;
+      } else {
+        _pagamentoMistoPdV = false;
+        _formaPagamentoSelecionada = orcamentoCompleto.formaPagamento;
+        _parcelasSelecionadas = orcamentoCompleto.quantidadeParcelas <= 0
+            ? 1
+            : orcamentoCompleto.quantidadeParcelas;
+      }
       _tipoEntregaSelecionada = tipoEntregaValido;
       _prioridadeEntregaSelecionada = prioridadeValida;
       _janelaEntregaSelecionada = janelaValida;
       _dataEntregaMarcada = orcamentoCompleto.dataEntregaMarcada;
-      _valorFreteController.text =
-          orcamentoCompleto.valorFrete.toStringAsFixed(2).replaceAll('.', ',');
+      _valorFreteController.text = orcamentoCompleto.valorFrete
+          .toStringAsFixed(2)
+          .replaceAll('.', ',');
       _enderecoEntregaController.text = orcamentoCompleto.enderecoEntrega;
       _observacaoEntregaController.text = orcamentoCompleto.observacaoEntrega;
       _orcamentoEmEdicaoId = orcamentoCompleto.id;
@@ -1557,10 +2291,29 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         return 'Fiado';
       case 'transferencia':
         return 'Transferencia';
+      case 'misto':
+        return 'Pagamento misto';
       case 'dinheiro':
-      default:
         return 'Dinheiro';
+      default:
+        if (forma.startsWith('cartao')) return forma;
+        return forma.isEmpty ? '-' : forma;
     }
+  }
+
+  String _textoPagamentoOrcamentoPdf(Venda v) {
+    if (v.formaPagamento != 'misto' || v.pagamentosJson.trim().isEmpty) {
+      return '${_rotuloFormaPagamento(v.formaPagamento)}'
+          '${v.formaPagamento == 'cartao_credito' ? ' | ${v.quantidadeParcelas}x' : ''}';
+    }
+    final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
+    return linhas
+        .map(
+          (l) =>
+              '${_rotuloFormaPagamento(l.meio)} ${_formatarMoeda(l.valor)}'
+              '${l.meio == 'cartao_credito' ? ' ${l.parcelas}x' : ''}',
+        )
+        .join('; ');
   }
 
   String _rotuloTipoEntrega(String tipoEntrega) {
@@ -1696,8 +2449,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                 ),
               ),
               pw.Text(
-                'Pagamento: ${_rotuloFormaPagamento(venda.formaPagamento)}'
-                '${venda.formaPagamento == 'cartao_credito' ? ' | ${venda.quantidadeParcelas}x' : ''}',
+                'Pagamento: ${_textoPagamentoOrcamentoPdf(venda)}',
                 style: const pw.TextStyle(fontSize: 9),
               ),
               pw.Text(
@@ -1931,6 +2683,39 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
 
   double get _totalGeralComFrete => _totalOrcamento + _valorFreteAtual;
 
+  double get _alturaLinhaListaPdV =>
+      _modoFocoPesquisa ? _alturaLinhaProdutoCompacta : _alturaLinhaProduto;
+
+  void _alternarModoFocoPesquisa() {
+    setState(() {
+      if (_modoFocoPesquisa) {
+        _modoFocoPesquisa = false;
+        final eraExpandido = _checkoutExpandidoAntesModoPesquisa ?? false;
+        _painelCheckoutRecolhido = !eraExpandido;
+        _checkoutExpandidoAntesModoPesquisa = null;
+      } else {
+        _checkoutExpandidoAntesModoPesquisa = !_painelCheckoutRecolhido;
+        _modoFocoPesquisa = true;
+        _painelCheckoutRecolhido = true;
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _scrollParaIndiceLista();
+      _pesquisaFocus.requestFocus();
+    });
+  }
+
+  /// F6/F7: sai do modo pesquisa e abre o checkout para uso normal.
+  void _sairModoFocoPesquisaParaCheckoutOuCarrinho() {
+    if (!_modoFocoPesquisa) return;
+    setState(() {
+      _modoFocoPesquisa = false;
+      _checkoutExpandidoAntesModoPesquisa = null;
+      _painelCheckoutRecolhido = false;
+    });
+  }
+
   String _rotuloParcela(int parcelas) {
     if (parcelas <= 0) {
       return '1x';
@@ -1954,8 +2739,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         SingleActivator(LogicalKeyboardKey.f3): SelecionarPrecoListaIntent(
           'preco3',
         ),
+        SingleActivator(LogicalKeyboardKey.f4): PdvModoFocoPesquisaIntent(),
         SingleActivator(LogicalKeyboardKey.f5): PdvRecarregarProdutosIntent(),
         SingleActivator(LogicalKeyboardKey.f6): PdvFocarCarrinhoIntent(),
+        SingleActivator(LogicalKeyboardKey.f8): PdvFocarPesquisaProdutosIntent(),
         SingleActivator(LogicalKeyboardKey.f10): PdvSalvarOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, control: true):
             PdvSalvarOrcamentoIntent(),
@@ -1982,6 +2769,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                   return null;
                 },
               ),
+          PdvModoFocoPesquisaIntent: CallbackAction<PdvModoFocoPesquisaIntent>(
+            onInvoke: (_) {
+              _alternarModoFocoPesquisa();
+              return null;
+            },
+          ),
           PdvRecarregarProdutosIntent:
               CallbackAction<PdvRecarregarProdutosIntent>(
                 onInvoke: (_) {
@@ -1995,9 +2788,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
               return null;
             },
           ),
+          PdvFocarPesquisaProdutosIntent:
+              CallbackAction<PdvFocarPesquisaProdutosIntent>(
+                onInvoke: (_) {
+                  _irParaPesquisaProdutos();
+                  return null;
+                },
+              ),
           PdvSalvarOrcamentoIntent: CallbackAction<PdvSalvarOrcamentoIntent>(
             onInvoke: (_) {
-              unawaited(_salvarOrcamento());
+              unawaited(_abrirPassoFechamentoVenda());
               return null;
             },
           ),
@@ -2019,6 +2819,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
             title: const Text('Ponto de Venda'),
             actions: [
               IconButton(
+                tooltip:
+                    'Pesquisa em destaque — lista maior, checkout ao fundo (F4)',
+                isSelected: _modoFocoPesquisa,
+                onPressed: _alternarModoFocoPesquisa,
+                icon: const Icon(Icons.fit_screen_outlined),
+              ),
+              IconButton(
                 tooltip: 'Ler orcamento para editar',
                 onPressed: _abrirLeitorOrcamento,
                 icon: const Icon(Icons.description_outlined),
@@ -2032,831 +2839,773 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
               children: [
                 Expanded(
                   flex: 3,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TextField(
-                        autofocus: true,
-                        focusNode: _pesquisaFocus,
-                        controller: _pesquisaController,
-                        textInputAction: TextInputAction.search,
-                        decoration: InputDecoration(
-                          labelText: 'Pesquisar produto para venda',
-                          suffixIcon: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: 'Limpar busca',
-                                onPressed: () {
-                                  _pesquisaController.clear();
-                                  _debouncePesquisa?.cancel();
-                                  setState(() {
-                                    _pesquisaAguardandoDebounce = false;
-                                  });
-                                  _pesquisar();
-                                },
-                                icon: const Icon(Icons.clear),
-                              ),
-                              IconButton(
-                                tooltip: 'Pesquisar',
-                                onPressed: () {
-                                  _debouncePesquisa?.cancel();
-                                  setState(() {
-                                    _pesquisaAguardandoDebounce = false;
-                                  });
-                                  _pesquisar(executarAtalhoRapido: true);
-                                },
-                                icon: const Icon(Icons.search),
-                              ),
-                              IconButton(
-                                tooltip: 'Recarregar produtos',
-                                onPressed: () {
-                                  _debouncePesquisa?.cancel();
-                                  setState(() {
-                                    _pesquisaAguardandoDebounce = false;
-                                  });
-                                  _carregarDadosIniciais();
-                                },
-                                icon: const Icon(Icons.refresh),
-                              ),
-                              if (_pesquisaAguardandoDebounce)
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: Text(
-                                    'buscando...',
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                  ),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                    decoration: _modoFocoPesquisa
+                        ? BoxDecoration(
+                            border: Border.all(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.primary.withValues(alpha: 0.65),
+                              width: 2,
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                            color: Theme.of(context).colorScheme.surface,
+                          )
+                        : null,
+                    padding: _modoFocoPesquisa
+                        ? const EdgeInsets.all(10)
+                        : EdgeInsets.zero,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_modoFocoPesquisa)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Material(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer
+                                  .withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
                                 ),
-                            ],
-                          ),
-                        ),
-                        onChanged: (_) => _agendarPesquisaDebounce(),
-                        onSubmitted: (_) =>
-                            _pesquisar(executarAtalhoRapido: true),
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Preco: ${_rotuloPreco(_precoListaAtivo)} · ${_produtos.length} produtos',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                          TextButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                _mostrarAjudaAtalhos = !_mostrarAjudaAtalhos;
-                              });
-                            },
-                            icon: Icon(
-                              _mostrarAjudaAtalhos
-                                  ? Icons.keyboard_arrow_up
-                                  : Icons.keyboard_arrow_down,
-                            ),
-                            label: Text(
-                              _mostrarAjudaAtalhos
-                                  ? 'Ocultar atalhos'
-                                  : 'Ajuda de atalhos',
-                            ),
-                          ),
-                        ],
-                      ),
-                      AnimatedCrossFade(
-                        crossFadeState: _mostrarAjudaAtalhos
-                            ? CrossFadeState.showFirst
-                            : CrossFadeState.showSecond,
-                        duration: const Duration(milliseconds: 180),
-                        firstChild: Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.only(top: 4, bottom: 8),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            'F1–F3 preco · F5 recarrega · Ctrl+K limpa busca · Enter -> lista · '
-                            'Numpad+ adiciona 1 · F6 carrinho · F7 checkout · Ctrl+O ler orcamento · '
-                            'F10/Ctrl+S salvar.',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ),
-                        secondChild: const SizedBox.shrink(),
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: _produtos.isEmpty
-                            ? Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
+                                child: Row(
                                   children: [
-                                    const Text('Nenhum produto encontrado.'),
-                                    const SizedBox(height: 8),
-                                    OutlinedButton.icon(
-                                      onPressed: _carregarDadosIniciais,
-                                      icon: const Icon(Icons.refresh),
-                                      label: const Text('Recarregar produtos'),
+                                    Icon(
+                                      Icons.info_outline,
+                                      size: 18,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Checkout ao fundo. F4 sai deste modo · F6 carrinho · F7 cliente/pagamento.',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodySmall,
+                                      ),
                                     ),
                                   ],
                                 ),
-                              )
-                            : Builder(
-                                builder: (context) {
-                                  final termoBuscaDestaque = _PesquisaComando.parse(
-                                    _pesquisaController.text,
-                                  ).termoBusca;
-                                  return Focus(
-                                focusNode: _listaProdutosFocus,
-                                onKeyEvent: _onKeyListaProdutos,
-                                child: ListView.builder(
-                                  controller: _listaProdutosScrollController,
-                                  itemExtent: _alturaLinhaProduto,
-                                  itemCount: _produtos.length,
-                                  itemBuilder: (context, index) {
-                                    final item = _produtos[index];
-                                    final selecionado =
-                                        _indiceListaProduto == index;
-                                    final precoLinha = _precoPorTipo(
-                                      item,
-                                      _precoListaAtivo,
-                                    );
-                                    final scheme = Theme.of(
-                                      context,
-                                    ).colorScheme;
-                                    final critico = _estoqueCritico(item);
-                                    return Material(
-                                      color: selecionado
-                                          ? scheme.primaryContainer.withValues(
-                                              alpha: 0.55,
-                                            )
-                                          : Theme.of(
-                                              context,
-                                            ).colorScheme.surface,
-                                      child: InkWell(
-                                        onTap: () =>
-                                            _mostrarSkuEDescricao(item),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 6,
-                                          ),
-                                          child: Row(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.center,
-                                            children: [
-                                              Expanded(
-                                                child: RichText(
-                                                  maxLines: 2,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  text: _textoComDestaqueBusca(
-                                                    context: context,
-                                                    texto: item.nome,
-                                                    termoBusca:
-                                                        termoBuscaDestaque,
-                                                    estiloBase:
-                                                        Theme.of(context)
-                                                            .textTheme
-                                                            .bodyMedium ??
-                                                        const TextStyle(),
-                                                  ),
-                                                ),
-                                              ),
-                                              Column(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.center,
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.end,
-                                                children: [
-                                                  Text(
-                                                    _formatarMoeda(precoLinha),
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .titleSmall
-                                                        ?.copyWith(
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                        ),
-                                                  ),
-                                                  Text(
-                                                    'Est: ${item.estoque}',
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .labelMedium
-                                                        ?.copyWith(
-                                                          color: critico
-                                                              ? scheme.error
-                                                              : scheme.tertiary,
-                                                          fontWeight:
-                                                              FontWeight.w700,
-                                                        ),
-                                                  ),
-                                                ],
-                                              ),
-                                              IconButton(
-                                                tooltip:
-                                                    'À Vista ou Atacado, quantidade…',
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                                padding: EdgeInsets.zero,
-                                                constraints:
-                                                    const BoxConstraints(
-                                                      minWidth: 32,
-                                                      minHeight: 36,
-                                                    ),
-                                                icon: const Icon(
-                                                  Icons.tune,
-                                                  size: 20,
-                                                ),
-                                                onPressed: () =>
-                                                    _adicionarAoOrcamento(item),
-                                              ),
-                                              IconButton(
-                                                tooltip:
-                                                    'Adicionar (${_rotuloPreco(_precoListaAtivo)})',
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                                padding: EdgeInsets.zero,
-                                                constraints:
-                                                    const BoxConstraints(
-                                                      minWidth: 36,
-                                                      minHeight: 36,
-                                                    ),
-                                                icon: const Icon(
-                                                  Icons
-                                                      .add_shopping_cart_outlined,
-                                                ),
-                                                onPressed: () =>
-                                                    _adicionarRapido(item),
-                                              ),
-                                            ],
-                                          ),
+                              ),
+                            ),
+                          ),
+                        TextField(
+                          autofocus: true,
+                          focusNode: _pesquisaFocus,
+                          controller: _pesquisaController,
+                          textInputAction: TextInputAction.search,
+                          decoration: InputDecoration(
+                            labelText: _modoFocoPesquisa
+                                ? 'Pesquisar produto (F4 para modo normal)'
+                                : 'Pesquisar produto para venda',
+                            suffixIcon: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Limpar busca',
+                                  onPressed: () {
+                                    _pesquisaController.clear();
+                                    _debouncePesquisa?.cancel();
+                                    setState(() {
+                                      _pesquisaAguardandoDebounce = false;
+                                    });
+                                    _pesquisar();
+                                  },
+                                  icon: const Icon(Icons.clear),
+                                ),
+                                IconButton(
+                                  tooltip: 'Pesquisar',
+                                  onPressed: () {
+                                    _debouncePesquisa?.cancel();
+                                    setState(() {
+                                      _pesquisaAguardandoDebounce = false;
+                                    });
+                                    _pesquisar(executarAtalhoRapido: true);
+                                  },
+                                  icon: const Icon(Icons.search),
+                                ),
+                                IconButton(
+                                  tooltip: 'Recarregar produtos',
+                                  onPressed: () {
+                                    _debouncePesquisa?.cancel();
+                                    setState(() {
+                                      _pesquisaAguardandoDebounce = false;
+                                    });
+                                    _carregarDadosIniciais();
+                                  },
+                                  icon: const Icon(Icons.refresh),
+                                ),
+                                if (_pesquisaAguardandoDebounce)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: Text(
+                                      'buscando...',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          onChanged: (_) => _agendarPesquisaDebounce(),
+                          onSubmitted: (_) =>
+                              _pesquisar(executarAtalhoRapido: true),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Preco: ${_rotuloPreco(_precoListaAtivo)} · ${_produtos.length} produtos',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  _mostrarAjudaAtalhos = !_mostrarAjudaAtalhos;
+                                });
+                              },
+                              icon: Icon(
+                                _mostrarAjudaAtalhos
+                                    ? Icons.keyboard_arrow_up
+                                    : Icons.keyboard_arrow_down,
+                              ),
+                              label: Text(
+                                _mostrarAjudaAtalhos
+                                    ? 'Ocultar atalhos'
+                                    : 'Ajuda de atalhos',
+                              ),
+                            ),
+                          ],
+                        ),
+                        AnimatedCrossFade(
+                          crossFadeState: _mostrarAjudaAtalhos
+                              ? CrossFadeState.showFirst
+                              : CrossFadeState.showSecond,
+                          duration: const Duration(milliseconds: 180),
+                          firstChild: Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(top: 4, bottom: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'F1–F3 preco · F4 pesquisa em destaque · F5 recarrega · F8 foco na pesquisa · Ctrl+K limpa busca · Enter -> lista · '
+                              'Numpad+ adiciona 1 · F6 carrinho · F7 painel (carrinho e continuar) · Ctrl+O ler venda pendente · '
+                              'F10/Ctrl+S abrir passo de salvar.',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                          secondChild: const SizedBox.shrink(),
+                        ),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: _produtos.isEmpty
+                              ? Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text('Nenhum produto encontrado.'),
+                                      const SizedBox(height: 8),
+                                      OutlinedButton.icon(
+                                        onPressed: _carregarDadosIniciais,
+                                        icon: const Icon(Icons.refresh),
+                                        label: const Text(
+                                          'Recarregar produtos',
                                         ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : Builder(
+                                  builder: (context) {
+                                    final termoBuscaDestaque =
+                                        _PesquisaComando.parse(
+                                          _pesquisaController.text,
+                                        ).termoBusca;
+                                    return Focus(
+                                      focusNode: _listaProdutosFocus,
+                                      onKeyEvent: _onKeyListaProdutos,
+                                      child: ListView.builder(
+                                        controller:
+                                            _listaProdutosScrollController,
+                                        itemExtent: _alturaLinhaListaPdV,
+                                        itemCount: _produtos.length,
+                                        itemBuilder: (context, index) {
+                                          final item = _produtos[index];
+                                          final selecionado =
+                                              _indiceListaProduto == index;
+                                          final precoLinha = _precoPorTipo(
+                                            item,
+                                            _precoListaAtivo,
+                                          );
+                                          final scheme = Theme.of(
+                                            context,
+                                          ).colorScheme;
+                                          final critico = _estoqueCritico(item);
+                                          return Material(
+                                            color: selecionado
+                                                ? scheme.primaryContainer
+                                                      .withValues(alpha: 0.55)
+                                                : Theme.of(
+                                                    context,
+                                                  ).colorScheme.surface,
+                                            child: InkWell(
+                                              onTap: () =>
+                                                  _mostrarSkuEDescricao(item),
+                                              child: Padding(
+                                                padding: EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: _modoFocoPesquisa
+                                                      ? 4
+                                                      : 6,
+                                                ),
+                                                child: Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.center,
+                                                  children: [
+                                                    Expanded(
+                                                      child: RichText(
+                                                        maxLines:
+                                                            _modoFocoPesquisa
+                                                            ? 1
+                                                            : 2,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        text: _textoComDestaqueBusca(
+                                                          context: context,
+                                                          texto: item.nome,
+                                                          termoBusca:
+                                                              termoBuscaDestaque,
+                                                          estiloBase:
+                                                              Theme.of(context)
+                                                                  .textTheme
+                                                                  .bodyMedium ??
+                                                              const TextStyle(),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    Column(
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .end,
+                                                      children: [
+                                                        Text(
+                                                          _formatarMoeda(
+                                                            precoLinha,
+                                                          ),
+                                                          style: Theme.of(context)
+                                                              .textTheme
+                                                              .titleSmall
+                                                              ?.copyWith(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                              ),
+                                                        ),
+                                                        Text(
+                                                          'Est: ${item.estoque}',
+                                                          style: Theme.of(context)
+                                                              .textTheme
+                                                              .labelMedium
+                                                              ?.copyWith(
+                                                                color: critico
+                                                                    ? scheme
+                                                                          .error
+                                                                    : scheme
+                                                                          .tertiary,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w700,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    IconButton(
+                                                      tooltip:
+                                                          'À Vista ou Atacado, quantidade…',
+                                                      visualDensity:
+                                                          VisualDensity.compact,
+                                                      padding: EdgeInsets.zero,
+                                                      constraints:
+                                                          const BoxConstraints(
+                                                            minWidth: 32,
+                                                            minHeight: 36,
+                                                          ),
+                                                      icon: const Icon(
+                                                        Icons.tune,
+                                                        size: 20,
+                                                      ),
+                                                      onPressed: () =>
+                                                          _adicionarAoOrcamento(
+                                                            item,
+                                                          ),
+                                                    ),
+                                                    IconButton(
+                                                      tooltip:
+                                                          'Adicionar (${_rotuloPreco(_precoListaAtivo)})',
+                                                      visualDensity:
+                                                          VisualDensity.compact,
+                                                      padding: EdgeInsets.zero,
+                                                      constraints:
+                                                          const BoxConstraints(
+                                                            minWidth: 36,
+                                                            minHeight: 36,
+                                                          ),
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .add_shopping_cart_outlined,
+                                                      ),
+                                                      onPressed: () =>
+                                                          _adicionarRapido(
+                                                            item,
+                                                          ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
                                       ),
                                     );
                                   },
                                 ),
-                              );
-                                },
-                              ),
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
-                AnimatedContainer(
-                  key: _keyPainelCheckoutPdV,
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  width: _painelCheckoutRecolhido ? 64 : 470,
-                  child: _painelCheckoutRecolhido
-                      ? Card(
-                          child: Column(
-                            children: [
-                              IconButton(
-                                tooltip: 'Expandir checkout',
-                                onPressed: () {
-                                  setState(() {
-                                    _painelCheckoutRecolhido = false;
-                                  });
-                                },
-                                icon: const Icon(Icons.chevron_left),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '${_carrinho.length}',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              Text(
-                                'itens',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              const Divider(height: 20),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 6),
-                                child: Text(
-                                  _formatarMoeda(_totalGeralComFrete),
-                                  textAlign: TextAlign.center,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : Card(
-                          child: Theme(
-                      data: Theme.of(context).copyWith(
-                        visualDensity: VisualDensity.compact,
-                        inputDecorationTheme:
-                            Theme.of(context).inputDecorationTheme.copyWith(
-                                  isDense: true,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 10,
-                                  ),
-                                ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  'Orcamento em atendimento',
-                                  style: Theme.of(context).textTheme.titleMedium,
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Recolher checkout',
-                                onPressed: () {
-                                  setState(() {
-                                    _painelCheckoutRecolhido = true;
-                                  });
-                                },
-                                icon: const Icon(Icons.chevron_right),
-                              ),
-                            ],
-                          ),
-                          if (_carrinho.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                'F6 foca aqui · ↑↓ quantidade · Ctrl+↑↓ linha · Del remove · Numpad ± quantidade',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                          const SizedBox(height: 6),
-                          Expanded(
-                            child: _carrinho.isEmpty
-                                ? const Center(
-                                    child: Text('Nenhum item no orcamento.'),
-                                  )
-                                : Focus(
-                                    focusNode: _carrinhoFocus,
-                                    onKeyEvent: _onKeyCarrinho,
-                                    child: ListView.separated(
-                                      itemCount: _carrinho.length,
-                                      separatorBuilder: (_, _) => const Divider(
-                                        height: 1,
-                                        thickness: 1,
-                                      ),
-                                      itemBuilder: (context, index) {
-                                        final item = _carrinho[index];
-                                        final theme = Theme.of(context);
-                                        return Semantics(
-                                          container: true,
-                                          label:
-                                              '${item.produto.nome}, ${_rotuloPreco(item.precoTipo)}, quantidade ${item.quantidade}',
-                                          child: ListTile(
-                                            selected:
-                                                _indiceLinhaCarrinho == index,
-                                            selectedTileColor: theme
-                                                .colorScheme
-                                                .primaryContainer
-                                                .withValues(alpha: 0.35),
-                                            onTap: () {
-                                              setState(
-                                                () => _indiceLinhaCarrinho =
-                                                    index,
-                                              );
-                                              _carrinhoFocus.requestFocus();
-                                            },
-                                            contentPadding:
-                                                const EdgeInsets.symmetric(
-                                                  horizontal: 8,
-                                                  vertical: 2,
-                                                ),
-                                            dense: true,
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            title: Text(
-                                              item.produto.nome,
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: theme.textTheme.bodyLarge,
-                                            ),
-                                            subtitle: Text(
-                                              '${_rotuloPreco(item.precoTipo)} · ${_formatarMoeda(item.precoUnitario)} / un · subtotal ${_formatarMoeda(item.subtotal)}',
-                                              maxLines: 2,
-                                            ),
-                                            trailing: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                IconButton(
-                                                  tooltip: 'Diminuir',
-                                                  visualDensity:
-                                                      VisualDensity.compact,
-                                                  style: IconButton.styleFrom(
-                                                    backgroundColor: theme
-                                                        .colorScheme
-                                                        .surfaceContainerHighest,
-                                                    tapTargetSize:
-                                                        MaterialTapTargetSize
-                                                            .shrinkWrap,
-                                                    padding:
-                                                        const EdgeInsets.all(6),
-                                                  ),
-                                                  icon: const Icon(
-                                                    Icons.remove,
-                                                    size: 20,
-                                                  ),
-                                                  onPressed: () =>
-                                                      _alterarQuantidadeCarrinho(
-                                                        index,
-                                                        -1,
-                                                      ),
-                                                ),
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 6,
-                                                      ),
-                                                  child: Text(
-                                                    '${item.quantidade}',
-                                                    style: theme
-                                                        .textTheme
-                                                        .titleMedium
-                                                        ?.copyWith(
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                        ),
-                                                  ),
-                                                ),
-                                                IconButton(
-                                                  tooltip: 'Aumentar',
-                                                  visualDensity:
-                                                      VisualDensity.compact,
-                                                  style: IconButton.styleFrom(
-                                                    backgroundColor: theme
-                                                        .colorScheme
-                                                        .surfaceContainerHighest,
-                                                    tapTargetSize:
-                                                        MaterialTapTargetSize
-                                                            .shrinkWrap,
-                                                    padding:
-                                                        const EdgeInsets.all(6),
-                                                  ),
-                                                  icon: const Icon(
-                                                    Icons.add,
-                                                    size: 20,
-                                                  ),
-                                                  onPressed: () =>
-                                                      _alterarQuantidadeCarrinho(
-                                                        index,
-                                                        1,
-                                                      ),
-                                                ),
-                                                IconButton(
-                                                  tooltip: 'Remover item',
-                                                  visualDensity:
-                                                      VisualDensity.compact,
-                                                  style: IconButton.styleFrom(
-                                                    foregroundColor:
-                                                        theme.colorScheme.error,
-                                                    tapTargetSize:
-                                                        MaterialTapTargetSize
-                                                            .shrinkWrap,
-                                                    padding:
-                                                        const EdgeInsets.all(6),
-                                                  ),
-                                                  icon: const Icon(
-                                                    Icons.delete_outline,
-                                                    size: 22,
-                                                  ),
-                                                  onPressed: () =>
-                                                      _removerItemCarrinho(
-                                                        index,
-                                                      ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Subtotal produtos: ${_formatarMoeda(_totalOrcamento)}',
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Frete: ${_formatarMoeda(_valorFreteAtual)}',
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Total geral: ${_formatarMoeda(_totalGeralComFrete)}',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 6),
-                          Focus(
-                            focusNode: _focusClientePdV,
-                            child: InkWell(
-                              onTap: _abrirSeletorClienteNoPdv,
-                              borderRadius: BorderRadius.circular(12),
-                              child: InputDecorator(
-                                decoration: const InputDecoration(
-                                  labelText: 'Cliente (opcional)',
-                                  suffixIcon: Icon(Icons.search),
-                                ),
-                                child: Text(_rotuloClienteSelecionadoPdV()),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<int?>(
-                            focusNode: _focusVendedorPdV,
-                            initialValue: _vendedorSelecionadoId,
-                            decoration: const InputDecoration(
-                              labelText: 'Vendedor (opcional)',
-                            ),
-                            items: [
-                              const DropdownMenuItem<int?>(
-                                value: null,
-                                child: Text('Sem vendedor'),
-                              ),
-                              ..._vendedoresAtivos.map(
-                                (v) => DropdownMenuItem<int?>(
-                                  value: v.id,
-                                  child: Text(_rotuloItemVendedorPdV(v)),
-                                ),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              setState(() => _vendedorSelecionadoId = value);
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            focusNode: _focusPagamentoPdV,
-                            initialValue: _formaPagamentoSelecionada,
-                            decoration: const InputDecoration(
-                              labelText: 'Forma de pagamento',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'dinheiro',
-                                child: Text('Dinheiro'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'pix',
-                                child: Text('PIX'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'cartao_credito',
-                                child: Text('Cartao de credito'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'cartao_debito',
-                                child: Text('Cartao de debito'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'fiado',
-                                child: Text('Fiado'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'transferencia',
-                                child: Text('Transferencia'),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              if (value == null) {
-                                return;
-                              }
-                              setState(() {
-                                _formaPagamentoSelecionada = value;
-                                if (_formaPagamentoSelecionada !=
-                                    'cartao_credito') {
-                                  _parcelasSelecionadas = 1;
-                                }
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 4),
-                          ExpansionTile(
-                            tilePadding: EdgeInsets.zero,
-                            childrenPadding: EdgeInsets.zero,
-                            initiallyExpanded: _mostrarMaisOpcoesCheckout,
-                            onExpansionChanged: (value) {
-                              setState(() {
-                                _mostrarMaisOpcoesCheckout = value;
-                              });
-                            },
-                            title: const Text('Mais opcoes (entrega, frete e parcelas)'),
-                            children: [
-                              const SizedBox(height: 4),
-                              DropdownButtonFormField<String>(
-                                focusNode: _focusEntregaPdV,
-                                initialValue: _tipoEntregaSelecionada,
-                                decoration: const InputDecoration(
-                                  labelText: 'Tipo de entrega',
-                                ),
-                                items: const [
-                                  DropdownMenuItem(
-                                    value: 'retirada',
-                                    child: Text('Retirada na loja'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'entrega_loja',
-                                    child: Text('Entrega da loja'),
-                                  ),
-                                ],
-                                onChanged: (value) {
-                                  if (value == null) return;
-                                  setState(() {
-                                    _tipoEntregaSelecionada = value;
-                                    if (_tipoEntregaSelecionada != 'entrega_loja') {
-                                      _prioridadeEntregaSelecionada = 'normal';
-                                      _janelaEntregaSelecionada = 'nao_definida';
-                                      _dataEntregaMarcada = null;
-                                      _valorFreteController.clear();
-                                      _enderecoEntregaController.clear();
-                                      _observacaoEntregaController.clear();
-                                    }
-                                  });
-                                },
-                              ),
-                              if (_tipoEntregaSelecionada == 'entrega_loja') ...[
-                                const SizedBox(height: 8),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: DropdownButtonFormField<String>(
-                                        initialValue: _prioridadeEntregaSelecionada,
-                                        decoration: const InputDecoration(
-                                          labelText: 'Prioridade da entrega',
-                                        ),
-                                        items: const [
-                                          DropdownMenuItem(
-                                            value: 'normal',
-                                            child: Text('Normal'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'urgente',
-                                            child: Text('Urgente'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'agendada',
-                                            child: Text('Agendada'),
-                                          ),
-                                        ],
-                                        onChanged: (value) {
-                                          if (value == null) return;
-                                          setState(() {
-                                            _prioridadeEntregaSelecionada = value;
-                                            if (_prioridadeEntregaSelecionada ==
-                                                    'agendada' &&
-                                                _janelaEntregaSelecionada ==
-                                                    'nao_definida') {
-                                              _janelaEntregaSelecionada = 'manha';
-                                            }
-                                          });
-                                        },
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: DropdownButtonFormField<String>(
-                                        initialValue: _janelaEntregaSelecionada,
-                                        decoration: const InputDecoration(
-                                          labelText: 'Janela',
-                                        ),
-                                        items: const [
-                                          DropdownMenuItem(
-                                            value: 'nao_definida',
-                                            child: Text('Nao definida'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'manha',
-                                            child: Text('Manha'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'tarde',
-                                            child: Text('Tarde'),
-                                          ),
-                                        ],
-                                        onChanged: (value) {
-                                          if (value == null) return;
-                                          setState(() {
-                                            _janelaEntregaSelecionada = value;
-                                          });
-                                        },
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: () async {
-                                      final agora = DateTime.now();
-                                      final inicial = _dataEntregaMarcada ?? agora;
-                                      final escolhido = await showDatePicker(
-                                        context: context,
-                                        initialDate: inicial,
-                                        firstDate: DateTime(
-                                          agora.year,
-                                          agora.month,
-                                          agora.day,
-                                        ),
-                                        lastDate: DateTime(
-                                          agora.year + 3,
-                                          12,
-                                          31,
-                                        ),
-                                      );
-                                      if (!mounted || escolhido == null) return;
+                Opacity(
+                  opacity: _modoFocoPesquisa ? 0.38 : 1,
+                  child: IgnorePointer(
+                    ignoring: _modoFocoPesquisa,
+                    child: AnimatedContainer(
+                      key: _keyPainelCheckoutPdV,
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      width: _painelCheckoutRecolhido ? 64 : 470,
+                      child: _painelCheckoutRecolhido
+                          ? Card(
+                              child: Column(
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Expandir checkout',
+                                    onPressed: () {
                                       setState(() {
-                                        _dataEntregaMarcada = escolhido;
+                                        if (_modoFocoPesquisa) {
+                                          _modoFocoPesquisa = false;
+                                          _checkoutExpandidoAntesModoPesquisa =
+                                              null;
+                                        }
+                                        _painelCheckoutRecolhido = false;
                                       });
                                     },
-                                    icon: const Icon(Icons.event_outlined),
-                                    label: Text(
-                                      _dataEntregaMarcada == null
-                                          ? 'Definir data da entrega'
-                                          : 'Data da entrega: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
+                                    icon: const Icon(Icons.chevron_left),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    '${_carrinho.length}',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleMedium,
+                                  ),
+                                  Text(
+                                    'itens',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
+                                  ),
+                                  const Divider(height: 20),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                    ),
+                                    child: Text(
+                                      _formatarMoeda(_totalGeralComFrete),
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                     ),
                                   ),
+                                ],
+                              ),
+                            )
+                          : Card(
+                              child: Theme(
+                                data: Theme.of(context).copyWith(
+                                  visualDensity: VisualDensity.compact,
+                                  inputDecorationTheme: Theme.of(context)
+                                      .inputDecorationTheme
+                                      .copyWith(
+                                        isDense: true,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 10,
+                                            ),
+                                      ),
                                 ),
-                                const SizedBox(height: 8),
-                                Container(
-                                  width: double.infinity,
+                                child: Padding(
                                   padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .surfaceContainerLowest,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.outlineVariant,
-                                    ),
-                                  ),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        'Entrega configurada',
-                                        style: Theme.of(context).textTheme.labelLarge,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _resumoEntrega(),
-                                        style: Theme.of(context).textTheme.bodySmall,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: Focus(
-                                          focusNode: _focusEditarEntregaPdV,
-                                          child: OutlinedButton.icon(
-                                            onPressed: () async {
-                                              final cliente = _clienteSelecionado();
-                                              if (cliente == null) {
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Selecione um cliente para editar a entrega.',
-                                                    ),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-                                              final entrega =
-                                                  await _abrirDialogEntregaCliente(
-                                                    cliente: cliente,
-                                                  );
-                                              if (!mounted || entrega == null) return;
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              'Venda em atendimento',
+                                              style: Theme.of(
+                                                context,
+                                              ).textTheme.titleMedium,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip:
+                                                'Pesquisar produto — foco no campo à esquerda',
+                                            onPressed: _irParaPesquisaProdutos,
+                                            icon: const Icon(Icons.search),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Recolher checkout',
+                                            onPressed: () {
                                               setState(() {
-                                                _tipoEntregaSelecionada =
-                                                    'entrega_loja';
-                                                _dataEntregaMarcada ??=
-                                                    DateTime.now();
-                                                _valorFreteController.text =
-                                                    entrega.valorFrete;
-                                                _enderecoEntregaController.text =
-                                                    entrega.endereco;
-                                                _observacaoEntregaController.text =
-                                                    entrega.observacao;
+                                                _painelCheckoutRecolhido = true;
                                               });
                                             },
-                                            icon: const Icon(Icons.edit_outlined),
-                                            label: const Text(
-                                              'Editar dados da entrega',
+                                            icon: const Icon(
+                                              Icons.chevron_right,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (_orcamentoEmEdicaoId != null)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 8),
+                                          child: Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  'Editando venda #${_orcamentoEmEdicaoNumero ?? '-'}',
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .labelLarge
+                                                      ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .primary,
+                                                      ),
+                                                ),
+                                              ),
+                                              TextButton(
+                                                onPressed: () {
+                                                  setState(() {
+                                                    _orcamentoEmEdicaoId = null;
+                                                    _orcamentoEmEdicaoNumero =
+                                                        null;
+                                                  });
+                                                },
+                                                child: const Text(
+                                                  'Cancelar edicao',
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      if (_carrinho.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 4,
+                                          ),
+                                          child: Text(
+                                            'F6 foca aqui · F8 pesquisa · ↑↓ quantidade · Ctrl+↑↓ linha · Del remove · Numpad ± quantidade',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.bodySmall,
+                                          ),
+                                        ),
+                                      const SizedBox(height: 6),
+                                      Expanded(
+                                        child: _carrinho.isEmpty
+                                            ? Center(
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 16,
+                                                      ),
+                                                  child: Column(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment.center,
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Icon(
+                                                        Icons
+                                                            .shopping_cart_outlined,
+                                                        size: 44,
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .outline,
+                                                      ),
+                                                      const SizedBox(height: 12),
+                                                      Text(
+                                                        'Nenhum item na venda.',
+                                                        textAlign:
+                                                            TextAlign.center,
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .titleSmall,
+                                                      ),
+                                                      const SizedBox(height: 16),
+                                                      FilledButton.icon(
+                                                        onPressed:
+                                                            _irParaPesquisaProdutos,
+                                                        icon: const Icon(
+                                                          Icons.search,
+                                                        ),
+                                                        label: const Text(
+                                                          'Pesquisar produto para venda',
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 10),
+                                                      Text(
+                                                        'Atalho: F8',
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .labelSmall
+                                                            ?.copyWith(
+                                                              color: Theme.of(
+                                                                context,
+                                                              )
+                                                                  .colorScheme
+                                                                  .outline,
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              )
+                                            : Focus(
+                                                focusNode: _carrinhoFocus,
+                                                onKeyEvent: _onKeyCarrinho,
+                                                child: ListView.separated(
+                                                  itemCount: _carrinho.length,
+                                                  separatorBuilder: (_, _) =>
+                                                      const Divider(
+                                                        height: 1,
+                                                        thickness: 1,
+                                                      ),
+                                                  itemBuilder: (context, index) {
+                                                    final item =
+                                                        _carrinho[index];
+                                                    final theme = Theme.of(
+                                                      context,
+                                                    );
+                                                    return Semantics(
+                                                      container: true,
+                                                      label:
+                                                          '${item.produto.nome}, ${_rotuloPreco(item.precoTipo)}, quantidade ${item.quantidade}',
+                                                      child: ListTile(
+                                                        selected:
+                                                            _indiceLinhaCarrinho ==
+                                                            index,
+                                                        selectedTileColor: theme
+                                                            .colorScheme
+                                                            .primaryContainer
+                                                            .withValues(
+                                                              alpha: 0.35,
+                                                            ),
+                                                        onTap: () {
+                                                          setState(
+                                                            () =>
+                                                                _indiceLinhaCarrinho =
+                                                                    index,
+                                                          );
+                                                          _carrinhoFocus
+                                                              .requestFocus();
+                                                        },
+                                                        contentPadding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 8,
+                                                              vertical: 2,
+                                                            ),
+                                                        dense: true,
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                        title: Text(
+                                                          item.produto.nome,
+                                                          maxLines: 2,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style: theme
+                                                              .textTheme
+                                                              .bodyLarge,
+                                                        ),
+                                                        subtitle: Text(
+                                                          '${_rotuloPreco(item.precoTipo)} · ${_formatarMoeda(item.precoUnitario)} / un · subtotal ${_formatarMoeda(item.subtotal)}',
+                                                          maxLines: 2,
+                                                        ),
+                                                        trailing: Row(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          children: [
+                                                            IconButton(
+                                                              tooltip:
+                                                                  'Diminuir',
+                                                              visualDensity:
+                                                                  VisualDensity
+                                                                      .compact,
+                                                              style: IconButton.styleFrom(
+                                                                backgroundColor: theme
+                                                                    .colorScheme
+                                                                    .surfaceContainerHighest,
+                                                                tapTargetSize:
+                                                                    MaterialTapTargetSize
+                                                                        .shrinkWrap,
+                                                                padding:
+                                                                    const EdgeInsets.all(
+                                                                      6,
+                                                                    ),
+                                                              ),
+                                                              icon: const Icon(
+                                                                Icons.remove,
+                                                                size: 20,
+                                                              ),
+                                                              onPressed: () =>
+                                                                  _alterarQuantidadeCarrinho(
+                                                                    index,
+                                                                    -1,
+                                                                  ),
+                                                            ),
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets.symmetric(
+                                                                    horizontal:
+                                                                        6,
+                                                                  ),
+                                                              child: Text(
+                                                                '${item.quantidade}',
+                                                                style: theme
+                                                                    .textTheme
+                                                                    .titleMedium
+                                                                    ?.copyWith(
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w600,
+                                                                    ),
+                                                              ),
+                                                            ),
+                                                            IconButton(
+                                                              tooltip:
+                                                                  'Aumentar',
+                                                              visualDensity:
+                                                                  VisualDensity
+                                                                      .compact,
+                                                              style: IconButton.styleFrom(
+                                                                backgroundColor: theme
+                                                                    .colorScheme
+                                                                    .surfaceContainerHighest,
+                                                                tapTargetSize:
+                                                                    MaterialTapTargetSize
+                                                                        .shrinkWrap,
+                                                                padding:
+                                                                    const EdgeInsets.all(
+                                                                      6,
+                                                                    ),
+                                                              ),
+                                                              icon: const Icon(
+                                                                Icons.add,
+                                                                size: 20,
+                                                              ),
+                                                              onPressed: () =>
+                                                                  _alterarQuantidadeCarrinho(
+                                                                    index,
+                                                                    1,
+                                                                  ),
+                                                            ),
+                                                            IconButton(
+                                                              tooltip:
+                                                                  'Remover item',
+                                                              visualDensity:
+                                                                  VisualDensity
+                                                                      .compact,
+                                                              style: IconButton.styleFrom(
+                                                                foregroundColor:
+                                                                    theme
+                                                                        .colorScheme
+                                                                        .error,
+                                                                tapTargetSize:
+                                                                    MaterialTapTargetSize
+                                                                        .shrinkWrap,
+                                                                padding:
+                                                                    const EdgeInsets.all(
+                                                                      6,
+                                                                    ),
+                                                              ),
+                                                              icon: const Icon(
+                                                                Icons
+                                                                    .delete_outline,
+                                                                size: 22,
+                                                              ),
+                                                              onPressed: () =>
+                                                                  _removerItemCarrinho(
+                                                                    index,
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                              ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: Focus(
+                                          focusNode: _focusSalvarOrcamentoPdV,
+                                          child: FilledButton.icon(
+                                            onPressed: _abrirPassoFechamentoVenda,
+                                            icon: const Icon(
+                                              Icons.arrow_forward,
+                                            ),
+                                            label: Text(
+                                              _orcamentoEmEdicaoId != null
+                                                  ? 'Continuar para atualizar (F10)'
+                                                  : 'Continuar para salvar (F10)',
                                             ),
                                           ),
                                         ),
@@ -2864,85 +3613,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                     ],
                                   ),
                                 ),
-                              ],
-                              const SizedBox(height: 8),
-                              DropdownButtonFormField<int>(
-                                focusNode: _focusParcelasPdV,
-                                initialValue: _parcelasSelecionadas,
-                                decoration: const InputDecoration(
-                                  labelText: 'Parcelas',
-                                ),
-                                items: List.generate(
-                                  12,
-                                  (index) => DropdownMenuItem(
-                                    value: index + 1,
-                                    child: Text(_rotuloParcela(index + 1)),
-                                  ),
-                                ),
-                                onChanged:
-                                    _formaPagamentoSelecionada == 'cartao_credito'
-                                    ? (value) {
-                                        if (value != null) {
-                                          setState(() {
-                                            _parcelasSelecionadas = value;
-                                          });
-                                        }
-                                      }
-                                    : null,
-                              ),
-                              if (_formaPagamentoSelecionada ==
-                                  'cartao_credito') ...[
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Selecionado: ${_rotuloParcela(_parcelasSelecionadas)}',
-                                ),
-                              ],
-                            ],
-                          ),
-                          if (_orcamentoEmEdicaoId != null) ...[
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    'Editando orcamento #${_orcamentoEmEdicaoNumero ?? '-'}',
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(fontWeight: FontWeight.w600),
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _orcamentoEmEdicaoId = null;
-                                      _orcamentoEmEdicaoNumero = null;
-                                    });
-                                  },
-                                  child: const Text('Cancelar edicao'),
-                                ),
-                              ],
-                            ),
-                          ],
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: Focus(
-                              focusNode: _focusSalvarOrcamentoPdV,
-                              child: ElevatedButton.icon(
-                                onPressed: _salvarOrcamento,
-                                icon: const Icon(Icons.save_outlined),
-                                label: Text(
-                                  _orcamentoEmEdicaoId != null
-                                      ? 'Atualizar orcamento (F10 · Ctrl+S)'
-                                      : 'Salvar orcamento (F10 · Ctrl+S)',
-                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
                     ),
                   ),
-                ),
                 ),
               ],
             ),
@@ -3209,6 +3883,14 @@ class IrParaListaProdutosIntent extends Intent {
 class SelecionarPrecoListaIntent extends Intent {
   const SelecionarPrecoListaIntent(this.precoTipo);
   final String precoTipo;
+}
+
+class PdvModoFocoPesquisaIntent extends Intent {
+  const PdvModoFocoPesquisaIntent();
+}
+
+class PdvFocarPesquisaProdutosIntent extends Intent {
+  const PdvFocarPesquisaProdutosIntent();
 }
 
 class PdvRecarregarProdutosIntent extends Intent {

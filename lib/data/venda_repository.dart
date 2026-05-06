@@ -1,8 +1,47 @@
+import '../domain/pagamento_orcamento.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
 import '../model/venda.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+
+void _aplicarPagamentoNoOrcamento(
+  Venda venda,
+  DadosPagamentoOrcamento pagamento, {
+  required double totalOrcamento,
+}) {
+  final linhas = pagamento.linhasMisto;
+  if (linhas != null && linhas.length >= 2) {
+    final soma = PagamentoOrcamentoCodec.soma(linhas);
+    if ((soma - totalOrcamento).abs() > 0.02) {
+      throw StateError(
+        'Pagamento misto: soma (${soma.toStringAsFixed(2)}) deve igualar '
+        'total (${totalOrcamento.toStringAsFixed(2)}).',
+      );
+    }
+    for (final l in linhas) {
+      if (l.meio == 'cartao_debito' && l.parcelas != 1) {
+        throw StateError('Cartao de debito deve ser a vista em cada linha.');
+      }
+    }
+    venda.formaPagamento = 'misto';
+    venda.pagamentosJson = PagamentoOrcamentoCodec.encode(linhas);
+    var maxPar = 1;
+    for (final l in linhas) {
+      if (l.meio == 'cartao_credito' && l.parcelas > maxPar) {
+        maxPar = l.parcelas;
+      }
+    }
+    venda.quantidadeParcelas = maxPar;
+    return;
+  }
+  final parcelas = pagamento.formaPagamento == 'cartao_credito'
+      ? pagamento.quantidadeParcelas
+      : 1;
+  venda.formaPagamento = pagamento.formaPagamento;
+  venda.quantidadeParcelas = parcelas;
+  venda.pagamentosJson = '';
+}
 
 class PeriodoFiltro {
   PeriodoFiltro({required this.inicio, required this.fim});
@@ -29,10 +68,13 @@ class DadosPagamentoOrcamento {
   DadosPagamentoOrcamento({
     required this.formaPagamento,
     required this.quantidadeParcelas,
+    this.linhasMisto,
   });
 
   final String formaPagamento;
   final int quantidadeParcelas;
+  /// Quando preenchido (2+ linhas ou modo misto), [formaPagamento] deve ser `misto`.
+  final List<PagamentoOrcamentoLinha>? linhasMisto;
 }
 
 class DadosEntregaOrcamento {
@@ -191,14 +233,12 @@ class VendaRepository {
     }
     return _db.store.runInTransaction(TxMode.write, () {
       final proximoNumero = _proximoNumeroOrcamento();
-      final parcelas = pagamento.formaPagamento == 'cartao_credito'
-          ? pagamento.quantidadeParcelas
-          : 1;
       final venda = Venda(
         status: 'orcamento',
         numeroOrcamento: proximoNumero,
-        formaPagamento: pagamento.formaPagamento,
-        quantidadeParcelas: parcelas,
+        formaPagamento: 'dinheiro',
+        quantidadeParcelas: 1,
+        pagamentosJson: '',
         tipoEntrega: entrega.tipoEntrega,
         valorFrete: entrega.tipoEntrega == 'entrega_loja'
             ? entrega.valorFrete
@@ -273,6 +313,7 @@ class VendaRepository {
       venda.total = total + venda.valorFrete;
       venda.custoTotal = custoTotal;
       venda.lucroTotal = venda.total - custoTotal;
+      _aplicarPagamentoNoOrcamento(venda, pagamento, totalOrcamento: venda.total);
       final vendaId = _db.vendaBox.put(venda);
       venda.id = vendaId;
 
@@ -308,11 +349,6 @@ class VendaRepository {
         throw StateError('Nao e possivel editar orcamento cancelado.');
       }
 
-      final parcelas = pagamento.formaPagamento == 'cartao_credito'
-          ? pagamento.quantidadeParcelas
-          : 1;
-      venda.formaPagamento = pagamento.formaPagamento;
-      venda.quantidadeParcelas = parcelas;
       venda.tipoEntrega = entrega.tipoEntrega;
       venda.valorFrete = entrega.tipoEntrega == 'entrega_loja' ? entrega.valorFrete : 0;
       venda.enderecoEntrega = entrega.tipoEntrega == 'entrega_loja'
@@ -398,6 +434,7 @@ class VendaRepository {
       venda.total = total + venda.valorFrete;
       venda.custoTotal = custoTotal;
       venda.lucroTotal = venda.total - custoTotal;
+      _aplicarPagamentoNoOrcamento(venda, pagamento, totalOrcamento: venda.total);
       _db.vendaBox.put(venda);
     });
   }
@@ -546,10 +583,85 @@ class VendaRepository {
       if (valorDesconto.isNaN || valorDesconto.isInfinite || valorDesconto < 0) {
         throw StateError('Valor de desconto invalido.');
       }
+      final totalAntesDesconto = venda.total;
       final descontoAplicado = valorDesconto.clamp(0, venda.total).toDouble();
       venda.total = (venda.total - descontoAplicado).clamp(0, double.infinity)
           .toDouble();
       venda.lucroTotal = venda.total - venda.custoTotal;
+      if (venda.formaPagamento == 'misto' &&
+          venda.pagamentosJson.trim().isNotEmpty &&
+          totalAntesDesconto > 0) {
+        final linhas = PagamentoOrcamentoCodec.decode(venda.pagamentosJson);
+        if (linhas.length >= 2) {
+          final fator = venda.total / totalAntesDesconto;
+          final escaladas = linhas
+              .map(
+                (l) => PagamentoOrcamentoLinha(
+                  meio: l.meio,
+                  valor: (l.valor * fator),
+                  parcelas: l.parcelas,
+                ),
+              )
+              .toList();
+          var soma = PagamentoOrcamentoCodec.soma(escaladas);
+          final diff = venda.total - soma;
+          if (escaladas.isNotEmpty && diff.abs() > 0.001) {
+            final i = escaladas.length - 1;
+            final u = escaladas[i];
+            escaladas[i] = PagamentoOrcamentoLinha(
+              meio: u.meio,
+              valor: (u.valor + diff).clamp(0, double.infinity),
+              parcelas: u.parcelas,
+            );
+            soma = PagamentoOrcamentoCodec.soma(escaladas);
+          }
+          venda.pagamentosJson = PagamentoOrcamentoCodec.encode(escaladas);
+        }
+      }
+      _db.vendaBox.put(venda);
+    });
+  }
+
+  /// Substitui linhas do misto ja com valores finais (ex.: conferidos no caixa).
+  /// [linhas] deve somar exatamente [Venda.total] do orcamento no momento da gravacao.
+  void substituirPagamentosMistoOrcamento(
+    int vendaId,
+    List<PagamentoOrcamentoLinha> linhas,
+  ) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Orcamento $vendaId nao encontrado.');
+      }
+      if (venda.status != 'orcamento') {
+        throw StateError('Somente orcamentos podem ser alterados.');
+      }
+      if (venda.formaPagamento != 'misto') {
+        throw StateError('Orcamento nao esta em pagamento misto.');
+      }
+      if (linhas.isEmpty) {
+        throw StateError('Nenhuma linha de pagamento informada.');
+      }
+      final soma = PagamentoOrcamentoCodec.soma(linhas);
+      if ((soma - venda.total).abs() > 0.05) {
+        throw StateError(
+          'Pagamento misto: soma (${soma.toStringAsFixed(2)}) deve igualar '
+          'total (${venda.total.toStringAsFixed(2)}).',
+        );
+      }
+      for (final l in linhas) {
+        if (l.meio == 'cartao_debito' && l.parcelas != 1) {
+          throw StateError('Cartao de debito deve ser a vista em cada linha.');
+        }
+      }
+      var maxPar = 1;
+      for (final l in linhas) {
+        if (l.meio == 'cartao_credito' && l.parcelas > maxPar) {
+          maxPar = l.parcelas;
+        }
+      }
+      venda.quantidadeParcelas = maxPar;
+      venda.pagamentosJson = PagamentoOrcamentoCodec.encode(linhas);
       _db.vendaBox.put(venda);
     });
   }
@@ -635,6 +747,53 @@ class VendaRepository {
     });
   }
 
+  void atualizarMotoristaEntrega(int vendaId, String motorista) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda/Orcamento $vendaId nao encontrado.');
+      }
+      if (venda.tipoEntrega != 'entrega_loja') {
+        throw StateError('Somente entregas da loja possuem motorista.');
+      }
+      venda.motoristaEntrega = motorista.trim();
+      _db.vendaBox.put(venda);
+    });
+  }
+
+  int migrarMotoristaEntregaLegado() {
+    return _db.store.runInTransaction(TxMode.write, () {
+      final vendas = _db.vendaBox.getAll();
+      var totalMigradas = 0;
+      for (final venda in vendas) {
+        if (venda.tipoEntrega != 'entrega_loja') continue;
+        if (venda.motoristaEntrega.trim().isNotEmpty) continue;
+        final linhas = venda.observacaoEntrega.split('\n');
+        String? motorista;
+        final linhasSemMotorista = <String>[];
+        for (final linha in linhas) {
+          final limpa = linha.trim();
+          if (limpa.startsWith('Motorista:') && motorista == null) {
+            final nome = limpa.substring('Motorista:'.length).trim();
+            if (nome.isNotEmpty) {
+              motorista = nome;
+            }
+            continue;
+          }
+          if (limpa.isNotEmpty) {
+            linhasSemMotorista.add(linha.trimRight());
+          }
+        }
+        if (motorista == null) continue;
+        venda.motoristaEntrega = motorista;
+        venda.observacaoEntrega = linhasSemMotorista.join('\n');
+        _db.vendaBox.put(venda);
+        totalMigradas++;
+      }
+      return totalMigradas;
+    });
+  }
+
   void registrarHistoricoStatusEntrega({
     required int vendaId,
     required String statusAnterior,
@@ -652,6 +811,30 @@ class VendaRepository {
       );
       item.venda.target = venda;
       _db.historicoEntregaBox.put(item);
+    });
+  }
+
+  void registrarOcorrenciaEntrega({
+    required int vendaId,
+    required String status,
+    required String motivo,
+    required String usuario,
+  }) {
+    final motivoLimpo = motivo.trim();
+    if (motivoLimpo.isEmpty) return;
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) return;
+      final quem = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
+      final dataHora = DateTime.now().toLocal();
+      final prefixo = '[${dataHora.day.toString().padLeft(2, '0')}/'
+          '${dataHora.month.toString().padLeft(2, '0')}/'
+          '${dataHora.year} ${dataHora.hour.toString().padLeft(2, '0')}:'
+          '${dataHora.minute.toString().padLeft(2, '0')}]';
+      final linha = '$prefixo ${status.toUpperCase()} por $quem: $motivoLimpo';
+      final atual = venda.observacaoEntrega.trim();
+      venda.observacaoEntrega = atual.isEmpty ? linha : '$atual\n$linha';
+      _db.vendaBox.put(venda);
     });
   }
 

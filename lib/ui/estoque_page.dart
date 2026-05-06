@@ -12,14 +12,29 @@ import 'package:pdf/widgets.dart' as pw;
 import '../data/produto_repository.dart';
 import '../model/produto.dart';
 
-class EstoquePage extends StatelessWidget {
+final NumberFormat _moedaBRL = NumberFormat('#,##0.00', 'pt_BR');
+
+class EstoquePage extends StatefulWidget {
   const EstoquePage({super.key, required this.produtoRepository});
 
   final ProdutoRepository produtoRepository;
 
+  @override
+  State<EstoquePage> createState() => _EstoquePageState();
+}
+
+class _EstoquePageState extends State<EstoquePage> {
+  final TextEditingController _buscaController = TextEditingController();
+  String _filtroBusca = '';
+
+  @override
+  void dispose() {
+    _buscaController.dispose();
+    super.dispose();
+  }
+
   String _formatarMoedaBRL(double valor) {
-    final formatador = NumberFormat('#,##0.00', 'pt_BR');
-    return 'R\$ ${formatador.format(valor)}';
+    return 'R\$ ${_moedaBRL.format(valor)}';
   }
 
   String _csvSeguro(String valor) {
@@ -72,7 +87,7 @@ class EstoquePage extends StatelessWidget {
 
     _mostrarProgressoExportacao(context);
     try {
-      final produtos = produtoRepository.listarTodos();
+      final produtos = widget.produtoRepository.listarTodos();
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final tipoArquivo = incluirCustos ? 'tabela_preco_custo' : 'tabela_precos';
       final arquivo = File(p.join(pastaDestino, '${tipoArquivo}_$timestamp.csv'));
@@ -145,7 +160,7 @@ class EstoquePage extends StatelessWidget {
 
     _mostrarProgressoExportacao(context);
     try {
-      final produtos = produtoRepository.listarTodos();
+      final produtos = widget.produtoRepository.listarTodos();
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final tipoArquivo = incluirCustos ? 'tabela_preco_custo' : 'tabela_precos';
       final arquivo = File(p.join(pastaDestino, '${tipoArquivo}_$timestamp.pdf'));
@@ -334,7 +349,18 @@ class EstoquePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final produtos = produtoRepository.listarTodos();
+    final produtos = widget.produtoRepository.listarTodos();
+    final termo = _filtroBusca.trim().toLowerCase();
+    final produtosFiltrados = termo.isEmpty
+        ? produtos
+        : produtos.where((p) {
+            return p.nome.toLowerCase().contains(termo) ||
+                p.codigoInterno.toLowerCase().contains(termo) ||
+                p.categoria.toLowerCase().contains(termo);
+          }).toList();
+    final totalAbaixoMinimo = produtos
+        .where((p) => p.estoque <= p.quantidadeMinima)
+        .length;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Estoque'),
@@ -391,29 +417,113 @@ class EstoquePage extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: produtos.length,
-        itemBuilder: (context, index) {
-          final produto = produtos[index];
-          final abaixoMinimo = produto.estoque <= produto.quantidadeMinima;
-          return Card(
-            child: ListTile(
-              title: Text('${produto.nome} (${produto.unidade})'),
-              subtitle: Text(
-                'SKU: ${produto.codigoInterno} | Estoque: ${produto.estoque} | Minimo: ${produto.quantidadeMinima}\n'
-                'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | Custo medio: ${_formatarMoedaBRL(produto.custoMedio)} | Venda: ${_formatarMoedaBRL(produto.precoVenda)}',
-              ),
-              isThreeLine: true,
-              trailing: abaixoMinimo
-                  ? const Text(
-                      'Abaixo',
-                      style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-                    )
-                  : const Text('OK'),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Column(
+              children: [
+                TextField(
+                  controller: _buscaController,
+                  decoration: InputDecoration(
+                    labelText: 'Pesquisar por nome, SKU ou categoria',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _filtroBusca.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Limpar pesquisa',
+                            onPressed: () {
+                              _buscaController.clear();
+                              setState(() => _filtroBusca = '');
+                            },
+                            icon: const Icon(Icons.close),
+                          ),
+                  ),
+                  onChanged: (value) => setState(() => _filtroBusca = value),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Chip(
+                      label: Text(
+                        'Itens: ${produtosFiltrados.length}/${produtos.length}',
+                      ),
+                    ),
+                    Chip(
+                      avatar: Icon(
+                        Icons.warning_amber_outlined,
+                        color: totalAbaixoMinimo > 0 ? Colors.red : Colors.green,
+                      ),
+                      label: Text('Abaixo minimo: $totalAbaixoMinimo'),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          );
-        },
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.all(12),
+              itemCount: produtosFiltrados.length,
+              cacheExtent: 800,
+              separatorBuilder: (_, _) => const SizedBox(height: 6),
+              itemBuilder: (context, index) {
+                final produto = produtosFiltrados[index];
+                final abaixoMinimo = produto.estoque <= produto.quantidadeMinima;
+                return Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${produto.nome} (${produto.unidade})',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'SKU: ${produto.codigoInterno} | Estoque: ${produto.estoque} | Minimo: ${produto.quantidadeMinima}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | Medio: ${_formatarMoedaBRL(produto.custoMedio)} | Venda: ${_formatarMoedaBRL(produto.precoVenda)}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        abaixoMinimo ? 'Abaixo' : 'OK',
+                        style: TextStyle(
+                          color: abaixoMinimo ? Colors.red : Colors.green,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

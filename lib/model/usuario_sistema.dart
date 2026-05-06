@@ -10,6 +10,7 @@ class UsuarioSistema {
     this.podeEstoque = false,
     this.podeVendas = false,
     this.podeCaixa = false,
+    this.podeLeituraParcialCaixa = false,
     this.podeManutencaoAuditoriaCaixa = false,
     this.podeEntregas = false,
     this.podeFinanceiro = false,
@@ -26,6 +27,7 @@ class UsuarioSistema {
   final bool podeEstoque;
   final bool podeVendas;
   final bool podeCaixa;
+  final bool podeLeituraParcialCaixa;
   final bool podeManutencaoAuditoriaCaixa;
   final bool podeEntregas;
   final bool podeFinanceiro;
@@ -42,6 +44,7 @@ class UsuarioSistema {
     bool? podeEstoque,
     bool? podeVendas,
     bool? podeCaixa,
+    bool? podeLeituraParcialCaixa,
     bool? podeManutencaoAuditoriaCaixa,
     bool? podeEntregas,
     bool? podeFinanceiro,
@@ -58,6 +61,8 @@ class UsuarioSistema {
       podeEstoque: podeEstoque ?? this.podeEstoque,
       podeVendas: podeVendas ?? this.podeVendas,
       podeCaixa: podeCaixa ?? this.podeCaixa,
+      podeLeituraParcialCaixa:
+          podeLeituraParcialCaixa ?? this.podeLeituraParcialCaixa,
       podeManutencaoAuditoriaCaixa:
           podeManutencaoAuditoriaCaixa ?? this.podeManutencaoAuditoriaCaixa,
       podeEntregas: podeEntregas ?? this.podeEntregas,
@@ -78,6 +83,7 @@ class UsuarioSistema {
       'podeEstoque': podeEstoque,
       'podeVendas': podeVendas,
       'podeCaixa': podeCaixa,
+      'podeLeituraParcialCaixa': podeLeituraParcialCaixa,
       'podeManutencaoAuditoriaCaixa': podeManutencaoAuditoriaCaixa,
       'podeEntregas': podeEntregas,
       'podeFinanceiro': podeFinanceiro,
@@ -97,6 +103,7 @@ class UsuarioSistema {
       podeEstoque: map['podeEstoque'] == true,
       podeVendas: map['podeVendas'] == true,
       podeCaixa: map['podeCaixa'] == true,
+      podeLeituraParcialCaixa: map['podeLeituraParcialCaixa'] == true,
       podeManutencaoAuditoriaCaixa:
           map['podeManutencaoAuditoriaCaixa'] == true,
       podeEntregas: map['podeEntregas'] == true,

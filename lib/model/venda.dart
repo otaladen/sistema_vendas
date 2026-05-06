@@ -17,10 +17,12 @@ class Venda {
     this.numeroOrcamento = 0,
     this.formaPagamento = 'dinheiro',
     this.quantidadeParcelas = 1,
+    this.pagamentosJson = '',
     this.tipoEntrega = 'retirada',
     this.valorFrete = 0,
     this.enderecoEntrega = '',
     this.observacaoEntrega = '',
+    this.motoristaEntrega = '',
     this.statusEntrega = 'nao_aplicavel',
     this.prioridadeEntrega = 'normal',
     this.janelaEntrega = 'nao_definida',
@@ -47,10 +49,13 @@ class Venda {
   int numeroOrcamento;
   String formaPagamento;
   int quantidadeParcelas;
+  /// JSON lista [PagamentoOrcamentoLinha]; vazio se pagamento unico (legado).
+  String pagamentosJson;
   String tipoEntrega;
   double valorFrete;
   String enderecoEntrega;
   String observacaoEntrega;
+  String motoristaEntrega;
   String statusEntrega;
   String prioridadeEntrega;
   String janelaEntrega;

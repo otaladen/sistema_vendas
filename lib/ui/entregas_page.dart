@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../data/motorista_repository.dart';
 import '../data/venda_repository.dart';
 import '../model/venda.dart';
 
@@ -14,11 +15,15 @@ class EntregasPage extends StatefulWidget {
   const EntregasPage({
     super.key,
     required this.vendaRepository,
+    required this.motoristaRepository,
     required this.usuarioAtual,
+    required this.podeGerenciarStatusEntrega,
   });
 
   final VendaRepository vendaRepository;
+  final MotoristaRepository motoristaRepository;
   final String usuarioAtual;
+  final bool podeGerenciarStatusEntrega;
 
   @override
   State<EntregasPage> createState() => _EntregasPageState();
@@ -39,6 +44,10 @@ class _EntregasPageState extends State<EntregasPage> {
 
   List<Venda> _entregas = [];
   String _statusSelecionado = 'todos';
+  String _filtroMotorista = 'todos';
+  String _filtroVendedor = 'todos';
+  List<String> _vendedoresDisponiveis = const [];
+  String _agrupamento = 'bairro'; // bairro | motorista
   String _filtroDataMarcada = 'todos'; // todos | hoje | amanha | sem_data
   DateTime? _inicio;
   DateTime? _fim;
@@ -125,6 +134,23 @@ class _EntregasPageState extends State<EntregasPage> {
       fim: _fim,
     );
     entregas = entregas.where(_atendeFiltroDataMarcada).toList();
+    final vendedoresDisponiveis = (entregas
+            .map(_nomeVendedor)
+            .map((n) => n.trim())
+            .where((n) => n.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
+    if (_filtroMotorista != 'todos') {
+      entregas = entregas
+          .where((v) => _nomeMotorista(v).toLowerCase() == _filtroMotorista)
+          .toList();
+    }
+    if (_filtroVendedor != 'todos') {
+      entregas = entregas
+          .where((v) => _nomeVendedor(v).toLowerCase() == _filtroVendedor)
+          .toList();
+    }
     entregas.sort((a, b) {
       final pa = _pesoPrioridade(a.prioridadeEntrega);
       final pb = _pesoPrioridade(b.prioridadeEntrega);
@@ -134,6 +160,7 @@ class _EntregasPageState extends State<EntregasPage> {
     });
     setState(() {
       _entregas = entregas;
+      _vendedoresDisponiveis = vendedoresDisponiveis;
     });
   }
 
@@ -185,6 +212,7 @@ class _EntregasPageState extends State<EntregasPage> {
                                 'Bairro: ${_extrairBairro(venda)} · Janela: ${_rotuloJanelaEntrega(venda.janelaEntrega)} · '
                                 'Prioridade: ${_rotuloPrioridade(venda.prioridadeEntrega)}',
                               ),
+                              Text('Motorista: ${_nomeMotorista(venda)}'),
                               Text('Endereco: ${venda.enderecoEntrega}'),
                               const SizedBox(height: 4),
                               Text(
@@ -336,10 +364,12 @@ class _EntregasPageState extends State<EntregasPage> {
                       pw.Text(
                         'Bairro: ${_extrairBairro(venda)} | Janela: ${_rotuloJanelaEntrega(venda.janelaEntrega)} | Prioridade: ${_rotuloPrioridade(venda.prioridadeEntrega)}',
                       ),
+                      pw.Text('Motorista: ${_nomeMotorista(venda)}'),
+                      pw.Text('Vendedor: ${_nomeVendedor(venda)}'),
                       pw.Text('Data marcada: $dataMarcada'),
                       pw.Text('Endereco: ${venda.enderecoEntrega}'),
-                      if (venda.observacaoEntrega.trim().isNotEmpty)
-                        pw.Text('Obs: ${venda.observacaoEntrega}'),
+                      if (_observacaoSemMotorista(venda).trim().isNotEmpty)
+                        pw.Text('Obs: ${_observacaoSemMotorista(venda)}'),
                       pw.SizedBox(height: 3),
                       pw.Text(
                         'Itens:',
@@ -486,9 +516,115 @@ class _EntregasPageState extends State<EntregasPage> {
     return partesPipe.isNotEmpty ? partesPipe.first : 'Sem bairro';
   }
 
+  String _nomeMotorista(Venda venda) {
+    if (venda.motoristaEntrega.trim().isNotEmpty) {
+      return venda.motoristaEntrega.trim();
+    }
+    // Compatibilidade com dados legados salvos em observacao.
+    final linhas = venda.observacaoEntrega.split('\n');
+    for (final linha in linhas) {
+      final limpa = linha.trim();
+      if (limpa.startsWith('Motorista:')) {
+        final nome = limpa.substring('Motorista:'.length).trim();
+        if (nome.isNotEmpty) return nome;
+      }
+    }
+    return 'Nao definido';
+  }
+
+  String _nomeVendedor(Venda venda) {
+    final vendedor = venda.vendedor.target;
+    final nome = vendedor?.apelido.trim().isNotEmpty == true
+        ? vendedor!.apelido.trim()
+        : (vendedor?.nomeCompleto.trim() ?? '');
+    if (nome.isNotEmpty) return nome;
+    return 'Nao definido';
+  }
+
+  String _observacaoSemMotorista(Venda venda) {
+    if (venda.motoristaEntrega.trim().isNotEmpty) {
+      return venda.observacaoEntrega.trim();
+    }
+    final linhas = venda.observacaoEntrega
+        .split('\n')
+        .map((linha) => linha.trimRight())
+        .where((linha) => linha.trim().isNotEmpty)
+        .where((linha) => !linha.trimLeft().startsWith('Motorista:'))
+        .toList();
+    return linhas.join('\n');
+  }
+
   Future<void> _atualizarPrioridade(Venda venda, String novaPrioridade) async {
     widget.vendaRepository.atualizarPrioridadeEntrega(venda.id, novaPrioridade);
     _carregarEntregas();
+  }
+
+  Future<void> _editarMotoristaEntrega(Venda venda) async {
+    if (!mounted) return;
+    final motoristas = widget.motoristaRepository.listarAtivos();
+    final atual = venda.motoristaEntrega.trim();
+    String selecionado = atual;
+    final nome = await showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Motorista #${venda.numeroOrcamento}'),
+          content: motoristas.isEmpty
+              ? const Text(
+                  'Nenhum motorista ativo cadastrado. Cadastre em Cadastros > Motoristas.',
+                )
+              : DropdownButtonFormField<String>(
+                  initialValue: selecionado.isEmpty ? null : selecionado,
+                  decoration: const InputDecoration(
+                    labelText: 'Motorista',
+                  ),
+                  items: motoristas
+                      .map(
+                        (m) => DropdownMenuItem<String>(
+                          value: m.nome.trim(),
+                          child: Text(
+                            m.telefone.trim().isEmpty
+                                ? m.nome
+                                : '${m.nome} · ${m.telefone}',
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => setDialogState(() => selecionado = v ?? ''),
+                ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, ''),
+              child: const Text('Limpar'),
+            ),
+            ElevatedButton(
+              onPressed: motoristas.isEmpty
+                  ? null
+                  : () => Navigator.pop(context, selecionado.trim()),
+              child: const Text('Salvar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (nome == null) return;
+    try {
+      widget.vendaRepository.atualizarMotoristaEntrega(venda.id, nome);
+      _carregarEntregas();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Motorista atualizado.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao atualizar motorista: $e')));
+    }
   }
 
   void _aplicarPeriodoRapido(String periodo) {
@@ -510,6 +646,47 @@ class _EntregasPageState extends State<EntregasPage> {
       }
     });
     _carregarEntregas();
+  }
+
+  Future<void> _selecionarPeriodoPersonalizado() async {
+    final agora = DateTime.now();
+    final inicioAtual = _inicio ?? DateTime(agora.year, agora.month, agora.day);
+    final fimAtual = _fim ?? agora;
+    final intervalo = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      initialDateRange: DateTimeRange(
+        start: DateTime(inicioAtual.year, inicioAtual.month, inicioAtual.day),
+        end: DateTime(fimAtual.year, fimAtual.month, fimAtual.day),
+      ),
+      helpText: 'Periodo personalizado',
+      saveText: 'Aplicar',
+    );
+    if (intervalo == null) return;
+    setState(() {
+      _inicio = DateTime(
+        intervalo.start.year,
+        intervalo.start.month,
+        intervalo.start.day,
+      );
+      _fim = DateTime(
+        intervalo.end.year,
+        intervalo.end.month,
+        intervalo.end.day,
+        23,
+        59,
+        59,
+        999,
+      );
+    });
+    _carregarEntregas();
+  }
+
+  String _rotuloPeriodoSelecionado() {
+    if (_inicio == null || _fim == null) return 'Periodo: todos';
+    final fmt = DateFormat('dd/MM/yyyy');
+    return 'Periodo: ${fmt.format(_inicio!.toLocal())} ate ${fmt.format(_fim!.toLocal())}';
   }
 
   bool _statusFinalizado(String status) {
@@ -555,6 +732,10 @@ class _EntregasPageState extends State<EntregasPage> {
 
   String _mensagemChecklistInvalido() {
     return 'Siga a sequencia do checklist: Separado -> Carregado -> Saiu.';
+  }
+
+  String _mensagemSemPermissaoStatus() {
+    return 'Seu perfil nao possui permissao para alterar status de entrega.';
   }
 
   int _entregasAtrasadas() {
@@ -625,6 +806,13 @@ class _EntregasPageState extends State<EntregasPage> {
 
   Future<void> _atualizarStatusEntrega(Venda venda, String novoStatus) async {
     try {
+      if (!widget.podeGerenciarStatusEntrega) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_mensagemSemPermissaoStatus())),
+        );
+        return;
+      }
       final statusAnterior = venda.statusEntrega;
       if (!_transicaoStatusPermitida(statusAnterior, novoStatus)) {
         if (!mounted) return;
@@ -635,6 +823,22 @@ class _EntregasPageState extends State<EntregasPage> {
         );
         return;
       }
+      if (novoStatus == 'entregue' && _progressoCarga(venda) < 3) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Checklist de carga incompleto. Finalize Separado, Carregado e Saiu antes de entregar.',
+            ),
+          ),
+        );
+        return;
+      }
+      String? motivo;
+      if (novoStatus == 'reagendada' || novoStatus == 'cancelada') {
+        motivo = await _solicitarMotivoMudancaStatus(novoStatus);
+        if (motivo == null) return;
+      }
       widget.vendaRepository.atualizarStatusEntrega(venda.id, novoStatus);
       widget.vendaRepository.registrarHistoricoStatusEntrega(
         vendaId: venda.id,
@@ -642,6 +846,14 @@ class _EntregasPageState extends State<EntregasPage> {
         statusNovo: novoStatus,
         usuario: widget.usuarioAtual,
       );
+      if (motivo != null) {
+        widget.vendaRepository.registrarOcorrenciaEntrega(
+          vendaId: venda.id,
+          status: novoStatus,
+          motivo: motivo,
+          usuario: widget.usuarioAtual,
+        );
+      }
       _carregarEntregas();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -653,6 +865,52 @@ class _EntregasPageState extends State<EntregasPage> {
         SnackBar(content: Text('Erro ao atualizar status: $e')),
       );
     }
+  }
+
+  Future<String?> _solicitarMotivoMudancaStatus(String novoStatus) async {
+    if (!mounted) return null;
+    final controller = TextEditingController();
+    final motivo = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Motivo da ${_rotuloStatusEntrega(novoStatus).toLowerCase()}'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: 'Motivo (obrigatorio)',
+            hintText: 'Descreva o motivo desta alteracao',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final texto = controller.text.trim();
+              if (texto.isEmpty) return;
+              Navigator.pop(context, texto);
+            },
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (motivo == null || motivo.trim().isEmpty) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Motivo obrigatorio para reagendar ou cancelar entrega.'),
+        ),
+      );
+      return null;
+    }
+    return motivo.trim();
   }
 
   void _atualizarChecklistCarga(
@@ -706,6 +964,7 @@ class _EntregasPageState extends State<EntregasPage> {
                       Text(
                         'Cliente: ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}',
                       ),
+                      Text('Vendedor: ${_nomeVendedor(venda)}'),
                       const SizedBox(height: 8),
                       Flexible(
                         child: ListView.separated(
@@ -792,6 +1051,7 @@ class _EntregasPageState extends State<EntregasPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Cliente: ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}'),
+                  Text('Vendedor: ${_nomeVendedor(venda)}'),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -851,17 +1111,20 @@ class _EntregasPageState extends State<EntregasPage> {
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
     final dataMarcadaFmt = DateFormat('dd/MM/yyyy');
+    final motoristasAtivos = widget.motoristaRepository.listarAtivos();
     final grouped = <String, List<Venda>>{};
     final resumoPorDia = <String, int>{};
     for (final venda in _entregas) {
-      final bairro = _extrairBairro(venda);
-      grouped.putIfAbsent(bairro, () => <Venda>[]).add(venda);
+      final chaveGrupo = _agrupamento == 'motorista'
+          ? _nomeMotorista(venda)
+          : _extrairBairro(venda);
+      grouped.putIfAbsent(chaveGrupo, () => <Venda>[]).add(venda);
       final dataKey = venda.dataEntregaMarcada == null
           ? 'Sem data marcada'
           : dataMarcadaFmt.format(venda.dataEntregaMarcada!.toLocal());
       resumoPorDia.update(dataKey, (atual) => atual + 1, ifAbsent: () => 1);
     }
-    final bairros = grouped.keys.toList()..sort((a, b) => a.compareTo(b));
+    final grupos = grouped.keys.toList()..sort((a, b) => a.compareTo(b));
     final atrasadas = _entregasAtrasadas();
     final pendentesHoje = _entregasPendentesHoje();
     final diasResumo = resumoPorDia.keys.toList()
@@ -902,6 +1165,81 @@ class _EntregasPageState extends State<EntregasPage> {
                           if (value == null) return;
                           setState(() => _statusSelecionado = value);
                           _carregarEntregas();
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: 240,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _filtroMotorista,
+                        decoration: const InputDecoration(
+                          labelText: 'Motorista',
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: 'todos',
+                            child: Text('Todos'),
+                          ),
+                          ...motoristasAtivos.map(
+                            (m) => DropdownMenuItem(
+                              value: m.nome.trim().toLowerCase(),
+                              child: Text(m.nome),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setState(() => _filtroMotorista = value);
+                          _carregarEntregas();
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: 240,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _filtroVendedor,
+                        decoration: const InputDecoration(
+                          labelText: 'Vendedor',
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: 'todos',
+                            child: Text('Todos'),
+                          ),
+                          ..._vendedoresDisponiveis.map(
+                            (nome) => DropdownMenuItem(
+                              value: nome.toLowerCase(),
+                              child: Text(nome),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setState(() => _filtroVendedor = value);
+                          _carregarEntregas();
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _agrupamento,
+                        decoration: const InputDecoration(
+                          labelText: 'Agrupar por',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'bairro',
+                            child: Text('Bairro'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'motorista',
+                            child: Text('Motorista'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setState(() => _agrupamento = value);
                         },
                       ),
                     ),
@@ -968,6 +1306,12 @@ class _EntregasPageState extends State<EntregasPage> {
                       onPressed: () => _aplicarPeriodoRapido('todos'),
                       child: const Text('Todos'),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: _selecionarPeriodoPersonalizado,
+                      icon: const Icon(Icons.date_range_outlined),
+                      label: const Text('Periodo personalizado'),
+                    ),
+                    Chip(label: Text(_rotuloPeriodoSelecionado())),
                   ],
                 ),
               ),
@@ -1054,17 +1398,17 @@ class _EntregasPageState extends State<EntregasPage> {
               child: _entregas.isEmpty
                   ? const Center(child: Text('Nenhuma entrega encontrada para os filtros.'))
                   : ListView.builder(
-                      itemCount: bairros.length,
+                      itemCount: grupos.length,
                       itemBuilder: (context, bairroIndex) {
-                        final bairro = bairros[bairroIndex];
-                        final vendasBairro = grouped[bairro] ?? const <Venda>[];
+                        final grupo = grupos[bairroIndex];
+                        final vendasBairro = grouped[grupo] ?? const <Venda>[];
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Padding(
                               padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
                               child: Text(
-                                'Bairro: $bairro (${vendasBairro.length})',
+                                '${_agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}: $grupo (${vendasBairro.length})',
                                 style: Theme.of(context).textTheme.titleSmall,
                               ),
                             ),
@@ -1088,7 +1432,7 @@ class _EntregasPageState extends State<EntregasPage> {
                                 child: ListTile(
                                   onTap: () => _abrirDetalhesItensVenda(venda),
                                   title: Text(
-                                    'Orcamento #${venda.numeroOrcamento} - ${_formatarMoeda(venda.total)}',
+                                    'Venda #${venda.numeroOrcamento} - ${_formatarMoeda(venda.total)}',
                                   ),
                                   subtitle: Column(
                                     crossAxisAlignment:
@@ -1098,6 +1442,7 @@ class _EntregasPageState extends State<EntregasPage> {
                                       Text(
                                         'Cliente: ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}',
                                       ),
+                                      Text('Vendedor: ${_nomeVendedor(venda)}'),
                                       Text('Endereco: ${venda.enderecoEntrega}'),
                                       Text(
                                         'Frete: ${_formatarMoeda(venda.valorFrete)}',
@@ -1108,14 +1453,17 @@ class _EntregasPageState extends State<EntregasPage> {
                                       Text(
                                         'Entrega marcada: ${venda.dataEntregaMarcada == null ? 'Sem data definida' : dataMarcadaFmt.format(venda.dataEntregaMarcada!.toLocal())}',
                                       ),
+                                      Text('Motorista: ${_nomeMotorista(venda)}'),
                                       if (ultimoEvento != null)
                                         Text(
                                           'Ultima mudanca: ${dateFormat.format(ultimoEvento.dataHora.toLocal())} por ${ultimoEvento.usuario}',
                                         ),
-                                      if (venda.observacaoEntrega
+                                      if (_observacaoSemMotorista(venda)
                                           .trim()
                                           .isNotEmpty)
-                                        Text('Obs: ${venda.observacaoEntrega}'),
+                                        Text(
+                                          'Obs: ${_observacaoSemMotorista(venda)}',
+                                        ),
                                       const SizedBox(height: 4),
                                       const Text(
                                         'Clique no pedido para ver os itens comprados',
@@ -1240,13 +1588,23 @@ class _EntregasPageState extends State<EntregasPage> {
                                         label: const Text('Historico'),
                                       ),
                                       const SizedBox(width: 6),
+                                      OutlinedButton.icon(
+                                        onPressed: () =>
+                                            _editarMotoristaEntrega(venda),
+                                        icon: const Icon(Icons.person_outline),
+                                        label: const Text('Motorista'),
+                                      ),
+                                      const SizedBox(width: 6),
                                       if (venda.statusEntrega != 'entregue')
                                         TextButton.icon(
-                                          onPressed: () =>
-                                              _atualizarStatusEntrega(
-                                                venda,
-                                                'entregue',
-                                              ),
+                                          onPressed: widget
+                                                  .podeGerenciarStatusEntrega
+                                              ? () =>
+                                                  _atualizarStatusEntrega(
+                                                    venda,
+                                                    'entregue',
+                                                  )
+                                              : null,
                                           icon: const Icon(
                                             Icons.check_circle_outline,
                                           ),
@@ -1262,43 +1620,55 @@ class _EntregasPageState extends State<EntregasPage> {
                                           }
                                           _atualizarStatusEntrega(venda, value);
                                         },
-                                        itemBuilder: (context) => const [
+                                        itemBuilder: (context) => [
                                           PopupMenuItem(
+                                            enabled: widget
+                                                .podeGerenciarStatusEntrega,
                                             value: 'pendente',
-                                            child: Text('Status: Pendente'),
+                                            child: const Text('Status: Pendente'),
                                           ),
                                           PopupMenuItem(
+                                            enabled: widget
+                                                .podeGerenciarStatusEntrega,
                                             value: 'roteirizada',
-                                            child: Text('Status: Roteirizada'),
+                                            child: const Text('Status: Roteirizada'),
                                           ),
                                           PopupMenuItem(
+                                            enabled: widget
+                                                .podeGerenciarStatusEntrega,
                                             value: 'saiu_entrega',
-                                            child: Text(
+                                            child: const Text(
                                               'Status: Saiu para entrega',
                                             ),
                                           ),
                                           PopupMenuItem(
+                                            enabled: widget
+                                                .podeGerenciarStatusEntrega,
                                             value: 'entregue',
-                                            child: Text('Status: Entregue'),
+                                            child: const Text('Status: Entregue'),
                                           ),
                                           PopupMenuItem(
+                                            enabled: widget
+                                                .podeGerenciarStatusEntrega,
                                             value: 'reagendada',
-                                            child: Text('Status: Reagendada'),
+                                            child: const Text('Status: Reagendada'),
                                           ),
                                           PopupMenuItem(
+                                            enabled: widget
+                                                .podeGerenciarStatusEntrega,
                                             value: 'cancelada',
-                                            child: Text('Status: Cancelada'),
+                                            child: const Text('Status: Cancelada'),
                                           ),
-                                          PopupMenuDivider(),
-                                          PopupMenuItem(
+                                          const PopupMenuDivider(),
+                                          const PopupMenuItem(
                                             value: 'prioridade:normal',
                                             child: Text('Prioridade: Normal'),
                                           ),
-                                          PopupMenuItem(
+                                          const PopupMenuItem(
                                             value: 'prioridade:urgente',
                                             child: Text('Prioridade: Urgente'),
                                           ),
-                                          PopupMenuItem(
+                                          const PopupMenuItem(
                                             value: 'prioridade:agendada',
                                             child: Text('Prioridade: Agendada'),
                                           ),

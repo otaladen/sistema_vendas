@@ -11,6 +11,7 @@ import 'package:printing/printing.dart';
 import '../data/cliente_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
+import '../domain/pagamento_orcamento.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
 import '../model/venda.dart';
@@ -67,6 +68,17 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
+
+  /// Numero da venda no cupom; se nao houver sequencial, cai no ID interno (caso raro).
+  String _rotuloVendaUsuario(Venda v) {
+    if (v.numeroOrcamento > 0) return 'Venda #${v.numeroOrcamento}';
+    return 'Venda ${v.id}';
+  }
+
+  String _badgeNumeroVenda(Venda v) {
+    if (v.numeroOrcamento > 0) return '#${v.numeroOrcamento}';
+    return '${v.id}';
+  }
 
   Cliente? _clienteDaVenda(Venda venda) {
     final ligado = venda.cliente.target;
@@ -142,9 +154,27 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       case 'transferencia':
         return 'Transferencia';
       case 'dinheiro':
+        return 'Dinheiro';
+      case 'misto':
+        return 'Pagamento misto';
       default:
         return 'Dinheiro';
     }
+  }
+
+  String _rotuloPagamentoLinhaLista(Venda v) {
+    if (v.formaPagamento != 'misto' || v.pagamentosJson.trim().isEmpty) {
+      return '${_rotuloFormaPagamento(v.formaPagamento)}'
+          '${v.formaPagamento == 'cartao_credito' ? ' ${v.quantidadeParcelas}x' : ''}';
+    }
+    final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
+    return linhas
+        .map(
+          (l) =>
+              '${_rotuloFormaPagamento(l.meio)} ${_formatarMoeda(l.valor)}'
+              '${l.meio == 'cartao_credito' ? ' ${l.parcelas}x' : ''}',
+        )
+        .join(' | ');
   }
 
   String _rotuloTipoEntrega(String tipo) {
@@ -273,7 +303,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       return;
     }
     final linhas = <String>[
-      'venda_id,orcamento,data_venda,cancelada_em,cancelada_por,motivo,total',
+      'venda_id,numero_venda,data_venda,cancelada_em,cancelada_por,motivo,total',
       ...canceladas.map((v) {
         final dataVenda = DateFormat('dd/MM/yyyy HH:mm').format(v.data.toLocal());
         final canceladaEm = v.canceladaEm == null
@@ -352,7 +382,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(
-                      'Orcamento #${v.numeroOrcamento} | Venda ID ${v.id}',
+                      _rotuloVendaUsuario(v),
                       style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                     ),
                     pw.SizedBox(height: 2),
@@ -525,7 +555,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Cancelar Orcamento #${venda.numeroOrcamento} / Venda ID ${venda.id}?',
+                  'Cancelar ${_rotuloVendaUsuario(venda)}?',
                 ),
                 const SizedBox(height: 8),
                 TextField(
@@ -566,7 +596,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Venda ${venda.id} cancelada por ${autorizado.$2}.$sufixoMotivo',
+            '${_rotuloVendaUsuario(venda)} cancelada por ${autorizado.$2}.$sufixoMotivo',
           ),
         ),
       );
@@ -709,6 +739,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 'cartao_debito',
                                 'fiado',
                                 'transferencia',
+                                'misto',
                               ].map(
                                 (f) => DropdownMenuItem(
                                   value: f,
@@ -875,9 +906,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                           child: TextField(
                             controller: _buscaController,
                             decoration: const InputDecoration(
-                              labelText: 'Pesquisar nota',
+                              labelText: 'Pesquisar venda',
                               hintText:
-                                  'N. orcamento, ID, cliente, vendedor (nome/codigo) ou produto',
+                                  'Numero da venda, ID, cliente, vendedor (nome/codigo) ou produto',
                               prefixIcon: Icon(Icons.search),
                             ),
                             textInputAction: TextInputAction.search,
@@ -925,7 +956,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              '${_resultados.length} nota(s) encontrada(s)',
+              '${_resultados.length} venda(s) encontrada(s)',
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 8),
@@ -949,14 +980,12 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                             isThreeLine: true,
                             leading: CircleAvatar(
                               child: Text(
-                                v.numeroOrcamento > 0
-                                    ? '#${v.numeroOrcamento}'
-                                    : '${v.id}',
+                                _badgeNumeroVenda(v),
                                 style: const TextStyle(fontSize: 11),
                               ),
                             ),
                             title: Text(
-                              'Orcamento #${v.numeroOrcamento} | Venda ID ${v.id}'
+                              '${_rotuloVendaUsuario(v)}'
                               '${v.cancelada ? ' (cancelada)' : ''}',
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
@@ -972,8 +1001,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 Text(
                                   'Cliente: ${cliente?.nomeRazao ?? 'Sem cliente'} | '
                                   'Vendedor: $rotuloVend | '
-                                  '${_rotuloFormaPagamento(v.formaPagamento)}'
-                                  '${v.formaPagamento == 'cartao_credito' ? ' ${v.quantidadeParcelas}x' : ''}',
+                                  '${_rotuloPagamentoLinhaLista(v)}',
                                 ),
                                 Text(
                                   '${_rotuloTipoEntrega(v.tipoEntrega)} | '

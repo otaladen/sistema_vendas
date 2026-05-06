@@ -7,6 +7,7 @@ import '../model/item_venda.dart';
 import '../model/cliente.dart';
 import '../model/funcionario.dart';
 import '../model/historico_entrega.dart';
+import '../model/motorista.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
@@ -19,6 +20,7 @@ class ObjectBox {
     vendaBox = Box<Venda>(store);
     itemVendaBox = Box<ItemVenda>(store);
     historicoEntregaBox = Box<HistoricoEntrega>(store);
+    motoristaBox = Box<Motorista>(store);
     vendedorBox = Box<Vendedor>(store);
     funcionarioBox = Box<Funcionario>(store);
   }
@@ -29,6 +31,7 @@ class ObjectBox {
   late final Box<Venda> vendaBox;
   late final Box<ItemVenda> itemVendaBox;
   late final Box<HistoricoEntrega> historicoEntregaBox;
+  late final Box<Motorista> motoristaBox;
   late final Box<Vendedor> vendedorBox;
   late final Box<Funcionario> funcionarioBox;
   late final Directory productImagesDir;

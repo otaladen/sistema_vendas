@@ -2,10 +2,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'data/app_config_repository.dart';
 import 'data/cliente_repository.dart';
 import 'data/funcionario_repository.dart';
+import 'data/motorista_repository.dart';
 import 'data/objectbox.dart';
 import 'data/produto_repository.dart';
+import 'data/sync/lan_sync_scheduler.dart';
+import 'data/sync/sync_service.dart';
 import 'data/usuario_repository.dart';
 import 'data/venda_repository.dart';
 import 'data/vendedor_repository.dart';
@@ -17,7 +21,33 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _tentarSincronizarHorarioSistemaNoInicio();
   final objectBox = await ObjectBox.create();
-  runApp(MyApp(objectBox: objectBox));
+  final appConfigRepository = AppConfigRepository();
+  await _executarMigracaoMotoristaEntrega(
+    objectBox: objectBox,
+    configRepository: appConfigRepository,
+  );
+  final syncService = SyncService(
+    objectBox: objectBox,
+    configRepository: appConfigRepository,
+  );
+  final lanSyncScheduler = LanSyncScheduler(syncService: syncService);
+  runApp(
+    MyApp(
+      objectBox: objectBox,
+      lanSyncScheduler: lanSyncScheduler,
+    ),
+  );
+}
+
+Future<void> _executarMigracaoMotoristaEntrega({
+  required ObjectBox objectBox,
+  required AppConfigRepository configRepository,
+}) async {
+  final jaConcluida = await configRepository.migracaoMotoristaEntregaConcluida();
+  if (jaConcluida) return;
+  final vendaRepository = VendaRepository(objectBox);
+  vendaRepository.migrarMotoristaEntregaLegado();
+  await configRepository.marcarMigracaoMotoristaEntregaConcluida();
 }
 
 Future<void> _tentarSincronizarHorarioSistemaNoInicio() async {
@@ -36,9 +66,14 @@ Future<void> _tentarSincronizarHorarioSistemaNoInicio() async {
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({super.key, required this.objectBox});
+  const MyApp({
+    super.key,
+    required this.objectBox,
+    required this.lanSyncScheduler,
+  });
 
   final ObjectBox objectBox;
+  final LanSyncScheduler lanSyncScheduler;
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -55,6 +90,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _sair() {
+    widget.lanSyncScheduler.parar();
     setState(() {
       _usuarioLogado = null;
     });
@@ -188,8 +224,10 @@ class _MyAppState extends State<MyApp> {
               vendaRepository: VendaRepository(widget.objectBox),
               vendedorRepository: VendedorRepository(widget.objectBox),
               funcionarioRepository: FuncionarioRepository(widget.objectBox),
+              motoristaRepository: MotoristaRepository(widget.objectBox),
               usuarioLogado: _usuarioLogado!,
               onLogout: _sair,
+              lanSyncScheduler: widget.lanSyncScheduler,
             ),
     );
   }

@@ -194,7 +194,7 @@
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "27:1438916366591562606",
+      "lastPropertyId": "29:91951873385185917",
       "name": "Venda",
       "properties": [
         {
@@ -338,6 +338,16 @@
           "id": "27:1438916366591562606",
           "name": "canceladaEm",
           "type": 10
+        },
+        {
+          "id": "28:5283079864891234155",
+          "name": "pagamentosJson",
+          "type": 9
+        },
+        {
+          "id": "29:91951873385185917",
+          "name": "motoristaEntrega",
+          "type": 9
         }
       ],
       "relations": []
@@ -705,9 +715,43 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "8:3546637958251126967",
+      "lastPropertyId": "5:6874770349840271468",
+      "name": "Motorista",
+      "properties": [
+        {
+          "id": "1:9154550035482299243",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:7110726591828941183",
+          "name": "nome",
+          "type": 9
+        },
+        {
+          "id": "3:1294304417758967385",
+          "name": "telefone",
+          "type": 9
+        },
+        {
+          "id": "4:3901757347579355748",
+          "name": "ativo",
+          "type": 1
+        },
+        {
+          "id": "5:6874770349840271468",
+          "name": "criadoEm",
+          "type": 10
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "7:3249171710221978790",
+  "lastEntityId": "8:3546637958251126967",
   "lastIndexId": "5:2420440196149968766",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",

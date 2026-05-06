@@ -25,6 +25,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
   bool _podeEstoque = false;
   bool _podeVendas = false;
   bool _podeCaixa = false;
+  bool _podeLeituraParcialCaixa = false;
   bool _podeManutencaoAuditoriaCaixa = false;
   bool _podeEntregas = false;
   bool _podeFinanceiro = false;
@@ -65,6 +66,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeEstoque = false;
       _podeVendas = false;
       _podeCaixa = false;
+      _podeLeituraParcialCaixa = false;
       _podeManutencaoAuditoriaCaixa = false;
       _podeEntregas = false;
       _podeFinanceiro = false;
@@ -79,6 +81,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeEstoque = true;
       _podeVendas = true;
       _podeCaixa = true;
+      _podeLeituraParcialCaixa = true;
       _podeManutencaoAuditoriaCaixa = true;
       _podeEntregas = true;
       _podeFinanceiro = true;
@@ -115,6 +118,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       podeEstoque: _podeEstoque,
       podeVendas: _podeVendas,
       podeCaixa: _podeCaixa,
+      podeLeituraParcialCaixa: _podeLeituraParcialCaixa,
       podeManutencaoAuditoriaCaixa: _podeManutencaoAuditoriaCaixa,
       podeEntregas: _podeEntregas,
       podeFinanceiro: _podeFinanceiro,
@@ -138,6 +142,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeEstoque = u.podeEstoque;
       _podeVendas = u.podeVendas;
       _podeCaixa = u.podeCaixa;
+      _podeLeituraParcialCaixa = u.podeLeituraParcialCaixa;
       _podeManutencaoAuditoriaCaixa = u.podeManutencaoAuditoriaCaixa;
       _podeEntregas = u.podeEntregas;
       _podeFinanceiro = u.podeFinanceiro;
@@ -215,6 +220,17 @@ class _UsuariosPageState extends State<UsuariosPage> {
             value: _podeCaixa,
             onChanged: _admin ? null : (v) => setState(() => _podeCaixa = v ?? false),
             title: const Text('Caixa'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          CheckboxListTile(
+            value: _podeLeituraParcialCaixa,
+            onChanged: _admin
+                ? null
+                : (v) => setState(() => _podeLeituraParcialCaixa = v ?? false),
+            title: const Text('Leitura parcial do caixa'),
+            subtitle: const Text(
+              'Ver totais por forma de pagamento e vendas sem fechar o caixa',
+            ),
             contentPadding: EdgeInsets.zero,
           ),
           CheckboxListTile(
