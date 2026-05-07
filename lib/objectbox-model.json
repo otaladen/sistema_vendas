@@ -5,7 +5,7 @@
   "entities": [
     {
       "id": "1:805574422642691043",
-      "lastPropertyId": "8:4668469838628667719",
+      "lastPropertyId": "10:8342851294323674054",
       "name": "ItemVenda",
       "properties": [
         {
@@ -54,6 +54,16 @@
           "id": "8:4668469838628667719",
           "name": "precoTipo",
           "type": 9
+        },
+        {
+          "id": "9:6765627189652672725",
+          "name": "quantidadeJaRetirada",
+          "type": 6
+        },
+        {
+          "id": "10:8342851294323674054",
+          "name": "quantidadeNoCarreto",
+          "type": 6
         }
       ],
       "relations": []
@@ -194,7 +204,7 @@
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "29:91951873385185917",
+      "lastPropertyId": "33:2512507411449777360",
       "name": "Venda",
       "properties": [
         {
@@ -348,6 +358,21 @@
           "id": "29:91951873385185917",
           "name": "motoristaEntrega",
           "type": 9
+        },
+        {
+          "id": "30:4760414389368228038",
+          "name": "idOrcamentoFreteRetiradaAberto",
+          "type": 6
+        },
+        {
+          "id": "31:504941896492685688",
+          "name": "vendaOrigemFreteRetiradaId",
+          "type": 6
+        },
+        {
+          "id": "33:2512507411449777360",
+          "name": "grupoEntregaFreteId",
+          "type": 6
         }
       ],
       "relations": []
@@ -760,7 +785,8 @@
   "retiredEntityUids": [],
   "retiredIndexUids": [],
   "retiredPropertyUids": [
-    8694161291238035285
+    8694161291238035285,
+    8618464481167645405
   ],
   "retiredRelationUids": [],
   "version": 1

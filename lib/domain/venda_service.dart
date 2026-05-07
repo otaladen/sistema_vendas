@@ -50,6 +50,23 @@ class VendaService {
     _vendaRepository.marcarEntregaComoPendente(vendaId);
   }
 
+  /// Retirada parcial ou total em venda com retirada futura pendente.
+  void registrarRetiradaParcial({
+    required int vendaId,
+    required Map<int, int> quantidadePorItemVendaId,
+    required String usuario,
+    String? retiradoPor,
+    bool permitirSemConferenciaEstoque = true,
+  }) {
+    _vendaRepository.registrarRetiradaParcial(
+      vendaId,
+      quantidadePorItemVendaId,
+      usuario: usuario,
+      retiradoPor: retiradoPor,
+      permitirSemConferenciaEstoque: permitirSemConferenciaEstoque,
+    );
+  }
+
   int registrarVenda(List<ItemVendaInput> itens) {
     return _vendaRepository.registrarVenda(itens);
   }

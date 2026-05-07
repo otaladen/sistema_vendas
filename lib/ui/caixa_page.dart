@@ -18,7 +18,6 @@ import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../domain/pagamento_orcamento.dart';
-import '../domain/venda_service.dart';
 import '../model/cliente.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
@@ -62,13 +61,10 @@ class _CaixaPageState extends State<CaixaPage> {
   final _configRepository = AppConfigRepository();
   late final MensageriaRepository _mensageriaRepository;
   final _usuarioRepository = UsuarioRepository();
-  late final VendaService _vendaService;
-  final _senhaRetiradaController = TextEditingController();
   double? _valorRecebido;
   String _tipoDesconto = 'percentual';
   int? _itemSelecionadoId;
   List<Cliente> _clientesAtivos = [];
-  bool _mostrarCampoSenhaRetirada = false;
   bool _caixaAberto = false;
   String _operadorCaixa = '';
   DateTime? _aberturaCaixaEm;
@@ -87,7 +83,6 @@ class _CaixaPageState extends State<CaixaPage> {
   void initState() {
     super.initState();
     _mensageriaRepository = MensageriaRepository();
-    _vendaService = VendaService(widget.vendaRepository);
     _clientesAtivos = widget.clienteRepository
         .listarTodos()
         .where((c) => c.ativo)
@@ -126,8 +121,6 @@ class _CaixaPageState extends State<CaixaPage> {
         _tipoDesconto = 'percentual';
         _valorRecebidoFocusNode.unfocus();
         _itemSelecionadoId = null;
-        _mostrarCampoSenhaRetirada = false;
-        _senhaRetiradaController.clear();
         _disposeMistoEdicao();
       } else if (_mistoPreparadoParaId != _selecionado!.id) {
         _prepararEdicaoMisto(_selecionado!);
@@ -1857,13 +1850,8 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
-  String _rotuloPagamentoCabecalho(Venda v) {
-    if (v.formaPagamento != 'misto' || v.pagamentosJson.trim().isEmpty) {
-      return '${_rotuloFormaPagamento(v.formaPagamento)}'
-          '${v.formaPagamento == 'cartao_credito' ? ' | ${v.quantidadeParcelas}x' : ''}';
-    }
-    final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
-    if (linhas.isEmpty) return 'Misto';
+  String _textoDetalheLinhasPagamento(List<PagamentoOrcamentoLinha> linhas) {
+    if (linhas.isEmpty) return '';
     return linhas
         .map(
           (l) =>
@@ -1871,6 +1859,25 @@ class _CaixaPageState extends State<CaixaPage> {
               '${l.meio == 'cartao_credito' ? ' ${l.parcelas}x' : ''}',
         )
         .join(' + ');
+  }
+
+  String _rotuloPagamentoCabecalho(Venda v) {
+    if (v.formaPagamento != 'misto' || v.pagamentosJson.trim().isEmpty) {
+      return '${_rotuloFormaPagamento(v.formaPagamento)}'
+          '${v.formaPagamento == 'cartao_credito' ? ' | ${v.quantidadeParcelas}x' : ''}';
+    }
+    final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
+    if (linhas.isEmpty) return 'Misto';
+    return _textoDetalheLinhasPagamento(linhas);
+  }
+
+  /// Na finalizacao, valores do misto no caixa podem divergir do JSON do orcamento ate gravar.
+  String _rotuloPagamentoResumoNaFinalizacao(Venda venda) {
+    if (venda.formaPagamento == 'misto') {
+      final textoForm = _textoDetalheLinhasPagamento(_linhasMistoDoFormulario());
+      if (textoForm.isNotEmpty) return textoForm;
+    }
+    return _rotuloPagamentoCabecalho(venda);
   }
 
   String _rotuloFormaPagamento(String forma) {
@@ -1896,10 +1903,12 @@ class _CaixaPageState extends State<CaixaPage> {
   String _rotuloTipoEntrega(String tipoEntrega) {
     switch (tipoEntrega) {
       case 'entrega_loja':
-        return 'Entrega da loja';
+        return 'Carreto';
+      case 'retirada_futura':
+        return 'Retirada futura';
       case 'retirada':
       default:
-        return 'Retirada na loja';
+        return 'Leva Agora';
     }
   }
 
@@ -2024,8 +2033,6 @@ class _CaixaPageState extends State<CaixaPage> {
 
     final descontoAplicado = _descontoAplicado(venda);
     final totalVenda = _totalComDesconto(venda);
-    final formaPagamento = venda.formaPagamento;
-    final parcelas = venda.quantidadeParcelas;
     late final double totalRecebido;
     late final double trocoFinal;
     if (venda.formaPagamento == 'misto') {
@@ -2137,8 +2144,7 @@ class _CaixaPageState extends State<CaixaPage> {
     }
     final confirmarFinalizacao = await _mostrarResumoFechamentoVenda(
       numeroOrcamento: venda.numeroOrcamento,
-      formaPagamento: formaPagamento,
-      quantidadeParcelas: parcelas,
+      textoPagamento: _rotuloPagamentoResumoNaFinalizacao(venda),
       totalVenda: totalVenda,
       descontoAplicado: descontoAplicado,
       totalRecebido: totalRecebido,
@@ -2209,43 +2215,6 @@ class _CaixaPageState extends State<CaixaPage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Nao foi possivel finalizar: $e')));
-    }
-  }
-
-  Future<void> _solicitarRetiradaFutura(Venda venda) async {
-    final senha = _senhaRetiradaController.text.trim();
-    if (senha.length != 4) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Informe a senha do dia com 4 digitos.')),
-      );
-      return;
-    }
-    try {
-      final eraOrcamento = venda.status == 'orcamento';
-      _vendaService.solicitarRetiradaFutura(
-        vendaId: venda.id,
-        senhaDoDiaInformada: senha,
-      );
-      _carregarOrcamentos();
-      if (!mounted) return;
-      setState(() {
-        _mostrarCampoSenhaRetirada = false;
-        _senhaRetiradaController.clear();
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            eraOrcamento
-                ? 'Orcamento marcado para retirada futura. Ao finalizar a venda, o estoque sera reservado.'
-                : 'Venda marcada com retirada futura (pendente).',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel marcar retirada futura: $e')),
-      );
     }
   }
 
@@ -2346,15 +2315,6 @@ class _CaixaPageState extends State<CaixaPage> {
                   style: const pw.TextStyle(fontSize: 9),
                 ),
               pw.Text(
-                'Pagamento: ${_rotuloFormaPagamento(venda.formaPagamento)}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              if (venda.formaPagamento == 'cartao_credito')
-                pw.Text(
-                  'Parcelas: ${venda.quantidadeParcelas}x',
-                  style: const pw.TextStyle(fontSize: 9),
-                ),
-              pw.Text(
                 'Entrega: ${_rotuloTipoEntrega(venda.tipoEntrega)}'
                 '${venda.tipoEntrega == 'entrega_loja' ? ' | Frete: ${_formatarMoeda(venda.valorFrete)}' : ''}',
                 style: const pw.TextStyle(fontSize: 9),
@@ -2411,6 +2371,10 @@ class _CaixaPageState extends State<CaixaPage> {
                   fontSize: 10,
                   fontWeight: pw.FontWeight.bold,
                 ),
+              ),
+              pw.Text(
+                'Pagamento: ${_rotuloPagamentoCabecalho(venda)}',
+                style: const pw.TextStyle(fontSize: 9),
               ),
               pw.Text(
                 'Recebido: ${_formatarMoeda(totalRecebido)}',
@@ -2564,8 +2528,7 @@ class _CaixaPageState extends State<CaixaPage> {
 
   Future<bool?> _mostrarResumoFechamentoVenda({
     required int numeroOrcamento,
-    required String formaPagamento,
-    required int quantidadeParcelas,
+    required String textoPagamento,
     required double totalVenda,
     required double descontoAplicado,
     required double totalRecebido,
@@ -2585,10 +2548,7 @@ class _CaixaPageState extends State<CaixaPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Pagamento: ${_rotuloFormaPagamento(formaPagamento)}'
-                  '${formaPagamento == 'cartao_credito' ? ' | ${quantidadeParcelas}x' : ''}',
-                ),
+                Text('Pagamento: $textoPagamento'),
                 const SizedBox(height: 4),
                 Text('Itens: $quantidadeItens'),
                 const SizedBox(height: 12),
@@ -2792,7 +2752,6 @@ class _CaixaPageState extends State<CaixaPage> {
   void dispose() {
     _valorRecebidoController.dispose();
     _descontoController.dispose();
-    _senhaRetiradaController.dispose();
     _valorRecebidoFocusNode.dispose();
     _orcamentosScrollController.dispose();
     _itensScrollController.dispose();
@@ -3689,79 +3648,11 @@ class _CaixaPageState extends State<CaixaPage> {
                                                   ),
                                                   const SizedBox(height: 2),
                                                   Text(
-                                                    'Finalize a venda e, se precisar, marque retirada futura.',
+                                                    'Finalize a venda pelo caixa. A escolha de retirada futura e feita no orcamento.',
                                                     style: Theme.of(
                                                       context,
                                                     ).textTheme.bodySmall,
                                                   ),
-                                                  const SizedBox(height: 8),
-                                                  Align(
-                                                    alignment:
-                                                        Alignment.centerLeft,
-                                                    child: TextButton(
-                                                      onPressed: () {
-                                                        setState(() {
-                                                          _mostrarCampoSenhaRetirada =
-                                                              !_mostrarCampoSenhaRetirada;
-                                                          if (!_mostrarCampoSenhaRetirada) {
-                                                            _senhaRetiradaController
-                                                                .clear();
-                                                          }
-                                                        });
-                                                      },
-                                                      style: TextButton.styleFrom(
-                                                        visualDensity:
-                                                            VisualDensity.compact,
-                                                        minimumSize: const Size(
-                                                          0,
-                                                          32,
-                                                        ),
-                                                        tapTargetSize:
-                                                            MaterialTapTargetSize
-                                                                .shrinkWrap,
-                                                        padding:
-                                                            const EdgeInsets.symmetric(
-                                                              horizontal: 8,
-                                                            ),
-                                                      ),
-                                                      child: const Text(
-                                                        'Retirada futura',
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  if (_mostrarCampoSenhaRetirada) ...[
-                                                    const SizedBox(height: 4),
-                                                    Row(
-                                                      children: [
-                                                        Expanded(
-                                                          child: TextField(
-                                                            controller:
-                                                                _senhaRetiradaController,
-                                                            maxLength: 4,
-                                                            keyboardType:
-                                                                TextInputType
-                                                                    .number,
-                                                            decoration:
-                                                                const InputDecoration(
-                                                                  labelText:
-                                                                      'Senha do dia',
-                                                                  counterText: '',
-                                                                ),
-                                                          ),
-                                                        ),
-                                                        const SizedBox(width: 8),
-                                                        ElevatedButton(
-                                                          onPressed: () =>
-                                                              _solicitarRetiradaFutura(
-                                                                selecionado,
-                                                              ),
-                                                          child: const Text(
-                                                            'Confirmar',
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ],
                                                 ],
                                               ),
                                             ),

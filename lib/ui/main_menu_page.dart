@@ -12,6 +12,7 @@ import 'cadastros_page.dart';
 import 'configuracoes_page.dart';
 import 'estoque_page.dart';
 import 'vendas_page.dart';
+import 'widgets/hub_nav_button.dart';
 
 class MainMenuPage extends StatefulWidget {
   const MainMenuPage({
@@ -70,7 +71,9 @@ class _MainMenuPageState extends State<MainMenuPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _MenuButton(
+            HubNavButton(
+              icon: Icons.app_registration_outlined,
+              corDestaque: HubNavColors.menuCadastros,
               titulo: 'Cadastros',
               habilitado:
                   widget.usuarioLogado.admin || widget.usuarioLogado.podeCadastros,
@@ -92,7 +95,9 @@ class _MainMenuPageState extends State<MainMenuPage> {
               },
             ),
             const SizedBox(height: 12),
-            _MenuButton(
+            HubNavButton(
+              icon: Icons.inventory_2_outlined,
+              corDestaque: HubNavColors.menuEstoque,
               titulo: 'Estoque',
               habilitado:
                   widget.usuarioLogado.admin || widget.usuarioLogado.podeEstoque,
@@ -107,7 +112,9 @@ class _MainMenuPageState extends State<MainMenuPage> {
               },
             ),
             const SizedBox(height: 12),
-            _MenuButton(
+            HubNavButton(
+              icon: Icons.point_of_sale_outlined,
+              corDestaque: HubNavColors.menuVendas,
               titulo: 'Vendas',
               habilitado:
                   widget.usuarioLogado.admin || widget.usuarioLogado.podeVendas,
@@ -141,7 +148,9 @@ class _MainMenuPageState extends State<MainMenuPage> {
               },
             ),
             const SizedBox(height: 12),
-            _MenuButton(
+            HubNavButton(
+              icon: Icons.settings_outlined,
+              corDestaque: HubNavColors.menuConfig,
               titulo: 'Configurações',
               habilitado:
                   widget.usuarioLogado.admin ||
@@ -160,29 +169,6 @@ class _MainMenuPageState extends State<MainMenuPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _MenuButton extends StatelessWidget {
-  const _MenuButton({
-    required this.titulo,
-    required this.onTap,
-    this.habilitado = true,
-  });
-
-  final String titulo;
-  final VoidCallback onTap;
-  final bool habilitado;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 72,
-      child: ElevatedButton(
-        onPressed: habilitado ? onTap : null,
-        child: Text(titulo, style: const TextStyle(fontSize: 18)),
       ),
     );
   }

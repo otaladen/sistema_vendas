@@ -5,12 +5,18 @@ import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../data/motorista_repository.dart';
-import '../domain/venda_service.dart';
 import 'caixa_page.dart';
 import 'entregas_page.dart';
 import 'listagem_vendas_page.dart';
 import 'ponto_de_venda_page.dart';
 import 'relatorios_page.dart';
+import 'widgets/hub_nav_button.dart';
+
+const Color _corPontoDeVenda = Color(0xFF2E7D32);
+const Color _corCaixa = Color(0xFF00897B);
+const Color _corEntregas = Color(0xFF0277BD);
+const Color _corListagem = Color(0xFF3949AB);
+const Color _corRelatorios = Color(0xFFEF6C00);
 
 class VendasPage extends StatelessWidget {
   const VendasPage({
@@ -38,32 +44,6 @@ class VendasPage extends StatelessWidget {
   final bool podeCancelarVendas;
   final bool podeGerenciarEntregas;
 
-  void _mostrarTokenSenhaDoDia(BuildContext context) {
-    final vendaService = VendaService(vendaRepository);
-    final token = vendaService.gerarSenhaDoDia();
-    showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Token para retirada'),
-          content: SelectableText(
-            token,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-              letterSpacing: 2,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Fechar'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -73,132 +53,103 @@ class VendasPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(
-              height: 72,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PontoDeVendaPage(
-                        produtoRepository: produtoRepository,
-                        clienteRepository: clienteRepository,
-                        vendaRepository: vendaRepository,
-                        vendedorRepository: vendedorRepository,
-                      ),
+            HubNavButton(
+              icon: Icons.point_of_sale_outlined,
+              corDestaque: _corPontoDeVenda,
+              titulo: 'Ponto de Venda',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PontoDeVendaPage(
+                      produtoRepository: produtoRepository,
+                      clienteRepository: clienteRepository,
+                      vendaRepository: vendaRepository,
+                      vendedorRepository: vendedorRepository,
                     ),
-                  );
-                },
-                icon: const Icon(Icons.point_of_sale_outlined),
-                label: const Text('Ponto de Venda'),
-              ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              height: 72,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => CaixaPage(
-                        clienteRepository: clienteRepository,
-                        produtoRepository: produtoRepository,
-                        vendaRepository: vendaRepository,
-                        vendedorRepository: vendedorRepository,
-                        usuarioAtual: usuarioAtual,
-                        podeLeituraParcialCaixa: podeLeituraParcialCaixa,
-                        podeManutencaoAuditoriaCaixa: podeManutencaoAuditoriaCaixa,
-                      ),
+            HubNavButton(
+              icon: Icons.receipt_long_outlined,
+              corDestaque: _corCaixa,
+              titulo: 'Caixa',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CaixaPage(
+                      clienteRepository: clienteRepository,
+                      produtoRepository: produtoRepository,
+                      vendaRepository: vendaRepository,
+                      vendedorRepository: vendedorRepository,
+                      usuarioAtual: usuarioAtual,
+                      podeLeituraParcialCaixa: podeLeituraParcialCaixa,
+                      podeManutencaoAuditoriaCaixa: podeManutencaoAuditoriaCaixa,
                     ),
-                  );
-                },
-                icon: const Icon(Icons.receipt_long_outlined),
-                label: const Text('Caixa'),
-              ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              height: 72,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          EntregasPage(
-                            vendaRepository: vendaRepository,
-                            motoristaRepository: motoristaRepository,
-                            usuarioAtual: usuarioAtual,
-                            podeGerenciarStatusEntrega: podeGerenciarEntregas,
-                          ),
+            HubNavButton(
+              icon: Icons.local_shipping_outlined,
+              corDestaque: _corEntregas,
+              titulo: 'Entregas',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EntregasPage(
+                      vendaRepository: vendaRepository,
+                      motoristaRepository: motoristaRepository,
+                      usuarioAtual: usuarioAtual,
+                      podeGerenciarStatusEntrega: podeGerenciarEntregas,
                     ),
-                  );
-                },
-                icon: const Icon(Icons.local_shipping_outlined),
-                label: const Text('Entregas'),
-              ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              height: 72,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ListagemVendasPage(
-                        vendaRepository: vendaRepository,
-                        clienteRepository: clienteRepository,
-                        vendedorRepository: vendedorRepository,
-                        usuarioAtual: usuarioAtual,
-                        podeCancelarVendas: podeCancelarVendas,
-                      ),
+            HubNavButton(
+              icon: Icons.view_list_outlined,
+              corDestaque: _corListagem,
+              titulo: 'Listagem de Vendas',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ListagemVendasPage(
+                      vendaRepository: vendaRepository,
+                      clienteRepository: clienteRepository,
+                      vendedorRepository: vendedorRepository,
+                      usuarioAtual: usuarioAtual,
+                      podeCancelarVendas: podeCancelarVendas,
                     ),
-                  );
-                },
-                icon: const Icon(Icons.view_list_outlined),
-                label: const Text('Listagem de Vendas'),
-              ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              height: 72,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => RelatoriosPage(
-                        vendaRepository: vendaRepository,
-                        clienteRepository: clienteRepository,
-                        vendedorRepository: vendedorRepository,
-                        produtoRepository: produtoRepository,
-                      ),
+            HubNavButton(
+              icon: Icons.assessment_outlined,
+              corDestaque: _corRelatorios,
+              titulo: 'Relatorios',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => RelatoriosPage(
+                      vendaRepository: vendaRepository,
+                      clienteRepository: clienteRepository,
+                      vendedorRepository: vendedorRepository,
+                      produtoRepository: produtoRepository,
                     ),
-                  );
-                },
-                icon: const Icon(Icons.assessment_outlined),
-                label: const Text('Relatorios'),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () => _mostrarTokenSenhaDoDia(context),
-                icon: const Icon(Icons.key_outlined),
-                label: const Text('Ver token de retirada'),
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(12),
-                child: Text(
-                  'No Ponto de Venda voce monta o atendimento; no Caixa a venda e finalizada com baixa de estoque. Entregas controla frete e status. Listagem de Vendas mostra vendas finalizadas, com filtros e pesquisa. Relatorios reune vendas por periodo, ranking de produtos e clientes, estoque minimo e orcamentos em aberto.',
-                ),
-              ),
+                  ),
+                );
+              },
             ),
           ],
         ),

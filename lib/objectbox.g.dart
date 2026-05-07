@@ -29,7 +29,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(1, 805574422642691043),
     name: 'ItemVenda',
-    lastPropertyId: const obx_int.IdUid(8, 4668469838628667719),
+    lastPropertyId: const obx_int.IdUid(10, 8342851294323674054),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -84,6 +84,18 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(8, 4668469838628667719),
         name: 'precoTipo',
         type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 6765627189652672725),
+        name: 'quantidadeJaRetirada',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 8342851294323674054),
+        name: 'quantidadeNoCarreto',
+        type: 6,
         flags: 0,
       ),
     ],
@@ -253,7 +265,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(29, 91951873385185917),
+    lastPropertyId: const obx_int.IdUid(33, 2512507411449777360),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -434,6 +446,24 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(29, 91951873385185917),
         name: 'motoristaEntrega',
         type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(30, 4760414389368228038),
+        name: 'idOrcamentoFreteRetiradaAberto',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(31, 504941896492685688),
+        name: 'vendaOrigemFreteRetiradaId',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(33, 2512507411449777360),
+        name: 'grupoEntregaFreteId',
+        type: 6,
         flags: 0,
       ),
     ],
@@ -975,7 +1005,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
     retiredIndexUids: const [],
-    retiredPropertyUids: const [8694161291238035285],
+    retiredPropertyUids: const [8694161291238035285, 8618464481167645405],
     retiredRelationUids: const [],
     modelVersion: 5,
     modelVersionParserMinimum: 5,
@@ -994,7 +1024,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
       objectToFB: (ItemVenda object, fb.Builder fbb) {
         final nomeProdutoOffset = fbb.writeString(object.nomeProduto);
         final precoTipoOffset = fbb.writeString(object.precoTipo);
-        fbb.startTable(9);
+        fbb.startTable(11);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.quantidade);
         fbb.addFloat64(2, object.precoUnitario);
@@ -1003,6 +1033,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(5, nomeProdutoOffset);
         fbb.addFloat64(6, object.precoCustoUnitario);
         fbb.addOffset(7, precoTipoOffset);
+        fbb.addInt64(8, object.quantidadeJaRetirada);
+        fbb.addInt64(9, object.quantidadeNoCarreto);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1024,6 +1056,18 @@ obx_int.ModelDefinition getObjectBoxModel() {
           6,
           0,
         );
+        final quantidadeJaRetiradaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          20,
+          0,
+        );
+        final quantidadeNoCarretoParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          22,
+          0,
+        );
         final precoTipoParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 18, '');
@@ -1043,6 +1087,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
           id: idParam,
           nomeProduto: nomeProdutoParam,
           quantidade: quantidadeParam,
+          quantidadeJaRetirada: quantidadeJaRetiradaParam,
+          quantidadeNoCarreto: quantidadeNoCarretoParam,
           precoTipo: precoTipoParam,
           precoUnitario: precoUnitarioParam,
           precoCustoUnitario: precoCustoUnitarioParam,
@@ -1296,7 +1342,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final canceladaPorOffset = fbb.writeString(object.canceladaPor);
         final pagamentosJsonOffset = fbb.writeString(object.pagamentosJson);
         final motoristaEntregaOffset = fbb.writeString(object.motoristaEntrega);
-        fbb.startTable(30);
+        fbb.startTable(34);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -1326,6 +1372,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addInt64(26, object.canceladaEm?.millisecondsSinceEpoch);
         fbb.addOffset(27, pagamentosJsonOffset);
         fbb.addOffset(28, motoristaEntregaOffset);
+        fbb.addInt64(29, object.idOrcamentoFreteRetiradaAberto);
+        fbb.addInt64(30, object.vendaOrigemFreteRetiradaId);
+        fbb.addInt64(32, object.grupoEntregaFreteId);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1463,6 +1512,16 @@ obx_int.ModelDefinition getObjectBoxModel() {
                 canceladaEmValue,
                 isUtc: true,
               );
+        final vendaOrigemFreteRetiradaIdParam = const fb.Int64Reader()
+            .vTableGet(buffer, rootOffset, 64, 0);
+        final idOrcamentoFreteRetiradaAbertoParam = const fb.Int64Reader()
+            .vTableGet(buffer, rootOffset, 62, 0);
+        final grupoEntregaFreteIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          68,
+          0,
+        );
         final object = Venda(
           id: idParam,
           data: dataParam,
@@ -1491,6 +1550,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           motivoCancelamento: motivoCancelamentoParam,
           canceladaPor: canceladaPorParam,
           canceladaEm: canceladaEmParam,
+          vendaOrigemFreteRetiradaId: vendaOrigemFreteRetiradaIdParam,
+          idOrcamentoFreteRetiradaAberto: idOrcamentoFreteRetiradaAbertoParam,
+          grupoEntregaFreteId: grupoEntregaFreteIdParam,
         );
         object.cliente.targetId = const fb.Int64Reader().vTableGet(
           buffer,
@@ -2142,6 +2204,16 @@ class ItemVenda_ {
   static final precoTipo = obx.QueryStringProperty<ItemVenda>(
     _entities[0].properties[7],
   );
+
+  /// See [ItemVenda.quantidadeJaRetirada].
+  static final quantidadeJaRetirada = obx.QueryIntegerProperty<ItemVenda>(
+    _entities[0].properties[8],
+  );
+
+  /// See [ItemVenda.quantidadeNoCarreto].
+  static final quantidadeNoCarreto = obx.QueryIntegerProperty<ItemVenda>(
+    _entities[0].properties[9],
+  );
 }
 
 /// [Produto] entity fields to define ObjectBox queries.
@@ -2413,6 +2485,21 @@ class Venda_ {
   /// See [Venda.motoristaEntrega].
   static final motoristaEntrega = obx.QueryStringProperty<Venda>(
     _entities[2].properties[28],
+  );
+
+  /// See [Venda.idOrcamentoFreteRetiradaAberto].
+  static final idOrcamentoFreteRetiradaAberto = obx.QueryIntegerProperty<Venda>(
+    _entities[2].properties[29],
+  );
+
+  /// See [Venda.vendaOrigemFreteRetiradaId].
+  static final vendaOrigemFreteRetiradaId = obx.QueryIntegerProperty<Venda>(
+    _entities[2].properties[30],
+  );
+
+  /// See [Venda.grupoEntregaFreteId].
+  static final grupoEntregaFreteId = obx.QueryIntegerProperty<Venda>(
+    _entities[2].properties[31],
   );
 
   /// see [Venda.itens]

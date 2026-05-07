@@ -14,6 +14,14 @@ import 'motoristas_page.dart';
 import 'produtos_page.dart';
 import 'usuarios_page.dart';
 import 'vendedores_page.dart';
+import 'widgets/hub_nav_button.dart';
+
+const Color _corProdutos = Color(0xFFE65100);
+const Color _corMotoristas = Color(0xFF0277BD);
+const Color _corFuncionarios = Color(0xFF455A64);
+const Color _corClientes = Color(0xFF1565C0);
+const Color _corVendedores = Color(0xFF2E7D32);
+const Color _corUsuarios = Color(0xFF6A1B9A);
 
 class CadastrosPage extends StatelessWidget {
   const CadastrosPage({
@@ -35,6 +43,9 @@ class CadastrosPage extends StatelessWidget {
   final MotoristaRepository motoristaRepository;
   final UsuarioSistema usuarioLogado;
 
+  bool get _podeCadastros =>
+      usuarioLogado.admin || usuarioLogado.podeCadastros;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -44,124 +55,106 @@ class CadastrosPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed:
-                    (usuarioLogado.admin || usuarioLogado.podeCadastros)
-                    ? () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          ProdutosPage(produtoRepository: produtoRepository),
-                    ),
-                  );
-                    }
-                    : null,
-                child: const Text('Produtos'),
-              ),
+            HubNavButton(
+              icon: Icons.inventory_2_outlined,
+              corDestaque: _corProdutos,
+              titulo: 'Produtos',
+              habilitado: _podeCadastros,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        ProdutosPage(produtoRepository: produtoRepository),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed:
-                    (usuarioLogado.admin || usuarioLogado.podeCadastros)
-                    ? () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => MotoristasPage(
-                        motoristaRepository: motoristaRepository,
-                      ),
+            HubNavButton(
+              icon: Icons.local_shipping_outlined,
+              corDestaque: _corMotoristas,
+              titulo: 'Motoristas',
+              habilitado: _podeCadastros,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MotoristasPage(
+                      motoristaRepository: motoristaRepository,
                     ),
-                  );
-                    }
-                    : null,
-                child: const Text('Motoristas'),
-              ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed:
-                    (usuarioLogado.admin || usuarioLogado.podeCadastros)
-                    ? () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => FuncionariosPage(
-                        funcionarioRepository: funcionarioRepository,
-                      ),
+            HubNavButton(
+              icon: Icons.badge_outlined,
+              corDestaque: _corFuncionarios,
+              titulo: 'Funcionarios',
+              habilitado: _podeCadastros,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FuncionariosPage(
+                      funcionarioRepository: funcionarioRepository,
                     ),
-                  );
-                    }
-                    : null,
-                child: const Text('Funcionarios'),
-              ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed:
-                    (usuarioLogado.admin || usuarioLogado.podeCadastros)
-                    ? () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          ClientesPage(
-                            clienteRepository: clienteRepository,
-                            vendaRepository: vendaRepository,
-                          ),
+            HubNavButton(
+              icon: Icons.people_outline,
+              corDestaque: _corClientes,
+              titulo: 'Clientes',
+              habilitado: _podeCadastros,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ClientesPage(
+                      clienteRepository: clienteRepository,
+                      vendaRepository: vendaRepository,
                     ),
-                  );
-                    }
-                    : null,
-                child: const Text('Clientes'),
-              ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed:
-                    (usuarioLogado.admin || usuarioLogado.podeCadastros)
-                    ? () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => VendedoresPage(
-                        vendedorRepository: vendedorRepository,
-                      ),
+            HubNavButton(
+              icon: Icons.storefront_outlined,
+              corDestaque: _corVendedores,
+              titulo: 'Vendedores',
+              habilitado: _podeCadastros,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => VendedoresPage(
+                      vendedorRepository: vendedorRepository,
                     ),
-                  );
-                    }
-                    : null,
-                child: const Text('Vendedores'),
-              ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: usuarioLogado.admin
-                    ? () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => UsuariosPage(
-                        usuarioRepository: UsuarioRepository(),
-                      ),
+            HubNavButton(
+              icon: Icons.manage_accounts_outlined,
+              corDestaque: _corUsuarios,
+              titulo: 'Usuarios',
+              habilitado: usuarioLogado.admin,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => UsuariosPage(
+                      usuarioRepository: UsuarioRepository(),
                     ),
-                  );
-                    }
-                    : null,
-                child: const Text('Usuarios'),
-              ),
+                  ),
+                );
+              },
             ),
           ],
         ),

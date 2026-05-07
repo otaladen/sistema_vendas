@@ -1,6 +1,7 @@
 import '../domain/pagamento_orcamento.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
+import '../model/produto.dart';
 import '../model/venda.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
@@ -88,7 +89,7 @@ class DadosEntregaOrcamento {
     this.dataEntregaMarcada,
   });
 
-  final String tipoEntrega; // retirada | entrega_loja
+  final String tipoEntrega; // retirada | retirada_futura | entrega_loja
   final double valorFrete;
   final String enderecoEntrega;
   final String observacaoEntrega;
@@ -261,6 +262,7 @@ class VendaRepository {
         dataEntregaMarcada: entrega.tipoEntrega == 'entrega_loja'
             ? entrega.dataEntregaMarcada
             : null,
+        entregaPendente: entrega.tipoEntrega == 'retirada_futura',
       );
       if (clienteId != null) {
         final cliente = _db.clienteBox.get(clienteId);
@@ -306,7 +308,7 @@ class VendaRepository {
         }
         if (venda.enderecoEntrega.trim().isEmpty) {
           throw StateError(
-            'Endereco de entrega obrigatorio para entrega da loja.',
+            'Endereco de entrega obrigatorio para carreto.',
           );
         }
       }
@@ -324,6 +326,286 @@ class VendaRepository {
 
       return vendaId;
     });
+  }
+
+  static const String _codigoProdutoFreteRetiradaFutura =
+      '__FRETE_RET_FUTURA__';
+
+  int _obterOuCriarProdutoFreteRetiradaFutura() {
+    final q = _db.produtoBox
+        .query(Produto_.codigoInterno.equals(_codigoProdutoFreteRetiradaFutura))
+        .build();
+    try {
+      final existente = q.findFirst();
+      if (existente != null) {
+        return existente.id;
+      }
+    } finally {
+      q.close();
+    }
+    final novo = Produto(
+      codigoInterno: _codigoProdutoFreteRetiradaFutura,
+      nome: 'Servico: Frete carreto (retirada futura)',
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 0,
+      preco1: 0,
+      preco2: 0,
+      preco3: 0,
+    );
+    novo.estoqueReal = 0;
+    return _db.produtoBox.put(novo);
+  }
+
+  /// Orcamento filho so para o frete; total da venda mae nao e alterado (opcao 3).
+  int registrarOrcamentoFreteRetiradaFutura({
+    required int vendaMaeId,
+    required double valorFreteCobrado,
+    required DadosPagamentoOrcamento pagamento,
+    required String enderecoEntrega,
+    required String observacaoEntrega,
+    required String prioridadeEntrega,
+    required String janelaEntrega,
+    required DateTime dataEntregaMarcada,
+    int? vendedorId,
+  }) {
+    return _db.store.runInTransaction(TxMode.write, () {
+      final mae = _db.vendaBox.get(vendaMaeId);
+      if (mae == null) {
+        throw StateError('Venda mae $vendaMaeId nao encontrada.');
+      }
+      if (mae.cancelada || mae.status != 'finalizada') {
+        throw StateError(
+          'Somente venda finalizada pode contratar frete de retirada futura.',
+        );
+      }
+      if (mae.tipoEntrega != 'retirada_futura' || !mae.entregaPendente) {
+        throw StateError(
+          'Somente venda com retirada futura pendente aceita frete carreto.',
+        );
+      }
+      if (mae.idOrcamentoFreteRetiradaAberto != 0) {
+        throw StateError(
+          'Ja existe orcamento de frete pendente para esta venda. Finalize ou cancele no caixa antes.',
+        );
+      }
+      final temPendencia =
+          mae.itens.any((i) => i.quantidadePendenteRetirada > 0);
+      if (!temPendencia) {
+        throw StateError('Nao ha quantidade pendente de retirada nesta venda.');
+      }
+      if (mae.cliente.targetId == 0) {
+        throw StateError('Venda sem cliente. Cadastre o cliente antes.');
+      }
+      if (valorFreteCobrado < 0) {
+        throw StateError('Valor de frete invalido.');
+      }
+
+      final produtoId = _obterOuCriarProdutoFreteRetiradaFutura();
+      final proximoNumero = _proximoNumeroOrcamento();
+      final venda = Venda(
+        status: 'orcamento',
+        numeroOrcamento: proximoNumero,
+        formaPagamento: 'dinheiro',
+        quantidadeParcelas: 1,
+        tipoEntrega: 'retirada',
+        valorFrete: 0,
+        entregaPendente: false,
+        vendaOrigemFreteRetiradaId: vendaMaeId,
+      );
+      venda.enderecoEntrega = enderecoEntrega.trim();
+      venda.observacaoEntrega = observacaoEntrega.trim();
+      venda.prioridadeEntrega = prioridadeEntrega;
+      venda.janelaEntrega = janelaEntrega;
+      venda.dataEntregaMarcada = dataEntregaMarcada;
+      final cliId = mae.cliente.targetId;
+      if (cliId != 0) {
+        final cli = mae.cliente.target ?? _db.clienteBox.get(cliId);
+        if (cli != null) {
+          venda.cliente.target = cli;
+        }
+      }
+      if (vendedorId != null) {
+        final v = _db.vendedorBox.get(vendedorId);
+        if (v != null) {
+          venda.vendedor.target = v;
+        }
+      }
+
+      final produto = _db.produtoBox.get(produtoId);
+      if (produto == null) {
+        throw StateError('Produto interno de frete nao encontrado.');
+      }
+
+      final refMae =
+          mae.numeroOrcamento > 0 ? '${mae.numeroOrcamento}' : '${mae.id}';
+      final item = ItemVenda(
+        nomeProduto: 'Frete carreto (ref. venda #$refMae)',
+        quantidade: 1,
+        precoTipo: 'preco1',
+        precoUnitario: valorFreteCobrado,
+        precoCustoUnitario: 0,
+      );
+      item.produto.target = produto;
+      final total = item.subtotal;
+      venda.total = total;
+      venda.custoTotal = 0;
+      venda.lucroTotal = total;
+      _aplicarPagamentoNoOrcamento(venda, pagamento, totalOrcamento: total);
+      final vendaId = _db.vendaBox.put(venda);
+      venda.id = vendaId;
+      item.venda.target = venda;
+      _db.itemVendaBox.put(item);
+
+      mae.idOrcamentoFreteRetiradaAberto = vendaId;
+      _db.vendaBox.put(mae);
+
+      return vendaId;
+    });
+  }
+
+  /// Agrupa entregas de carreto (mesmo cliente) para a equipe ver como um unico carregamento.
+  void definirGrupoEntregaLogistica(Set<int> vendaIds) {
+    final ids = vendaIds.where((id) => id > 0).toList()..sort();
+    if (ids.length < 2) {
+      throw StateError('Selecione ao menos duas entregas para agrupar.');
+    }
+    _db.store.runInTransaction(TxMode.write, () {
+      final vendas = <Venda>[];
+      for (final id in ids) {
+        final v = _db.vendaBox.get(id);
+        if (v == null) {
+          throw StateError('Venda $id nao encontrada.');
+        }
+        vendas.add(v);
+      }
+      for (final v in vendas) {
+        if (v.cancelada ||
+            v.status != 'finalizada' ||
+            v.tipoEntrega != 'entrega_loja') {
+          throw StateError(
+            'Somente entregas de carreto finalizadas podem ser agrupadas.',
+          );
+        }
+      }
+      final clienteRef = vendas.first.cliente.targetId;
+      if (clienteRef == 0) {
+        throw StateError(
+          'Vendas sem cliente nao podem ser agrupadas (cadastre o cliente).',
+        );
+      }
+      for (final v in vendas) {
+        if (v.cliente.targetId != clienteRef) {
+          throw StateError(
+            'Agrupar na mesma carga exige o mesmo cliente em todas as notas.',
+          );
+        }
+      }
+      final grupoId = ids.first;
+      for (final v in vendas) {
+        v.grupoEntregaFreteId = grupoId;
+        _db.vendaBox.put(v);
+      }
+    });
+  }
+
+  void limparGrupoEntregaLogisticaEm(Set<int> vendaIds) {
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final id in vendaIds) {
+        final v = _db.vendaBox.get(id);
+        if (v == null) continue;
+        v.grupoEntregaFreteId = 0;
+        _db.vendaBox.put(v);
+      }
+    });
+  }
+
+  void _migrarUmaMaeRetiradaFuturaParaCarretoNaTransacao(
+    Venda filho,
+    Venda mae,
+  ) {
+    if (mae.idOrcamentoFreteRetiradaAberto != filho.id) {
+      throw StateError(
+        'Inconsistencia: este orcamento nao e o frete pendente da venda mae '
+        '${mae.id}.',
+      );
+    }
+    if (mae.cancelada || mae.status != 'finalizada') {
+      throw StateError('Venda mae invalida para migracao.');
+    }
+    if (mae.tipoEntrega != 'retirada_futura' || !mae.entregaPendente) {
+      throw StateError('Venda mae nao esta mais em retirada futura pendente.');
+    }
+
+    for (final item in mae.itens) {
+      final q = item.quantidadePendenteRetirada;
+      item.quantidadeNoCarreto = q;
+      if (q <= 0) {
+        _db.itemVendaBox.put(item);
+        continue;
+      }
+      final produto = item.produto.target;
+      if (produto == null) {
+        throw StateError(
+          'Item "${item.nomeProduto}" sem produto ligado: nao e possivel '
+          'baixar estoque na migracao.',
+        );
+      }
+      if (produto.estoqueReservado < q || produto.estoqueReal < q) {
+        throw StateError(
+          'Estoque insuficiente para ${produto.nome}: reservado '
+          '${produto.estoqueReservado}, precisa $q (fisico ${produto.estoqueReal}).',
+        );
+      }
+      produto.estoqueReservado -= q;
+      produto.estoqueReal -= q;
+      _db.produtoBox.put(produto);
+      item.quantidadeJaRetirada += q;
+      _db.itemVendaBox.put(item);
+    }
+
+    mae.tipoEntrega = 'entrega_loja';
+    mae.valorFrete = 0;
+    mae.enderecoEntrega = filho.enderecoEntrega.trim();
+    mae.observacaoEntrega = filho.observacaoEntrega.trim();
+    mae.prioridadeEntrega = filho.prioridadeEntrega;
+    mae.janelaEntrega = filho.janelaEntrega;
+    mae.dataEntregaMarcada = filho.dataEntregaMarcada;
+    mae.statusEntrega = 'pendente';
+    mae.entregaPendente = false;
+    mae.motoristaEntrega = '';
+    mae.cargaSeparada = false;
+    mae.cargaCarregada = false;
+    mae.cargaSaiu = false;
+    mae.idOrcamentoFreteRetiradaAberto = 0;
+
+    final dataHora = DateTime.now().toLocal();
+    final prefixo = '[${dataHora.day.toString().padLeft(2, '0')}/'
+        '${dataHora.month.toString().padLeft(2, '0')}/'
+        '${dataHora.year} ${dataHora.hour.toString().padLeft(2, '0')}:'
+        '${dataHora.minute.toString().padLeft(2, '0')}]';
+    final linha =
+        '$prefixo CAIXA: Migrada para carreto apos pagamento do frete '
+        '(orc. #${filho.numeroOrcamento}).';
+    final atualObs = mae.observacaoEntrega.trim();
+    mae.observacaoEntrega =
+        atualObs.isEmpty ? linha : '$atualObs\n$linha';
+
+    _db.vendaBox.put(mae);
+  }
+
+  void _migrarVendaMaeRetiradaFuturaParaCarretoNaTransacao(Venda filho) {
+    final maeId = filho.vendaOrigemFreteRetiradaId;
+    if (maeId <= 0) {
+      throw StateError(
+        'Orcamento de frete sem vinculo a venda mae (dados inconsistentes).',
+      );
+    }
+    final mae = _db.vendaBox.get(maeId);
+    if (mae == null) {
+      throw StateError('Venda mae $maeId nao encontrada ao finalizar frete.');
+    }
+    _migrarUmaMaeRetiradaFuturaParaCarretoNaTransacao(filho, mae);
   }
 
   void atualizarOrcamento(
@@ -369,6 +651,7 @@ class VendaRepository {
       venda.dataEntregaMarcada = entrega.tipoEntrega == 'entrega_loja'
           ? entrega.dataEntregaMarcada
           : null;
+      venda.entregaPendente = entrega.tipoEntrega == 'retirada_futura';
 
       if (clienteId == null) {
         venda.cliente.target = null;
@@ -426,7 +709,7 @@ class VendaRepository {
         }
         if (venda.enderecoEntrega.trim().isEmpty) {
           throw StateError(
-            'Endereco de entrega obrigatorio para entrega da loja.',
+            'Endereco de entrega obrigatorio para carreto.',
           );
         }
       }
@@ -452,42 +735,47 @@ class VendaRepository {
         throw StateError('Somente orcamentos podem ser finalizados.');
       }
 
-      if (venda.entregaPendente) {
-        if (!permitirVendaSemEstoque) {
+      final filhoFreteRetirada = venda.vendaOrigemFreteRetiradaId > 0;
+
+      if (!filhoFreteRetirada) {
+        if (venda.entregaPendente) {
+          if (!permitirVendaSemEstoque) {
+            for (final item in venda.itens) {
+              final produto = item.produto.target;
+              if (produto == null) {
+                throw StateError('Produto do item ${item.id} nao encontrado.');
+              }
+              if (produto.estoqueReal < item.quantidade) {
+                throw StateError(
+                  'Estoque insuficiente para reservar ${produto.nome}.',
+                );
+              }
+            }
+          }
+          for (final item in venda.itens) {
+            final produto = item.produto.target;
+            if (produto != null) {
+              produto.estoqueReservado += item.quantidade;
+              _db.produtoBox.put(produto);
+            }
+          }
+        } else {
           for (final item in venda.itens) {
             final produto = item.produto.target;
             if (produto == null) {
               throw StateError('Produto do item ${item.id} nao encontrado.');
             }
-            if (produto.estoqueReal < item.quantidade) {
-              throw StateError(
-                'Estoque insuficiente para reservar ${produto.nome}.',
-              );
+            if (!permitirVendaSemEstoque &&
+                produto.estoqueReal < item.quantidade) {
+              throw StateError('Estoque insuficiente para ${produto.nome}.');
             }
           }
-        }
-        for (final item in venda.itens) {
-          final produto = item.produto.target;
-          if (produto != null) {
-            produto.estoqueReservado += item.quantidade;
-            _db.produtoBox.put(produto);
-          }
-        }
-      } else {
-        for (final item in venda.itens) {
-          final produto = item.produto.target;
-          if (produto == null) {
-            throw StateError('Produto do item ${item.id} nao encontrado.');
-          }
-          if (!permitirVendaSemEstoque && produto.estoqueReal < item.quantidade) {
-            throw StateError('Estoque insuficiente para ${produto.nome}.');
-          }
-        }
-        for (final item in venda.itens) {
-          final produto = item.produto.target;
-          if (produto != null) {
-            produto.estoqueReal -= item.quantidade;
-            _db.produtoBox.put(produto);
+          for (final item in venda.itens) {
+            final produto = item.produto.target;
+            if (produto != null) {
+              produto.estoqueReal -= item.quantidade;
+              _db.produtoBox.put(produto);
+            }
           }
         }
       }
@@ -498,6 +786,10 @@ class VendaRepository {
       venda.canceladaPor = '';
       venda.canceladaEm = null;
       _db.vendaBox.put(venda);
+
+      if (filhoFreteRetirada) {
+        _migrarVendaMaeRetiradaFuturaParaCarretoNaTransacao(venda);
+      }
     });
   }
 
@@ -567,6 +859,27 @@ class VendaRepository {
         }
         venda.cliente.target = cliente;
       }
+      _db.vendaBox.put(venda);
+    });
+  }
+
+  void vincularClienteVendaFinalizada(int vendaId, int clienteId) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      if (venda.status != 'finalizada') {
+        throw StateError('Somente venda finalizada pode receber vinculo de cliente.');
+      }
+      if (venda.cancelada) {
+        throw StateError('Venda cancelada nao pode ser alterada.');
+      }
+      final cliente = _db.clienteBox.get(clienteId);
+      if (cliente == null) {
+        throw StateError('Cliente $clienteId nao encontrado.');
+      }
+      venda.cliente.target = cliente;
       _db.vendaBox.put(venda);
     });
   }
@@ -914,6 +1227,117 @@ class VendaRepository {
     _db.vendaBox.put(venda);
   }
 
+  /// Retirada parcial ou total em venda com `entregaPendente`.
+  /// Para cada unidade retirada, baixa [Produto.estoqueReservado] e [Produto.estoqueReal].
+  /// Quando todos os itens tiverem sido totalmente retirados, [Venda.entregaPendente]
+  /// passa a `false`.
+  void registrarRetiradaParcial(
+    int vendaId,
+    Map<int, int> quantidadePorItemVendaId, {
+    required String usuario,
+    String? retiradoPor,
+    bool permitirSemConferenciaEstoque = true,
+  }) {
+    final filtrado = <int, int>{};
+    for (final e in quantidadePorItemVendaId.entries) {
+      if (e.value > 0) {
+        filtrado[e.key] = e.value;
+      }
+    }
+    if (filtrado.isEmpty) {
+      throw StateError('Informe ao menos uma quantidade a retirar.');
+    }
+
+    final usuarioLimpo = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
+    final linhasLog = <String>[];
+
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      if (venda.cancelada) {
+        throw StateError('Venda cancelada nao pode registrar retirada.');
+      }
+      if (venda.status != 'finalizada') {
+        throw StateError('Somente vendas finalizadas permitem retirada.');
+      }
+      if (!venda.entregaPendente) {
+        throw StateError('Esta venda nao esta com retirada futura pendente.');
+      }
+
+      for (final e in filtrado.entries) {
+        final itemId = e.key;
+        final qRet = e.value;
+        final item = _db.itemVendaBox.get(itemId);
+        if (item == null) {
+          throw StateError('Item de venda $itemId nao encontrado.');
+        }
+        if (item.venda.targetId != vendaId) {
+          throw StateError('Item $itemId nao pertence a esta venda.');
+        }
+        final pendente = item.quantidadePendenteRetirada;
+        if (qRet > pendente) {
+          throw StateError(
+            'Retirada de $qRet un. de "${item.nomeProduto}" excede o pendente ($pendente).',
+          );
+        }
+
+        final produto = item.produto.target;
+        if (produto == null) {
+          throw StateError('Produto do item ${item.id} nao encontrado.');
+        }
+        if (!permitirSemConferenciaEstoque) {
+          if (produto.estoqueReal < qRet) {
+            throw StateError(
+              'Estoque fisico insuficiente para retirar $qRet de ${produto.nome}.',
+            );
+          }
+          if (produto.estoqueReservado < qRet) {
+            throw StateError(
+              'Estoque reservado inconsistente para ${produto.nome}.',
+            );
+          }
+        }
+
+        produto.estoqueReal -= qRet;
+        produto.estoqueReservado -= qRet;
+        _db.produtoBox.put(produto);
+
+        item.quantidadeJaRetirada += qRet;
+        _db.itemVendaBox.put(item);
+
+        linhasLog.add('${item.nomeProduto} x$qRet');
+      }
+
+      var aindaPendente = false;
+      for (final it in venda.itens) {
+        if (it.quantidadePendenteRetirada > 0) {
+          aindaPendente = true;
+          break;
+        }
+      }
+      if (!aindaPendente) {
+        venda.entregaPendente = false;
+      }
+      _db.vendaBox.put(venda);
+    });
+
+    final trecho = linhasLog.join('; ');
+    var motivoFinal =
+        trecho.isEmpty ? 'Retirada registrada.' : 'Retirada: $trecho';
+    final quemRetirou = retiradoPor?.trim() ?? '';
+    if (quemRetirou.isNotEmpty) {
+      motivoFinal = '$motivoFinal Quem retirou: $quemRetirou.';
+    }
+    registrarOcorrenciaEntrega(
+      vendaId: vendaId,
+      status: 'retirada_futura',
+      motivo: motivoFinal,
+      usuario: usuarioLimpo,
+    );
+  }
+
   void cancelarVenda(
     int vendaId, {
     String motivo = '',
@@ -930,7 +1354,22 @@ class VendaRepository {
         throw StateError('Venda $vendaId ja esta cancelada.');
       }
 
+      if (venda.status != 'orcamento' &&
+          venda.entregaPendente &&
+          venda.itens.any((i) => i.quantidadeJaRetirada > 0)) {
+        throw StateError(
+          'Nao e possivel cancelar: ja houve retirada parcial de mercadoria nesta venda.',
+        );
+      }
+
       if (venda.status == 'orcamento') {
+        if (venda.vendaOrigemFreteRetiradaId > 0) {
+          final mae = _db.vendaBox.get(venda.vendaOrigemFreteRetiradaId);
+          if (mae != null && mae.idOrcamentoFreteRetiradaAberto == vendaId) {
+            mae.idOrcamentoFreteRetiradaAberto = 0;
+            _db.vendaBox.put(mae);
+          }
+        }
         venda.cancelada = true;
         venda.motivoCancelamento = motivoLimpo;
         venda.canceladaPor = usuarioCancelamento;

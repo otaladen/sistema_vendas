@@ -154,6 +154,8 @@ class SyncEntityCodec {
       itens.add({
         'nomeProduto': i.nomeProduto,
         'quantidade': i.quantidade,
+        'quantidadeJaRetirada': i.quantidadeJaRetirada,
+        'quantidadeNoCarreto': i.quantidadeNoCarreto,
         'precoTipo': i.precoTipo,
         'precoUnitario': i.precoUnitario,
         'precoCustoUnitario': i.precoCustoUnitario,
@@ -187,6 +189,9 @@ class SyncEntityCodec {
       'motivoCancelamento': v.motivoCancelamento,
       'canceladaPor': v.canceladaPor,
       'canceladaEm': v.canceladaEm?.toUtc().toIso8601String(),
+      'idOrcamentoFreteRetiradaAberto': v.idOrcamentoFreteRetiradaAberto,
+      'vendaOrigemFreteRetiradaId': v.vendaOrigemFreteRetiradaId,
+      'grupoEntregaFreteId': v.grupoEntregaFreteId,
       'clienteId': v.cliente.targetId,
       'vendedorId': v.vendedor.targetId,
       'itens': itens,
@@ -223,6 +228,12 @@ class SyncEntityCodec {
       canceladaPor: (m['canceladaPor'] ?? '').toString(),
       canceladaEm:
           DateTime.tryParse((m['canceladaEm'] ?? '').toString())?.toUtc(),
+      idOrcamentoFreteRetiradaAberto:
+          (m['idOrcamentoFreteRetiradaAberto'] as num?)?.toInt() ?? 0,
+      vendaOrigemFreteRetiradaId:
+          (m['vendaOrigemFreteRetiradaId'] as num?)?.toInt() ?? 0,
+      grupoEntregaFreteId:
+          (m['grupoEntregaFreteId'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -231,6 +242,8 @@ class SyncEntityCodec {
       id: 0,
       nomeProduto: (m['nomeProduto'] ?? '').toString(),
       quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
+      quantidadeJaRetirada: (m['quantidadeJaRetirada'] as num?)?.toInt() ?? 0,
+      quantidadeNoCarreto: (m['quantidadeNoCarreto'] as num?)?.toInt() ?? 0,
       precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
       precoUnitario: (m['precoUnitario'] as num?)?.toDouble() ?? 0,
       precoCustoUnitario: (m['precoCustoUnitario'] as num?)?.toDouble() ?? 0,

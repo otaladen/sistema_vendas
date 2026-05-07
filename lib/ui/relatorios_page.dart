@@ -9,6 +9,15 @@ import '../model/cliente.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import 'widgets/hub_nav_button.dart';
+
+const Color _corRelVendasPeriodo = Color(0xFF1565C0);
+const Color _corRelProdutosRanking = Color(0xFF2E7D32);
+const Color _corRelVendasVendedor = Color(0xFF00897B);
+const Color _corRelComissao = Color(0xFF6A1B9A);
+const Color _corRelTopClientes = Color(0xFF0277BD);
+const Color _corRelEstoqueMin = Color(0xFFE65100);
+const Color _corRelOrcamentos = Color(0xFF3949AB);
 
 /// Hub de relatorios gerenciais (material de construcao).
 class RelatoriosPage extends StatelessWidget {
@@ -32,10 +41,11 @@ class RelatoriosPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _RelatorioTile(
+          HubNavButton(
             icon: Icons.date_range_outlined,
+            corDestaque: _corRelVendasPeriodo,
             titulo: 'Vendas por periodo',
-            descricao:
+            subtitulo:
                 'Lista vendas finalizadas no intervalo, totais e forma de pagamento.',
             onTap: () => Navigator.push<void>(
               context,
@@ -48,10 +58,12 @@ class RelatoriosPage extends StatelessWidget {
               ),
             ),
           ),
-          _RelatorioTile(
+          const SizedBox(height: 12),
+          HubNavButton(
             icon: Icons.trending_up_outlined,
+            corDestaque: _corRelProdutosRanking,
             titulo: 'Produtos mais vendidos',
-            descricao:
+            subtitulo:
                 'Quantidade e valor por produto no periodo (somente vendas finalizadas).',
             onTap: () => Navigator.push<void>(
               context,
@@ -63,10 +75,12 @@ class RelatoriosPage extends StatelessWidget {
               ),
             ),
           ),
-          _RelatorioTile(
+          const SizedBox(height: 12),
+          HubNavButton(
             icon: Icons.person_search_outlined,
+            corDestaque: _corRelVendasVendedor,
             titulo: 'Vendas por vendedor',
-            descricao:
+            subtitulo:
                 'Total vendido por representante no periodo — util para metas e comissao.',
             onTap: () => Navigator.push<void>(
               context,
@@ -78,10 +92,12 @@ class RelatoriosPage extends StatelessWidget {
               ),
             ),
           ),
-          _RelatorioTile(
+          const SizedBox(height: 12),
+          HubNavButton(
             icon: Icons.account_balance_wallet_outlined,
+            corDestaque: _corRelComissao,
             titulo: 'Comissao de vendedores',
-            descricao:
+            subtitulo:
                 'Percentual do cadastro, base sobre venda ou lucro, filtros e total a pagar.',
             onTap: () => Navigator.push<void>(
               context,
@@ -93,10 +109,12 @@ class RelatoriosPage extends StatelessWidget {
               ),
             ),
           ),
-          _RelatorioTile(
+          const SizedBox(height: 12),
+          HubNavButton(
             icon: Icons.groups_outlined,
+            corDestaque: _corRelTopClientes,
             titulo: 'Clientes que mais compraram',
-            descricao:
+            subtitulo:
                 'Ranking por valor no periodo — foco em obra e cliente recorrente.',
             onTap: () => Navigator.push<void>(
               context,
@@ -108,10 +126,12 @@ class RelatoriosPage extends StatelessWidget {
               ),
             ),
           ),
-          _RelatorioTile(
+          const SizedBox(height: 12),
+          HubNavButton(
             icon: Icons.inventory_2_outlined,
+            corDestaque: _corRelEstoqueMin,
             titulo: 'Estoque abaixo do minimo',
-            descricao:
+            subtitulo:
                 'Produtos com saldo menor que a quantidade minima cadastrada.',
             onTap: () => Navigator.push<void>(
               context,
@@ -122,10 +142,12 @@ class RelatoriosPage extends StatelessWidget {
               ),
             ),
           ),
-          _RelatorioTile(
+          const SizedBox(height: 12),
+          HubNavButton(
             icon: Icons.description_outlined,
+            corDestaque: _corRelOrcamentos,
             titulo: 'Orcamentos em aberto',
-            descricao:
+            subtitulo:
                 'Orcamentos ainda nao finalizados no caixa — valor em “pipeline”.',
             onTap: () => Navigator.push<void>(
               context,
@@ -138,34 +160,6 @@ class RelatoriosPage extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _RelatorioTile extends StatelessWidget {
-  const _RelatorioTile({
-    required this.icon,
-    required this.titulo,
-    required this.descricao,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String titulo;
-  final String descricao;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        leading: Icon(icon, size: 32),
-        title: Text(titulo, style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(descricao),
-        isThreeLine: true,
-        onTap: onTap,
       ),
     );
   }

@@ -9,6 +9,8 @@ class ItemVenda {
     this.id = 0,
     required this.nomeProduto,
     required this.quantidade,
+    this.quantidadeJaRetirada = 0,
+    this.quantidadeNoCarreto = 0,
     this.precoTipo = 'preco1',
     required this.precoUnitario,
     required this.precoCustoUnitario,
@@ -19,6 +21,14 @@ class ItemVenda {
 
   String nomeProduto;
   int quantidade;
+
+  /// Quantidade ja entregue ao cliente em retiradas parciais (retirada futura).
+  int quantidadeJaRetirada;
+
+  /// Unidades nesta linha que seguem no carreto apos migrar retirada futura > carreto.
+  /// Zero = nao aplicavel (ex.: venda nativa carreto usa [quantidade] na UI).
+  int quantidadeNoCarreto;
+
   String precoTipo;
   double precoUnitario;
   double precoCustoUnitario;
@@ -29,4 +39,18 @@ class ItemVenda {
   double get subtotal => quantidade * precoUnitario;
   double get subtotalCusto => quantidade * precoCustoUnitario;
   double get lucro => subtotal - subtotalCusto;
+
+  /// Unidades ainda nao retiradas quando a venda esta com retirada futura.
+  int get quantidadePendenteRetirada {
+    final p = quantidade - quantidadeJaRetirada;
+    return p < 0 ? 0 : p;
+  }
+
+  /// Quantidade a mostrar na tela de entregas (carga / caminhao).
+  int quantidadeParaExibicaoEntrega(bool vendaUsaDestaqueCarreto) {
+    if (vendaUsaDestaqueCarreto) {
+      return quantidadeNoCarreto;
+    }
+    return quantidade;
+  }
 }

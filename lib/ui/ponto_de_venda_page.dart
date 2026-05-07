@@ -1056,16 +1056,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   }
 
   String _montarObservacaoEntregaCliente(Cliente cliente) {
-    final partes = <String>[];
-    final referencia = cliente.referencia.trim();
-    final telefone = cliente.telefone.trim();
-    if (telefone.isNotEmpty) {
-      partes.add('Tel: $telefone');
-    }
-    if (referencia.isNotEmpty) {
-      partes.add(referencia);
-    }
-    return partes.join(' | ');
+    return cliente.referencia.trim();
   }
 
   String _resumoEntrega() {
@@ -1591,11 +1582,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
               items: const [
                 DropdownMenuItem(
                   value: 'retirada',
-                  child: Text('Retirada na loja'),
+                  child: Text('Leva Agora'),
+                ),
+                DropdownMenuItem(
+                  value: 'retirada_futura',
+                  child: Text('Retirada futura'),
                 ),
                 DropdownMenuItem(
                   value: 'entrega_loja',
-                  child: Text('Entrega da loja'),
+                  child: Text('Carreto'),
                 ),
               ],
               onChanged: (value) {
@@ -1805,7 +1800,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           _enderecoEntregaController.text.trim().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Informe o endereco para entrega da loja.'),
+            content: Text('Informe o endereco para carreto.'),
           ),
         );
         return;
@@ -1838,6 +1833,33 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           ),
         );
         return;
+      }
+      if (_tipoEntregaSelecionada == 'entrega_loja' && valorFrete <= 0) {
+        if (!mounted) return;
+        final aceitaGratis = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Frete zerado'),
+            content: const Text(
+              'Carreto com frete em R\$ 0,00. Confirma registrar entrega com frete gratuito, '
+              'ou volte para informar o valor correto?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Informar frete'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Frete gratuito'),
+              ),
+            ],
+          ),
+        );
+        if (aceitaGratis != true) {
+          return;
+        }
       }
       final itens = _carrinho
           .map(
@@ -2208,9 +2230,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
             _vendedoresAtivos.any((v) => v.id == vendedorIdCarregado)
         ? vendedorIdCarregado
         : null;
-    final tipoEntregaValido = orcamentoCompleto.tipoEntrega == 'entrega_loja'
-        ? 'entrega_loja'
-        : 'retirada';
+    final tipoEntregaValido = switch (orcamentoCompleto.tipoEntrega) {
+      'entrega_loja' => 'entrega_loja',
+      'retirada_futura' => 'retirada_futura',
+      _ => 'retirada',
+    };
     final prioridadeValida = switch (orcamentoCompleto.prioridadeEntrega) {
       'urgente' => 'urgente',
       'agendada' => 'agendada',
@@ -2319,10 +2343,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   String _rotuloTipoEntrega(String tipoEntrega) {
     switch (tipoEntrega) {
       case 'entrega_loja':
-        return 'Entrega da loja';
+        return 'Carreto';
+      case 'retirada_futura':
+        return 'Retirada futura';
       case 'retirada':
       default:
-        return 'Retirada na loja';
+        return 'Leva Agora';
     }
   }
 
@@ -2449,10 +2475,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                 ),
               ),
               pw.Text(
-                'Pagamento: ${_textoPagamentoOrcamentoPdf(venda)}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              pw.Text(
                 'Entrega: ${_rotuloTipoEntrega(venda.tipoEntrega)}',
                 style: const pw.TextStyle(fontSize: 9),
               ),
@@ -2508,6 +2530,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                   fontSize: 10,
                   fontWeight: pw.FontWeight.bold,
                 ),
+              ),
+              pw.Text(
+                'Pagamento: ${_textoPagamentoOrcamentoPdf(venda)}',
+                style: const pw.TextStyle(fontSize: 9),
               ),
               pw.SizedBox(height: 6),
               pw.Text(
@@ -3124,7 +3150,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                                               ),
                                                         ),
                                                         Text(
-                                                          'Est: ${item.estoque}',
+                                                          'Est: ${item.estoqueReal} · Res: ${item.estoqueReservado}',
                                                           style: Theme.of(context)
                                                               .textTheme
                                                               .labelMedium

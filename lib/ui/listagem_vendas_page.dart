@@ -16,6 +16,7 @@ import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import 'clientes_page.dart';
 
 /// Lista vendas já finalizadas no Caixa (`status == finalizada`), com filtros e busca.
 class ListagemVendasPage extends StatefulWidget {
@@ -68,6 +69,104 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
+
+  double _parseValorMonetario(String valor) {
+    final normalizado = valor.trim().replaceAll('.', '').replaceAll(',', '.');
+    if (normalizado.isEmpty) return 0;
+    return double.tryParse(normalizado) ?? 0;
+  }
+
+  bool _podePagarFreteCarreto(Venda v) {
+    if (v.cancelada || v.status != 'finalizada') return false;
+    if (v.tipoEntrega != 'retirada_futura' || !v.entregaPendente) return false;
+    if (v.idOrcamentoFreteRetiradaAberto != 0) return false;
+    return v.itens.any((i) => i.quantidadePendenteRetirada > 0);
+  }
+
+  String _montarEnderecoEntregaClienteListagem(Cliente cliente) {
+    final partes = <String>[];
+    final endereco = cliente.endereco.trim();
+    final numero = cliente.numero.trim();
+    final bairro = cliente.bairro.trim();
+    final cidade = cliente.cidade.trim();
+    final uf = cliente.uf.trim();
+    final cep = cliente.cep.trim();
+    if (endereco.isNotEmpty) {
+      partes.add(numero.isNotEmpty ? '$endereco, $numero' : endereco);
+    }
+    if (bairro.isNotEmpty) {
+      partes.add(bairro);
+    }
+    final cidadeUf = [cidade, uf].where((p) => p.isNotEmpty).join(' - ');
+    if (cidadeUf.isNotEmpty) {
+      partes.add(cidadeUf);
+    }
+    if (cep.isNotEmpty) {
+      partes.add('CEP: $cep');
+    }
+    return partes.join(' | ');
+  }
+
+  Future<void> _abrirPagarFreteCarreto(Venda vIn) async {
+    var v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
+    if (!_podePagarFreteCarreto(v)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Nao e possivel gerar frete agora (verifique retirada futura, pendencia e se ja existe orcamento de frete).',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (_clienteDaVenda(v) == null) {
+      if (!mounted) return;
+      final c = await Navigator.push<Cliente>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ClientesPage(
+            clienteRepository: widget.clienteRepository,
+            vendaRepository: widget.vendaRepository,
+            retornarClienteAoSalvar: true,
+          ),
+        ),
+      );
+      if (!mounted || c == null) return;
+      widget.vendaRepository.vincularClienteVendaFinalizada(v.id, c.id);
+      v = widget.vendaRepository.obterPorId(v.id) ?? v;
+    }
+
+    final cliente = _clienteDaVenda(v);
+    if (cliente == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cadastre e vincule o cliente primeiro.')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return _DialogoFreteCarretoRetiradaFutura(
+          vendaMae: v,
+          cliente: cliente,
+          enderecoInicial: _montarEnderecoEntregaClienteListagem(cliente),
+          observacaoInicial: cliente.referencia.trim(),
+          vendaRepository: widget.vendaRepository,
+          formatarMoeda: _formatarMoeda,
+          parseValor: _parseValorMonetario,
+          onSucesso: () {
+            _pesquisar();
+          },
+        );
+      },
+    );
+  }
 
   /// Numero da venda no cupom; se nao houver sequencial, cai no ID interno (caso raro).
   String _rotuloVendaUsuario(Venda v) {
@@ -180,11 +279,108 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   String _rotuloTipoEntrega(String tipo) {
     switch (tipo) {
       case 'entrega_loja':
-        return 'Entrega da loja';
+        return 'Carreto';
+      case 'retirada_futura':
+        return 'Retirada futura';
       case 'retirada':
       default:
-        return 'Retirada na loja';
+        return 'Leva Agora';
     }
+  }
+
+  String _linhaRetiradaFutura(Venda v) {
+    if (!v.entregaPendente) {
+      return 'Retirada futura: Nao';
+    }
+    final unidades = v.itens.fold<int>(
+      0,
+      (a, i) => a + i.quantidadePendenteRetirada,
+    );
+    return 'Retirada futura: Pendente ($unidades un. a retirar)';
+  }
+
+  Future<void> _abrirRegistrarRetirada(Venda v) async {
+    final atual = widget.vendaRepository.obterPorId(v.id);
+    if (atual == null || atual.cancelada || !atual.entregaPendente) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'So e possivel registrar retirada em vendas com retirada futura pendente.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (!atual.itens.any((i) => i.quantidadePendenteRetirada > 0)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nao ha quantidade pendente de retirada nesta venda.'),
+        ),
+      );
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _DialogRetiradaFutura(
+        venda: atual,
+        vendaRepository: widget.vendaRepository,
+        usuario: widget.usuarioAtual,
+      ),
+    );
+    if (ok == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Retirada registrada.')),
+      );
+      _pesquisar();
+    }
+  }
+
+  /// Observacao de entrega (log com data/operador) ou itens com retirada ja registrada.
+  bool _temRegistroRetiradaOuEntrega(Venda v) {
+    if (v.observacaoEntrega.trim().isNotEmpty) return true;
+    return v.itens.any((i) => i.quantidadeJaRetirada > 0);
+  }
+
+  Future<void> _mostrarHistoricoRetirada(Venda v) async {
+    final atual = widget.vendaRepository.obterPorId(v.id) ?? v;
+    final linhas = <String>[];
+    if (atual.observacaoEntrega.trim().isNotEmpty) {
+      linhas.add(atual.observacaoEntrega.trim());
+    }
+    final comRetirada =
+        atual.itens.where((i) => i.quantidadeJaRetirada > 0).toList();
+    if (comRetirada.isNotEmpty) {
+      if (linhas.isNotEmpty) linhas.add('');
+      linhas.add('Resumo — ja retirado por item:');
+      for (final i in comRetirada) {
+        linhas.add('- ${i.nomeProduto}: ${i.quantidadeJaRetirada} un.');
+      }
+    }
+    final texto = linhas.isEmpty
+        ? 'Nenhum registro de retirada ou texto de entrega nesta venda.'
+        : linhas.join('\n');
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Historico de retiradas e entrega'),
+        content: SizedBox(
+          width: 480,
+          child: SingleChildScrollView(
+            child: SelectableText(texto),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _pesquisar() {
@@ -748,8 +944,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                               ),
                             ],
                             onChanged: (v) {
-                              if (v != null)
+                              if (v != null) {
                                 setState(() => _formaPagamento = v);
+                              }
                             },
                           ),
                         ),
@@ -768,11 +965,15 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                               ),
                               DropdownMenuItem(
                                 value: 'retirada',
-                                child: Text('Retirada na loja'),
+                                child: Text('Leva Agora'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'retirada_futura',
+                                child: Text('Retirada futura'),
                               ),
                               DropdownMenuItem(
                                 value: 'entrega_loja',
-                                child: Text('Entrega da loja'),
+                                child: Text('Carreto'),
                               ),
                             ],
                             onChanged: (v) {
@@ -803,8 +1004,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                               ),
                             ],
                             onChanged: (v) {
-                              if (v != null)
+                              if (v != null) {
                                 setState(() => _entregaPendente = v);
+                              }
                             },
                           ),
                         ),
@@ -1005,9 +1207,43 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 ),
                                 Text(
                                   '${_rotuloTipoEntrega(v.tipoEntrega)} | '
-                                  'Retirada futura: ${v.entregaPendente ? 'Sim' : 'Nao'} | '
+                                  '${_linhaRetiradaFutura(v)} | '
                                   'Itens: ${v.itens.length}',
                                 ),
+                                if (v.idOrcamentoFreteRetiradaAberto != 0)
+                                  Text(
+                                    () {
+                                      final filho = widget.vendaRepository
+                                          .obterPorId(
+                                        v.idOrcamentoFreteRetiradaAberto,
+                                      );
+                                      final n = filho?.numeroOrcamento ?? 0;
+                                      final rot =
+                                          n > 0 ? '#$n' : '(id ${filho?.id})';
+                                      return 'Frete carreto: orcamento pendente no caixa $rot.';
+                                    }(),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .tertiary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                if (_temRegistroRetiradaOuEntrega(v))
+                                  Text(
+                                    'Rastreio: data e operador no log — menu Historico de retiradas.',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                        ),
+                                  ),
                                 if (v.cancelada)
                                   Text(
                                     'Cancelada por: ${v.canceladaPor.isEmpty ? 'Nao informado' : v.canceladaPor}'
@@ -1032,11 +1268,34 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                   PopupMenuButton<String>(
                                     tooltip: 'Acoes',
                                     onSelected: (value) {
-                                      if (value == 'cancelar') {
+                                      if (value == 'historico') {
+                                        _mostrarHistoricoRetirada(v);
+                                      } else if (value == 'retirada') {
+                                        _abrirRegistrarRetirada(v);
+                                      } else if (value == 'pagar_frete') {
+                                        _abrirPagarFreteCarreto(v);
+                                      } else if (value == 'cancelar') {
                                         _cancelarVenda(v);
                                       }
                                     },
                                     itemBuilder: (context) => [
+                                      if (_podePagarFreteCarreto(v))
+                                        const PopupMenuItem<String>(
+                                          value: 'pagar_frete',
+                                          child: Text('Pagar frete (carreto)'),
+                                        ),
+                                      if (v.entregaPendente && !v.cancelada)
+                                        const PopupMenuItem<String>(
+                                          value: 'retirada',
+                                          child: Text('Registrar retirada'),
+                                        ),
+                                      if (_temRegistroRetiradaOuEntrega(v))
+                                        const PopupMenuItem<String>(
+                                          value: 'historico',
+                                          child: Text(
+                                            'Historico de retiradas',
+                                          ),
+                                        ),
                                       PopupMenuItem<String>(
                                         value: 'cancelar',
                                         enabled: !v.cancelada,
@@ -1055,6 +1314,470 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DialogoFreteCarretoRetiradaFutura extends StatefulWidget {
+  const _DialogoFreteCarretoRetiradaFutura({
+    required this.vendaMae,
+    required this.cliente,
+    required this.enderecoInicial,
+    required this.observacaoInicial,
+    required this.vendaRepository,
+    required this.formatarMoeda,
+    required this.parseValor,
+    required this.onSucesso,
+  });
+
+  final Venda vendaMae;
+  final Cliente cliente;
+  final String enderecoInicial;
+  final String observacaoInicial;
+  final VendaRepository vendaRepository;
+  final String Function(double) formatarMoeda;
+  final double Function(String) parseValor;
+  final VoidCallback onSucesso;
+
+  @override
+  State<_DialogoFreteCarretoRetiradaFutura> createState() =>
+      _DialogoFreteCarretoRetiradaFuturaState();
+}
+
+class _DialogoFreteCarretoRetiradaFuturaState
+    extends State<_DialogoFreteCarretoRetiradaFutura> {
+  late final TextEditingController _endereco;
+  late final TextEditingController _obs;
+  late final TextEditingController _frete;
+  String _prioridade = 'normal';
+  String _janela = 'nao_definida';
+  DateTime? _dataEntrega;
+
+  @override
+  void initState() {
+    super.initState();
+    _endereco = TextEditingController(text: widget.enderecoInicial);
+    _obs = TextEditingController(text: widget.observacaoInicial);
+    _frete = TextEditingController();
+    _dataEntrega = DateTime.now();
+  }
+
+  @override
+  void dispose() {
+    _endereco.dispose();
+    _obs.dispose();
+    _frete.dispose();
+    super.dispose();
+  }
+
+  Future<void> _gerar() async {
+    final vf = widget.parseValor(_frete.text);
+    if (_endereco.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe o endereco de entrega.')),
+      );
+      return;
+    }
+    if (_prioridade == 'agendada' && _janela == 'nao_definida') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Para entrega agendada, selecione janela Manha ou Tarde.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (_dataEntrega == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Defina a data da entrega.')),
+      );
+      return;
+    }
+
+    if (vf <= 0) {
+      final ok = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Frete zerado'),
+          content: const Text(
+            'Confirmar orcamento de carreto com frete gratuito?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Nao'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Frete gratuito'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+
+    try {
+      final pagamento = DadosPagamentoOrcamento(
+        formaPagamento: 'dinheiro',
+        quantidadeParcelas: 1,
+      );
+      final idFilho = widget.vendaRepository.registrarOrcamentoFreteRetiradaFutura(
+        vendaMaeId: widget.vendaMae.id,
+        valorFreteCobrado: vf,
+        pagamento: pagamento,
+        enderecoEntrega: _endereco.text.trim(),
+        observacaoEntrega: _obs.text.trim(),
+        prioridadeEntrega: _prioridade,
+        janelaEntrega: _janela,
+        dataEntregaMarcada: _dataEntrega!,
+        vendedorId: widget.vendaMae.vendedor.targetId == 0
+            ? null
+            : widget.vendaMae.vendedor.targetId,
+      );
+      if (!mounted) return;
+      final filho = widget.vendaRepository.obterPorId(idFilho);
+      final n = filho?.numeroOrcamento ?? 0;
+      Navigator.of(context).pop();
+      widget.onSucesso();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Orcamento de frete ${n > 0 ? '#$n' : '#$idFilho'} gerado. Finalize no Caixa.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ref =
+        widget.vendaMae.numeroOrcamento > 0
+            ? '${widget.vendaMae.numeroOrcamento}'
+            : '${widget.vendaMae.id}';
+    return AlertDialog(
+      title: Text('Frete carreto — ref. venda #$ref'),
+      content: SizedBox(
+        width: 500,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Cliente: ${widget.cliente.nomeRazao}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _frete,
+                decoration: const InputDecoration(
+                  labelText: 'Valor do frete (R\$)',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _endereco,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Endereco de entrega',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _obs,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Observacoes da entrega',
+                ),
+              ),
+              const SizedBox(height: 8),
+              InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Prioridade da entrega',
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: _prioridade,
+                    items: const [
+                      DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                      DropdownMenuItem(value: 'urgente', child: Text('Urgente')),
+                      DropdownMenuItem(
+                        value: 'agendada',
+                        child: Text('Agendada'),
+                      ),
+                    ],
+                    onChanged: (v) => setState(() {
+                      _prioridade = v ?? 'normal';
+                      if (_prioridade == 'agendada') {
+                        if (_janela == 'nao_definida') {
+                          _janela = 'manha';
+                        }
+                      } else {
+                        _janela = 'nao_definida';
+                      }
+                    }),
+                  ),
+                ),
+              ),
+              if (_prioridade == 'agendada') ...[
+                const SizedBox(height: 8),
+                InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Janela',
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: _janela,
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'manha',
+                          child: Text('Manha'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'tarde',
+                          child: Text('Tarde'),
+                        ),
+                      ],
+                      onChanged: (v) =>
+                          setState(() => _janela = v ?? 'manha'),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final agora = DateTime.now();
+                  final inicial = _dataEntrega ?? agora;
+                  final escolhido = await showDatePicker(
+                    context: context,
+                    initialDate: inicial,
+                    firstDate: DateTime(agora.year, agora.month, agora.day),
+                    lastDate: DateTime(agora.year + 3, 12, 31),
+                  );
+                  if (!mounted || escolhido == null) return;
+                  setState(() => _dataEntrega = escolhido);
+                },
+                icon: const Icon(Icons.event_outlined),
+                label: Text(
+                  _dataEntrega == null
+                      ? 'Definir data da entrega'
+                      : 'Data: ${_dataEntrega!.day.toString().padLeft(2, '0')}/'
+                          '${_dataEntrega!.month.toString().padLeft(2, '0')}/'
+                          '${_dataEntrega!.year}',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'O total da venda #$ref nao e alterado; o frete entra em orcamento separado '
+                'para pagamento no caixa. Ao pagar, a venda mae vira carreto e aparece em Entregas.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _gerar,
+          child: const Text('Gerar orcamento de frete'),
+        ),
+      ],
+    );
+  }
+}
+
+class _DialogRetiradaFutura extends StatefulWidget {
+  const _DialogRetiradaFutura({
+    required this.venda,
+    required this.vendaRepository,
+    required this.usuario,
+  });
+
+  final Venda venda;
+  final VendaRepository vendaRepository;
+  final String usuario;
+
+  @override
+  State<_DialogRetiradaFutura> createState() => _DialogRetiradaFuturaState();
+}
+
+class _DialogRetiradaFuturaState extends State<_DialogRetiradaFutura> {
+  late final Map<int, TextEditingController> _controllers;
+  late final TextEditingController _quemRetirouController;
+
+  @override
+  void initState() {
+    super.initState();
+    _quemRetirouController = TextEditingController();
+    _controllers = {
+      for (final it in widget.venda.itens)
+        it.id: TextEditingController(text: ''),
+    };
+  }
+
+  @override
+  void dispose() {
+    _quemRetirouController.dispose();
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _preencherTudo() {
+    for (final it in widget.venda.itens) {
+      final c = _controllers[it.id];
+      if (c != null && it.quantidadePendenteRetirada > 0) {
+        c.text = '${it.quantidadePendenteRetirada}';
+      }
+    }
+    setState(() {});
+  }
+
+  Future<void> _confirmar() async {
+    final map = <int, int>{};
+    for (final it in widget.venda.itens) {
+      final c = _controllers[it.id];
+      if (c == null) continue;
+      final q = int.tryParse(c.text.trim()) ?? 0;
+      if (q > 0) {
+        map[it.id] = q;
+      }
+    }
+    if (map.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Informe ao menos uma quantidade maior que zero.'),
+        ),
+      );
+      return;
+    }
+    try {
+      final quem = _quemRetirouController.text.trim();
+      widget.vendaRepository.registrarRetiradaParcial(
+        widget.venda.id,
+        map,
+        usuario: widget.usuario,
+        retiradoPor: quem.isEmpty ? null : quem,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel registrar: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('Registrar retirada'),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Informe quantas unidades o cliente esta retirando agora '
+                '(parcial ou total).',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _quemRetirouController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Quem retirou (opcional)',
+                  hintText: 'Nome de quem leva a mercadoria',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              for (final it in widget.venda.itens)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              it.nomeProduto,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Pendente: ${it.quantidadePendenteRetirada} un.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(
+                        width: 88,
+                        child: TextField(
+                          controller: _controllers[it.id],
+                          enabled: it.quantidadePendenteRetirada > 0,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.right,
+                          decoration: const InputDecoration(
+                            labelText: 'Qtd',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancelar'),
+        ),
+        TextButton(
+          onPressed: _preencherTudo,
+          child: const Text('Retirar tudo'),
+        ),
+        FilledButton(
+          onPressed: _confirmar,
+          child: const Text('Confirmar'),
+        ),
+      ],
     );
   }
 }

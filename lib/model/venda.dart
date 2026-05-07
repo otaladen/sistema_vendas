@@ -35,6 +35,9 @@ class Venda {
     this.motivoCancelamento = '',
     this.canceladaPor = '',
     this.canceladaEm,
+    this.vendaOrigemFreteRetiradaId = 0,
+    this.idOrcamentoFreteRetiradaAberto = 0,
+    this.grupoEntregaFreteId = 0,
   }) : data = data ?? DateTime.now();
 
   @Id()
@@ -70,6 +73,16 @@ class Venda {
   String canceladaPor;
   @Property(type: PropertyType.dateUtc)
   DateTime? canceladaEm;
+
+  /// Orcamento filho (somente frete) pendente no caixa; zerado apos pagamento.
+  int idOrcamentoFreteRetiradaAberto;
+
+  /// Na venda filha: ID da venda mae (retirada futura) que contratou o carreto.
+  int vendaOrigemFreteRetiradaId;
+
+  /// ID comum do grupo logistico na aba Entregas (mesmo valor = mesmo carro).
+  /// Define-se manualmente ao agrupar notas; 0 = sem grupo.
+  int grupoEntregaFreteId;
 
   final cliente = ToOne<Cliente>();
   final vendedor = ToOne<Vendedor>();
