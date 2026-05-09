@@ -1,7 +1,10 @@
 import '../domain/pagamento_orcamento.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
+import '../model/linha_devolucao_entrada.dart';
+import '../model/linha_troca_saida.dart';
 import '../model/produto.dart';
+import '../model/registro_devolucao.dart';
 import '../model/venda.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
@@ -63,6 +66,70 @@ class ItemVendaInput {
   final int quantidade;
   final double precoUnitario;
   final String precoTipo;
+}
+
+class LinhaDevolucaoEntradaInput {
+  const LinhaDevolucaoEntradaInput({
+    required this.itemVendaId,
+    required this.quantidade,
+  });
+
+  final int itemVendaId;
+  final int quantidade;
+}
+
+class LinhaTrocaSaidaInput {
+  const LinhaTrocaSaidaInput({
+    required this.produtoId,
+    required this.quantidade,
+    required this.precoUnitario,
+    this.precoTipo = 'preco1',
+    required this.precoCustoUnitario,
+  });
+
+  final int produtoId;
+  final int quantidade;
+  final double precoUnitario;
+  final String precoTipo;
+  final double precoCustoUnitario;
+}
+
+/// Impacto financeiro das devolucoes/trocas cuja **data do registro** cai no periodo.
+class ImpactosDevolucaoTrocaPeriodo {
+  const ImpactosDevolucaoTrocaPeriodo({
+    required this.impactoFaturamentoTotal,
+    required this.impactoLucroTotal,
+    required this.porVendedorFaturamento,
+    required this.porVendedorLucro,
+    required this.porClienteFaturamento,
+  });
+
+  /// Negativo em devolucao pura; troca pode ser misto (saida - entrada).
+  final double impactoFaturamentoTotal;
+
+  /// Aproxima lucro: entrada usa custo do item da venda; saida troca usa custo da linha.
+  final double impactoLucroTotal;
+
+  final Map<int, double> porVendedorFaturamento;
+  final Map<int, double> porVendedorLucro;
+  final Map<int, double> porClienteFaturamento;
+}
+
+/// Deltas para ranking de produtos (entrada devolucao negativa; saida troca positiva).
+class DeltaProdutoDevolucao {
+  const DeltaProdutoDevolucao({
+    required this.chaveAgg,
+    required this.nomeExibicao,
+    required this.produtoId,
+    required this.deltaQuantidade,
+    required this.deltaValor,
+  });
+
+  final String chaveAgg;
+  final String nomeExibicao;
+  final int produtoId;
+  final int deltaQuantidade;
+  final double deltaValor;
 }
 
 class DadosPagamentoOrcamento {
@@ -1362,6 +1429,13 @@ class VendaRepository {
         );
       }
 
+      if (venda.status != 'orcamento' &&
+          venda.itens.any((i) => i.quantidadeDevolvida > 0)) {
+        throw StateError(
+          'Nao e possivel cancelar: existem devolucoes/trocas registradas nesta venda.',
+        );
+      }
+
       if (venda.status == 'orcamento') {
         if (venda.vendaOrigemFreteRetiradaId > 0) {
           final mae = _db.vendaBox.get(venda.vendaOrigemFreteRetiradaId);
@@ -1399,5 +1473,342 @@ class VendaRepository {
       venda.canceladaEm = DateTime.now();
       _db.vendaBox.put(venda);
     });
+  }
+
+  /// Devolucao (estoque de volta) ou troca (devolucao + saida de novos itens).
+  /// Nao sincronizado entre dispositivos na rede (registro local).
+  int registrarDevolucaoOuTroca({
+    required int vendaOrigemId,
+    required String tipo,
+    required String motivo,
+    required String observacaoFinanceira,
+    required String registradoPor,
+    required List<LinhaDevolucaoEntradaInput> entradas,
+    required List<LinhaTrocaSaidaInput> saidasTroca,
+    bool permitirVendaSemEstoque = true,
+  }) {
+    final tipoLimpo = tipo.trim().toLowerCase();
+    if (tipoLimpo != 'devolucao' && tipoLimpo != 'troca') {
+      throw StateError('Tipo deve ser devolucao ou troca.');
+    }
+    final motivoLimpo = motivo.trim();
+    if (motivoLimpo.isEmpty) {
+      throw StateError('Informe o motivo da devolucao/troca.');
+    }
+    final filtradas = entradas.where((e) => e.quantidade > 0).toList();
+    if (filtradas.isEmpty) {
+      throw StateError('Informe ao menos um item com quantidade devolvida.');
+    }
+    if (tipoLimpo == 'troca' && saidasTroca.every((s) => s.quantidade <= 0)) {
+      throw StateError('Em troca, informe ao menos um produto de saida.');
+    }
+
+    return _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaOrigemId);
+      if (venda == null) {
+        throw StateError('Venda $vendaOrigemId nao encontrada.');
+      }
+      if (venda.cancelada) {
+        throw StateError('Venda cancelada nao aceita devolucao/troca.');
+      }
+      if (venda.status != 'finalizada') {
+        throw StateError('Somente vendas finalizadas permitem devolucao/troca.');
+      }
+      if (venda.vendaOrigemFreteRetiradaId > 0) {
+        throw StateError(
+          'Devolucao/troca nao disponivel para orcamento de frete (venda filha).',
+        );
+      }
+
+      for (final e in filtradas) {
+        final item = _db.itemVendaBox.get(e.itemVendaId);
+        if (item == null) {
+          throw StateError('Item de venda ${e.itemVendaId} nao encontrado.');
+        }
+        if (item.venda.targetId != vendaOrigemId) {
+          throw StateError('Item ${e.itemVendaId} nao pertence a esta venda.');
+        }
+        final maxDev = item.quantidade - item.quantidadeDevolvida;
+        if (e.quantidade > maxDev) {
+          throw StateError(
+            'Devolucao de ${e.quantidade} un. de "${item.nomeProduto}" '
+            'excede o disponivel ($maxDev).',
+          );
+        }
+        final produto = item.produto.target;
+        if (produto == null) {
+          throw StateError('Produto do item ${item.id} nao encontrado.');
+        }
+        _aplicarEstoqueEntradaDevolucao(
+          venda: venda,
+          item: item,
+          produto: produto,
+          qtd: e.quantidade,
+        );
+        _db.produtoBox.put(produto);
+        item.quantidadeDevolvida += e.quantidade;
+        _db.itemVendaBox.put(item);
+      }
+
+      if (tipoLimpo == 'troca') {
+        for (final s in saidasTroca) {
+          if (s.quantidade <= 0) continue;
+          final p = _db.produtoBox.get(s.produtoId);
+          if (p == null) {
+            throw StateError('Produto ${s.produtoId} nao encontrado.');
+          }
+          if (!permitirVendaSemEstoque && p.estoqueReal < s.quantidade) {
+            throw StateError(
+              'Estoque insuficiente na troca para ${p.nome} (precisa ${s.quantidade}).',
+            );
+          }
+        }
+        for (final s in saidasTroca) {
+          if (s.quantidade <= 0) continue;
+          final p = _db.produtoBox.get(s.produtoId);
+          if (p == null) {
+            throw StateError('Produto ${s.produtoId} nao encontrado.');
+          }
+          p.estoqueReal -= s.quantidade;
+          _db.produtoBox.put(p);
+        }
+      }
+
+      final reg = RegistroDevolucao(
+        tipo: tipoLimpo,
+        motivo: motivoLimpo,
+        observacaoFinanceira: observacaoFinanceira.trim(),
+        registradoPor: registradoPor.trim().isEmpty
+            ? 'sistema'
+            : registradoPor.trim(),
+      );
+      reg.vendaOrigem.target = venda;
+      final regId = _db.registroDevolucaoBox.put(reg);
+      final regSalvo = _db.registroDevolucaoBox.get(regId);
+      if (regSalvo == null) {
+        throw StateError('Falha ao gravar registro de devolucao.');
+      }
+
+      for (final e in filtradas) {
+        final item = _db.itemVendaBox.get(e.itemVendaId);
+        if (item == null) continue;
+        final produto = item.produto.target;
+        if (produto == null) continue;
+        final linha = LinhaDevolucaoEntrada(
+          itemVendaId: item.id,
+          quantidade: e.quantidade,
+          precoUnitarioReferencia: item.precoUnitario,
+          nomeProdutoSnapshot: item.nomeProduto,
+        );
+        linha.registro.target = regSalvo;
+        linha.produto.target = produto;
+        _db.linhaDevolucaoEntradaBox.put(linha);
+      }
+
+      if (tipoLimpo == 'troca') {
+        for (final s in saidasTroca) {
+          if (s.quantidade <= 0) continue;
+          final p = _db.produtoBox.get(s.produtoId);
+          if (p == null) continue;
+          final linha = LinhaTrocaSaida(
+            quantidade: s.quantidade,
+            precoUnitario: s.precoUnitario,
+            precoCustoUnitario: s.precoCustoUnitario,
+            precoTipo: s.precoTipo,
+            nomeProdutoSnapshot: p.nome,
+          );
+          linha.registro.target = regSalvo;
+          linha.produto.target = p;
+          _db.linhaTrocaSaidaBox.put(linha);
+        }
+      }
+
+      return regId;
+    });
+  }
+
+  List<RegistroDevolucao> listarRegistrosDevolucaoPorVenda(int vendaId) {
+    final q = _db.registroDevolucaoBox
+        .query(RegistroDevolucao_.vendaOrigem.equals(vendaId))
+        .order(RegistroDevolucao_.data, flags: Order.descending)
+        .build();
+    final list = q.find();
+    q.close();
+    return list;
+  }
+
+  List<RegistroDevolucao> listarRegistrosDevolucaoPorPeriodo(
+    PeriodoFiltro periodo,
+  ) {
+    final inicioUtc = periodo.inicio.toUtc();
+    final fimUtc = periodo.fim.toUtc();
+    final q = _db.registroDevolucaoBox
+        .query()
+        .order(RegistroDevolucao_.data, flags: Order.descending)
+        .build();
+    final all = q.find();
+    q.close();
+    return all.where((r) {
+      final d = r.data.toUtc();
+      return !d.isBefore(inicioUtc) && !d.isAfter(fimUtc);
+    }).toList();
+  }
+
+  double valorReferenciaEntradaRegistro(RegistroDevolucao r) {
+    var s = 0.0;
+    for (final l in r.linhasEntrada) {
+      s += l.quantidade * l.precoUnitarioReferencia;
+    }
+    return s;
+  }
+
+  double valorSaidaTrocaRegistro(RegistroDevolucao r) {
+    var s = 0.0;
+    for (final l in r.linhasSaidaTroca) {
+      s += l.quantidade * l.precoUnitario;
+    }
+    return s;
+  }
+
+  /// Efeito na receita: troca = saida - entrada; devolucao = -entrada.
+  double impactoFaturamentoRegistro(RegistroDevolucao r) {
+    final e = valorReferenciaEntradaRegistro(r);
+    if (r.tipo == 'troca') {
+      return valorSaidaTrocaRegistro(r) - e;
+    }
+    return -e;
+  }
+
+  double impactoLucroRegistro(RegistroDevolucao r) {
+    var lucro = 0.0;
+    for (final l in r.linhasEntrada) {
+      final item = _db.itemVendaBox.get(l.itemVendaId);
+      final cu = item?.precoCustoUnitario ?? 0;
+      lucro -= l.quantidade * (l.precoUnitarioReferencia - cu);
+    }
+    for (final l in r.linhasSaidaTroca) {
+      lucro += l.quantidade * (l.precoUnitario - l.precoCustoUnitario);
+    }
+    return lucro;
+  }
+
+  ImpactosDevolucaoTrocaPeriodo calcularImpactosDevolucaoTrocaPeriodo(
+    PeriodoFiltro periodo,
+  ) {
+    final regs = listarRegistrosDevolucaoPorPeriodo(periodo);
+    var fatT = 0.0;
+    var lucT = 0.0;
+    final pvFat = <int, double>{};
+    final pvLuc = <int, double>{};
+    final pcFat = <int, double>{};
+    for (final r in regs) {
+      final fat = impactoFaturamentoRegistro(r);
+      final luc = impactoLucroRegistro(r);
+      fatT += fat;
+      lucT += luc;
+      final vidOrigem = r.vendaOrigem.targetId;
+      final vOrigem =
+          vidOrigem > 0 ? (_db.vendaBox.get(vidOrigem)) : null;
+      final vendedorId = vOrigem?.vendedor.targetId ?? 0;
+      pvFat[vendedorId] = (pvFat[vendedorId] ?? 0) + fat;
+      pvLuc[vendedorId] = (pvLuc[vendedorId] ?? 0) + luc;
+      final clienteId = vOrigem?.cliente.targetId ?? 0;
+      pcFat[clienteId] = (pcFat[clienteId] ?? 0) + fat;
+    }
+    return ImpactosDevolucaoTrocaPeriodo(
+      impactoFaturamentoTotal: fatT,
+      impactoLucroTotal: lucT,
+      porVendedorFaturamento: pvFat,
+      porVendedorLucro: pvLuc,
+      porClienteFaturamento: pcFat,
+    );
+  }
+
+  List<DeltaProdutoDevolucao> listarDeltasProdutosDevolucaoPeriodo(
+    PeriodoFiltro periodo,
+  ) {
+    final out = <DeltaProdutoDevolucao>[];
+    for (final r in listarRegistrosDevolucaoPorPeriodo(periodo)) {
+      for (final l in r.linhasEntrada) {
+        final pid = l.produto.targetId;
+        final nome = l.nomeProdutoSnapshot.trim().isNotEmpty
+            ? l.nomeProdutoSnapshot.trim()
+            : (l.produto.target?.nome ?? '');
+        final chave = pid > 0 ? 'id:$pid' : 'nome:$nome';
+        final v = l.quantidade * l.precoUnitarioReferencia;
+        out.add(
+          DeltaProdutoDevolucao(
+            chaveAgg: chave,
+            nomeExibicao: nome.isEmpty ? 'Produto' : nome,
+            produtoId: pid,
+            deltaQuantidade: -l.quantidade,
+            deltaValor: -v,
+          ),
+        );
+      }
+      for (final l in r.linhasSaidaTroca) {
+        final pid = l.produto.targetId;
+        final nome = l.nomeProdutoSnapshot.trim().isNotEmpty
+            ? l.nomeProdutoSnapshot.trim()
+            : (l.produto.target?.nome ?? '');
+        final chave = pid > 0 ? 'id:$pid' : 'nome:$nome';
+        final v = l.quantidade * l.precoUnitario;
+        out.add(
+          DeltaProdutoDevolucao(
+            chaveAgg: chave,
+            nomeExibicao: nome.isEmpty ? 'Produto' : nome,
+            produtoId: pid,
+            deltaQuantidade: l.quantidade,
+            deltaValor: v,
+          ),
+        );
+      }
+    }
+    return out;
+  }
+
+  /// Valor de referencia ja devolvido (preco original da linha) para exibicao.
+  double valorReferenciaDevolvidoAcumuladoVenda(int vendaId) {
+    final v = _db.vendaBox.get(vendaId);
+    if (v == null) return 0;
+    var s = 0.0;
+    for (final it in v.itens) {
+      if (it.quantidadeDevolvida <= 0) continue;
+      s += it.quantidadeDevolvida * it.precoUnitario;
+    }
+    return s;
+  }
+
+  double valorSaidaTrocaAcumuladoVenda(int vendaId) {
+    var s = 0.0;
+    for (final r in listarRegistrosDevolucaoPorVenda(vendaId)) {
+      if (r.tipo != 'troca') continue;
+      s += valorSaidaTrocaRegistro(r);
+    }
+    return s;
+  }
+
+  void _aplicarEstoqueEntradaDevolucao({
+    required Venda venda,
+    required ItemVenda item,
+    required Produto produto,
+    required int qtd,
+  }) {
+    if (qtd <= 0) return;
+    if (venda.entregaPendente) {
+      final daReserva = qtd <= item.quantidadePendenteRetirada
+          ? qtd
+          : item.quantidadePendenteRetirada;
+      final daCliente = qtd - daReserva;
+      if (daReserva > 0) {
+        final r = produto.estoqueReservado;
+        produto.estoqueReservado = (r - daReserva).clamp(0, r).toInt();
+      }
+      if (daCliente > 0) {
+        produto.estoqueReal += daCliente;
+      }
+    } else {
+      produto.estoqueReal += qtd;
+    }
   }
 }

@@ -37,6 +37,13 @@ class _VendedoresPageState extends State<VendedoresPage> {
   late final _emailFormatter = _EmailLowercaseFormatter();
 
   @override
+  void initState() {
+    super.initState();
+    _codigoController.text =
+        '${widget.vendedorRepository.proximoCodigoInternoSequencial()}';
+  }
+
+  @override
   void dispose() {
     _codigoController.dispose();
     _nomeCompletoController.dispose();
@@ -62,8 +69,9 @@ class _VendedoresPageState extends State<VendedoresPage> {
   }
 
   void _limparFormulario() {
+    final proximo = widget.vendedorRepository.proximoCodigoInternoSequencial();
     setState(() {
-      _codigoController.clear();
+      _codigoController.text = '$proximo';
       _nomeCompletoController.clear();
       _apelidoController.clear();
       _telefoneController.clear();
@@ -128,12 +136,12 @@ class _VendedoresPageState extends State<VendedoresPage> {
   }
 
   void _salvar() {
-    final codigo = _codigoController.text.trim();
-    final nome = _nomeCompletoController.text.trim();
+    var codigo = _codigoController.text.trim();
     if (codigo.isEmpty) {
-      setState(() => _status = 'Informe o codigo interno (ex.: V01).');
-      return;
+      codigo = '${widget.vendedorRepository.proximoCodigoInternoSequencial()}';
+      _codigoController.text = codigo;
     }
+    final nome = _nomeCompletoController.text.trim();
     if (nome.isEmpty) {
       setState(() => _status = 'Informe o nome completo.');
       return;
@@ -267,9 +275,9 @@ class _VendedoresPageState extends State<VendedoresPage> {
                     controller: _codigoController,
                     decoration: const InputDecoration(
                       labelText: 'Codigo interno',
-                      hintText: 'Ex.: V01, B03',
+                      hintText: 'Sequencial automatico (1, 2, 3…)',
                     ),
-                    textCapitalization: TextCapitalization.characters,
+                    keyboardType: TextInputType.number,
                   ),
                   const SizedBox(height: 10),
                   TextField(

@@ -38,6 +38,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _rodapeNotaController = TextEditingController();
   final _rodapeOrcamentoController = TextEditingController();
   final _limiteDivergenciaCaixaController = TextEditingController();
+  final _maxDescontoPercentualPdvController = TextEditingController();
   final _whatsApiVersionController = TextEditingController();
   final _whatsPhoneIdController = TextEditingController();
   final _whatsTokenController = TextEditingController();
@@ -110,6 +111,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _rodapeNotaController.dispose();
     _rodapeOrcamentoController.dispose();
     _limiteDivergenciaCaixaController.dispose();
+    _maxDescontoPercentualPdvController.dispose();
     _whatsApiVersionController.dispose();
     _whatsPhoneIdController.dispose();
     _whatsTokenController.dispose();
@@ -138,6 +140,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _logoPath = config.logoPath;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       _mostrarCampoDescontoCaixa = config.mostrarCampoDescontoCaixa;
+      _maxDescontoPercentualPdvController.text =
+          config.maxDescontoPercentualPdv.toStringAsFixed(1).replaceAll('.', ',');
       _whatsApiVersionController.text = config.whatsappApiVersion;
       _whatsPhoneIdController.text = config.whatsappPhoneNumberId;
       _whatsTokenController.text = config.whatsappAccessToken;
@@ -355,6 +359,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           limiteDivergenciaCaixa:
               _parseMoeda(_limiteDivergenciaCaixaController.text) ?? 20,
           mostrarCampoDescontoCaixa: _mostrarCampoDescontoCaixa,
+          maxDescontoPercentualPdv:
+              (_parseMoeda(_maxDescontoPercentualPdvController.text) ?? 15)
+                  .clamp(0, 100),
           permitirVendaSemEstoque: _permitirVendaSemEstoque,
           whatsappApiVersion: _whatsApiVersionController.text,
           whatsappPhoneNumberId: _whatsPhoneIdController.text,
@@ -1676,6 +1683,27 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                       'Desligue para ocultar o campo de desconto na tela do Caixa. '
                       'O total segue sem desconto adicional pelo operador.',
                     ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _maxDescontoPercentualPdvController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText:
+                          'Desconto maximo no Ponto de Venda (% sobre subtotal)',
+                      hintText: 'Ex.: 15',
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Limite percentual sobre o subtotal dos produtos (nao inclui frete). '
+                    'No PDV o vendedor pode informar % ou valor em reais, desde que o '
+                    'desconto em reais nao ultrapasse esse percentual do subtotal. '
+                    'Use 0 para nao permitir desconto no PDV — so no Caixa, se estiver '
+                    'habilitado acima.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 8),
                   SwitchListTile.adaptive(

@@ -125,6 +125,7 @@ class VendasPage extends StatelessWidget {
                       vendaRepository: vendaRepository,
                       clienteRepository: clienteRepository,
                       vendedorRepository: vendedorRepository,
+                      produtoRepository: produtoRepository,
                       usuarioAtual: usuarioAtual,
                       podeCancelarVendas: podeCancelarVendas,
                     ),

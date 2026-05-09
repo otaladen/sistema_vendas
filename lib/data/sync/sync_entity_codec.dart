@@ -82,6 +82,7 @@ class SyncEntityCodec {
       'cidade': c.cidade,
       'uf': c.uf,
       'referencia': c.referencia,
+      'enderecosJson': c.enderecosJson,
       'limiteCredito': c.limiteCredito,
       'observacoes': c.observacoes,
       'ativo': c.ativo,
@@ -107,6 +108,7 @@ class SyncEntityCodec {
       cidade: (m['cidade'] ?? '').toString(),
       uf: (m['uf'] ?? '').toString(),
       referencia: (m['referencia'] ?? '').toString(),
+      enderecosJson: (m['enderecosJson'] ?? '').toString(),
       limiteCredito: (m['limiteCredito'] as num?)?.toDouble() ?? 0,
       observacoes: (m['observacoes'] ?? '').toString(),
       ativo: m['ativo'] == true,
@@ -156,6 +158,7 @@ class SyncEntityCodec {
         'quantidade': i.quantidade,
         'quantidadeJaRetirada': i.quantidadeJaRetirada,
         'quantidadeNoCarreto': i.quantidadeNoCarreto,
+        'quantidadeDevolvida': i.quantidadeDevolvida,
         'precoTipo': i.precoTipo,
         'precoUnitario': i.precoUnitario,
         'precoCustoUnitario': i.precoCustoUnitario,
@@ -217,8 +220,9 @@ class SyncEntityCodec {
       statusEntrega: (m['statusEntrega'] ?? 'nao_aplicavel').toString(),
       prioridadeEntrega: (m['prioridadeEntrega'] ?? 'normal').toString(),
       janelaEntrega: (m['janelaEntrega'] ?? 'nao_definida').toString(),
-      dataEntregaMarcada:
-          DateTime.tryParse((m['dataEntregaMarcada'] ?? '').toString())?.toUtc(),
+      dataEntregaMarcada: DateTime.tryParse(
+        (m['dataEntregaMarcada'] ?? '').toString(),
+      )?.toUtc(),
       cargaSeparada: m['cargaSeparada'] == true,
       cargaCarregada: m['cargaCarregada'] == true,
       cargaSaiu: m['cargaSaiu'] == true,
@@ -226,14 +230,14 @@ class SyncEntityCodec {
       cancelada: m['cancelada'] == true,
       motivoCancelamento: (m['motivoCancelamento'] ?? '').toString(),
       canceladaPor: (m['canceladaPor'] ?? '').toString(),
-      canceladaEm:
-          DateTime.tryParse((m['canceladaEm'] ?? '').toString())?.toUtc(),
+      canceladaEm: DateTime.tryParse(
+        (m['canceladaEm'] ?? '').toString(),
+      )?.toUtc(),
       idOrcamentoFreteRetiradaAberto:
           (m['idOrcamentoFreteRetiradaAberto'] as num?)?.toInt() ?? 0,
       vendaOrigemFreteRetiradaId:
           (m['vendaOrigemFreteRetiradaId'] as num?)?.toInt() ?? 0,
-      grupoEntregaFreteId:
-          (m['grupoEntregaFreteId'] as num?)?.toInt() ?? 0,
+      grupoEntregaFreteId: (m['grupoEntregaFreteId'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -244,6 +248,7 @@ class SyncEntityCodec {
       quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
       quantidadeJaRetirada: (m['quantidadeJaRetirada'] as num?)?.toInt() ?? 0,
       quantidadeNoCarreto: (m['quantidadeNoCarreto'] as num?)?.toInt() ?? 0,
+      quantidadeDevolvida: (m['quantidadeDevolvida'] as num?)?.toInt() ?? 0,
       precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
       precoUnitario: (m['precoUnitario'] as num?)?.toDouble() ?? 0,
       precoCustoUnitario: (m['precoCustoUnitario'] as num?)?.toDouble() ?? 0,

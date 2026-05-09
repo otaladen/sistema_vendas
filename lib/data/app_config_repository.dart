@@ -13,6 +13,8 @@ class EmpresaConfig {
     this.logoPath = '',
     this.limiteDivergenciaCaixa = 20,
     this.mostrarCampoDescontoCaixa = true,
+    /// Limite de desconto (%) sobre o subtotal de produtos no PDV ao enviar ao caixa (0 = desabilitado).
+    this.maxDescontoPercentualPdv = 15,
     this.permitirVendaSemEstoque = true,
     this.whatsappApiVersion = 'v20.0',
     this.whatsappPhoneNumberId = '',
@@ -34,6 +36,8 @@ class EmpresaConfig {
   final double limiteDivergenciaCaixa;
   /// Quando falso, o painel de desconto rapido some na tela do Caixa.
   final bool mostrarCampoDescontoCaixa;
+  /// 0 = vendedor nao pode informar desconto no dialog "Enviar ao caixa"; ate 100 (% sobre subtotal dos produtos).
+  final double maxDescontoPercentualPdv;
   final bool permitirVendaSemEstoque;
   final String whatsappApiVersion;
   final String whatsappPhoneNumberId;
@@ -56,6 +60,7 @@ class EmpresaConfig {
     String? logoPath,
     double? limiteDivergenciaCaixa,
     bool? mostrarCampoDescontoCaixa,
+    double? maxDescontoPercentualPdv,
     bool? permitirVendaSemEstoque,
     String? whatsappApiVersion,
     String? whatsappPhoneNumberId,
@@ -78,6 +83,8 @@ class EmpresaConfig {
           limiteDivergenciaCaixa ?? this.limiteDivergenciaCaixa,
       mostrarCampoDescontoCaixa:
           mostrarCampoDescontoCaixa ?? this.mostrarCampoDescontoCaixa,
+      maxDescontoPercentualPdv:
+          maxDescontoPercentualPdv ?? this.maxDescontoPercentualPdv,
       permitirVendaSemEstoque:
           permitirVendaSemEstoque ?? this.permitirVendaSemEstoque,
       whatsappApiVersion: whatsappApiVersion ?? this.whatsappApiVersion,
@@ -105,6 +112,7 @@ class AppConfigRepository {
   static const _kLogoPath = 'config_logo_path';
   static const _kLimiteDivergenciaCaixa = 'config_limite_divergencia_caixa';
   static const _kMostrarCampoDescontoCaixa = 'config_mostrar_campo_desconto_caixa';
+  static const _kMaxDescontoPercentualPdv = 'config_max_desconto_percentual_pdv';
   static const _kPermitirVendaSemEstoque = 'config_permitir_venda_sem_estoque';
   static const _kWhatsappApiVersion = 'config_whatsapp_api_version';
   static const _kWhatsappPhoneNumberId = 'config_whatsapp_phone_number_id';
@@ -135,6 +143,11 @@ class AppConfigRepository {
       limiteDivergenciaCaixa: prefs.getDouble(_kLimiteDivergenciaCaixa) ?? 20,
       mostrarCampoDescontoCaixa:
           prefs.getBool(_kMostrarCampoDescontoCaixa) ?? true,
+      maxDescontoPercentualPdv: () {
+        final v = prefs.getDouble(_kMaxDescontoPercentualPdv);
+        if (v == null) return 15.0;
+        return v.clamp(0.0, 100.0).toDouble();
+      }(),
       permitirVendaSemEstoque: prefs.getBool(_kPermitirVendaSemEstoque) ?? true,
       whatsappApiVersion: prefs.getString(_kWhatsappApiVersion) ?? 'v20.0',
       whatsappPhoneNumberId: prefs.getString(_kWhatsappPhoneNumberId) ?? '',
@@ -170,6 +183,10 @@ class AppConfigRepository {
     await prefs.setBool(
       _kMostrarCampoDescontoCaixa,
       config.mostrarCampoDescontoCaixa,
+    );
+    await prefs.setDouble(
+      _kMaxDescontoPercentualPdv,
+      config.maxDescontoPercentualPdv.clamp(0, 100),
     );
     await prefs.setBool(_kPermitirVendaSemEstoque, config.permitirVendaSemEstoque);
     await prefs.setString(

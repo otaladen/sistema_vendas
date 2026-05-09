@@ -18,8 +18,11 @@ import 'model/cliente.dart';
 import 'model/funcionario.dart';
 import 'model/historico_entrega.dart';
 import 'model/item_venda.dart';
+import 'model/linha_devolucao_entrada.dart';
+import 'model/linha_troca_saida.dart';
 import 'model/motorista.dart';
 import 'model/produto.dart';
+import 'model/registro_devolucao.dart';
 import 'model/venda.dart';
 import 'model/vendedor.dart';
 
@@ -29,7 +32,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(1, 805574422642691043),
     name: 'ItemVenda',
-    lastPropertyId: const obx_int.IdUid(10, 8342851294323674054),
+    lastPropertyId: const obx_int.IdUid(11, 7736469216551977158),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -95,6 +98,12 @@ final _entities = <obx_int.ModelEntity>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(10, 8342851294323674054),
         name: 'quantidadeNoCarreto',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 7736469216551977158),
+        name: 'quantidadeDevolvida',
         type: 6,
         flags: 0,
       ),
@@ -484,7 +493,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(4, 8923372746033765628),
     name: 'Cliente',
-    lastPropertyId: const obx_int.IdUid(20, 6486430712394977568),
+    lastPropertyId: const obx_int.IdUid(21, 7312456789012345678),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -605,6 +614,12 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(20, 6486430712394977568),
         name: 'criadoEm',
         type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(21, 7312456789012345678),
+        name: 'enderecosJson',
+        type: 9,
         flags: 0,
       ),
     ],
@@ -954,6 +969,194 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(9, 1286028343169021869),
+    name: 'LinhaDevolucaoEntrada',
+    lastPropertyId: const obx_int.IdUid(7, 837464439390569632),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 9184417973143937701),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 1419546889472551924),
+        name: 'itemVendaId',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 352115123085126012),
+        name: 'quantidade',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 8544287653649528738),
+        name: 'precoUnitarioReferencia',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 2055103823561414615),
+        name: 'nomeProdutoSnapshot',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 72566948862369952),
+        name: 'registroId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(6, 8123697855675757201),
+        relationField: 'registro',
+        relationTarget: 'RegistroDevolucao',
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 837464439390569632),
+        name: 'produtoId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(7, 4347539867533251860),
+        relationField: 'produto',
+        relationTarget: 'Produto',
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(10, 684207345885210561),
+    name: 'LinhaTrocaSaida',
+    lastPropertyId: const obx_int.IdUid(8, 1266447661938449195),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 3544467081093683947),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 4804843447993656533),
+        name: 'quantidade',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 1830136097834309511),
+        name: 'precoUnitario',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 489209070243659773),
+        name: 'precoCustoUnitario',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 4604530827504204404),
+        name: 'precoTipo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 7129834584685881156),
+        name: 'nomeProdutoSnapshot',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 6626779396839602366),
+        name: 'registroId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(8, 8744315975077715478),
+        relationField: 'registro',
+        relationTarget: 'RegistroDevolucao',
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 1266447661938449195),
+        name: 'produtoId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(9, 2414315300598665008),
+        relationField: 'produto',
+        relationTarget: 'Produto',
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(11, 9083307328797630834),
+    name: 'RegistroDevolucao',
+    lastPropertyId: const obx_int.IdUid(7, 7520924180800678756),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 5591194229489112244),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 3453749993916784300),
+        name: 'tipo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 1132178087167616967),
+        name: 'motivo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 3034696156137854121),
+        name: 'observacaoFinanceira',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 2908599129401760844),
+        name: 'registradoPor',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 1676449541639284609),
+        name: 'data',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 7520924180800678756),
+        name: 'vendaOrigemId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(10, 3798372306845118182),
+        relationField: 'vendaOrigem',
+        relationTarget: 'Venda',
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[
+      obx_int.ModelBacklink(
+        name: 'linhasEntrada',
+        srcEntity: 'LinhaDevolucaoEntrada',
+        srcField: 'registro',
+      ),
+      obx_int.ModelBacklink(
+        name: 'linhasSaidaTroca',
+        srcEntity: 'LinhaTrocaSaida',
+        srcField: 'registro',
+      ),
+    ],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -999,8 +1202,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(8, 3546637958251126967),
-    lastIndexId: const obx_int.IdUid(5, 2420440196149968766),
+    lastEntityId: const obx_int.IdUid(11, 9083307328797630834),
+    lastIndexId: const obx_int.IdUid(10, 3798372306845118182),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -1024,7 +1227,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
       objectToFB: (ItemVenda object, fb.Builder fbb) {
         final nomeProdutoOffset = fbb.writeString(object.nomeProduto);
         final precoTipoOffset = fbb.writeString(object.precoTipo);
-        fbb.startTable(11);
+        fbb.startTable(12);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.quantidade);
         fbb.addFloat64(2, object.precoUnitario);
@@ -1035,6 +1238,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(7, precoTipoOffset);
         fbb.addInt64(8, object.quantidadeJaRetirada);
         fbb.addInt64(9, object.quantidadeNoCarreto);
+        fbb.addInt64(10, object.quantidadeDevolvida);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1068,6 +1272,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
           22,
           0,
         );
+        final quantidadeDevolvidaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          24,
+          0,
+        );
         final precoTipoParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 18, '');
@@ -1089,6 +1299,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           quantidade: quantidadeParam,
           quantidadeJaRetirada: quantidadeJaRetiradaParam,
           quantidadeNoCarreto: quantidadeNoCarretoParam,
+          quantidadeDevolvida: quantidadeDevolvidaParam,
           precoTipo: precoTipoParam,
           precoUnitario: precoUnitarioParam,
           precoCustoUnitario: precoCustoUnitarioParam,
@@ -1616,7 +1827,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final ufOffset = fbb.writeString(object.uf);
         final referenciaOffset = fbb.writeString(object.referencia);
         final observacoesOffset = fbb.writeString(object.observacoes);
-        fbb.startTable(21);
+        final enderecosJsonOffset = fbb.writeString(object.enderecosJson);
+        fbb.startTable(22);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, tipoPessoaOffset);
         fbb.addOffset(2, nomeRazaoOffset);
@@ -1637,6 +1849,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(17, observacoesOffset);
         fbb.addBool(18, object.ativo);
         fbb.addInt64(19, object.criadoEm.millisecondsSinceEpoch);
+        fbb.addOffset(20, enderecosJsonOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1694,6 +1907,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final referenciaParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 34, '');
+        final enderecosJsonParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 44, '');
         final limiteCreditoParam = const fb.Float64Reader().vTableGet(
           buffer,
           rootOffset,
@@ -1730,6 +1946,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           cidade: cidadeParam,
           uf: ufParam,
           referencia: referenciaParam,
+          enderecosJson: enderecosJsonParam,
           limiteCredito: limiteCreditoParam,
           observacoes: observacoesParam,
           ativo: ativoParam,
@@ -2158,6 +2375,270 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    LinhaDevolucaoEntrada: obx_int.EntityDefinition<LinhaDevolucaoEntrada>(
+      model: _entities[8],
+      toOneRelations: (LinhaDevolucaoEntrada object) => [
+        object.registro,
+        object.produto,
+      ],
+      toManyRelations: (LinhaDevolucaoEntrada object) => {},
+      getId: (LinhaDevolucaoEntrada object) => object.id,
+      setId: (LinhaDevolucaoEntrada object, int id) {
+        object.id = id;
+      },
+      objectToFB: (LinhaDevolucaoEntrada object, fb.Builder fbb) {
+        final nomeProdutoSnapshotOffset = fbb.writeString(
+          object.nomeProdutoSnapshot,
+        );
+        fbb.startTable(8);
+        fbb.addInt64(0, object.id);
+        fbb.addInt64(1, object.itemVendaId);
+        fbb.addInt64(2, object.quantidade);
+        fbb.addFloat64(3, object.precoUnitarioReferencia);
+        fbb.addOffset(4, nomeProdutoSnapshotOffset);
+        fbb.addInt64(5, object.registro.targetId);
+        fbb.addInt64(6, object.produto.targetId);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final itemVendaIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          6,
+          0,
+        );
+        final quantidadeParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          8,
+          0,
+        );
+        final precoUnitarioReferenciaParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          10,
+          0,
+        );
+        final nomeProdutoSnapshotParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 12, '');
+        final object = LinhaDevolucaoEntrada(
+          id: idParam,
+          itemVendaId: itemVendaIdParam,
+          quantidade: quantidadeParam,
+          precoUnitarioReferencia: precoUnitarioReferenciaParam,
+          nomeProdutoSnapshot: nomeProdutoSnapshotParam,
+        );
+        object.registro.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          14,
+          0,
+        );
+        object.registro.attach(store);
+        object.produto.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        object.produto.attach(store);
+        return object;
+      },
+    ),
+    LinhaTrocaSaida: obx_int.EntityDefinition<LinhaTrocaSaida>(
+      model: _entities[9],
+      toOneRelations: (LinhaTrocaSaida object) => [
+        object.registro,
+        object.produto,
+      ],
+      toManyRelations: (LinhaTrocaSaida object) => {},
+      getId: (LinhaTrocaSaida object) => object.id,
+      setId: (LinhaTrocaSaida object, int id) {
+        object.id = id;
+      },
+      objectToFB: (LinhaTrocaSaida object, fb.Builder fbb) {
+        final precoTipoOffset = fbb.writeString(object.precoTipo);
+        final nomeProdutoSnapshotOffset = fbb.writeString(
+          object.nomeProdutoSnapshot,
+        );
+        fbb.startTable(9);
+        fbb.addInt64(0, object.id);
+        fbb.addInt64(1, object.quantidade);
+        fbb.addFloat64(2, object.precoUnitario);
+        fbb.addFloat64(3, object.precoCustoUnitario);
+        fbb.addOffset(4, precoTipoOffset);
+        fbb.addOffset(5, nomeProdutoSnapshotOffset);
+        fbb.addInt64(6, object.registro.targetId);
+        fbb.addInt64(7, object.produto.targetId);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final quantidadeParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          6,
+          0,
+        );
+        final precoUnitarioParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          8,
+          0,
+        );
+        final precoCustoUnitarioParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          10,
+          0,
+        );
+        final precoTipoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 12, '');
+        final nomeProdutoSnapshotParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 14, '');
+        final object = LinhaTrocaSaida(
+          id: idParam,
+          quantidade: quantidadeParam,
+          precoUnitario: precoUnitarioParam,
+          precoCustoUnitario: precoCustoUnitarioParam,
+          precoTipo: precoTipoParam,
+          nomeProdutoSnapshot: nomeProdutoSnapshotParam,
+        );
+        object.registro.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        object.registro.attach(store);
+        object.produto.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          18,
+          0,
+        );
+        object.produto.attach(store);
+        return object;
+      },
+    ),
+    RegistroDevolucao: obx_int.EntityDefinition<RegistroDevolucao>(
+      model: _entities[10],
+      toOneRelations: (RegistroDevolucao object) => [object.vendaOrigem],
+      toManyRelations: (RegistroDevolucao object) => {
+        obx_int.RelInfo<LinhaDevolucaoEntrada>.toOneBacklink(
+          6,
+          object.id,
+          (LinhaDevolucaoEntrada srcObject) => srcObject.registro,
+        ): object.linhasEntrada,
+        obx_int.RelInfo<LinhaTrocaSaida>.toOneBacklink(
+          7,
+          object.id,
+          (LinhaTrocaSaida srcObject) => srcObject.registro,
+        ): object.linhasSaidaTroca,
+      },
+      getId: (RegistroDevolucao object) => object.id,
+      setId: (RegistroDevolucao object, int id) {
+        object.id = id;
+      },
+      objectToFB: (RegistroDevolucao object, fb.Builder fbb) {
+        final tipoOffset = fbb.writeString(object.tipo);
+        final motivoOffset = fbb.writeString(object.motivo);
+        final observacaoFinanceiraOffset = fbb.writeString(
+          object.observacaoFinanceira,
+        );
+        final registradoPorOffset = fbb.writeString(object.registradoPor);
+        fbb.startTable(8);
+        fbb.addInt64(0, object.id);
+        fbb.addOffset(1, tipoOffset);
+        fbb.addOffset(2, motivoOffset);
+        fbb.addOffset(3, observacaoFinanceiraOffset);
+        fbb.addOffset(4, registradoPorOffset);
+        fbb.addInt64(5, object.data.millisecondsSinceEpoch);
+        fbb.addInt64(6, object.vendaOrigem.targetId);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final tipoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 6, '');
+        final motivoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final observacaoFinanceiraParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final registradoPorParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 12, '');
+        final dataParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 14, 0),
+          isUtc: true,
+        );
+        final object = RegistroDevolucao(
+          id: idParam,
+          tipo: tipoParam,
+          motivo: motivoParam,
+          observacaoFinanceira: observacaoFinanceiraParam,
+          registradoPor: registradoPorParam,
+          data: dataParam,
+        );
+        object.vendaOrigem.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        object.vendaOrigem.attach(store);
+        obx_int.InternalToManyAccess.setRelInfo<RegistroDevolucao>(
+          object.linhasEntrada,
+          store,
+          obx_int.RelInfo<LinhaDevolucaoEntrada>.toOneBacklink(
+            6,
+            object.id,
+            (LinhaDevolucaoEntrada srcObject) => srcObject.registro,
+          ),
+        );
+        obx_int.InternalToManyAccess.setRelInfo<RegistroDevolucao>(
+          object.linhasSaidaTroca,
+          store,
+          obx_int.RelInfo<LinhaTrocaSaida>.toOneBacklink(
+            7,
+            object.id,
+            (LinhaTrocaSaida srcObject) => srcObject.registro,
+          ),
+        );
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -2213,6 +2694,11 @@ class ItemVenda_ {
   /// See [ItemVenda.quantidadeNoCarreto].
   static final quantidadeNoCarreto = obx.QueryIntegerProperty<ItemVenda>(
     _entities[0].properties[9],
+  );
+
+  /// See [ItemVenda.quantidadeDevolvida].
+  static final quantidadeDevolvida = obx.QueryIntegerProperty<ItemVenda>(
+    _entities[0].properties[10],
   );
 }
 
@@ -2613,6 +3099,11 @@ class Cliente_ {
   static final criadoEm = obx.QueryDateProperty<Cliente>(
     _entities[3].properties[19],
   );
+
+  /// See [Cliente.enderecosJson].
+  static final enderecosJson = obx.QueryStringProperty<Cliente>(
+    _entities[3].properties[20],
+  );
 }
 
 /// [Vendedor] entity fields to define ObjectBox queries.
@@ -2875,4 +3366,138 @@ class Motorista_ {
   static final criadoEm = obx.QueryDateProperty<Motorista>(
     _entities[7].properties[4],
   );
+}
+
+/// [LinhaDevolucaoEntrada] entity fields to define ObjectBox queries.
+class LinhaDevolucaoEntrada_ {
+  /// See [LinhaDevolucaoEntrada.id].
+  static final id = obx.QueryIntegerProperty<LinhaDevolucaoEntrada>(
+    _entities[8].properties[0],
+  );
+
+  /// See [LinhaDevolucaoEntrada.itemVendaId].
+  static final itemVendaId = obx.QueryIntegerProperty<LinhaDevolucaoEntrada>(
+    _entities[8].properties[1],
+  );
+
+  /// See [LinhaDevolucaoEntrada.quantidade].
+  static final quantidade = obx.QueryIntegerProperty<LinhaDevolucaoEntrada>(
+    _entities[8].properties[2],
+  );
+
+  /// See [LinhaDevolucaoEntrada.precoUnitarioReferencia].
+  static final precoUnitarioReferencia =
+      obx.QueryDoubleProperty<LinhaDevolucaoEntrada>(
+        _entities[8].properties[3],
+      );
+
+  /// See [LinhaDevolucaoEntrada.nomeProdutoSnapshot].
+  static final nomeProdutoSnapshot =
+      obx.QueryStringProperty<LinhaDevolucaoEntrada>(
+        _entities[8].properties[4],
+      );
+
+  /// See [LinhaDevolucaoEntrada.registro].
+  static final registro =
+      obx.QueryRelationToOne<LinhaDevolucaoEntrada, RegistroDevolucao>(
+        _entities[8].properties[5],
+      );
+
+  /// See [LinhaDevolucaoEntrada.produto].
+  static final produto = obx.QueryRelationToOne<LinhaDevolucaoEntrada, Produto>(
+    _entities[8].properties[6],
+  );
+}
+
+/// [LinhaTrocaSaida] entity fields to define ObjectBox queries.
+class LinhaTrocaSaida_ {
+  /// See [LinhaTrocaSaida.id].
+  static final id = obx.QueryIntegerProperty<LinhaTrocaSaida>(
+    _entities[9].properties[0],
+  );
+
+  /// See [LinhaTrocaSaida.quantidade].
+  static final quantidade = obx.QueryIntegerProperty<LinhaTrocaSaida>(
+    _entities[9].properties[1],
+  );
+
+  /// See [LinhaTrocaSaida.precoUnitario].
+  static final precoUnitario = obx.QueryDoubleProperty<LinhaTrocaSaida>(
+    _entities[9].properties[2],
+  );
+
+  /// See [LinhaTrocaSaida.precoCustoUnitario].
+  static final precoCustoUnitario = obx.QueryDoubleProperty<LinhaTrocaSaida>(
+    _entities[9].properties[3],
+  );
+
+  /// See [LinhaTrocaSaida.precoTipo].
+  static final precoTipo = obx.QueryStringProperty<LinhaTrocaSaida>(
+    _entities[9].properties[4],
+  );
+
+  /// See [LinhaTrocaSaida.nomeProdutoSnapshot].
+  static final nomeProdutoSnapshot = obx.QueryStringProperty<LinhaTrocaSaida>(
+    _entities[9].properties[5],
+  );
+
+  /// See [LinhaTrocaSaida.registro].
+  static final registro =
+      obx.QueryRelationToOne<LinhaTrocaSaida, RegistroDevolucao>(
+        _entities[9].properties[6],
+      );
+
+  /// See [LinhaTrocaSaida.produto].
+  static final produto = obx.QueryRelationToOne<LinhaTrocaSaida, Produto>(
+    _entities[9].properties[7],
+  );
+}
+
+/// [RegistroDevolucao] entity fields to define ObjectBox queries.
+class RegistroDevolucao_ {
+  /// See [RegistroDevolucao.id].
+  static final id = obx.QueryIntegerProperty<RegistroDevolucao>(
+    _entities[10].properties[0],
+  );
+
+  /// See [RegistroDevolucao.tipo].
+  static final tipo = obx.QueryStringProperty<RegistroDevolucao>(
+    _entities[10].properties[1],
+  );
+
+  /// See [RegistroDevolucao.motivo].
+  static final motivo = obx.QueryStringProperty<RegistroDevolucao>(
+    _entities[10].properties[2],
+  );
+
+  /// See [RegistroDevolucao.observacaoFinanceira].
+  static final observacaoFinanceira =
+      obx.QueryStringProperty<RegistroDevolucao>(_entities[10].properties[3]);
+
+  /// See [RegistroDevolucao.registradoPor].
+  static final registradoPor = obx.QueryStringProperty<RegistroDevolucao>(
+    _entities[10].properties[4],
+  );
+
+  /// See [RegistroDevolucao.data].
+  static final data = obx.QueryDateProperty<RegistroDevolucao>(
+    _entities[10].properties[5],
+  );
+
+  /// See [RegistroDevolucao.vendaOrigem].
+  static final vendaOrigem = obx.QueryRelationToOne<RegistroDevolucao, Venda>(
+    _entities[10].properties[6],
+  );
+
+  /// see [RegistroDevolucao.linhasEntrada]
+  static final linhasEntrada =
+      obx.QueryBacklinkToMany<LinhaDevolucaoEntrada, RegistroDevolucao>(
+        LinhaDevolucaoEntrada_.registro,
+      );
+
+  /// see [RegistroDevolucao.linhasSaidaTroca]
+  static final linhasSaidaTroca =
+      obx.QueryBacklinkToMany<LinhaTrocaSaida, RegistroDevolucao>(
+        LinhaTrocaSaida_.registro,
+      );
 }

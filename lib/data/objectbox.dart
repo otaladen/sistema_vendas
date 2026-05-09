@@ -4,6 +4,9 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../model/item_venda.dart';
+import '../model/linha_devolucao_entrada.dart';
+import '../model/linha_troca_saida.dart';
+import '../model/registro_devolucao.dart';
 import '../model/cliente.dart';
 import '../model/funcionario.dart';
 import '../model/historico_entrega.dart';
@@ -19,6 +22,9 @@ class ObjectBox {
     clienteBox = Box<Cliente>(store);
     vendaBox = Box<Venda>(store);
     itemVendaBox = Box<ItemVenda>(store);
+    registroDevolucaoBox = Box<RegistroDevolucao>(store);
+    linhaDevolucaoEntradaBox = Box<LinhaDevolucaoEntrada>(store);
+    linhaTrocaSaidaBox = Box<LinhaTrocaSaida>(store);
     historicoEntregaBox = Box<HistoricoEntrega>(store);
     motoristaBox = Box<Motorista>(store);
     vendedorBox = Box<Vendedor>(store);
@@ -30,6 +36,9 @@ class ObjectBox {
   late final Box<Cliente> clienteBox;
   late final Box<Venda> vendaBox;
   late final Box<ItemVenda> itemVendaBox;
+  late final Box<RegistroDevolucao> registroDevolucaoBox;
+  late final Box<LinhaDevolucaoEntrada> linhaDevolucaoEntradaBox;
+  late final Box<LinhaTrocaSaida> linhaTrocaSaidaBox;
   late final Box<HistoricoEntrega> historicoEntregaBox;
   late final Box<Motorista> motoristaBox;
   late final Box<Vendedor> vendedorBox;

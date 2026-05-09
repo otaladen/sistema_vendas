@@ -46,6 +46,7 @@ class _ClientesPageState extends State<ClientesPage> {
   final _referenciaController = TextEditingController();
   final _limiteController = TextEditingController();
   final _observacoesController = TextEditingController();
+  final List<_EnderecoFormControllers> _enderecosExtras = [];
 
   int? _clienteEmEdicaoId;
   String _tipoPessoa = 'fisica';
@@ -85,6 +86,9 @@ class _ClientesPageState extends State<ClientesPage> {
     _referenciaController.dispose();
     _limiteController.dispose();
     _observacoesController.dispose();
+    for (final endereco in _enderecosExtras) {
+      endereco.dispose();
+    }
     _scrollController.dispose();
     super.dispose();
   }
@@ -140,14 +144,16 @@ class _ClientesPageState extends State<ClientesPage> {
             }
 
             void rolarParaIndiceSelecionado() {
-              if (!resultadosScrollController.hasClients || indiceSelecionado < 0) {
+              if (!resultadosScrollController.hasClients ||
+                  indiceSelecionado < 0) {
                 return;
               }
               const alturaEstimadaLinha = 64.0;
-              final posicaoDesejada = (indiceSelecionado * alturaEstimadaLinha).clamp(
-                0.0,
-                resultadosScrollController.position.maxScrollExtent,
-              );
+              final posicaoDesejada = (indiceSelecionado * alturaEstimadaLinha)
+                  .clamp(
+                    0.0,
+                    resultadosScrollController.position.maxScrollExtent,
+                  );
               resultadosScrollController.animateTo(
                 posicaoDesejada,
                 duration: const Duration(milliseconds: 120),
@@ -223,7 +229,9 @@ class _ClientesPageState extends State<ClientesPage> {
                                 cliente.email,
                                 cliente.cidade,
                               ].map((e) => e.toLowerCase());
-                              final matchTexto = campos.any((campo) => campo.contains(termo));
+                              final matchTexto = campos.any(
+                                (campo) => campo.contains(termo),
+                              );
                               if (matchTexto) return true;
                               if (termoNumerico.isEmpty) return false;
                               final camposNumericos = [
@@ -233,7 +241,8 @@ class _ClientesPageState extends State<ClientesPage> {
                                 cliente.cep,
                               ].map(_somenteDigitos);
                               return camposNumericos.any(
-                                (campoNumerico) => campoNumerico.contains(termoNumerico),
+                                (campoNumerico) =>
+                                    campoNumerico.contains(termoNumerico),
                               );
                             }).toList();
                             indiceSelecionado = resultados.isEmpty ? -1 : 0;
@@ -251,7 +260,9 @@ class _ClientesPageState extends State<ClientesPage> {
                           if (resultados.isEmpty) {
                             return;
                           }
-                          final indice = indiceSelecionado >= 0 ? indiceSelecionado : 0;
+                          final indice = indiceSelecionado >= 0
+                              ? indiceSelecionado
+                              : 0;
                           Navigator.pop(context, resultados[indice]);
                         },
                       ),
@@ -262,23 +273,31 @@ class _ClientesPageState extends State<ClientesPage> {
                           maxHeight: MediaQuery.of(context).size.height * 0.58,
                         ),
                         child: resultados.isEmpty
-                            ? const Center(child: Text('Nenhum cliente encontrado.'))
+                            ? const Center(
+                                child: Text('Nenhum cliente encontrado.'),
+                              )
                             : ListView.builder(
                                 controller: resultadosScrollController,
                                 shrinkWrap: true,
                                 itemCount: resultados.length,
                                 itemBuilder: (context, index) {
                                   final cliente = resultados[index];
-                                  final consulta = pesquisaController.text.trim();
-                                  final estiloTitulo = Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(fontWeight: FontWeight.w600) ??
-                                      const TextStyle(fontWeight: FontWeight.w600);
+                                  final consulta = pesquisaController.text
+                                      .trim();
+                                  final estiloTitulo =
+                                      Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      ) ??
+                                      const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      );
                                   final estiloSubtitulo =
                                       Theme.of(context).textTheme.bodyMedium ??
-                                          const TextStyle();
-                                  final selecionado = index == indiceSelecionado;
+                                      const TextStyle();
+                                  final selecionado =
+                                      index == indiceSelecionado;
 
                                   return MouseRegion(
                                     onEnter: (_) {
@@ -290,15 +309,15 @@ class _ClientesPageState extends State<ClientesPage> {
                                       });
                                     },
                                     child: ListTile(
-                                      contentPadding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 4,
-                                      ),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 4,
+                                          ),
                                       selected: selecionado,
-                                      selectedTileColor: Theme.of(context)
-                                          .colorScheme
-                                          .primary
-                                          .withOpacity(0.08),
+                                      selectedTileColor: Theme.of(
+                                        context,
+                                      ).colorScheme.primary.withOpacity(0.08),
                                       title: RichText(
                                         text: spanComDestaque(
                                           cliente.nomeRazao,
@@ -315,7 +334,8 @@ class _ClientesPageState extends State<ClientesPage> {
                                           estiloSubtitulo,
                                         ),
                                       ),
-                                      onTap: () => Navigator.pop(context, cliente),
+                                      onTap: () =>
+                                          Navigator.pop(context, cliente),
                                     ),
                                   );
                                 },
@@ -347,6 +367,9 @@ class _ClientesPageState extends State<ClientesPage> {
   }
 
   void _limparFormulario() {
+    for (final endereco in _enderecosExtras) {
+      endereco.dispose();
+    }
     setState(() {
       _nomeRazaoController.clear();
       _nomeFantasiaController.clear();
@@ -362,6 +385,7 @@ class _ClientesPageState extends State<ClientesPage> {
       _cidadeController.clear();
       _ufController.clear();
       _referenciaController.clear();
+      _enderecosExtras.clear();
       _limiteController.clear();
       _observacoesController.clear();
       _tipoPessoa = 'fisica';
@@ -378,14 +402,19 @@ class _ClientesPageState extends State<ClientesPage> {
       });
       return;
     }
-    final limiteCredito = double.tryParse(
-          _limiteController.text.trim().replaceAll('.', '').replaceAll(',', '.'),
+    final limiteCredito =
+        double.tryParse(
+          _limiteController.text
+              .trim()
+              .replaceAll('.', '')
+              .replaceAll(',', '.'),
         ) ??
         0;
     final existente = _clienteEmEdicaoId == null
         ? null
         : widget.clienteRepository.obterPorId(_clienteEmEdicaoId!);
 
+    final enderecos = _enderecosDoFormulario();
     final cliente = Cliente(
       id: existente?.id ?? 0,
       tipoPessoa: _tipoPessoa,
@@ -398,18 +427,20 @@ class _ClientesPageState extends State<ClientesPage> {
       telefone: _somenteDigitos(_telefoneController.text),
       whatsapp: _somenteDigitos(_whatsappController.text),
       email: _emailController.text.trim().toLowerCase(),
-      cep: _somenteDigitos(_cepController.text),
-      endereco: _enderecoController.text.trim(),
-      numero: _numeroController.text.trim(),
-      bairro: _bairroController.text.trim(),
-      cidade: _cidadeController.text.trim(),
-      uf: _ufController.text.trim().toUpperCase(),
-      referencia: _referenciaController.text.trim(),
+      cep: '',
+      endereco: '',
+      numero: '',
+      bairro: '',
+      cidade: '',
+      uf: '',
+      referencia: '',
+      enderecosJson: existente?.enderecosJson ?? '',
       limiteCredito: limiteCredito,
       observacoes: _observacoesController.text.trim(),
       ativo: _ativo,
       criadoEm: existente?.criadoEm,
     );
+    cliente.definirEnderecos(enderecos);
     final clienteId = widget.clienteRepository.salvar(cliente);
     final clienteSalvo = widget.clienteRepository.obterPorId(clienteId);
     if (widget.retornarClienteAoSalvar && clienteSalvo != null) {
@@ -427,6 +458,14 @@ class _ClientesPageState extends State<ClientesPage> {
   }
 
   void _editarCliente(Cliente c) {
+    final enderecos = c.listarEnderecos();
+    final principal = enderecos.isEmpty ? EnderecoCliente() : enderecos.first;
+    final extras = enderecos.length > 1
+        ? enderecos.sublist(1)
+        : const <EnderecoCliente>[];
+    for (final endereco in _enderecosExtras) {
+      endereco.dispose();
+    }
     setState(() {
       _clienteEmEdicaoId = c.id;
       _tipoPessoa = c.tipoPessoa;
@@ -437,14 +476,19 @@ class _ClientesPageState extends State<ClientesPage> {
       _telefoneController.text = c.telefone;
       _whatsappController.text = c.whatsapp;
       _emailController.text = c.email;
-      _cepController.text = c.cep;
-      _enderecoController.text = c.endereco;
-      _numeroController.text = c.numero;
-      _bairroController.text = c.bairro;
-      _cidadeController.text = c.cidade;
-      _ufController.text = c.uf;
-      _referenciaController.text = c.referencia;
-      _limiteController.text = c.limiteCredito.toStringAsFixed(2).replaceAll('.', ',');
+      _cepController.text = principal.cep;
+      _enderecoController.text = principal.endereco;
+      _numeroController.text = principal.numero;
+      _bairroController.text = principal.bairro;
+      _cidadeController.text = principal.cidade;
+      _ufController.text = principal.uf;
+      _referenciaController.text = principal.referencia;
+      _enderecosExtras
+        ..clear()
+        ..addAll(extras.map(_EnderecoFormControllers.fromEndereco));
+      _limiteController.text = c.limiteCredito
+          .toStringAsFixed(2)
+          .replaceAll('.', ',');
       _observacoesController.text = c.observacoes;
       _ativo = c.ativo;
       _status = 'Editando cliente: ${c.nomeRazao}';
@@ -544,10 +588,36 @@ class _ClientesPageState extends State<ClientesPage> {
       const TextEditingValue(),
       TextEditingValue(text: _cepController.text),
     );
+    for (final endereco in _enderecosExtras) {
+      endereco.cepController.value = _cepFormatter.formatEditUpdate(
+        const TextEditingValue(),
+        TextEditingValue(text: endereco.cepController.text),
+      );
+      endereco.ufController.value = UpperCaseTextFormatter().formatEditUpdate(
+        const TextEditingValue(),
+        TextEditingValue(text: endereco.ufController.text),
+      );
+    }
     _limiteController.value = _limiteCreditoFormatter.formatEditUpdate(
       const TextEditingValue(),
       TextEditingValue(text: _limiteController.text),
     );
+  }
+
+  List<EnderecoCliente> _enderecosDoFormulario() {
+    final enderecos = <EnderecoCliente>[
+      EnderecoCliente(
+        cep: _somenteDigitos(_cepController.text),
+        endereco: _enderecoController.text.trim(),
+        numero: _numeroController.text.trim(),
+        bairro: _bairroController.text.trim(),
+        cidade: _cidadeController.text.trim(),
+        uf: _ufController.text.trim().toUpperCase(),
+        referencia: _referenciaController.text.trim(),
+      ),
+      ..._enderecosExtras.map((e) => e.toEndereco()),
+    ];
+    return enderecos.where((e) => e.temDados).toList();
   }
 
   (DateTime?, DateTime?) _limitesPeriodoHistorico() {
@@ -625,14 +695,18 @@ class _ClientesPageState extends State<ClientesPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Cadastre um template manual em Configuracoes > Mensageria.'),
+          content: Text(
+            'Cadastre um template manual em Configuracoes > Mensageria.',
+          ),
         ),
       );
       return;
     }
     MensagemTemplate selecionado = templatesManuais.first;
     final destinoController = TextEditingController(
-      text: cliente.whatsapp.trim().isNotEmpty ? cliente.whatsapp : cliente.telefone,
+      text: cliente.whatsapp.trim().isNotEmpty
+          ? cliente.whatsapp
+          : cliente.telefone,
     );
     if (!mounted) return;
     final ok = await showDialog<bool>(
@@ -747,7 +821,9 @@ class _ClientesPageState extends State<ClientesPage> {
     final ultimaCompra = compras.isEmpty ? null : compras.first;
     final quantidadeItens = compras.fold<int>(
       0,
-      (acc, compra) => acc + compra.itens.fold<int>(0, (soma, item) => soma + item.quantidade),
+      (acc, compra) =>
+          acc +
+          compra.itens.fold<int>(0, (soma, item) => soma + item.quantidade),
     );
     final topProdutosMap = <String, int>{};
     for (final compra in compras) {
@@ -775,567 +851,611 @@ class _ClientesPageState extends State<ClientesPage> {
             controller: _scrollController,
             padding: const EdgeInsets.only(right: 10),
             children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    theme.colorScheme.primaryContainer,
-                    theme.colorScheme.surfaceContainerHighest,
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.badge_outlined,
-                    size: 30,
-                    color: theme.colorScheme.primary,
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      theme.colorScheme.primaryContainer,
+                      theme.colorScheme.surfaceContainerHighest,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Cadastro de Clientes',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.badge_outlined,
+                      size: 30,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Cadastro de Clientes',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        Text(
-                          emEdicao
-                              ? 'Modo edicao ativo: revise os dados e salve.'
-                              : 'Preencha os dados para registrar um novo cliente.',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ],
+                          Text(
+                            emEdicao
+                                ? 'Modo edicao ativo: revise os dados e salve.'
+                                : 'Preencha os dados para registrar um novo cliente.',
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _abrirPesquisaCliente,
+                  icon: const Icon(Icons.search),
+                  label: const Text('Pesquisar cliente'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _irParaPrimeiroCliente,
+                      child: const Text('|< Primeiro'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _irParaClienteAnterior,
+                      child: const Text('< Anterior'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _irParaProximoCliente,
+                      child: const Text('Proximo >'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _irParaUltimoCliente,
+                      child: const Text('Ultimo >|'),
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _abrirPesquisaCliente,
-                icon: const Icon(Icons.search),
-                label: const Text('Pesquisar cliente'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _irParaPrimeiroCliente,
-                    child: const Text('|< Primeiro'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _irParaClienteAnterior,
-                    child: const Text('< Anterior'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _irParaProximoCliente,
-                    child: const Text('Proximo >'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _irParaUltimoCliente,
-                    child: const Text('Ultimo >|'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _buildSectionCard(
-              context: context,
-              title: 'Dados principais',
-              icon: Icons.person_outline,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: _tipoPessoa,
-                  decoration: const InputDecoration(labelText: 'Tipo de pessoa'),
-                  items: const [
-                    DropdownMenuItem(value: 'fisica', child: Text('Fisica')),
-                    DropdownMenuItem(value: 'juridica', child: Text('Juridica')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) {
-                      setState(() {
-                        _tipoPessoa = v;
-                        _documentoController.clear();
-                        if (_tipoPessoa == 'fisica') {
-                          _inscricaoController.clear();
-                        }
-                      });
-                    }
-                  },
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _nomeRazaoController,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(labelText: 'Nome / Razao social'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _nomeFantasiaController,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(labelText: 'Nome fantasia (opcional)'),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _documentoController,
-                        decoration: InputDecoration(
-                          labelText: _tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ',
-                        ),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [_cpfCnpjFormatter],
-                      ),
+              const SizedBox(height: 14),
+              _buildSectionCard(
+                context: context,
+                title: 'Dados principais',
+                icon: Icons.person_outline,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: _tipoPessoa,
+                    decoration: const InputDecoration(
+                      labelText: 'Tipo de pessoa',
                     ),
-                    if (_tipoPessoa == 'juridica') ...[
+                    items: const [
+                      DropdownMenuItem(value: 'fisica', child: Text('Fisica')),
+                      DropdownMenuItem(
+                        value: 'juridica',
+                        child: Text('Juridica'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          _tipoPessoa = v;
+                          _documentoController.clear();
+                          if (_tipoPessoa == 'fisica') {
+                            _inscricaoController.clear();
+                          }
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _nomeRazaoController,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome / Razao social',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _nomeFantasiaController,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome fantasia (opcional)',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _documentoController,
+                          decoration: InputDecoration(
+                            labelText: _tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ',
+                          ),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [_cpfCnpjFormatter],
+                        ),
+                      ),
+                      if (_tipoPessoa == 'juridica') ...[
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _inscricaoController,
+                            decoration: const InputDecoration(
+                              labelText: 'Inscricao Estadual',
+                            ),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[0-9A-Za-z]'),
+                              ),
+                              LengthLimitingTextInputFormatter(20),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _buildSectionCard(
+                context: context,
+                title: 'Contato',
+                icon: Icons.phone_outlined,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _telefoneController,
+                          decoration: const InputDecoration(
+                            labelText: 'Telefone',
+                          ),
+                          keyboardType: TextInputType.phone,
+                          inputFormatters: [_telefoneFormatter],
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextField(
-                          controller: _inscricaoController,
-                          decoration: const InputDecoration(labelText: 'Inscricao Estadual'),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Za-z]')),
-                            LengthLimitingTextInputFormatter(20),
-                          ],
+                          controller: _whatsappController,
+                          decoration: const InputDecoration(
+                            labelText: 'WhatsApp',
+                          ),
+                          keyboardType: TextInputType.phone,
+                          inputFormatters: [_telefoneFormatter],
                         ),
                       ),
                     ],
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _buildSectionCard(
-              context: context,
-              title: 'Contato',
-              icon: Icons.phone_outlined,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _telefoneController,
-                        decoration: const InputDecoration(labelText: 'Telefone'),
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [_telefoneFormatter],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _whatsappController,
-                        decoration: const InputDecoration(labelText: 'WhatsApp'),
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [_telefoneFormatter],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _emailController,
-                  decoration: const InputDecoration(labelText: 'Email'),
-                  keyboardType: TextInputType.emailAddress,
-                        textCapitalization: TextCapitalization.none,
-                  inputFormatters: [_emailFormatter],
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _buildSectionCard(
-              context: context,
-              title: 'Endereco',
-              icon: Icons.location_on_outlined,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _cepController,
-                        decoration: const InputDecoration(labelText: 'CEP'),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [_cepFormatter],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: _enderecoController,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(labelText: 'Endereco'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _numeroController,
-                        decoration: const InputDecoration(labelText: 'Numero'),
-                        inputFormatters: [
-                          LengthLimitingTextInputFormatter(10),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _bairroController,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(labelText: 'Bairro'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _cidadeController,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(labelText: 'Cidade'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 90,
-                      child: TextField(
-                        controller: _ufController,
-                        decoration: const InputDecoration(labelText: 'UF'),
-                        textCapitalization: TextCapitalization.characters,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
-                          LengthLimitingTextInputFormatter(2),
-                          UpperCaseTextFormatter(),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _buildSectionCard(
-              context: context,
-              title: 'Comercial',
-              icon: Icons.payments_outlined,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _referenciaController,
-                        textCapitalization: TextCapitalization.sentences,
-                        decoration: const InputDecoration(labelText: 'Referencia'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _limiteController,
-                        decoration: const InputDecoration(labelText: 'Limite de credito'),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [_limiteCreditoFormatter],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _observacoesController,
-                  maxLines: 2,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(labelText: 'Observacoes'),
-                ),
-                SwitchListTile(
-                  value: _ativo,
-                  onChanged: (v) => setState(() => _ativo = v),
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Cliente ativo'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Card(
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: theme.colorScheme.outlineVariant),
-              ),
-              child: ExpansionTile(
-                initiallyExpanded: false,
-                tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-                leading: Icon(Icons.history_outlined, color: theme.colorScheme.primary),
-                title: Text(
-                  'Historico de Compras',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
                   ),
-                ),
-                childrenPadding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _emailController,
+                    decoration: const InputDecoration(labelText: 'Email'),
+                    keyboardType: TextInputType.emailAddress,
+                    textCapitalization: TextCapitalization.none,
+                    inputFormatters: [_emailFormatter],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _buildSectionCard(
+                context: context,
+                title: 'Endereco',
+                icon: Icons.location_on_outlined,
                 children: [
-                  if (!emEdicao)
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Salve o cliente para habilitar o historico de compras.',
-                        ),
-                      ),
-                    )
-                  else ...[
-                    DropdownButtonFormField<String>(
-                      initialValue: _periodoHistorico,
-                      decoration: const InputDecoration(
-                        labelText: 'Periodo do historico',
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'todo', child: Text('Todo o periodo')),
-                        DropdownMenuItem(value: 'ultimos_30', child: Text('Ultimos 30 dias')),
-                        DropdownMenuItem(value: 'ultimos_90', child: Text('Ultimos 90 dias')),
-                        DropdownMenuItem(value: 'ano_atual', child: Text('Ano atual')),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setState(() {
-                          _periodoHistorico = value;
-                        });
+                  _buildEnderecoForm(
+                    titulo: 'Endereco principal',
+                    cepController: _cepController,
+                    enderecoController: _enderecoController,
+                    numeroController: _numeroController,
+                    bairroController: _bairroController,
+                    cidadeController: _cidadeController,
+                    ufController: _ufController,
+                    referenciaController: _referenciaController,
+                  ),
+                  for (var i = 0; i < _enderecosExtras.length; i++) ...[
+                    const SizedBox(height: 10),
+                    _buildEnderecoForm(
+                      titulo: 'Endereco adicional ${i + 1}',
+                      cepController: _enderecosExtras[i].cepController,
+                      enderecoController:
+                          _enderecosExtras[i].enderecoController,
+                      numeroController: _enderecosExtras[i].numeroController,
+                      bairroController: _enderecosExtras[i].bairroController,
+                      cidadeController: _enderecosExtras[i].cidadeController,
+                      ufController: _enderecosExtras[i].ufController,
+                      referenciaController:
+                          _enderecosExtras[i].referenciaController,
+                      onRemover: () {
+                        final removido = _enderecosExtras.removeAt(i);
+                        removido.dispose();
+                        setState(() {});
                       },
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Total ja gasto na loja: ${_formatarMoeda(totalGasto)}',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                  ],
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _enderecosExtras.add(
+                            _EnderecoFormControllers.vazio(),
+                          );
+                        });
+                      },
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Adicionar endereco'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _buildSectionCard(
+                context: context,
+                title: 'Comercial',
+                icon: Icons.payments_outlined,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _limiteController,
+                          decoration: const InputDecoration(
+                            labelText: 'Limite de credito',
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [_limiteCreditoFormatter],
+                        ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _observacoesController,
+                    maxLines: 2,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: const InputDecoration(labelText: 'Observacoes'),
+                  ),
+                  SwitchListTile(
+                    value: _ativo,
+                    onChanged: (v) => setState(() => _ativo = v),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Cliente ativo'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: theme.colorScheme.outlineVariant),
+                ),
+                child: ExpansionTile(
+                  initiallyExpanded: false,
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                  leading: Icon(
+                    Icons.history_outlined,
+                    color: theme.colorScheme.primary,
+                  ),
+                  title: Text(
+                    'Historico de Compras',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
-                    const SizedBox(height: 4),
-                    Text('Ticket medio: ${_formatarMoeda(ticketMedio)}'),
-                    Text('Total de itens comprados: $quantidadeItens'),
-                    Text(
-                      'Ultima compra: ${ultimaCompra == null ? 'Nao disponivel' : _dataHora.format(ultimaCompra.data.toLocal())}',
-                    ),
-                    const SizedBox(height: 8),
-                    Text('Compras registradas: ${compras.length}'),
-                    const SizedBox(height: 8),
-                    if (topProdutos.isNotEmpty) ...[
+                  ),
+                  childrenPadding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                  children: [
+                    if (!emEdicao)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 8),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Salve o cliente para habilitar o historico de compras.',
+                          ),
+                        ),
+                      )
+                    else ...[
+                      DropdownButtonFormField<String>(
+                        initialValue: _periodoHistorico,
+                        decoration: const InputDecoration(
+                          labelText: 'Periodo do historico',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'todo',
+                            child: Text('Todo o periodo'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'ultimos_30',
+                            child: Text('Ultimos 30 dias'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'ultimos_90',
+                            child: Text('Ultimos 90 dias'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'ano_atual',
+                            child: Text('Ano atual'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setState(() {
+                            _periodoHistorico = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 10),
                       Text(
-                        'Top produtos comprados',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
+                        'Total ja gasto na loja: ${_formatarMoeda(totalGasto)}',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      ...topProdutos.take(3).map(
-                        (entry) => Text('${entry.key} - ${entry.value} un'),
+                      Text('Ticket medio: ${_formatarMoeda(ticketMedio)}'),
+                      Text('Total de itens comprados: $quantidadeItens'),
+                      Text(
+                        'Ultima compra: ${ultimaCompra == null ? 'Nao disponivel' : _dataHora.format(ultimaCompra.data.toLocal())}',
                       ),
                       const SizedBox(height: 8),
-                    ],
-                    const SizedBox(height: 10),
-                    if (compras.isEmpty)
-                      const Text('Este cliente ainda nao tem compras finalizadas.')
-                    else
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 260),
-                        child: ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: compras.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 6),
-                          itemBuilder: (context, index) {
-                            final compra = compras[index];
-                            final nota = compra.numeroOrcamento > 0
-                                ? '#${compra.numeroOrcamento}'
-                                : 'ID ${compra.id}';
-                            return ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              leading: const Icon(Icons.receipt_long_outlined),
-                              title: Text('Nota/Orcamento: $nota'),
-                              subtitle: Text(_dataHora.format(compra.data.toLocal())),
-                              trailing: Text(
-                                _formatarMoeda(compra.total),
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            );
-                          },
+                      Text('Compras registradas: ${compras.length}'),
+                      const SizedBox(height: 8),
+                      if (topProdutos.isNotEmpty) ...[
+                        Text(
+                          'Top produtos comprados',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 4),
+                        ...topProdutos
+                            .take(3)
+                            .map(
+                              (entry) =>
+                                  Text('${entry.key} - ${entry.value} un'),
+                            ),
+                        const SizedBox(height: 8),
+                      ],
+                      const SizedBox(height: 10),
+                      if (compras.isEmpty)
+                        const Text(
+                          'Este cliente ainda nao tem compras finalizadas.',
+                        )
+                      else
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 260),
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            itemCount: compras.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 6),
+                            itemBuilder: (context, index) {
+                              final compra = compras[index];
+                              final nota = compra.numeroOrcamento > 0
+                                  ? '#${compra.numeroOrcamento}'
+                                  : 'ID ${compra.id}';
+                              return ListTile(
+                                dense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                leading: const Icon(
+                                  Icons.receipt_long_outlined,
+                                ),
+                                title: Text('Nota/Orcamento: $nota'),
+                                subtitle: Text(
+                                  _dataHora.format(compra.data.toLocal()),
+                                ),
+                                trailing: Text(
+                                  _formatarMoeda(compra.total),
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                    ],
                   ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            Card(
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: theme.colorScheme.outlineVariant),
-              ),
-              child: ExpansionTile(
-                initiallyExpanded: false,
-                tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-                leading: Icon(Icons.chat_bubble_outline, color: theme.colorScheme.primary),
-                title: Text(
-                  'Mensagens enviadas',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
                 ),
-                childrenPadding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                children: [
-                  if (!emEdicao)
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Salve o cliente para habilitar logs de mensagens.',
-                      ),
-                    )
-                  else
-                    FutureBuilder<List<MensagemLog>>(
-                      future: _mensageriaRepository.listarLogsPorCliente(
-                        _clienteEmEdicaoId!,
-                      ),
-                      builder: (context, snapshot) {
-                        final logs = snapshot.data ?? const <MensagemLog>[];
-                        final clienteAtual = _clienteEmEdicaoAtual();
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 8),
-                            child: LinearProgressIndicator(),
-                          );
-                        }
-                        if (clienteAtual == null) {
-                          return const Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text('Cliente nao encontrado.'),
-                          );
-                        }
-                        if (logs.isEmpty) {
+              ),
+              const SizedBox(height: 10),
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: theme.colorScheme.outlineVariant),
+                ),
+                child: ExpansionTile(
+                  initiallyExpanded: false,
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                  leading: Icon(
+                    Icons.chat_bubble_outline,
+                    color: theme.colorScheme.primary,
+                  ),
+                  title: Text(
+                    'Mensagens enviadas',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  childrenPadding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                  children: [
+                    if (!emEdicao)
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Salve o cliente para habilitar logs de mensagens.',
+                        ),
+                      )
+                    else
+                      FutureBuilder<List<MensagemLog>>(
+                        future: _mensageriaRepository.listarLogsPorCliente(
+                          _clienteEmEdicaoId!,
+                        ),
+                        builder: (context, snapshot) {
+                          final logs = snapshot.data ?? const <MensagemLog>[];
+                          final clienteAtual = _clienteEmEdicaoAtual();
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 8),
+                              child: LinearProgressIndicator(),
+                            );
+                          }
+                          if (clienteAtual == null) {
+                            return const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text('Cliente nao encontrado.'),
+                            );
+                          }
+                          if (logs.isEmpty) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _enviarMensagemManualCliente(
+                                          clienteAtual,
+                                        ),
+                                    icon: const Icon(Icons.send_outlined),
+                                    label: const Text('Enviar mensagem agora'),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'Nenhum log de mensagem para este cliente.',
+                                ),
+                              ],
+                            );
+                          }
                           return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               SizedBox(
                                 width: double.infinity,
                                 child: OutlinedButton.icon(
-                                  onPressed: () =>
-                                      _enviarMensagemManualCliente(clienteAtual),
+                                  onPressed: () => _enviarMensagemManualCliente(
+                                    clienteAtual,
+                                  ),
                                   icon: const Icon(Icons.send_outlined),
                                   label: const Text('Enviar mensagem agora'),
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              const Text('Nenhum log de mensagem para este cliente.'),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxHeight: 220,
+                                ),
+                                child: ListView.separated(
+                                  shrinkWrap: true,
+                                  itemCount: logs.length,
+                                  separatorBuilder: (_, _) =>
+                                      const SizedBox(height: 6),
+                                  itemBuilder: (context, index) {
+                                    final log = logs[index];
+                                    final enviado = log.resultado == 'enviado';
+                                    return ListTile(
+                                      dense: true,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                          ),
+                                      leading: Icon(
+                                        enviado
+                                            ? Icons.check_circle_outline
+                                            : Icons.error_outline,
+                                        color: enviado
+                                            ? theme.colorScheme.primary
+                                            : theme.colorScheme.error,
+                                      ),
+                                      title: Text(
+                                        '${log.canal.toUpperCase()} - ${_rotuloStatusMensagem(log.statusEntrega)}',
+                                      ),
+                                      subtitle: Text(
+                                        '${_dataHora.format(log.criadoEm.toLocal())}\nDestino: ${log.destino}',
+                                      ),
+                                      isThreeLine: true,
+                                      trailing: log.resultado == 'falhou'
+                                          ? IconButton(
+                                              tooltip: 'Ver erro detalhado',
+                                              onPressed: () =>
+                                                  _verErroDetalhadoLogCliente(
+                                                    log,
+                                                  ),
+                                              icon: const Icon(
+                                                Icons.error_outline,
+                                              ),
+                                            )
+                                          : null,
+                                    );
+                                  },
+                                ),
+                              ),
                             ],
                           );
-                        }
-                        return Column(
-                          children: [
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: () => _enviarMensagemManualCliente(clienteAtual),
-                                icon: const Icon(Icons.send_outlined),
-                                label: const Text('Enviar mensagem agora'),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxHeight: 220),
-                              child: ListView.separated(
-                                shrinkWrap: true,
-                                itemCount: logs.length,
-                                separatorBuilder: (_, _) => const SizedBox(height: 6),
-                                itemBuilder: (context, index) {
-                                  final log = logs[index];
-                                  final enviado = log.resultado == 'enviado';
-                                  return ListTile(
-                                    dense: true,
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                                    leading: Icon(
-                                      enviado
-                                          ? Icons.check_circle_outline
-                                          : Icons.error_outline,
-                                      color: enviado
-                                          ? theme.colorScheme.primary
-                                          : theme.colorScheme.error,
-                                    ),
-                                    title: Text(
-                                      '${log.canal.toUpperCase()} - ${_rotuloStatusMensagem(log.statusEntrega)}',
-                                    ),
-                                    subtitle: Text(
-                                      '${_dataHora.format(log.criadoEm.toLocal())}\nDestino: ${log.destino}',
-                                    ),
-                                    isThreeLine: true,
-                                    trailing: log.resultado == 'falhou'
-                                        ? IconButton(
-                                            tooltip: 'Ver erro detalhado',
-                                            onPressed: () =>
-                                                _verErroDetalhadoLogCliente(log),
-                                            icon: const Icon(Icons.error_outline),
-                                          )
-                                        : null,
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
-                        );
-                      },
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _salvarCliente,
+                      icon: const Icon(Icons.save_outlined),
+                      label: Text(
+                        emEdicao ? 'Salvar edicao' : 'Salvar cliente',
+                      ),
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _limparFormulario,
+                      icon: Icon(
+                        emEdicao
+                            ? Icons.close
+                            : Icons.cleaning_services_outlined,
+                      ),
+                      label: Text(emEdicao ? 'Cancelar edicao' : 'Limpar'),
+                    ),
+                  ),
                 ],
               ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _salvarCliente,
-                    icon: const Icon(Icons.save_outlined),
-                    label: Text(emEdicao ? 'Salvar edicao' : 'Salvar cliente'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _limparFormulario,
-                    icon: Icon(emEdicao ? Icons.close : Icons.cleaning_services_outlined),
-                    label: Text(emEdicao ? 'Cancelar edicao' : 'Limpar'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            if (_status.isNotEmpty) _buildStatusBanner(context, _status),
+              const SizedBox(height: 8),
+              if (_status.isNotEmpty) _buildStatusBanner(context, _status),
             ],
           ),
         ),
@@ -1381,11 +1501,118 @@ class _ClientesPageState extends State<ClientesPage> {
     );
   }
 
+  Widget _buildEnderecoForm({
+    required String titulo,
+    required TextEditingController cepController,
+    required TextEditingController enderecoController,
+    required TextEditingController numeroController,
+    required TextEditingController bairroController,
+    required TextEditingController cidadeController,
+    required TextEditingController ufController,
+    required TextEditingController referenciaController,
+    VoidCallback? onRemover,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                titulo,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (onRemover != null)
+              IconButton(
+                tooltip: 'Remover endereco',
+                onPressed: onRemover,
+                icon: const Icon(Icons.remove_circle_outline),
+              ),
+          ],
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: cepController,
+                decoration: const InputDecoration(labelText: 'CEP'),
+                keyboardType: TextInputType.number,
+                inputFormatters: [_cepFormatter],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: TextField(
+                controller: enderecoController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Endereco'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: numeroController,
+                decoration: const InputDecoration(labelText: 'Numero'),
+                inputFormatters: [LengthLimitingTextInputFormatter(10)],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: bairroController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Bairro'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: cidadeController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Cidade'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 90,
+              child: TextField(
+                controller: ufController,
+                decoration: const InputDecoration(labelText: 'UF'),
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
+                  LengthLimitingTextInputFormatter(2),
+                  UpperCaseTextFormatter(),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: referenciaController,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(labelText: 'Referencia'),
+        ),
+      ],
+    );
+  }
+
   Widget _buildStatusBanner(BuildContext context, String message) {
     final theme = Theme.of(context);
     final semantic = theme.extension<AppSemanticColors>();
     final sucesso = message.toLowerCase().contains('sucesso');
-    final bg = sucesso ? semantic?.successBg ?? const Color(0xFFEAF8EF) : semantic?.errorBg ?? const Color(0xFFFDECEC);
+    final bg = sucesso
+        ? semantic?.successBg ?? const Color(0xFFEAF8EF)
+        : semantic?.errorBg ?? const Color(0xFFFDECEC);
     final border = sucesso
         ? semantic?.successBorder ?? const Color(0xFF8FD1A8)
         : semantic?.errorBorder ?? const Color(0xFFF1A3A3);
@@ -1402,7 +1629,10 @@ class _ClientesPageState extends State<ClientesPage> {
       ),
       child: Row(
         children: [
-          Icon(sucesso ? Icons.check_circle_outline : Icons.error_outline, color: fg),
+          Icon(
+            sucesso ? Icons.check_circle_outline : Icons.error_outline,
+            color: fg,
+          ),
           const SizedBox(width: 8),
           Expanded(child: Text(message)),
         ],
@@ -1419,7 +1649,9 @@ class _CpfCnpjInputFormatter extends TextInputFormatter {
   ) {
     final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
     final truncated = digits.length > 14 ? digits.substring(0, 14) : digits;
-    final masked = truncated.length <= 11 ? _maskCpf(truncated) : _maskCnpj(truncated);
+    final masked = truncated.length <= 11
+        ? _maskCpf(truncated)
+        : _maskCnpj(truncated);
     return TextEditingValue(
       text: masked,
       selection: TextSelection.collapsed(offset: masked.length),
@@ -1428,7 +1660,9 @@ class _CpfCnpjInputFormatter extends TextInputFormatter {
 
   String _maskCpf(String value) {
     if (value.length <= 3) return value;
-    if (value.length <= 6) return '${value.substring(0, 3)}.${value.substring(3)}';
+    if (value.length <= 6) {
+      return '${value.substring(0, 3)}.${value.substring(3)}';
+    }
     if (value.length <= 9) {
       return '${value.substring(0, 3)}.${value.substring(3, 6)}.${value.substring(6)}';
     }
@@ -1437,7 +1671,9 @@ class _CpfCnpjInputFormatter extends TextInputFormatter {
 
   String _maskCnpj(String value) {
     if (value.length <= 2) return value;
-    if (value.length <= 5) return '${value.substring(0, 2)}.${value.substring(2)}';
+    if (value.length <= 5) {
+      return '${value.substring(0, 2)}.${value.substring(2)}';
+    }
     if (value.length <= 8) {
       return '${value.substring(0, 2)}.${value.substring(2, 5)}.${value.substring(5)}';
     }
@@ -1478,7 +1714,9 @@ class _TelefoneInputFormatter extends TextInputFormatter {
   String _maskTelefoneLocal(String value) {
     if (value.isEmpty) return '';
     if (value.length <= 2) return '($value';
-    if (value.length <= 6) return '(${value.substring(0, 2)}) ${value.substring(2)}';
+    if (value.length <= 6) {
+      return '(${value.substring(0, 2)}) ${value.substring(2)}';
+    }
     if (value.length <= 10) {
       return '(${value.substring(0, 2)}) ${value.substring(2, 6)}-${value.substring(6)}';
     }
@@ -1558,5 +1796,71 @@ class UpperCaseTextFormatter extends TextInputFormatter {
       text: newValue.text.toUpperCase(),
       selection: newValue.selection,
     );
+  }
+}
+
+class _EnderecoFormControllers {
+  _EnderecoFormControllers({
+    required this.cepController,
+    required this.enderecoController,
+    required this.numeroController,
+    required this.bairroController,
+    required this.cidadeController,
+    required this.ufController,
+    required this.referenciaController,
+  });
+
+  factory _EnderecoFormControllers.vazio() {
+    return _EnderecoFormControllers(
+      cepController: TextEditingController(),
+      enderecoController: TextEditingController(),
+      numeroController: TextEditingController(),
+      bairroController: TextEditingController(),
+      cidadeController: TextEditingController(),
+      ufController: TextEditingController(),
+      referenciaController: TextEditingController(),
+    );
+  }
+
+  factory _EnderecoFormControllers.fromEndereco(EnderecoCliente endereco) {
+    return _EnderecoFormControllers(
+      cepController: TextEditingController(text: endereco.cep),
+      enderecoController: TextEditingController(text: endereco.endereco),
+      numeroController: TextEditingController(text: endereco.numero),
+      bairroController: TextEditingController(text: endereco.bairro),
+      cidadeController: TextEditingController(text: endereco.cidade),
+      ufController: TextEditingController(text: endereco.uf),
+      referenciaController: TextEditingController(text: endereco.referencia),
+    );
+  }
+
+  final TextEditingController cepController;
+  final TextEditingController enderecoController;
+  final TextEditingController numeroController;
+  final TextEditingController bairroController;
+  final TextEditingController cidadeController;
+  final TextEditingController ufController;
+  final TextEditingController referenciaController;
+
+  EnderecoCliente toEndereco() {
+    return EnderecoCliente(
+      cep: cepController.text.replaceAll(RegExp(r'\D'), ''),
+      endereco: enderecoController.text.trim(),
+      numero: numeroController.text.trim(),
+      bairro: bairroController.text.trim(),
+      cidade: cidadeController.text.trim(),
+      uf: ufController.text.trim().toUpperCase(),
+      referencia: referenciaController.text.trim(),
+    );
+  }
+
+  void dispose() {
+    cepController.dispose();
+    enderecoController.dispose();
+    numeroController.dispose();
+    bairroController.dispose();
+    cidadeController.dispose();
+    ufController.dispose();
+    referenciaController.dispose();
   }
 }

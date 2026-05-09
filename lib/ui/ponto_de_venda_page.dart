@@ -107,12 +107,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   final List<_LinhaPagamentoMistoPdV> _linhasPagamentoMisto = [];
   static const double _valorMinimoParcelaCreditoPdV = 5.0;
   int? _clienteSelecionadoId;
+  int _indiceEnderecoSelecionado = 0;
   int? _vendedorSelecionadoId;
   String _tipoEntregaSelecionada = 'retirada';
   String _prioridadeEntregaSelecionada = 'normal';
   String _janelaEntregaSelecionada = 'nao_definida';
   DateTime? _dataEntregaMarcada;
   bool _permitirVendaSemEstoque = true;
+  double _maxDescontoPercentualPdv = 15;
+
+  /// `percentual` | `valor` — desconto sempre limitado ao configurado (% sobre subtotal).
+  String _tipoDescontoPdV = 'percentual';
+  final _descontoPdVController = TextEditingController();
   int? _orcamentoEmEdicaoId;
   int? _orcamentoEmEdicaoNumero;
   bool _mostrarAjudaAtalhos = false;
@@ -158,6 +164,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     }
     setState(() {
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
+      _maxDescontoPercentualPdv = config.maxDescontoPercentualPdv;
     });
   }
 
@@ -176,6 +183,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     _focusParcelasPdV.dispose();
     _focusEditarEntregaPdV.dispose();
     _focusSalvarOrcamentoPdV.dispose();
+    _descontoPdVController.dispose();
     _pesquisaFocus.dispose();
     _pesquisaController.dispose();
     _valorFreteController.dispose();
@@ -222,14 +230,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     for (final l in _linhasPagamentoMisto) {
       final v = _parseValorMonetario(l.valorController.text);
       if (v <= 0) continue;
-      final par =
-          l.meio == 'cartao_credito' ? l.parcelas.clamp(1, 12) : 1;
+      final par = l.meio == 'cartao_credito' ? l.parcelas.clamp(1, 12) : 1;
       if (l.meio == 'cartao_debito' && par != 1) {
         throw StateError('Cartao de debito so a vista.');
       }
-      out.add(
-        PagamentoOrcamentoLinha(meio: l.meio, valor: v, parcelas: par),
-      );
+      out.add(PagamentoOrcamentoLinha(meio: l.meio, valor: v, parcelas: par));
     }
     if (out.length < 2) {
       throw StateError(
@@ -840,6 +845,27 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     return _clientes.where((c) => c.id == id).firstOrNull;
   }
 
+  List<EnderecoCliente> _enderecosClienteSelecionado() {
+    final cliente = _clienteSelecionado();
+    if (cliente == null) return const [];
+    return cliente.listarEnderecos();
+  }
+
+  void _aplicarEnderecoSelecionadoDoCliente(Cliente cliente, int indice) {
+    final enderecos = cliente.listarEnderecos();
+    if (enderecos.isEmpty) {
+      _indiceEnderecoSelecionado = 0;
+      _enderecoEntregaController.clear();
+      _observacaoEntregaController.clear();
+      return;
+    }
+    final indiceSeguro = indice.clamp(0, enderecos.length - 1);
+    final endereco = enderecos[indiceSeguro];
+    _indiceEnderecoSelecionado = indiceSeguro;
+    _enderecoEntregaController.text = endereco.resumo();
+    _observacaoEntregaController.text = endereco.referencia.trim();
+  }
+
   String _rotuloClienteSelecionadoPdV() {
     final cliente = _clienteSelecionado();
     return cliente?.nomeRazao ?? 'Sem cliente';
@@ -849,6 +875,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     if (value == null) {
       setState(() {
         _clienteSelecionadoId = null;
+        _indiceEnderecoSelecionado = 0;
         _tipoEntregaSelecionada = 'retirada';
         _prioridadeEntregaSelecionada = 'normal';
         _janelaEntregaSelecionada = 'nao_definida';
@@ -863,6 +890,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     if (cliente == null) return;
     setState(() {
       _clienteSelecionadoId = value;
+      _aplicarEnderecoSelecionadoDoCliente(cliente, 0);
     });
   }
 
@@ -1032,31 +1060,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   }
 
   String _montarEnderecoEntregaCliente(Cliente cliente) {
-    final partes = <String>[];
-    final endereco = cliente.endereco.trim();
-    final numero = cliente.numero.trim();
-    final bairro = cliente.bairro.trim();
-    final cidade = cliente.cidade.trim();
-    final uf = cliente.uf.trim();
-    final cep = cliente.cep.trim();
-    if (endereco.isNotEmpty) {
-      partes.add(numero.isNotEmpty ? '$endereco, $numero' : endereco);
-    }
-    if (bairro.isNotEmpty) {
-      partes.add(bairro);
-    }
-    final cidadeUf = [cidade, uf].where((p) => p.isNotEmpty).join(' - ');
-    if (cidadeUf.isNotEmpty) {
-      partes.add(cidadeUf);
-    }
-    if (cep.isNotEmpty) {
-      partes.add('CEP: $cep');
-    }
-    return partes.join(' | ');
+    final enderecos = cliente.listarEnderecos();
+    if (enderecos.isEmpty) return '';
+    return enderecos.first.resumo();
   }
 
   String _montarObservacaoEntregaCliente(Cliente cliente) {
-    return cliente.referencia.trim();
+    final enderecos = cliente.listarEnderecos();
+    if (enderecos.isEmpty) return '';
+    return enderecos.first.referencia.trim();
   }
 
   String _resumoEntrega() {
@@ -1086,14 +1098,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   Future<_EntregaDialogResult?> _abrirDialogEntregaCliente({
     required Cliente cliente,
   }) async {
-    final enderecoInicial = _montarEnderecoEntregaCliente(cliente);
-    final obsInicial = _montarObservacaoEntregaCliente(cliente);
+    final enderecos = cliente.listarEnderecos();
+    final enderecoInicial = _enderecoEntregaController.text.trim().isNotEmpty
+        ? _enderecoEntregaController.text.trim()
+        : _montarEnderecoEntregaCliente(cliente);
+    final obsInicial = _observacaoEntregaController.text.trim().isNotEmpty
+        ? _observacaoEntregaController.text.trim()
+        : _montarObservacaoEntregaCliente(cliente);
     return showDialog<_EntregaDialogResult>(
       context: context,
       barrierDismissible: false,
       builder: (context) {
         return _EntregaClienteDialog(
           clienteNome: cliente.nomeRazao,
+          enderecosDisponiveis: enderecos,
+          indiceEnderecoInicial: _indiceEnderecoSelecionado,
           enderecoInicial: enderecoInicial,
           observacaoInicial: obsInicial,
           valorFreteInicial: _valorFreteController.text.trim(),
@@ -1223,7 +1242,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   ];
 
   Widget _buildPainelPagamentoMistoPdV(StateSetter setDialogState) {
-    final restante = _totalGeralComFrete - _somaDigitadaMistoPdV();
+    final restante = _totalLiquidoPagamentoPdV() - _somaDigitadaMistoPdV();
     final ok = restante.abs() < 0.02;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1335,22 +1354,22 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
               ? 'Pagamento fecha com o total geral.'
               : 'Restante: ${_formatarMoeda(restante)}',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: ok
-                    ? Colors.green.shade800
-                    : Theme.of(context).colorScheme.primary,
-              ),
+            fontWeight: FontWeight.w600,
+            color: ok
+                ? Colors.green.shade800
+                : Theme.of(context).colorScheme.primary,
+          ),
         ),
       ],
     );
   }
 
   Future<void> _abrirPassoFechamentoVenda() async {
+    _descontoPdVController.clear();
+    _tipoDescontoPdV = 'percentual';
     if (_carrinho.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Adicione ao menos um item na venda.'),
-        ),
+        const SnackBar(content: Text('Adicione ao menos um item na venda.')),
       );
       return;
     }
@@ -1372,14 +1391,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                   child: Theme(
                     data: Theme.of(context).copyWith(
                       visualDensity: VisualDensity.compact,
-                      inputDecorationTheme:
-                          Theme.of(context).inputDecorationTheme.copyWith(
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                              ),
+                      inputDecorationTheme: Theme.of(context)
+                          .inputDecorationTheme
+                          .copyWith(
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 10,
+                            ),
+                          ),
                     ),
                     child: _buildFormularioFechamentoVenda(
                       setDialogState: setDialogState,
@@ -1440,10 +1460,77 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           style: Theme.of(context).textTheme.bodyLarge,
         ),
         const SizedBox(height: 2),
-        Text(
-          'Total geral: ${_formatarMoeda(_totalGeralComFrete)}',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
+        if (_maxDescontoPercentualPdv > 0) ...[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment<String>(
+                      value: 'percentual',
+                      label: Text('%'),
+                    ),
+                    ButtonSegment<String>(value: 'valor', label: Text('R\$')),
+                  ],
+                  selected: {_tipoDescontoPdV},
+                  onSelectionChanged: (values) {
+                    _atualizarCheckoutFechamento(setDialogState, () {
+                      _tipoDescontoPdV = values.first;
+                      _descontoPdVController.clear();
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _descontoPdVController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: _tipoDescontoPdV == 'percentual'
+                        ? 'Desconto % (subtotal produtos)'
+                        : 'Desconto em reais (subtotal)',
+                    helperText: _descontoPdVDigitadoUltrapassaTeto()
+                        ? null
+                        : 'Teto: ${_maxDescontoPercentualPdv.toStringAsFixed(1)}% '
+                              'do subtotal = ${_formatarMoeda(_valorMaximoDescontoReaisPdV())}',
+                    errorText: _descontoPdVDigitadoUltrapassaTeto()
+                        ? _mensagemErroDescontoPdVUltrapassaTeto()
+                        : null,
+                    isDense: true,
+                  ),
+                  onChanged: (_) =>
+                      _atualizarCheckoutFechamento(setDialogState, () {}),
+                ),
+              ),
+            ],
+          ),
+          if (_valorDescontoReaisPdV() > 0.004) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Desconto: - ${_formatarMoeda(_valorDescontoReaisPdV())} '
+              '(${_percentualEfetivoSobreSubtotalPdV().toStringAsFixed(1)}% do subtotal)',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            'Total a pagar (caixa): ${_formatarMoeda(_totalLiquidoPagamentoPdV())}',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ] else ...[
+          Text(
+            'Total geral: ${_formatarMoeda(_totalGeralComFrete)}',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ],
         const SizedBox(height: 6),
         Focus(
           focusNode: _focusClientePdV,
@@ -1464,9 +1551,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         DropdownButtonFormField<int?>(
           focusNode: _focusVendedorPdV,
           initialValue: _vendedorSelecionadoId,
-          decoration: const InputDecoration(
-            labelText: 'Vendedor (opcional)',
-          ),
+          decoration: const InputDecoration(labelText: 'Vendedor (opcional)'),
           items: [
             const DropdownMenuItem<int?>(
               value: null,
@@ -1487,31 +1572,229 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           },
         ),
         const SizedBox(height: 8),
-        SwitchListTile.adaptive(
-          contentPadding: EdgeInsets.zero,
-          value: _pagamentoMistoPdV,
-          onChanged: (on) {
+        DropdownButtonFormField<String>(
+          focusNode: _focusEntregaPdV,
+          initialValue: _tipoEntregaSelecionada,
+          decoration: const InputDecoration(labelText: 'Tipo de entrega'),
+          items: const [
+            DropdownMenuItem(value: 'retirada', child: Text('Leva Agora')),
+            DropdownMenuItem(
+              value: 'retirada_futura',
+              child: Text('Retirada futura'),
+            ),
+            DropdownMenuItem(value: 'entrega_loja', child: Text('Carreto')),
+          ],
+          onChanged: (value) {
+            if (value == null) return;
             _atualizarCheckoutFechamento(setDialogState, () {
-              _pagamentoMistoPdV = on;
-              if (on) {
-                _inicializarLinhasMistoPadrao();
+              _tipoEntregaSelecionada = value;
+              if (_tipoEntregaSelecionada == 'entrega_loja') {
+                final cliente = _clienteSelecionado();
+                if (cliente != null) {
+                  _aplicarEnderecoSelecionadoDoCliente(
+                    cliente,
+                    _indiceEnderecoSelecionado,
+                  );
+                }
               } else {
-                _disposeLinhasPagamentoMisto();
+                _prioridadeEntregaSelecionada = 'normal';
+                _janelaEntregaSelecionada = 'nao_definida';
+                _dataEntregaMarcada = null;
+                _valorFreteController.clear();
+                _enderecoEntregaController.clear();
+                _observacaoEntregaController.clear();
               }
             });
           },
-          title: const Text('Pagamento misto'),
-          subtitle: const Text(
-            'Defina cada meio aqui; no caixa o operador so confere e finaliza.',
-          ),
         ),
+        if (_tipoEntregaSelecionada == 'entrega_loja') ...[
+          if (_clienteSelecionado() != null &&
+              _enderecosClienteSelecionado().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            DropdownButtonFormField<int>(
+              initialValue: _indiceEnderecoSelecionado.clamp(
+                0,
+                _enderecosClienteSelecionado().length - 1,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Endereco para entrega',
+              ),
+              items: List.generate(_enderecosClienteSelecionado().length, (
+                index,
+              ) {
+                final endereco = _enderecosClienteSelecionado()[index];
+                final rotulo = endereco.rotulo.trim().isNotEmpty
+                    ? endereco.rotulo.trim()
+                    : 'Endereco ${index + 1}';
+                final resumo = endereco.resumo();
+                return DropdownMenuItem<int>(
+                  value: index,
+                  child: Text(
+                    resumo.isEmpty ? rotulo : '$rotulo - $resumo',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
+              }),
+              onChanged: (value) {
+                if (value == null) return;
+                final cliente = _clienteSelecionado();
+                if (cliente == null) return;
+                _atualizarCheckoutFechamento(setDialogState, () {
+                  _aplicarEnderecoSelecionadoDoCliente(cliente, value);
+                });
+              },
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _prioridadeEntregaSelecionada,
+                  decoration: const InputDecoration(
+                    labelText: 'Prioridade da entrega',
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                    DropdownMenuItem(value: 'urgente', child: Text('Urgente')),
+                    DropdownMenuItem(
+                      value: 'agendada',
+                      child: Text('Agendada'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    _atualizarCheckoutFechamento(setDialogState, () {
+                      _prioridadeEntregaSelecionada = value;
+                      if (_prioridadeEntregaSelecionada == 'agendada' &&
+                          _janelaEntregaSelecionada == 'nao_definida') {
+                        _janelaEntregaSelecionada = 'manha';
+                      }
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _janelaEntregaSelecionada,
+                  decoration: const InputDecoration(labelText: 'Janela'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'nao_definida',
+                      child: Text('Nao definida'),
+                    ),
+                    DropdownMenuItem(value: 'manha', child: Text('Manha')),
+                    DropdownMenuItem(value: 'tarde', child: Text('Tarde')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    _atualizarCheckoutFechamento(
+                      setDialogState,
+                      () => _janelaEntregaSelecionada = value,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final agora = DateTime.now();
+                final inicial = _dataEntregaMarcada ?? agora;
+                final escolhido = await showDatePicker(
+                  context: context,
+                  initialDate: inicial,
+                  firstDate: DateTime(agora.year, agora.month, agora.day),
+                  lastDate: DateTime(agora.year + 3, 12, 31),
+                );
+                if (!mounted || escolhido == null) return;
+                _atualizarCheckoutFechamento(
+                  setDialogState,
+                  () => _dataEntregaMarcada = escolhido,
+                );
+              },
+              icon: const Icon(Icons.event_outlined),
+              label: Text(
+                _dataEntregaMarcada == null
+                    ? 'Definir data da entrega'
+                    : 'Data da entrega: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Entrega configurada',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _resumoEntrega(),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Focus(
+                    focusNode: _focusEditarEntregaPdV,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final cliente = _clienteSelecionado();
+                        if (cliente == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Selecione um cliente para editar a entrega.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        final entrega = await _abrirDialogEntregaCliente(
+                          cliente: cliente,
+                        );
+                        if (!mounted || entrega == null) return;
+                        _atualizarCheckoutFechamento(setDialogState, () {
+                          _tipoEntregaSelecionada = 'entrega_loja';
+                          _dataEntregaMarcada ??= DateTime.now();
+                          _valorFreteController.text = entrega.valorFrete;
+                          _enderecoEntregaController.text = entrega.endereco;
+                          _observacaoEntregaController.text =
+                              entrega.observacao;
+                          _indiceEnderecoSelecionado =
+                              entrega.indiceEnderecoSelecionado;
+                        });
+                      },
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Editar dados da entrega'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         if (!_pagamentoMistoPdV) ...[
           DropdownButtonFormField<String>(
             focusNode: _focusPagamentoPdV,
             initialValue: _formaPagamentoSelecionada,
-            decoration: const InputDecoration(
-              labelText: 'Forma de pagamento',
-            ),
+            decoration: const InputDecoration(labelText: 'Forma de pagamento'),
             items: const [
               DropdownMenuItem(value: 'dinheiro', child: Text('Dinheiro')),
               DropdownMenuItem(value: 'pix', child: Text('PIX')),
@@ -1573,188 +1856,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           _buildPainelPagamentoMistoPdV(setDialogState),
         ],
         const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-              focusNode: _focusEntregaPdV,
-              initialValue: _tipoEntregaSelecionada,
-              decoration: const InputDecoration(
-                labelText: 'Tipo de entrega',
-              ),
-              items: const [
-                DropdownMenuItem(
-                  value: 'retirada',
-                  child: Text('Leva Agora'),
-                ),
-                DropdownMenuItem(
-                  value: 'retirada_futura',
-                  child: Text('Retirada futura'),
-                ),
-                DropdownMenuItem(
-                  value: 'entrega_loja',
-                  child: Text('Carreto'),
-                ),
-              ],
-              onChanged: (value) {
-                if (value == null) return;
-                _atualizarCheckoutFechamento(setDialogState, () {
-                  _tipoEntregaSelecionada = value;
-                  if (_tipoEntregaSelecionada != 'entrega_loja') {
-                    _prioridadeEntregaSelecionada = 'normal';
-                    _janelaEntregaSelecionada = 'nao_definida';
-                    _dataEntregaMarcada = null;
-                    _valorFreteController.clear();
-                    _enderecoEntregaController.clear();
-                    _observacaoEntregaController.clear();
-                  }
-                });
-              },
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: _pagamentoMistoPdV,
+          onChanged: (on) {
+            _atualizarCheckoutFechamento(setDialogState, () {
+              _pagamentoMistoPdV = on;
+              if (on) {
+                _inicializarLinhasMistoPadrao();
+              } else {
+                _disposeLinhasPagamentoMisto();
+              }
+            });
+          },
+          title: const Text('Pagamento misto'),
         ),
-        if (_tipoEntregaSelecionada == 'entrega_loja') ...[
-          const SizedBox(height: 8),
-          Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _prioridadeEntregaSelecionada,
-                      decoration: const InputDecoration(
-                        labelText: 'Prioridade da entrega',
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'normal', child: Text('Normal')),
-                        DropdownMenuItem(
-                          value: 'urgente',
-                          child: Text('Urgente'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'agendada',
-                          child: Text('Agendada'),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) return;
-                        _atualizarCheckoutFechamento(setDialogState, () {
-                          _prioridadeEntregaSelecionada = value;
-                          if (_prioridadeEntregaSelecionada == 'agendada' &&
-                              _janelaEntregaSelecionada == 'nao_definida') {
-                            _janelaEntregaSelecionada = 'manha';
-                          }
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _janelaEntregaSelecionada,
-                      decoration: const InputDecoration(labelText: 'Janela'),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'nao_definida',
-                          child: Text('Nao definida'),
-                        ),
-                        DropdownMenuItem(value: 'manha', child: Text('Manha')),
-                        DropdownMenuItem(value: 'tarde', child: Text('Tarde')),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) return;
-                        _atualizarCheckoutFechamento(
-                          setDialogState,
-                          () => _janelaEntregaSelecionada = value,
-                        );
-                      },
-                    ),
-                  ),
-                ],
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    final agora = DateTime.now();
-                    final inicial = _dataEntregaMarcada ?? agora;
-                    final escolhido = await showDatePicker(
-                      context: context,
-                      initialDate: inicial,
-                      firstDate: DateTime(agora.year, agora.month, agora.day),
-                      lastDate: DateTime(agora.year + 3, 12, 31),
-                    );
-                    if (!mounted || escolhido == null) return;
-                    _atualizarCheckoutFechamento(
-                      setDialogState,
-                      () => _dataEntregaMarcada = escolhido,
-                    );
-                  },
-                  icon: const Icon(Icons.event_outlined),
-                  label: Text(
-                    _dataEntregaMarcada == null
-                        ? 'Definir data da entrega'
-                        : 'Data da entrega: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
-                  ),
-                ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerLowest,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Entrega configurada',
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _resumoEntrega(),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Focus(
-                        focusNode: _focusEditarEntregaPdV,
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final cliente = _clienteSelecionado();
-                            if (cliente == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Selecione um cliente para editar a entrega.',
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-                            final entrega = await _abrirDialogEntregaCliente(
-                              cliente: cliente,
-                            );
-                            if (!mounted || entrega == null) return;
-                            _atualizarCheckoutFechamento(setDialogState, () {
-                              _tipoEntregaSelecionada = 'entrega_loja';
-                              _dataEntregaMarcada ??= DateTime.now();
-                              _valorFreteController.text = entrega.valorFrete;
-                              _enderecoEntregaController.text = entrega.endereco;
-                              _observacaoEntregaController.text =
-                                  entrega.observacao;
-                            });
-                          },
-                          icon: const Icon(Icons.edit_outlined),
-                          label: const Text('Editar dados da entrega'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-          ),
-        ],
         if (_orcamentoEmEdicaoId != null) ...[
           const SizedBox(height: 8),
           Row(
@@ -1762,9 +1878,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
               Expanded(
                 child: Text(
                   'Editando venda #${_orcamentoEmEdicaoNumero ?? '-'}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
               TextButton(
@@ -1786,9 +1902,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   Future<void> _salvarOrcamento({BuildContext? fechamentoDialogContext}) async {
     if (_carrinho.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Adicione ao menos um item na venda.'),
-        ),
+        const SnackBar(content: Text('Adicione ao menos um item na venda.')),
+      );
+      return;
+    }
+    if (_maxDescontoPercentualPdv > 0 && _descontoPdVDigitadoUltrapassaTeto()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_mensagemErroDescontoPdVUltrapassaTeto())),
       );
       return;
     }
@@ -1799,9 +1920,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       if (_tipoEntregaSelecionada == 'entrega_loja' &&
           _enderecoEntregaController.text.trim().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Informe o endereco para carreto.'),
-          ),
+          const SnackBar(content: Text('Informe o endereco para carreto.')),
         );
         return;
       }
@@ -1873,22 +1992,23 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           .toList();
       List<PagamentoOrcamentoLinha>? linhasMisto;
       try {
-        linhasMisto = _montarLinhasMistoParaSalvar(_totalGeralComFrete);
+        linhasMisto = _montarLinhasMistoParaSalvar(_totalLiquidoPagamentoPdV());
       } on StateError catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
         return;
       }
       final pagamento = DadosPagamentoOrcamento(
-        formaPagamento:
-            _pagamentoMistoPdV ? 'misto' : _formaPagamentoSelecionada,
+        formaPagamento: _pagamentoMistoPdV
+            ? 'misto'
+            : _formaPagamentoSelecionada,
         quantidadeParcelas: _pagamentoMistoPdV
             ? 1
             : (_formaPagamentoSelecionada == 'cartao_credito'
-                ? _parcelasSelecionadas
-                : 1),
+                  ? _parcelasSelecionadas
+                  : 1),
         linhasMisto: linhasMisto,
       );
       final entrega = DadosEntregaOrcamento(
@@ -1927,6 +2047,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           vendedorId: _vendedorSelecionadoId,
         );
       }
+      final descontoPdV = _valorDescontoReaisPdV();
+      if (descontoPdV > 0.009) {
+        widget.vendaRepository.aplicarDescontoNoOrcamento(
+          orcamentoId,
+          descontoPdV,
+        );
+      }
       final vendaSalva = widget.vendaRepository.obterPorId(orcamentoId);
       final numeroOrcamentoSalvo =
           vendaSalva?.numeroOrcamento ?? _orcamentoEmEdicaoNumero;
@@ -1937,6 +2064,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         _formaPagamentoSelecionada = 'dinheiro';
         _parcelasSelecionadas = 1;
         _clienteSelecionadoId = null;
+        _indiceEnderecoSelecionado = 0;
         _vendedorSelecionadoId = null;
         _tipoEntregaSelecionada = 'retirada';
         _prioridadeEntregaSelecionada = 'normal';
@@ -1947,9 +2075,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         _observacaoEntregaController.clear();
         _orcamentoEmEdicaoId = null;
         _orcamentoEmEdicaoNumero = null;
+        _descontoPdVController.clear();
+        _tipoDescontoPdV = 'percentual';
       });
-      if (fechamentoDialogContext != null &&
-          fechamentoDialogContext.mounted) {
+      if (fechamentoDialogContext != null && fechamentoDialogContext.mounted) {
         Navigator.of(fechamentoDialogContext).pop();
       }
       if (!mounted) return;
@@ -2245,6 +2374,22 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       'tarde' => 'tarde',
       _ => 'nao_definida',
     };
+    var indiceEndereco = 0;
+    if (clienteIdValido != null) {
+      final cliente = _clientes
+          .where((c) => c.id == clienteIdValido)
+          .firstOrNull;
+      final enderecos = cliente?.listarEnderecos() ?? const <EnderecoCliente>[];
+      if (enderecos.isNotEmpty) {
+        final enderecoAtual = orcamentoCompleto.enderecoEntrega.trim();
+        final encontrado = enderecos.indexWhere(
+          (e) => e.resumo().trim() == enderecoAtual,
+        );
+        if (encontrado >= 0) {
+          indiceEndereco = encontrado;
+        }
+      }
+    }
 
     setState(() {
       _carrinho
@@ -2252,13 +2397,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         ..addAll(drafts);
       _indiceLinhaCarrinho = _carrinho.isEmpty ? null : 0;
       _clienteSelecionadoId = clienteIdValido;
+      _indiceEnderecoSelecionado = indiceEndereco;
       _vendedorSelecionadoId = vendedorIdValido;
       _disposeLinhasPagamentoMisto();
       if (orcamentoCompleto.formaPagamento == 'misto' &&
           orcamentoCompleto.pagamentosJson.trim().isNotEmpty) {
         _pagamentoMistoPdV = true;
-        for (final ln
-            in PagamentoOrcamentoCodec.decode(orcamentoCompleto.pagamentosJson)) {
+        for (final ln in PagamentoOrcamentoCodec.decode(
+          orcamentoCompleto.pagamentosJson,
+        )) {
           _linhasPagamentoMisto.add(
             _LinhaPagamentoMistoPdV(
               meio: ln.meio,
@@ -2709,6 +2856,78 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
 
   double get _totalGeralComFrete => _totalOrcamento + _valorFreteAtual;
 
+  /// Valor maximo de desconto em reais permitido neste pedido (config % x subtotal).
+  double _valorMaximoDescontoReaisPdV() {
+    if (_maxDescontoPercentualPdv <= 0) return 0;
+    final sub = _totalOrcamento;
+    return (sub * _maxDescontoPercentualPdv / 100).clamp(0.0, sub);
+  }
+
+  double _percentualDigitadoPdV() {
+    if (_tipoDescontoPdV != 'percentual') return 0;
+    final bruto = _percentualDigitadoBrutoSemLimitePdV();
+    if (bruto == null) return 0;
+    return bruto.clamp(0.0, _maxDescontoPercentualPdv);
+  }
+
+  /// Percentual digitado sem aplicar o teto (para aviso quando ultrapassa).
+  double? _percentualDigitadoBrutoSemLimitePdV() {
+    if (_tipoDescontoPdV != 'percentual') return null;
+    final raw = _descontoPdVController.text.replaceAll(',', '.').trim();
+    if (raw.isEmpty) return null;
+    final v = double.tryParse(raw);
+    if (v == null || v.isNaN) return null;
+    return v;
+  }
+
+  bool _descontoPdVDigitadoUltrapassaTeto() {
+    if (_maxDescontoPercentualPdv <= 0) return false;
+    final maxPct = _maxDescontoPercentualPdv;
+    final maxReais = _valorMaximoDescontoReaisPdV();
+    const eps = 1e-6;
+    if (_tipoDescontoPdV == 'percentual') {
+      final bruto = _percentualDigitadoBrutoSemLimitePdV();
+      if (bruto == null) return false;
+      return bruto > maxPct + eps;
+    }
+    if (_descontoPdVController.text.trim().isEmpty) return false;
+    final brutoReais = _parseValorMonetario(_descontoPdVController.text);
+    return brutoReais > maxReais + eps;
+  }
+
+  String _mensagemErroDescontoPdVUltrapassaTeto() {
+    final maxPct = _maxDescontoPercentualPdv;
+    final maxReais = _valorMaximoDescontoReaisPdV();
+    return 'Acima do permitido. Maximo: ${maxPct.toStringAsFixed(1)}% '
+        'do subtotal = ${_formatarMoeda(maxReais)}.';
+  }
+
+  /// Desconto apenas sobre o subtotal; frete entra inteiro no total a pagar.
+  double _valorDescontoReaisPdV() {
+    if (_maxDescontoPercentualPdv <= 0) return 0;
+    final sub = _totalOrcamento;
+    if (sub <= 0) return 0;
+    final maxReais = _valorMaximoDescontoReaisPdV();
+    if (_tipoDescontoPdV == 'percentual') {
+      final pct = _percentualDigitadoPdV();
+      return (sub * pct / 100).clamp(0.0, maxReais);
+    }
+    final digitado = _parseValorMonetario(_descontoPdVController.text);
+    return digitado.clamp(0.0, maxReais).clamp(0.0, sub);
+  }
+
+  double _percentualEfetivoSobreSubtotalPdV() {
+    final sub = _totalOrcamento;
+    if (sub <= 0.004) return 0;
+    return _valorDescontoReaisPdV() / sub * 100;
+  }
+
+  double _totalLiquidoPagamentoPdV() =>
+      (_totalGeralComFrete - _valorDescontoReaisPdV()).clamp(
+        0.0,
+        double.infinity,
+      );
+
   double get _alturaLinhaListaPdV =>
       _modoFocoPesquisa ? _alturaLinhaProdutoCompacta : _alturaLinhaProduto;
 
@@ -2746,7 +2965,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     if (parcelas <= 0) {
       return '1x';
     }
-    final valorParcela = _totalGeralComFrete / parcelas;
+    final valorParcela = _totalLiquidoPagamentoPdV() / parcelas;
     return '${parcelas}x de ${_formatarMoeda(valorParcela)}';
   }
 
@@ -2768,7 +2987,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         SingleActivator(LogicalKeyboardKey.f4): PdvModoFocoPesquisaIntent(),
         SingleActivator(LogicalKeyboardKey.f5): PdvRecarregarProdutosIntent(),
         SingleActivator(LogicalKeyboardKey.f6): PdvFocarCarrinhoIntent(),
-        SingleActivator(LogicalKeyboardKey.f8): PdvFocarPesquisaProdutosIntent(),
+        SingleActivator(LogicalKeyboardKey.f8):
+            PdvFocarPesquisaProdutosIntent(),
         SingleActivator(LogicalKeyboardKey.f10): PdvSalvarOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, control: true):
             PdvSalvarOrcamentoIntent(),
@@ -3086,128 +3306,149 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                             context,
                                           ).colorScheme;
                                           final critico = _estoqueCritico(item);
+                                          final corFundoLista = selecionado
+                                              ? scheme.primaryContainer
+                                                    .withValues(alpha: 0.55)
+                                              : (index.isOdd
+                                                    ? scheme.surfaceContainerLow
+                                                    : scheme.surface);
                                           return Material(
-                                            color: selecionado
-                                                ? scheme.primaryContainer
-                                                      .withValues(alpha: 0.55)
-                                                : Theme.of(
-                                                    context,
-                                                  ).colorScheme.surface,
+                                            color: corFundoLista,
                                             child: InkWell(
                                               onTap: () =>
                                                   _mostrarSkuEDescricao(item),
-                                              child: Padding(
-                                                padding: EdgeInsets.symmetric(
-                                                  horizontal: 10,
-                                                  vertical: _modoFocoPesquisa
-                                                      ? 4
-                                                      : 6,
+                                              child: DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  border: Border(
+                                                    bottom: BorderSide(
+                                                      color: scheme
+                                                          .outlineVariant
+                                                          .withValues(
+                                                            alpha: 0.55,
+                                                          ),
+                                                    ),
+                                                  ),
                                                 ),
-                                                child: Row(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.center,
-                                                  children: [
-                                                    Expanded(
-                                                      child: RichText(
-                                                        maxLines:
-                                                            _modoFocoPesquisa
-                                                            ? 1
-                                                            : 2,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        text: _textoComDestaqueBusca(
-                                                          context: context,
-                                                          texto: item.nome,
-                                                          termoBusca:
-                                                              termoBuscaDestaque,
-                                                          estiloBase:
-                                                              Theme.of(context)
-                                                                  .textTheme
-                                                                  .bodyMedium ??
-                                                              const TextStyle(),
+                                                child: Padding(
+                                                  padding: EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: _modoFocoPesquisa
+                                                        ? 4
+                                                        : 6,
+                                                  ),
+                                                  child: Row(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .center,
+                                                    children: [
+                                                      Expanded(
+                                                        child: RichText(
+                                                          maxLines:
+                                                              _modoFocoPesquisa
+                                                              ? 1
+                                                              : 2,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          text: _textoComDestaqueBusca(
+                                                            context: context,
+                                                            texto: item.nome,
+                                                            termoBusca:
+                                                                termoBuscaDestaque,
+                                                            estiloBase:
+                                                                Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .textTheme
+                                                                    .bodyMedium ??
+                                                                const TextStyle(),
+                                                          ),
                                                         ),
                                                       ),
-                                                    ),
-                                                    Column(
-                                                      mainAxisAlignment:
-                                                          MainAxisAlignment
-                                                              .center,
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .end,
-                                                      children: [
-                                                        Text(
-                                                          _formatarMoeda(
-                                                            precoLinha,
+                                                      Column(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .center,
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .end,
+                                                        children: [
+                                                          Text(
+                                                            _formatarMoeda(
+                                                              precoLinha,
+                                                            ),
+                                                            style: Theme.of(context)
+                                                                .textTheme
+                                                                .titleSmall
+                                                                ?.copyWith(
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                ),
                                                           ),
-                                                          style: Theme.of(context)
-                                                              .textTheme
-                                                              .titleSmall
-                                                              ?.copyWith(
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold,
-                                                              ),
-                                                        ),
-                                                        Text(
-                                                          'Est: ${item.estoqueReal} · Res: ${item.estoqueReservado}',
-                                                          style: Theme.of(context)
-                                                              .textTheme
-                                                              .labelMedium
-                                                              ?.copyWith(
-                                                                color: critico
-                                                                    ? scheme
-                                                                          .error
-                                                                    : scheme
-                                                                          .tertiary,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w700,
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    IconButton(
-                                                      tooltip:
-                                                          'À Vista ou Atacado, quantidade…',
-                                                      visualDensity:
-                                                          VisualDensity.compact,
-                                                      padding: EdgeInsets.zero,
-                                                      constraints:
-                                                          const BoxConstraints(
-                                                            minWidth: 32,
-                                                            minHeight: 36,
+                                                          Text(
+                                                            'Est: ${item.estoqueReal} · Res: ${item.estoqueReservado}',
+                                                            style: Theme.of(context)
+                                                                .textTheme
+                                                                .labelMedium
+                                                                ?.copyWith(
+                                                                  color: critico
+                                                                      ? scheme
+                                                                            .error
+                                                                      : scheme
+                                                                            .tertiary,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w700,
+                                                                ),
                                                           ),
-                                                      icon: const Icon(
-                                                        Icons.tune,
-                                                        size: 20,
+                                                        ],
                                                       ),
-                                                      onPressed: () =>
-                                                          _adicionarAoOrcamento(
-                                                            item,
-                                                          ),
-                                                    ),
-                                                    IconButton(
-                                                      tooltip:
-                                                          'Adicionar (${_rotuloPreco(_precoListaAtivo)})',
-                                                      visualDensity:
-                                                          VisualDensity.compact,
-                                                      padding: EdgeInsets.zero,
-                                                      constraints:
-                                                          const BoxConstraints(
-                                                            minWidth: 36,
-                                                            minHeight: 36,
-                                                          ),
-                                                      icon: const Icon(
-                                                        Icons
-                                                            .add_shopping_cart_outlined,
+                                                      IconButton(
+                                                        tooltip:
+                                                            'À Vista ou Atacado, quantidade…',
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                        padding:
+                                                            EdgeInsets.zero,
+                                                        constraints:
+                                                            const BoxConstraints(
+                                                              minWidth: 32,
+                                                              minHeight: 36,
+                                                            ),
+                                                        icon: const Icon(
+                                                          Icons.tune,
+                                                          size: 20,
+                                                        ),
+                                                        onPressed: () =>
+                                                            _adicionarAoOrcamento(
+                                                              item,
+                                                            ),
                                                       ),
-                                                      onPressed: () =>
-                                                          _adicionarRapido(
-                                                            item,
-                                                          ),
-                                                    ),
-                                                  ],
+                                                      IconButton(
+                                                        tooltip:
+                                                            'Adicionar (${_rotuloPreco(_precoListaAtivo)})',
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                        padding:
+                                                            EdgeInsets.zero,
+                                                        constraints:
+                                                            const BoxConstraints(
+                                                              minWidth: 36,
+                                                              minHeight: 36,
+                                                            ),
+                                                        icon: const Icon(
+                                                          Icons
+                                                              .add_shopping_cart_outlined,
+                                                        ),
+                                                        onPressed: () =>
+                                                            _adicionarRapido(
+                                                              item,
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
                                                 ),
                                               ),
                                             ),
@@ -3334,7 +3575,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                       ),
                                       if (_orcamentoEmEdicaoId != null)
                                         Padding(
-                                          padding: const EdgeInsets.only(top: 8),
+                                          padding: const EdgeInsets.only(
+                                            top: 8,
+                                          ),
                                           child: Row(
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
@@ -3348,9 +3591,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                                       ?.copyWith(
                                                         fontWeight:
                                                             FontWeight.w600,
-                                                        color: Theme.of(context)
-                                                            .colorScheme
-                                                            .primary,
+                                                        color: Theme.of(
+                                                          context,
+                                                        ).colorScheme.primary,
                                                       ),
                                                 ),
                                               ),
@@ -3392,7 +3635,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                                       ),
                                                   child: Column(
                                                     mainAxisAlignment:
-                                                        MainAxisAlignment.center,
+                                                        MainAxisAlignment
+                                                            .center,
                                                     mainAxisSize:
                                                         MainAxisSize.min,
                                                     children: [
@@ -3400,20 +3644,24 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                                         Icons
                                                             .shopping_cart_outlined,
                                                         size: 44,
-                                                        color: Theme.of(context)
-                                                            .colorScheme
-                                                            .outline,
+                                                        color: Theme.of(
+                                                          context,
+                                                        ).colorScheme.outline,
                                                       ),
-                                                      const SizedBox(height: 12),
+                                                      const SizedBox(
+                                                        height: 12,
+                                                      ),
                                                       Text(
                                                         'Nenhum item na venda.',
                                                         textAlign:
                                                             TextAlign.center,
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .titleSmall,
+                                                        style: Theme.of(
+                                                          context,
+                                                        ).textTheme.titleSmall,
                                                       ),
-                                                      const SizedBox(height: 16),
+                                                      const SizedBox(
+                                                        height: 16,
+                                                      ),
                                                       FilledButton.icon(
                                                         onPressed:
                                                             _irParaPesquisaProdutos,
@@ -3424,18 +3672,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                                           'Pesquisar produto para venda',
                                                         ),
                                                       ),
-                                                      const SizedBox(height: 10),
+                                                      const SizedBox(
+                                                        height: 10,
+                                                      ),
                                                       Text(
                                                         'Atalho: F8',
                                                         style: Theme.of(context)
                                                             .textTheme
                                                             .labelSmall
                                                             ?.copyWith(
-                                                              color: Theme.of(
-                                                                context,
-                                                              )
-                                                                  .colorScheme
-                                                                  .outline,
+                                                              color:
+                                                                  Theme.of(
+                                                                        context,
+                                                                      )
+                                                                      .colorScheme
+                                                                      .outline,
                                                             ),
                                                       ),
                                                     ],
@@ -3624,7 +3875,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                         child: Focus(
                                           focusNode: _focusSalvarOrcamentoPdV,
                                           child: FilledButton.icon(
-                                            onPressed: _abrirPassoFechamentoVenda,
+                                            onPressed:
+                                                _abrirPassoFechamentoVenda,
                                             icon: const Icon(
                                               Icons.arrow_forward,
                                             ),
@@ -3667,23 +3919,29 @@ class _EntregaDialogResult {
     required this.valorFrete,
     required this.endereco,
     required this.observacao,
+    required this.indiceEnderecoSelecionado,
   });
 
   final String valorFrete;
   final String endereco;
   final String observacao;
+  final int indiceEnderecoSelecionado;
 }
 
 class _EntregaClienteDialog extends StatefulWidget {
   const _EntregaClienteDialog({
     required this.clienteNome,
     required this.valorFreteInicial,
+    required this.enderecosDisponiveis,
+    required this.indiceEnderecoInicial,
     required this.enderecoInicial,
     required this.observacaoInicial,
   });
 
   final String clienteNome;
   final String valorFreteInicial;
+  final List<EnderecoCliente> enderecosDisponiveis;
+  final int indiceEnderecoInicial;
   final String enderecoInicial;
   final String observacaoInicial;
 
@@ -3695,6 +3953,7 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
   late final TextEditingController _freteController;
   late final TextEditingController _enderecoController;
   late final TextEditingController _obsController;
+  late int _indiceEnderecoSelecionado;
 
   @override
   void initState() {
@@ -3702,6 +3961,12 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
     _freteController = TextEditingController(text: widget.valorFreteInicial);
     _enderecoController = TextEditingController(text: widget.enderecoInicial);
     _obsController = TextEditingController(text: widget.observacaoInicial);
+    _indiceEnderecoSelecionado = widget.enderecosDisponiveis.isEmpty
+        ? 0
+        : widget.indiceEnderecoInicial.clamp(
+            0,
+            widget.enderecosDisponiveis.length - 1,
+          );
   }
 
   @override
@@ -3726,6 +3991,7 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
         valorFrete: _freteController.text.trim(),
         endereco: _enderecoController.text.trim(),
         observacao: _obsController.text.trim(),
+        indiceEnderecoSelecionado: _indiceEnderecoSelecionado,
       ),
     );
   }
@@ -3757,6 +4023,40 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
                 ),
               ),
               const SizedBox(height: 8),
+              if (widget.enderecosDisponiveis.isNotEmpty) ...[
+                DropdownButtonFormField<int>(
+                  initialValue: _indiceEnderecoSelecionado,
+                  decoration: const InputDecoration(
+                    labelText: 'Endereco do cliente',
+                  ),
+                  items: List.generate(widget.enderecosDisponiveis.length, (
+                    index,
+                  ) {
+                    final endereco = widget.enderecosDisponiveis[index];
+                    final rotulo = endereco.rotulo.trim().isNotEmpty
+                        ? endereco.rotulo.trim()
+                        : 'Endereco ${index + 1}';
+                    final resumo = endereco.resumo();
+                    return DropdownMenuItem<int>(
+                      value: index,
+                      child: Text(
+                        resumo.isEmpty ? rotulo : '$rotulo - $resumo',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() {
+                      _indiceEnderecoSelecionado = value;
+                      final endereco = widget.enderecosDisponiveis[value];
+                      _enderecoController.text = endereco.resumo();
+                      _obsController.text = endereco.referencia.trim();
+                    });
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
               TextField(
                 controller: _enderecoController,
                 decoration: const InputDecoration(

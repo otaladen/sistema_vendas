@@ -11,6 +11,7 @@ class ItemVenda {
     required this.quantidade,
     this.quantidadeJaRetirada = 0,
     this.quantidadeNoCarreto = 0,
+    this.quantidadeDevolvida = 0,
     this.precoTipo = 'preco1',
     required this.precoUnitario,
     required this.precoCustoUnitario,
@@ -28,6 +29,9 @@ class ItemVenda {
   /// Unidades nesta linha que seguem no carreto apos migrar retirada futura > carreto.
   /// Zero = nao aplicavel (ex.: venda nativa carreto usa [quantidade] na UI).
   int quantidadeNoCarreto;
+
+  /// Devolvido/trocado acumulado (registros de devolucao ligados a esta venda).
+  int quantidadeDevolvida;
 
   String precoTipo;
   double precoUnitario;

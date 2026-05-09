@@ -9,6 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../data/cliente_repository.dart';
+import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
 import '../domain/pagamento_orcamento.dart';
@@ -17,6 +18,7 @@ import '../model/cliente.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import 'clientes_page.dart';
+import 'registrar_devolucao_troca_page.dart';
 
 /// Lista vendas já finalizadas no Caixa (`status == finalizada`), com filtros e busca.
 class ListagemVendasPage extends StatefulWidget {
@@ -25,6 +27,7 @@ class ListagemVendasPage extends StatefulWidget {
     required this.vendaRepository,
     required this.clienteRepository,
     required this.vendedorRepository,
+    required this.produtoRepository,
     required this.usuarioAtual,
     required this.podeCancelarVendas,
   });
@@ -32,6 +35,7 @@ class ListagemVendasPage extends StatefulWidget {
   final VendaRepository vendaRepository;
   final ClienteRepository clienteRepository;
   final VendedorRepository vendedorRepository;
+  final ProdutoRepository produtoRepository;
   final String usuarioAtual;
   final bool podeCancelarVendas;
 
@@ -74,6 +78,41 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     final normalizado = valor.trim().replaceAll('.', '').replaceAll(',', '.');
     if (normalizado.isEmpty) return 0;
     return double.tryParse(normalizado) ?? 0;
+  }
+
+  bool _podeRegistrarDevolucaoTroca(Venda v) {
+    if (v.cancelada || v.status != 'finalizada') return false;
+    if (v.vendaOrigemFreteRetiradaId > 0) return false;
+    return v.itens.any((i) => i.quantidade - i.quantidadeDevolvida > 0);
+  }
+
+  Future<void> _abrirRegistrarDevolucaoTroca(Venda v) async {
+    if (!_podeRegistrarDevolucaoTroca(v)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Devolucao/troca nao disponivel para esta venda.',
+          ),
+        ),
+      );
+      return;
+    }
+    final ok = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RegistrarDevolucaoTrocaPage(
+          vendaRepository: widget.vendaRepository,
+          produtoRepository: widget.produtoRepository,
+          vendaId: v.id,
+          usuarioAtual: widget.usuarioAtual,
+          podeRegistrarSemSenha: widget.podeCancelarVendas,
+        ),
+      ),
+    );
+    if (ok == true && mounted) {
+      _pesquisar();
+    }
   }
 
   bool _podePagarFreteCarreto(Venda v) {
@@ -1210,6 +1249,42 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                   '${_linhaRetiradaFutura(v)} | '
                                   'Itens: ${v.itens.length}',
                                 ),
+                                if (!v.cancelada &&
+                                    v.status == 'finalizada' &&
+                                    (widget.vendaRepository
+                                                .valorReferenciaDevolvidoAcumuladoVenda(
+                                                  v.id,
+                                                ) >
+                                                0.005 ||
+                                        widget.vendaRepository
+                                                .valorSaidaTrocaAcumuladoVenda(
+                                                  v.id,
+                                                ) >
+                                                0.005))
+                                  Text(
+                                    () {
+                                      final dev = widget.vendaRepository
+                                          .valorReferenciaDevolvidoAcumuladoVenda(
+                                            v.id,
+                                          );
+                                      final troca = widget.vendaRepository
+                                          .valorSaidaTrocaAcumuladoVenda(v.id);
+                                      final liq = troca - dev;
+                                      return 'Devolucao/troca acum.: devolvido '
+                                          '${_formatarMoeda(dev)} · saida troca '
+                                          '${_formatarMoeda(troca)} · liquido '
+                                          '${_formatarMoeda(liq)}';
+                                    }(),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
                                 if (v.idOrcamentoFreteRetiradaAberto != 0)
                                   Text(
                                     () {
@@ -1274,6 +1349,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                         _abrirRegistrarRetirada(v);
                                       } else if (value == 'pagar_frete') {
                                         _abrirPagarFreteCarreto(v);
+                                      } else if (value == 'devolucao') {
+                                        _abrirRegistrarDevolucaoTroca(v);
                                       } else if (value == 'cancelar') {
                                         _cancelarVenda(v);
                                       }
@@ -1295,6 +1372,11 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                           child: Text(
                                             'Historico de retiradas',
                                           ),
+                                        ),
+                                      if (_podeRegistrarDevolucaoTroca(v))
+                                        const PopupMenuItem<String>(
+                                          value: 'devolucao',
+                                          child: Text('Devolucao / troca'),
                                         ),
                                       PopupMenuItem<String>(
                                         value: 'cancelar',

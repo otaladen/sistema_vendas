@@ -5,7 +5,7 @@
   "entities": [
     {
       "id": "1:805574422642691043",
-      "lastPropertyId": "10:8342851294323674054",
+      "lastPropertyId": "11:7736469216551977158",
       "name": "ItemVenda",
       "properties": [
         {
@@ -63,6 +63,11 @@
         {
           "id": "10:8342851294323674054",
           "name": "quantidadeNoCarreto",
+          "type": 6
+        },
+        {
+          "id": "11:7736469216551977158",
+          "name": "quantidadeDevolvida",
           "type": 6
         }
       ],
@@ -379,7 +384,7 @@
     },
     {
       "id": "4:8923372746033765628",
-      "lastPropertyId": "20:6486430712394977568",
+      "lastPropertyId": "21:7312456789012345678",
       "name": "Cliente",
       "properties": [
         {
@@ -482,6 +487,11 @@
           "id": "20:6486430712394977568",
           "name": "criadoEm",
           "type": 10
+        },
+        {
+          "id": "21:7312456789012345678",
+          "name": "enderecosJson",
+          "type": 9
         }
       ],
       "relations": []
@@ -774,10 +784,162 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "9:1286028343169021869",
+      "lastPropertyId": "7:837464439390569632",
+      "name": "LinhaDevolucaoEntrada",
+      "properties": [
+        {
+          "id": "1:9184417973143937701",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:1419546889472551924",
+          "name": "itemVendaId",
+          "type": 6
+        },
+        {
+          "id": "3:352115123085126012",
+          "name": "quantidade",
+          "type": 6
+        },
+        {
+          "id": "4:8544287653649528738",
+          "name": "precoUnitarioReferencia",
+          "type": 8
+        },
+        {
+          "id": "5:2055103823561414615",
+          "name": "nomeProdutoSnapshot",
+          "type": 9
+        },
+        {
+          "id": "6:72566948862369952",
+          "name": "registroId",
+          "indexId": "6:8123697855675757201",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "RegistroDevolucao"
+        },
+        {
+          "id": "7:837464439390569632",
+          "name": "produtoId",
+          "indexId": "7:4347539867533251860",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Produto"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "10:684207345885210561",
+      "lastPropertyId": "8:1266447661938449195",
+      "name": "LinhaTrocaSaida",
+      "properties": [
+        {
+          "id": "1:3544467081093683947",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:4804843447993656533",
+          "name": "quantidade",
+          "type": 6
+        },
+        {
+          "id": "3:1830136097834309511",
+          "name": "precoUnitario",
+          "type": 8
+        },
+        {
+          "id": "4:489209070243659773",
+          "name": "precoCustoUnitario",
+          "type": 8
+        },
+        {
+          "id": "5:4604530827504204404",
+          "name": "precoTipo",
+          "type": 9
+        },
+        {
+          "id": "6:7129834584685881156",
+          "name": "nomeProdutoSnapshot",
+          "type": 9
+        },
+        {
+          "id": "7:6626779396839602366",
+          "name": "registroId",
+          "indexId": "8:8744315975077715478",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "RegistroDevolucao"
+        },
+        {
+          "id": "8:1266447661938449195",
+          "name": "produtoId",
+          "indexId": "9:2414315300598665008",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Produto"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "11:9083307328797630834",
+      "lastPropertyId": "7:7520924180800678756",
+      "name": "RegistroDevolucao",
+      "properties": [
+        {
+          "id": "1:5591194229489112244",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:3453749993916784300",
+          "name": "tipo",
+          "type": 9
+        },
+        {
+          "id": "3:1132178087167616967",
+          "name": "motivo",
+          "type": 9
+        },
+        {
+          "id": "4:3034696156137854121",
+          "name": "observacaoFinanceira",
+          "type": 9
+        },
+        {
+          "id": "5:2908599129401760844",
+          "name": "registradoPor",
+          "type": 9
+        },
+        {
+          "id": "6:1676449541639284609",
+          "name": "data",
+          "type": 10
+        },
+        {
+          "id": "7:7520924180800678756",
+          "name": "vendaOrigemId",
+          "indexId": "10:3798372306845118182",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Venda"
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "8:3546637958251126967",
-  "lastIndexId": "5:2420440196149968766",
+  "lastEntityId": "11:9083307328797630834",
+  "lastIndexId": "10:3798372306845118182",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

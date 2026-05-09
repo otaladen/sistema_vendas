@@ -12,12 +12,22 @@ class ResumoFinanceiroPeriodo {
     required this.faturamento,
     required this.custo,
     required this.lucro,
+    this.impactoDevolucaoTrocaFaturamento = 0,
+    this.impactoDevolucaoTrocaLucro = 0,
   });
 
   final int quantidadeVendas;
   final double faturamento;
   final double custo;
   final double lucro;
+
+  /// Soma dos impactos de registros de devolucao/troca cuja **data** cai no mesmo periodo.
+  final double impactoDevolucaoTrocaFaturamento;
+  final double impactoDevolucaoTrocaLucro;
+
+  double get faturamentoLiquido => faturamento + impactoDevolucaoTrocaFaturamento;
+
+  double get lucroLiquido => lucro + impactoDevolucaoTrocaLucro;
 }
 
 class HistoricoVendaDetalhado {
@@ -129,11 +139,16 @@ class VendaService {
       faturamento += venda.total;
       custo += venda.custoTotal;
     }
+    final imp =
+        _vendaRepository.calcularImpactosDevolucaoTrocaPeriodo(periodo);
+    final lucro = faturamento - custo;
     return ResumoFinanceiroPeriodo(
       quantidadeVendas: vendas.length,
       faturamento: faturamento,
       custo: custo,
-      lucro: faturamento - custo,
+      lucro: lucro,
+      impactoDevolucaoTrocaFaturamento: imp.impactoFaturamentoTotal,
+      impactoDevolucaoTrocaLucro: imp.impactoLucroTotal,
     );
   }
 

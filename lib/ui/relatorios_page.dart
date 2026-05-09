@@ -46,7 +46,7 @@ class RelatoriosPage extends StatelessWidget {
             corDestaque: _corRelVendasPeriodo,
             titulo: 'Vendas por periodo',
             subtitulo:
-                'Lista vendas finalizadas no intervalo, totais e forma de pagamento.',
+                'Lista vendas finalizadas no intervalo; inclui linha de ajuste por devolucoes/trocas registradas no periodo.',
             onTap: () => Navigator.push<void>(
               context,
               MaterialPageRoute<void>(
@@ -64,7 +64,7 @@ class RelatoriosPage extends StatelessWidget {
             corDestaque: _corRelProdutosRanking,
             titulo: 'Produtos mais vendidos',
             subtitulo:
-                'Quantidade e valor por produto no periodo (somente vendas finalizadas).',
+                'Quantidade e valor no periodo: vendas finalizadas ajustadas por devolucoes/trocas cuja data do registro esta no intervalo.',
             onTap: () => Navigator.push<void>(
               context,
               MaterialPageRoute<void>(
@@ -81,7 +81,7 @@ class RelatoriosPage extends StatelessWidget {
             corDestaque: _corRelVendasVendedor,
             titulo: 'Vendas por vendedor',
             subtitulo:
-                'Total vendido por representante no periodo — util para metas e comissao.',
+                'Total por representante no periodo, incluindo ajuste de devolucoes/trocas ligadas as vendas dele.',
             onTap: () => Navigator.push<void>(
               context,
               MaterialPageRoute<void>(
@@ -98,7 +98,7 @@ class RelatoriosPage extends StatelessWidget {
             corDestaque: _corRelComissao,
             titulo: 'Comissao de vendedores',
             subtitulo:
-                'Percentual do cadastro, base sobre venda ou lucro, filtros e total a pagar.',
+                'Percentual do cadastro; base sobre venda ou lucro (ambos ajustados por devolucoes/trocas no periodo).',
             onTap: () => Navigator.push<void>(
               context,
               MaterialPageRoute<void>(
@@ -115,7 +115,7 @@ class RelatoriosPage extends StatelessWidget {
             corDestaque: _corRelTopClientes,
             titulo: 'Clientes que mais compraram',
             subtitulo:
-                'Ranking por valor no periodo — foco em obra e cliente recorrente.',
+                'Ranking por valor no periodo (vendas menos devolucoes/trocas atribuidas ao cliente).',
             onTap: () => Navigator.push<void>(
               context,
               MaterialPageRoute<void>(
@@ -322,6 +322,9 @@ List<Venda> _vendasFinalizadasPeriodo(
     ..sort((a, b) => b.data.compareTo(a.data));
 }
 
+PeriodoFiltro _periodoFiltro(LimitesPeriodo limites) =>
+    PeriodoFiltro(inicio: limites.$1, fim: limites.$2);
+
 String _rotuloFormaPagamento(String forma) {
   switch (forma) {
     case 'pix':
@@ -397,7 +400,13 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
 
   @override
   Widget build(BuildContext context) {
-    final total = _linhas.fold<double>(0, (s, v) => s + v.total);
+    final totalNotas = _linhas.fold<double>(0, (s, v) => s + v.total);
+    final imp = _limites != null
+        ? widget.vendaRepository
+            .calcularImpactosDevolucaoTrocaPeriodo(_periodoFiltro(_limites!))
+        : null;
+    final ajuste = imp?.impactoFaturamentoTotal ?? 0;
+    final liquido = totalNotas + ajuste;
     return Scaffold(
       appBar: AppBar(title: const Text('Vendas por periodo')),
       body: Column(
@@ -409,11 +418,24 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
           if (_limites != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                '${DateFormat('dd/MM/yyyy').format(_limites!.$1)} — '
-                '${DateFormat('dd/MM/yyyy').format(_limites!.$2)} · '
-                '${_linhas.length} venda(s) · Total ${_fmt(total)}',
-                style: Theme.of(context).textTheme.titleSmall,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${DateFormat('dd/MM/yyyy').format(_limites!.$1)} — '
+                    '${DateFormat('dd/MM/yyyy').format(_limites!.$2)} · '
+                    '${_linhas.length} nota(s) · Total notas ${_fmt(totalNotas)}',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Ajuste devolucao/troca (data do registro): ${_fmt(ajuste)} · '
+                    'Liquido combinado: ${_fmt(liquido)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ],
               ),
             ),
           const Divider(height: 1),
@@ -496,7 +518,20 @@ class _RelatorioProdutosMaisVendidosPageState
         a.valor += item.subtotal;
       }
     }
-    final lista = map.values.toList()
+    for (final d in widget.vendaRepository.listarDeltasProdutosDevolucaoPeriodo(
+          _periodoFiltro(limites),
+        )) {
+      map.putIfAbsent(
+        d.chaveAgg,
+        () => _AggProd(nome: d.nomeExibicao, produtoId: d.produtoId),
+      );
+      final a = map[d.chaveAgg]!;
+      a.quantidade += d.deltaQuantidade;
+      a.valor += d.deltaValor;
+    }
+    final lista = map.values
+        .where((a) => a.quantidade > 0)
+        .toList()
       ..sort((a, b) => b.quantidade.compareTo(a.quantidade));
     setState(() {
       _limites = limites;
@@ -594,6 +629,25 @@ class _RelatorioVendasPorVendedorPageState
           nome: cur.nome,
           qtd: cur.qtd + 1,
           total: cur.total + v.total,
+        );
+      }
+    }
+    final imp = widget.vendaRepository
+        .calcularImpactosDevolucaoTrocaPeriodo(_periodoFiltro(limites));
+    for (final e in imp.porVendedorFaturamento.entries) {
+      final id = e.key;
+      final adj = e.value;
+      if (adj.abs() < 0.0001) continue;
+      final w = id == 0 ? null : widget.vendedorRepository.obterPorId(id);
+      final nome = _nome(w);
+      final cur = map[id];
+      if (cur == null) {
+        map[id] = (nome: nome, qtd: 0, total: adj);
+      } else {
+        map[id] = (
+          nome: cur.nome,
+          qtd: cur.qtd,
+          total: cur.total + adj,
         );
       }
     }
@@ -729,6 +783,26 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
       a.baseAcumulada += parcelaBase;
     }
 
+    final imp = widget.vendaRepository
+        .calcularImpactosDevolucaoTrocaPeriodo(_periodoFiltro(limites));
+    final porVend = _baseCalculo == 'lucro'
+        ? imp.porVendedorLucro
+        : imp.porVendedorFaturamento;
+    for (final e in porVend.entries) {
+      final id = e.key;
+      final adj = e.value;
+      if (adj.abs() < 0.0001) continue;
+      if (_filtroVendedorId != null && id != _filtroVendedorId) continue;
+
+      final w = id == 0 ? null : widget.vendedorRepository.obterPorId(id);
+      if (_somenteVendedoresAtivos && id != 0 && (w == null || !w.ativo)) {
+        continue;
+      }
+
+      map.putIfAbsent(id, () => _AggComissaoVendedor(vendedorId: id));
+      map[id]!.baseAcumulada += adj;
+    }
+
     final saida =
         <({
           int vendedorId,
@@ -860,10 +934,21 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
           if (_limites != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-              child: Text(
-                '${DateFormat('dd/MM/yyyy').format(_limites!.$1)} — '
-                '${DateFormat('dd/MM/yyyy').format(_limites!.$2)}',
-                style: Theme.of(context).textTheme.titleSmall,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${DateFormat('dd/MM/yyyy').format(_limites!.$1)} — '
+                    '${DateFormat('dd/MM/yyyy').format(_limites!.$2)}',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Inclui ajuste por devolucoes/trocas registradas neste periodo '
+                    '(atribuido ao vendedor da venda original).',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ),
             ),
           Padding(
@@ -1020,6 +1105,29 @@ class _RelatorioTopClientesPageState extends State<RelatorioTopClientesPage> {
           nome: cur.nome,
           qtd: cur.qtd + 1,
           total: cur.total + v.total,
+        );
+      }
+    }
+    final imp = widget.vendaRepository
+        .calcularImpactosDevolucaoTrocaPeriodo(_periodoFiltro(limites));
+    for (final e in imp.porClienteFaturamento.entries) {
+      final id = e.key;
+      final adj = e.value;
+      if (adj.abs() < 0.0001) continue;
+      final cli = id == 0 ? null : widget.clienteRepository.obterPorId(id);
+      final nomeFallback = id == 0
+          ? 'Sem cliente'
+          : (cli?.nomeRazao.trim().isNotEmpty == true
+              ? cli!.nomeRazao.trim()
+              : 'Cliente #$id');
+      final cur = map[id];
+      if (cur == null) {
+        map[id] = (nome: nomeFallback, qtd: 0, total: adj);
+      } else {
+        map[id] = (
+          nome: cur.nome,
+          qtd: cur.qtd,
+          total: cur.total + adj,
         );
       }
     }

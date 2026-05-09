@@ -55,4 +55,25 @@ class VendedorRepository {
     }
     return false;
   }
+
+  /// Valor numerico extraido de [codigoInterno] (ex.: `12`, `V03` -> 3). Null se nao houver digitos.
+  static int? codigoInternoComoInteiro(String codigoInterno) {
+    final t = codigoInterno.trim();
+    if (t.isEmpty) return null;
+    final direto = int.tryParse(t);
+    if (direto != null) return direto;
+    final m = RegExp(r'\d+').firstMatch(t);
+    if (m == null) return null;
+    return int.tryParse(m.group(0)!);
+  }
+
+  /// Proximo codigo sugerido na sequencia 1, 2, 3… com base no maior numero ja usado.
+  int proximoCodigoInternoSequencial() {
+    var maxN = 0;
+    for (final v in listarTodos()) {
+      final n = codigoInternoComoInteiro(v.codigoInterno);
+      if (n != null && n > maxN) maxN = n;
+    }
+    return maxN + 1;
+  }
 }
