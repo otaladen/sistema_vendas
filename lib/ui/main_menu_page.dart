@@ -12,6 +12,7 @@ import 'cadastros_page.dart';
 import 'configuracoes_page.dart';
 import 'estoque_page.dart';
 import 'vendas_page.dart';
+import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
 
 class MainMenuPage extends StatefulWidget {
@@ -57,12 +58,9 @@ class _MainMenuPageState extends State<MainMenuPage> {
       appBar: AppBar(
         title: const Text('MENU PRINCIPAL'),
         actions: [
-          Center(child: Text(widget.usuarioLogado.login)),
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Sair',
-            onPressed: widget.onLogout,
-            icon: const Icon(Icons.logout),
+          ContaSessaoAppBarActions(
+            login: widget.usuarioLogado.login,
+            onLogout: widget.onLogout,
           ),
         ],
       ),
@@ -76,7 +74,8 @@ class _MainMenuPageState extends State<MainMenuPage> {
               corDestaque: HubNavColors.menuCadastros,
               titulo: 'Cadastros',
               habilitado:
-                  widget.usuarioLogado.admin || widget.usuarioLogado.podeCadastros,
+                  widget.usuarioLogado.admin ||
+                  widget.usuarioLogado.podeCadastros,
               onTap: () {
                 Navigator.push(
                   context,
@@ -100,13 +99,15 @@ class _MainMenuPageState extends State<MainMenuPage> {
               corDestaque: HubNavColors.menuEstoque,
               titulo: 'Estoque',
               habilitado:
-                  widget.usuarioLogado.admin || widget.usuarioLogado.podeEstoque,
+                  widget.usuarioLogado.admin ||
+                  widget.usuarioLogado.podeEstoque,
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        EstoquePage(produtoRepository: widget.produtoRepository),
+                    builder: (_) => EstoquePage(
+                      produtoRepository: widget.produtoRepository,
+                    ),
                   ),
                 );
               },
@@ -128,6 +129,7 @@ class _MainMenuPageState extends State<MainMenuPage> {
                       vendaRepository: widget.vendaRepository,
                       vendedorRepository: widget.vendedorRepository,
                       usuarioAtual: widget.usuarioLogado.login,
+                      onLogout: widget.onLogout,
                       podeLeituraParcialCaixa:
                           widget.usuarioLogado.admin ||
                           widget.usuarioLogado.podeLeituraParcialCaixa,

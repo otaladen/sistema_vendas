@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'sync/sync_write_trigger.dart';
+
 class EmpresaConfig {
   const EmpresaConfig({
     this.nomeLoja = 'LOJA DE MATERIAIS',
@@ -13,6 +15,7 @@ class EmpresaConfig {
     this.logoPath = '',
     this.limiteDivergenciaCaixa = 20,
     this.mostrarCampoDescontoCaixa = true,
+
     /// Limite de desconto (%) sobre o subtotal de produtos no PDV ao enviar ao caixa (0 = desabilitado).
     this.maxDescontoPercentualPdv = 15,
     this.permitirVendaSemEstoque = true,
@@ -34,8 +37,10 @@ class EmpresaConfig {
   final String rodapeOrcamento;
   final String logoPath;
   final double limiteDivergenciaCaixa;
+
   /// Quando falso, o painel de desconto rapido some na tela do Caixa.
   final bool mostrarCampoDescontoCaixa;
+
   /// 0 = vendedor nao pode informar desconto no dialog "Enviar ao caixa"; ate 100 (% sobre subtotal dos produtos).
   final double maxDescontoPercentualPdv;
   final bool permitirVendaSemEstoque;
@@ -43,8 +48,10 @@ class EmpresaConfig {
   final String whatsappPhoneNumberId;
   final String whatsappAccessToken;
   final String mensageriaBackendUrl;
+
   /// Quando verdadeiro, o cliente tentara usar [redeServidorUrl] para sync (quando implementado).
   final bool redeSincronizacaoAtiva;
+
   /// Ex.: `http://192.168.0.15:8787` — servidor de sincronizacao na LAN.
   final String redeServidorUrl;
 
@@ -111,8 +118,10 @@ class AppConfigRepository {
   static const _kRodapeOrcamento = 'config_rodape_orcamento';
   static const _kLogoPath = 'config_logo_path';
   static const _kLimiteDivergenciaCaixa = 'config_limite_divergencia_caixa';
-  static const _kMostrarCampoDescontoCaixa = 'config_mostrar_campo_desconto_caixa';
-  static const _kMaxDescontoPercentualPdv = 'config_max_desconto_percentual_pdv';
+  static const _kMostrarCampoDescontoCaixa =
+      'config_mostrar_campo_desconto_caixa';
+  static const _kMaxDescontoPercentualPdv =
+      'config_max_desconto_percentual_pdv';
   static const _kPermitirVendaSemEstoque = 'config_permitir_venda_sem_estoque';
   static const _kWhatsappApiVersion = 'config_whatsapp_api_version';
   static const _kWhatsappPhoneNumberId = 'config_whatsapp_phone_number_id';
@@ -160,12 +169,20 @@ class AppConfigRepository {
 
   Future<void> salvarEmpresaConfig(EmpresaConfig config) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kNomeLoja, config.nomeLoja.trim().isEmpty ? 'LOJA DE MATERIAIS' : config.nomeLoja.trim());
+    await prefs.setString(
+      _kNomeLoja,
+      config.nomeLoja.trim().isEmpty
+          ? 'LOJA DE MATERIAIS'
+          : config.nomeLoja.trim(),
+    );
     await prefs.setString(_kTelefone, config.telefone.trim());
     await prefs.setString(_kEndereco, config.endereco.trim());
     await prefs.setString(_kPastaPadraoPdf, config.pastaPadraoPdf.trim());
     await prefs.setString(_kImpressoraPadrao, config.impressoraPadrao.trim());
-    await prefs.setString(_kModeloPdf, config.modeloPdf.trim().isEmpty ? 'cupom' : config.modeloPdf.trim());
+    await prefs.setString(
+      _kModeloPdf,
+      config.modeloPdf.trim().isEmpty ? 'cupom' : config.modeloPdf.trim(),
+    );
     final rodapeNota = config.rodapeNota.trim().isEmpty
         ? 'Documento nao fiscal'
         : config.rodapeNota.trim();
@@ -188,7 +205,10 @@ class AppConfigRepository {
       _kMaxDescontoPercentualPdv,
       config.maxDescontoPercentualPdv.clamp(0, 100),
     );
-    await prefs.setBool(_kPermitirVendaSemEstoque, config.permitirVendaSemEstoque);
+    await prefs.setBool(
+      _kPermitirVendaSemEstoque,
+      config.permitirVendaSemEstoque,
+    );
     await prefs.setString(
       _kWhatsappApiVersion,
       config.whatsappApiVersion.trim().isEmpty
@@ -199,10 +219,20 @@ class AppConfigRepository {
       _kWhatsappPhoneNumberId,
       config.whatsappPhoneNumberId.trim(),
     );
-    await prefs.setString(_kWhatsappAccessToken, config.whatsappAccessToken.trim());
-    await prefs.setString(_kMensageriaBackendUrl, config.mensageriaBackendUrl.trim());
-    await prefs.setBool(_kRedeSincronizacaoAtiva, config.redeSincronizacaoAtiva);
+    await prefs.setString(
+      _kWhatsappAccessToken,
+      config.whatsappAccessToken.trim(),
+    );
+    await prefs.setString(
+      _kMensageriaBackendUrl,
+      config.mensageriaBackendUrl.trim(),
+    );
+    await prefs.setBool(
+      _kRedeSincronizacaoAtiva,
+      config.redeSincronizacaoAtiva,
+    );
     await prefs.setString(_kRedeServidorUrl, config.redeServidorUrl.trim());
+    notificarAlteracaoParaRede();
   }
 
   Future<bool> migracaoMotoristaEntregaConcluida() async {

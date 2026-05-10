@@ -114,7 +114,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(2, 12069401530715107),
     name: 'Produto',
-    lastPropertyId: const obx_int.IdUid(26, 6338301039957375252),
+    lastPropertyId: const obx_int.IdUid(27, 6227758820947378730),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -265,6 +265,12 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(26, 6338301039957375252),
         name: 'custoMedio',
         type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(27, 6227758820947378730),
+        name: 'ativo',
+        type: 1,
         flags: 0,
       ),
     ],
@@ -1343,7 +1349,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final localizacaoOffset = fbb.writeString(object.localizacao);
         final ncmOffset = fbb.writeString(object.ncm);
         final fotoPathOffset = fbb.writeString(object.fotoPath);
-        fbb.startTable(27);
+        fbb.startTable(28);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, nomeOffset);
         fbb.addInt64(2, object.estoque);
@@ -1369,6 +1375,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addInt64(23, object.estoqueReal);
         fbb.addInt64(24, object.estoqueReservado);
         fbb.addFloat64(25, object.custoMedio);
+        fbb.addBool(26, object.ativo);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1484,6 +1491,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
           const fb.Int64Reader().vTableGet(buffer, rootOffset, 14, 0),
           isUtc: true,
         );
+        final ativoParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          56,
+          false,
+        );
         final object = Produto(
           id: idParam,
           codigoInterno: codigoInternoParam,
@@ -1510,6 +1523,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           preco3: preco3Param,
           precoVenda: precoVendaParam,
           criadoEm: criadoEmParam,
+          ativo: ativoParam,
         );
 
         return object;
@@ -2827,6 +2841,11 @@ class Produto_ {
   /// See [Produto.custoMedio].
   static final custoMedio = obx.QueryDoubleProperty<Produto>(
     _entities[1].properties[24],
+  );
+
+  /// See [Produto.ativo].
+  static final ativo = obx.QueryBooleanProperty<Produto>(
+    _entities[1].properties[25],
   );
 }
 

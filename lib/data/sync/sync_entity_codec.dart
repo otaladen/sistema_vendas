@@ -32,6 +32,7 @@ class SyncEntityCodec {
       'preco3': p.preco3,
       'precoVenda': p.precoVenda,
       'criadoEm': p.criadoEm.toUtc().toIso8601String(),
+      'ativo': p.ativo,
     };
   }
 
@@ -61,6 +62,7 @@ class SyncEntityCodec {
       preco3: (m['preco3'] as num?)?.toDouble() ?? 0,
       precoVenda: (m['precoVenda'] as num?)?.toDouble() ?? 0,
       criadoEm: DateTime.tryParse((m['criadoEm'] ?? '').toString())?.toUtc(),
+      ativo: m['ativo'] != false,
     );
   }
 

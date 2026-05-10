@@ -83,6 +83,19 @@ class SyncService {
         }
       }
 
+      final numeroCorrections = pushResp['numeroCorrections'];
+      if (numeroCorrections is List) {
+        for (final raw in numeroCorrections) {
+          if (raw is Map<String, dynamic>) {
+            await _aplicarCorrecaoNumeroOrcamento(raw);
+          } else if (raw is Map) {
+            await _aplicarCorrecaoNumeroOrcamento(
+              Map<String, dynamic>.from(raw),
+            );
+          }
+        }
+      }
+
       return null;
     } catch (e, st) {
       return '${e.toString()}\n${st.toString().split('\n').take(3).join('\n')}';
@@ -231,6 +244,21 @@ class SyncService {
           _db.itemVendaBox.put(item);
         }
       }
+    });
+  }
+
+  Future<void> _aplicarCorrecaoNumeroOrcamento(Map<String, dynamic> m) async {
+    final globalId = (m['globalId'] as num?)?.toInt();
+    final numero = (m['numeroOrcamento'] as num?)?.toInt();
+    if (globalId == null || globalId <= 0 || numero == null || numero <= 0) {
+      return;
+    }
+    _db.store.runInTransaction(TxMode.write, () {
+      final v = _db.vendaBox.get(globalId);
+      if (v == null) return;
+      if (v.numeroOrcamento == numero) return;
+      v.numeroOrcamento = numero;
+      _db.vendaBox.put(v);
     });
   }
 

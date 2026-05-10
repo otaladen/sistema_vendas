@@ -1,8 +1,12 @@
+import 'dart:io';
 import 'dart:math' as math;
+
+import 'package:path/path.dart' as p;
 
 import '../model/produto.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'sync/sync_write_trigger.dart';
 
 class ProdutoRepository {
   ProdutoRepository(this._db);
@@ -28,17 +32,62 @@ class ProdutoRepository {
   Map<int, double> _cacheScoreHistorico = const {};
   final Map<int, Map<int, double>> _cacheScoreCliente = {};
 
+  static bool _migracaoAtivoLegadoOk = false;
+
   String get productImagesDirPath => _db.productImagesDir.path;
 
-  List<Produto> listarTodos() {
-    final query = _db.produtoBox.query().order(Produto_.nome).build();
-    final produtos = query.find();
-    query.close();
+  /// Quando [somenteAtivos] e true, retorna apenas produtos vendiveis (PDV).
+  /// Padrao false: cadastro, estoque, relatorios e resolucao de itens antigos em orcamentos.
+  List<Produto> listarTodos({bool somenteAtivos = false}) {
+    _migrarCampoAtivoLegadoUmaVez();
+    late final List<Produto> produtos;
+    if (somenteAtivos) {
+      final query = _db.produtoBox
+          .query(Produto_.ativo.equals(true))
+          .order(Produto_.nome)
+          .build();
+      try {
+        produtos = query.find();
+      } finally {
+        query.close();
+      }
+    } else {
+      final query = _db.produtoBox.query().order(Produto_.nome).build();
+      try {
+        produtos = query.find();
+      } finally {
+        query.close();
+      }
+    }
     _normalizarDadosLegados(produtos);
     return produtos;
   }
 
+  /// Migracao unica: registros antigos ganham coluna [ativo]; define todos como ativos.
+  void _migrarCampoAtivoLegadoUmaVez() {
+    if (_migracaoAtivoLegadoOk) return;
+    try {
+      final flag = File(p.join(_db.storeDirectoryPath, '.migracao_produto_ativo_v1'));
+      if (flag.existsSync()) {
+        _migracaoAtivoLegadoOk = true;
+        return;
+      }
+      final todos = _db.produtoBox.getAll();
+      for (final prod in todos) {
+        prod.ativo = true;
+        _db.produtoBox.put(prod);
+      }
+      flag.writeAsStringSync('ok');
+      _invalidarCacheBusca();
+      notificarAlteracaoParaRede();
+      _migracaoAtivoLegadoOk = true;
+    } catch (_) {
+      // Falha de IO: proxima chamada tenta novamente.
+    }
+  }
+
   void _normalizarDadosLegados(List<Produto> produtos) {
+    var gravou = false;
     for (final produto in produtos) {
       final unidade = produto.unidade.trim();
       final unidadeValida = _unidadesValidas.contains(unidade);
@@ -62,15 +111,25 @@ class ProdutoRepository {
       }
       if (houveAjuste) {
         _db.produtoBox.put(produto);
+        gravou = true;
       }
+    }
+    if (gravou) {
+      notificarAlteracaoParaRede();
     }
   }
 
+  /// - [somenteAtivos] padrao true (PDV): ignora inativos.
+  /// - [somenteInativos]: quando true, retorna apenas inativos ([somenteAtivos] e ignorado).
+  /// - Ambos false: todos os produtos (cadastro / busca ampla).
   List<Produto> pesquisar(
     String termo, {
     int? clienteId,
     int limite = 50,
+    bool somenteAtivos = true,
+    bool somenteInativos = false,
   }) {
+    _migrarCampoAtivoLegadoUmaVez();
     _garantirCachesAtualizados();
     final consultaBruta = termo.trim();
     final consultaNormalizada = _normalizarTexto(consultaBruta);
@@ -79,7 +138,15 @@ class ProdutoRepository {
     if (consultaNormalizada.isEmpty) {
       final ordenados = [..._cacheDocs]
         ..sort((a, b) => a.nomeNormalizado.compareTo(b.nomeNormalizado));
-      return ordenados.map((d) => d.produto).take(limite).toList();
+      List<_ProdutoBuscaDoc> docs;
+      if (somenteInativos) {
+        docs = ordenados.where((d) => !d.produto.ativo).toList();
+      } else if (somenteAtivos) {
+        docs = ordenados.where((d) => d.produto.ativo).toList();
+      } else {
+        docs = ordenados;
+      }
+      return docs.map((d) => d.produto).take(limite).toList();
     }
 
     final scorePorProduto = <int, double>{};
@@ -88,6 +155,11 @@ class ProdutoRepository {
         : _pontuacaoPorCliente(clienteId);
 
     for (final doc in _cacheDocs) {
+      if (somenteInativos) {
+        if (doc.produto.ativo) continue;
+      } else if (somenteAtivos && !doc.produto.ativo) {
+        continue;
+      }
       final score = _scoreProduto(
         doc,
         consultaNormalizada: consultaNormalizada,
@@ -100,16 +172,17 @@ class ProdutoRepository {
       }
     }
 
-    final resultados = _cacheDocs
-        .where((d) => scorePorProduto.containsKey(d.produto.id))
-        .toList()
-      ..sort((a, b) {
-        final scoreA = scorePorProduto[a.produto.id] ?? 0;
-        final scoreB = scorePorProduto[b.produto.id] ?? 0;
-        final byScore = scoreB.compareTo(scoreA);
-        if (byScore != 0) return byScore;
-        return a.nomeNormalizado.compareTo(b.nomeNormalizado);
-      });
+    final resultados =
+        _cacheDocs
+            .where((d) => scorePorProduto.containsKey(d.produto.id))
+            .toList()
+          ..sort((a, b) {
+            final scoreA = scorePorProduto[a.produto.id] ?? 0;
+            final scoreB = scorePorProduto[b.produto.id] ?? 0;
+            final byScore = scoreB.compareTo(scoreA);
+            if (byScore != 0) return byScore;
+            return a.nomeNormalizado.compareTo(b.nomeNormalizado);
+          });
 
     return resultados.map((d) => d.produto).take(limite).toList();
   }
@@ -119,13 +192,15 @@ class ProdutoRepository {
     final produtoCount = _db.produtoBox.count();
     final itemCount = _db.itemVendaBox.count();
     final vendaCount = _db.vendaBox.count();
-    final ttlExpirado = _cacheMontadoEm == null ||
+    final ttlExpirado =
+        _cacheMontadoEm == null ||
         agora.difference(_cacheMontadoEm!) > _cacheTtl;
     final estruturaMudou = produtoCount != _cacheProdutoCount;
     final historicoMudou =
         itemCount != _cacheItemCount || vendaCount != _cacheVendaCount;
 
     if (estruturaMudou || _cacheDocs.isEmpty || ttlExpirado) {
+      _migrarCampoAtivoLegadoUmaVez();
       final produtos = _db.produtoBox.getAll();
       _normalizarDadosLegados(produtos);
       _cacheDocs = produtos.map(_criarDocBusca).toList();
@@ -243,8 +318,10 @@ class ProdutoRepository {
 
     double score = 0;
 
-    if (consultaNormalizada == codigoBarras && codigoBarras.isNotEmpty) score += 1200;
-    if (consultaNormalizada == codigoInterno && codigoInterno.isNotEmpty) score += 1000;
+    if (consultaNormalizada == codigoBarras && codigoBarras.isNotEmpty)
+      score += 1200;
+    if (consultaNormalizada == codigoInterno && codigoInterno.isNotEmpty)
+      score += 1000;
     if (nome.startsWith(consultaNormalizada)) score += 700;
     if (nome.contains(consultaNormalizada)) score += 450;
     if (doc.categoriaNormalizada.contains(consultaNormalizada) ||
@@ -324,8 +401,8 @@ class ProdutoRepository {
       for (var j = 1; j <= b.length; j++) {
         final insert = curr[j - 1] + 1;
         final delete = prev[j] + 1;
-        final replace = prev[j - 1] +
-            (a.codeUnitAt(i - 1) == b.codeUnitAt(j - 1) ? 0 : 1);
+        final replace =
+            prev[j - 1] + (a.codeUnitAt(i - 1) == b.codeUnitAt(j - 1) ? 0 : 1);
         curr[j] = math.min(math.min(insert, delete), replace);
       }
       prev = curr;
@@ -404,6 +481,7 @@ class ProdutoRepository {
   int salvar(Produto produto) {
     final id = _db.produtoBox.put(produto);
     _invalidarCacheBusca();
+    notificarAlteracaoParaRede();
     return id;
   }
 
@@ -411,6 +489,7 @@ class ProdutoRepository {
     final ok = _db.produtoBox.remove(id);
     if (ok) {
       _invalidarCacheBusca();
+      notificarAlteracaoParaRede();
     }
     return ok;
   }

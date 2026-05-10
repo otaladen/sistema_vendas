@@ -1,6 +1,7 @@
 import '../model/funcionario.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'sync/sync_write_trigger.dart';
 
 class FuncionarioRepository {
   FuncionarioRepository(this._db);
@@ -8,7 +9,10 @@ class FuncionarioRepository {
   final ObjectBox _db;
 
   List<Funcionario> listarTodos() {
-    final query = _db.funcionarioBox.query().order(Funcionario_.nomeCompleto).build();
+    final query = _db.funcionarioBox
+        .query()
+        .order(Funcionario_.nomeCompleto)
+        .build();
     final lista = query.find();
     query.close();
     return lista;
@@ -33,9 +37,19 @@ class FuncionarioRepository {
     }).toList();
   }
 
-  int salvar(Funcionario funcionario) => _db.funcionarioBox.put(funcionario);
+  int salvar(Funcionario funcionario) {
+    final id = _db.funcionarioBox.put(funcionario);
+    notificarAlteracaoParaRede();
+    return id;
+  }
 
-  bool remover(int id) => _db.funcionarioBox.remove(id);
+  bool remover(int id) {
+    final ok = _db.funcionarioBox.remove(id);
+    if (ok) {
+      notificarAlteracaoParaRede();
+    }
+    return ok;
+  }
 
   Funcionario? obterPorId(int id) => _db.funcionarioBox.get(id);
 

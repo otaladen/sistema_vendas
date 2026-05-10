@@ -11,6 +11,7 @@ import 'package:printing/printing.dart';
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
+import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../data/vendedor_repository.dart';
@@ -1519,6 +1520,7 @@ class _DialogoFreteCarretoRetiradaFuturaState
             ? null
             : widget.vendaMae.vendedor.targetId,
       );
+      await LanSyncScheduler.solicitarSyncImediato();
       if (!mounted) return;
       final filho = widget.vendaRepository.obterPorId(idFilho);
       final n = filho?.numeroOrcamento ?? 0;

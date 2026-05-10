@@ -8,6 +8,7 @@ import '../model/registro_devolucao.dart';
 import '../model/venda.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'sync/sync_write_trigger.dart';
 
 void _aplicarPagamentoNoOrcamento(
   Venda venda,
@@ -141,6 +142,7 @@ class DadosPagamentoOrcamento {
 
   final String formaPagamento;
   final int quantidadeParcelas;
+
   /// Quando preenchido (2+ linhas ou modo misto), [formaPagamento] deve ser `misto`.
   final List<PagamentoOrcamentoLinha>? linhasMisto;
 }
@@ -169,6 +171,10 @@ class VendaRepository {
   VendaRepository(this._db);
 
   final ObjectBox _db;
+
+  void _notificarRedeAposEscrita() {
+    notificarAlteracaoParaRede();
+  }
 
   List<Venda> listarTodas() {
     final query = _db.vendaBox
@@ -232,7 +238,7 @@ class VendaRepository {
       throw ArgumentError('A venda deve conter ao menos um item.');
     }
 
-    return _db.store.runInTransaction(TxMode.write, () {
+    final novoId = _db.store.runInTransaction(TxMode.write, () {
       final venda = Venda(
         status: 'finalizada',
         entregaPendente: false,
@@ -253,7 +259,8 @@ class VendaRepository {
           throw StateError('Quantidade invalida para ${produto.nome}.');
         }
 
-        if (!permitirVendaSemEstoque && produto.estoqueReal < input.quantidade) {
+        if (!permitirVendaSemEstoque &&
+            produto.estoqueReal < input.quantidade) {
           throw StateError('Estoque insuficiente para ${produto.nome}.');
         }
 
@@ -287,6 +294,8 @@ class VendaRepository {
 
       return vendaId;
     });
+    _notificarRedeAposEscrita();
+    return novoId;
   }
 
   int registrarOrcamento(
@@ -295,11 +304,12 @@ class VendaRepository {
     required DadosEntregaOrcamento entrega,
     int? clienteId,
     int? vendedorId,
+    double descontoEmReais = 0,
   }) {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
     }
-    return _db.store.runInTransaction(TxMode.write, () {
+    final novoId = _db.store.runInTransaction(TxMode.write, () {
       final proximoNumero = _proximoNumeroOrcamento();
       final venda = Venda(
         status: 'orcamento',
@@ -374,15 +384,26 @@ class VendaRepository {
           throw StateError('Valor de frete nao pode ser negativo.');
         }
         if (venda.enderecoEntrega.trim().isEmpty) {
-          throw StateError(
-            'Endereco de entrega obrigatorio para carreto.',
-          );
+          throw StateError('Endereco de entrega obrigatorio para carreto.');
         }
       }
       venda.total = total + venda.valorFrete;
       venda.custoTotal = custoTotal;
+      if (descontoEmReais.isNaN ||
+          descontoEmReais.isInfinite ||
+          descontoEmReais < 0) {
+        throw ArgumentError('Valor de desconto invalido.');
+      }
+      final descAplicado = descontoEmReais.clamp(0, venda.total).toDouble();
+      venda.total = (venda.total - descAplicado)
+          .clamp(0, double.infinity)
+          .toDouble();
       venda.lucroTotal = venda.total - custoTotal;
-      _aplicarPagamentoNoOrcamento(venda, pagamento, totalOrcamento: venda.total);
+      _aplicarPagamentoNoOrcamento(
+        venda,
+        pagamento,
+        totalOrcamento: venda.total,
+      );
       final vendaId = _db.vendaBox.put(venda);
       venda.id = vendaId;
 
@@ -393,6 +414,8 @@ class VendaRepository {
 
       return vendaId;
     });
+    _notificarRedeAposEscrita();
+    return novoId;
   }
 
   static const String _codigoProdutoFreteRetiradaFutura =
@@ -419,6 +442,7 @@ class VendaRepository {
       preco1: 0,
       preco2: 0,
       preco3: 0,
+      ativo: true,
     );
     novo.estoqueReal = 0;
     return _db.produtoBox.put(novo);
@@ -436,7 +460,7 @@ class VendaRepository {
     required DateTime dataEntregaMarcada,
     int? vendedorId,
   }) {
-    return _db.store.runInTransaction(TxMode.write, () {
+    final novoId = _db.store.runInTransaction(TxMode.write, () {
       final mae = _db.vendaBox.get(vendaMaeId);
       if (mae == null) {
         throw StateError('Venda mae $vendaMaeId nao encontrada.');
@@ -456,8 +480,9 @@ class VendaRepository {
           'Ja existe orcamento de frete pendente para esta venda. Finalize ou cancele no caixa antes.',
         );
       }
-      final temPendencia =
-          mae.itens.any((i) => i.quantidadePendenteRetirada > 0);
+      final temPendencia = mae.itens.any(
+        (i) => i.quantidadePendenteRetirada > 0,
+      );
       if (!temPendencia) {
         throw StateError('Nao ha quantidade pendente de retirada nesta venda.');
       }
@@ -504,8 +529,9 @@ class VendaRepository {
         throw StateError('Produto interno de frete nao encontrado.');
       }
 
-      final refMae =
-          mae.numeroOrcamento > 0 ? '${mae.numeroOrcamento}' : '${mae.id}';
+      final refMae = mae.numeroOrcamento > 0
+          ? '${mae.numeroOrcamento}'
+          : '${mae.id}';
       final item = ItemVenda(
         nomeProduto: 'Frete carreto (ref. venda #$refMae)',
         quantidade: 1,
@@ -529,6 +555,8 @@ class VendaRepository {
 
       return vendaId;
     });
+    _notificarRedeAposEscrita();
+    return novoId;
   }
 
   /// Agrupa entregas de carreto (mesmo cliente) para a equipe ver como um unico carregamento.
@@ -574,6 +602,7 @@ class VendaRepository {
         _db.vendaBox.put(v);
       }
     });
+    _notificarRedeAposEscrita();
   }
 
   void limparGrupoEntregaLogisticaEm(Set<int> vendaIds) {
@@ -585,6 +614,7 @@ class VendaRepository {
         _db.vendaBox.put(v);
       }
     });
+    _notificarRedeAposEscrita();
   }
 
   void _migrarUmaMaeRetiradaFuturaParaCarretoNaTransacao(
@@ -647,7 +677,8 @@ class VendaRepository {
     mae.idOrcamentoFreteRetiradaAberto = 0;
 
     final dataHora = DateTime.now().toLocal();
-    final prefixo = '[${dataHora.day.toString().padLeft(2, '0')}/'
+    final prefixo =
+        '[${dataHora.day.toString().padLeft(2, '0')}/'
         '${dataHora.month.toString().padLeft(2, '0')}/'
         '${dataHora.year} ${dataHora.hour.toString().padLeft(2, '0')}:'
         '${dataHora.minute.toString().padLeft(2, '0')}]';
@@ -655,8 +686,7 @@ class VendaRepository {
         '$prefixo CAIXA: Migrada para carreto apos pagamento do frete '
         '(orc. #${filho.numeroOrcamento}).';
     final atualObs = mae.observacaoEntrega.trim();
-    mae.observacaoEntrega =
-        atualObs.isEmpty ? linha : '$atualObs\n$linha';
+    mae.observacaoEntrega = atualObs.isEmpty ? linha : '$atualObs\n$linha';
 
     _db.vendaBox.put(mae);
   }
@@ -682,6 +712,7 @@ class VendaRepository {
     required DadosEntregaOrcamento entrega,
     int? clienteId,
     int? vendedorId,
+    double descontoEmReais = 0,
   }) {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
@@ -699,7 +730,9 @@ class VendaRepository {
       }
 
       venda.tipoEntrega = entrega.tipoEntrega;
-      venda.valorFrete = entrega.tipoEntrega == 'entrega_loja' ? entrega.valorFrete : 0;
+      venda.valorFrete = entrega.tipoEntrega == 'entrega_loja'
+          ? entrega.valorFrete
+          : 0;
       venda.enderecoEntrega = entrega.tipoEntrega == 'entrega_loja'
           ? entrega.enderecoEntrega
           : '';
@@ -775,18 +808,30 @@ class VendaRepository {
           throw StateError('Valor de frete nao pode ser negativo.');
         }
         if (venda.enderecoEntrega.trim().isEmpty) {
-          throw StateError(
-            'Endereco de entrega obrigatorio para carreto.',
-          );
+          throw StateError('Endereco de entrega obrigatorio para carreto.');
         }
       }
 
       venda.total = total + venda.valorFrete;
       venda.custoTotal = custoTotal;
+      if (descontoEmReais.isNaN ||
+          descontoEmReais.isInfinite ||
+          descontoEmReais < 0) {
+        throw ArgumentError('Valor de desconto invalido.');
+      }
+      final descAplicado = descontoEmReais.clamp(0, venda.total).toDouble();
+      venda.total = (venda.total - descAplicado)
+          .clamp(0, double.infinity)
+          .toDouble();
       venda.lucroTotal = venda.total - custoTotal;
-      _aplicarPagamentoNoOrcamento(venda, pagamento, totalOrcamento: venda.total);
+      _aplicarPagamentoNoOrcamento(
+        venda,
+        pagamento,
+        totalOrcamento: venda.total,
+      );
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   void converterOrcamentoParaVenda(
@@ -858,6 +903,7 @@ class VendaRepository {
         _migrarVendaMaeRetiradaFuturaParaCarretoNaTransacao(venda);
       }
     });
+    _notificarRedeAposEscrita();
   }
 
   void atualizarQuantidadeItemOrcamento(
@@ -884,6 +930,7 @@ class VendaRepository {
       _db.itemVendaBox.put(item);
       _recalcularTotaisVenda(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   void removerItemOrcamento(int vendaId, int itemId) {
@@ -906,6 +953,7 @@ class VendaRepository {
       }
       _recalcularTotaisVenda(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   void vincularClienteNoOrcamento(int vendaId, int? clienteId) {
@@ -928,6 +976,7 @@ class VendaRepository {
       }
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   void vincularClienteVendaFinalizada(int vendaId, int clienteId) {
@@ -937,7 +986,9 @@ class VendaRepository {
         throw StateError('Venda $vendaId nao encontrada.');
       }
       if (venda.status != 'finalizada') {
-        throw StateError('Somente venda finalizada pode receber vinculo de cliente.');
+        throw StateError(
+          'Somente venda finalizada pode receber vinculo de cliente.',
+        );
       }
       if (venda.cancelada) {
         throw StateError('Venda cancelada nao pode ser alterada.');
@@ -949,6 +1000,7 @@ class VendaRepository {
       venda.cliente.target = cliente;
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   void aplicarDescontoNoOrcamento(int vendaId, double valorDesconto) {
@@ -960,12 +1012,15 @@ class VendaRepository {
       if (venda.status != 'orcamento') {
         throw StateError('Somente orcamentos podem receber desconto.');
       }
-      if (valorDesconto.isNaN || valorDesconto.isInfinite || valorDesconto < 0) {
+      if (valorDesconto.isNaN ||
+          valorDesconto.isInfinite ||
+          valorDesconto < 0) {
         throw StateError('Valor de desconto invalido.');
       }
       final totalAntesDesconto = venda.total;
       final descontoAplicado = valorDesconto.clamp(0, venda.total).toDouble();
-      venda.total = (venda.total - descontoAplicado).clamp(0, double.infinity)
+      venda.total = (venda.total - descontoAplicado)
+          .clamp(0, double.infinity)
           .toDouble();
       venda.lucroTotal = venda.total - venda.custoTotal;
       if (venda.formaPagamento == 'misto' &&
@@ -1000,6 +1055,7 @@ class VendaRepository {
       }
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   /// Substitui linhas do misto ja com valores finais (ex.: conferidos no caixa).
@@ -1044,6 +1100,7 @@ class VendaRepository {
       venda.pagamentosJson = PagamentoOrcamentoCodec.encode(linhas);
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   List<Venda> listarEntregas({
@@ -1088,6 +1145,7 @@ class VendaRepository {
       venda.statusEntrega = novoStatus;
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   void atualizarPrioridadeEntrega(int vendaId, String novaPrioridade) {
@@ -1104,6 +1162,7 @@ class VendaRepository {
       venda.prioridadeEntrega = prioridade;
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   void atualizarChecklistCargaEntrega(
@@ -1118,13 +1177,16 @@ class VendaRepository {
         throw StateError('Venda/Orcamento $vendaId nao encontrado.');
       }
       if (venda.tipoEntrega != 'entrega_loja') {
-        throw StateError('Somente entregas da loja possuem checklist de carga.');
+        throw StateError(
+          'Somente entregas da loja possuem checklist de carga.',
+        );
       }
       if (separado != null) venda.cargaSeparada = separado;
       if (carregado != null) venda.cargaCarregada = carregado;
       if (saiu != null) venda.cargaSaiu = saiu;
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   void atualizarMotoristaEntrega(int vendaId, String motorista) {
@@ -1139,10 +1201,11 @@ class VendaRepository {
       venda.motoristaEntrega = motorista.trim();
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   int migrarMotoristaEntregaLegado() {
-    return _db.store.runInTransaction(TxMode.write, () {
+    final n = _db.store.runInTransaction(TxMode.write, () {
       final vendas = _db.vendaBox.getAll();
       var totalMigradas = 0;
       for (final venda in vendas) {
@@ -1172,6 +1235,8 @@ class VendaRepository {
       }
       return totalMigradas;
     });
+    _notificarRedeAposEscrita();
+    return n;
   }
 
   void registrarHistoricoStatusEntrega({
@@ -1192,6 +1257,7 @@ class VendaRepository {
       item.venda.target = venda;
       _db.historicoEntregaBox.put(item);
     });
+    _notificarRedeAposEscrita();
   }
 
   void registrarOcorrenciaEntrega({
@@ -1207,7 +1273,8 @@ class VendaRepository {
       if (venda == null) return;
       final quem = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
       final dataHora = DateTime.now().toLocal();
-      final prefixo = '[${dataHora.day.toString().padLeft(2, '0')}/'
+      final prefixo =
+          '[${dataHora.day.toString().padLeft(2, '0')}/'
           '${dataHora.month.toString().padLeft(2, '0')}/'
           '${dataHora.year} ${dataHora.hour.toString().padLeft(2, '0')}:'
           '${dataHora.minute.toString().padLeft(2, '0')}]';
@@ -1216,6 +1283,7 @@ class VendaRepository {
       venda.observacaoEntrega = atual.isEmpty ? linha : '$atual\n$linha';
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   List<HistoricoEntrega> listarHistoricoEntrega(int vendaId) {
@@ -1271,6 +1339,7 @@ class VendaRepository {
       venda.entregaPendente = true;
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   int _proximoNumeroOrcamento() {
@@ -1389,10 +1458,12 @@ class VendaRepository {
       }
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
 
     final trecho = linhasLog.join('; ');
-    var motivoFinal =
-        trecho.isEmpty ? 'Retirada registrada.' : 'Retirada: $trecho';
+    var motivoFinal = trecho.isEmpty
+        ? 'Retirada registrada.'
+        : 'Retirada: $trecho';
     final quemRetirou = retiradoPor?.trim() ?? '';
     if (quemRetirou.isNotEmpty) {
       motivoFinal = '$motivoFinal Quem retirou: $quemRetirou.';
@@ -1473,10 +1544,11 @@ class VendaRepository {
       venda.canceladaEm = DateTime.now();
       _db.vendaBox.put(venda);
     });
+    _notificarRedeAposEscrita();
   }
 
   /// Devolucao (estoque de volta) ou troca (devolucao + saida de novos itens).
-  /// Nao sincronizado entre dispositivos na rede (registro local).
+  /// Registro de devolucao e local; venda e produtos seguem na sync LAN.
   int registrarDevolucaoOuTroca({
     required int vendaOrigemId,
     required String tipo,
@@ -1503,7 +1575,7 @@ class VendaRepository {
       throw StateError('Em troca, informe ao menos um produto de saida.');
     }
 
-    return _db.store.runInTransaction(TxMode.write, () {
+    final registroId = _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaOrigemId);
       if (venda == null) {
         throw StateError('Venda $vendaOrigemId nao encontrada.');
@@ -1512,7 +1584,9 @@ class VendaRepository {
         throw StateError('Venda cancelada nao aceita devolucao/troca.');
       }
       if (venda.status != 'finalizada') {
-        throw StateError('Somente vendas finalizadas permitem devolucao/troca.');
+        throw StateError(
+          'Somente vendas finalizadas permitem devolucao/troca.',
+        );
       }
       if (venda.vendaOrigemFreteRetiradaId > 0) {
         throw StateError(
@@ -1625,6 +1699,8 @@ class VendaRepository {
 
       return regId;
     });
+    _notificarRedeAposEscrita();
+    return registroId;
   }
 
   List<RegistroDevolucao> listarRegistrosDevolucaoPorVenda(int vendaId) {
@@ -1707,8 +1783,7 @@ class VendaRepository {
       fatT += fat;
       lucT += luc;
       final vidOrigem = r.vendaOrigem.targetId;
-      final vOrigem =
-          vidOrigem > 0 ? (_db.vendaBox.get(vidOrigem)) : null;
+      final vOrigem = vidOrigem > 0 ? (_db.vendaBox.get(vidOrigem)) : null;
       final vendedorId = vOrigem?.vendedor.targetId ?? 0;
       pvFat[vendedorId] = (pvFat[vendedorId] ?? 0) + fat;
       pvLuc[vendedorId] = (pvLuc[vendedorId] ?? 0) + luc;

@@ -1,6 +1,7 @@
 import '../model/motorista.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'sync/sync_write_trigger.dart';
 
 class MotoristaRepository {
   MotoristaRepository(this._db);
@@ -27,9 +28,19 @@ class MotoristaRepository {
     }).toList();
   }
 
-  int salvar(Motorista motorista) => _db.motoristaBox.put(motorista);
+  int salvar(Motorista motorista) {
+    final id = _db.motoristaBox.put(motorista);
+    notificarAlteracaoParaRede();
+    return id;
+  }
 
-  bool remover(int id) => _db.motoristaBox.remove(id);
+  bool remover(int id) {
+    final ok = _db.motoristaBox.remove(id);
+    if (ok) {
+      notificarAlteracaoParaRede();
+    }
+    return ok;
+  }
 
   bool existeNomeParaOutro({
     required String nomeNormalizado,

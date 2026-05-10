@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +10,8 @@ import '../data/motorista_repository.dart';
 import '../data/venda_repository.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
+import 'entregas/logistica_entregas.dart';
+import 'entregas/romaneio_pdf.dart';
 
 /// Filtro rapido pelos contadores de resumo (atrasadas / pendentes hoje).
 enum _FiltroResumoEntregas { nenhum, atrasadas, pendentesHoje }
@@ -58,9 +59,11 @@ class _EntregasPageState extends State<EntregasPage> {
   DateTime? _fim;
   bool _modoAgruparMesmoCarro = false;
   final Set<int> _idsEntregasSelecionadas = {};
+
   /// Incrementado ao usar "Limpar tudo" para remontar dropdowns (initialValue vale apenas no primeiro build).
   int _filtrosDropdownNonce = 0;
   _FiltroResumoEntregas _filtroResumoLista = _FiltroResumoEntregas.nenhum;
+
   /// Chave igual a [resumoPorDia] (`dd/MM/yyyy` ou `Sem data marcada`); filtra so a lista.
   String? _chaveDiaPlanejamentoSelecionado;
 
@@ -211,7 +214,8 @@ class _EntregasPageState extends State<EntregasPage> {
     );
     entregas = entregas.where(_atendeFiltroDataMarcada).toList();
     entregas = _filtrarPorNumeroNotaSeInformado(entregas);
-    final vendedoresDisponiveis = (entregas
+    final vendedoresDisponiveis =
+        (entregas
             .map(_nomeVendedor)
             .map((n) => n.trim())
             .where((n) => n.isNotEmpty)
@@ -257,6 +261,11 @@ class _EntregasPageState extends State<EntregasPage> {
     });
   }
 
+  Future<void> _atualizarListaEntregas() async {
+    _carregarEntregas();
+    await Future<void>.delayed(const Duration(milliseconds: 280));
+  }
+
   void _alternarSelecaoEntrega(int vendaId) {
     setState(() {
       if (_idsEntregasSelecionadas.contains(vendaId)) {
@@ -296,9 +305,7 @@ class _EntregasPageState extends State<EntregasPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -320,15 +327,11 @@ class _EntregasPageState extends State<EntregasPage> {
       if (!mounted) return;
       setState(() => _idsEntregasSelecionadas.clear());
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Agrupamento removido das selecionadas.'),
-        ),
+        const SnackBar(content: Text('Agrupamento removido das selecionadas.')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -343,7 +346,8 @@ class _EntregasPageState extends State<EntregasPage> {
     );
     entregas = entregas.where(_atendeFiltroDataMarcada).toList();
     entregas = _filtrarPorNumeroNotaSeInformado(entregas);
-    final vendedoresDisponiveis = (entregas
+    final vendedoresDisponiveis =
+        (entregas
             .map(_nomeVendedor)
             .map((n) => n.trim())
             .where((n) => n.isNotEmpty)
@@ -404,35 +408,6 @@ class _EntregasPageState extends State<EntregasPage> {
     return true;
   }
 
-  /// Mantem a ordem de [ordenadas]; vendas com o mesmo [grupoEntregaFreteId] > 0 ficam no mesmo bloco.
-  List<List<Venda>> _blocosEntregaComCarretoAgrupado(List<Venda> ordenadas) {
-    final vistos = <int>{};
-    final blocos = <List<Venda>>[];
-    for (final v in ordenadas) {
-      final g = v.grupoEntregaFreteId;
-      if (g <= 0) {
-        blocos.add([v]);
-        continue;
-      }
-      if (vistos.contains(g)) {
-        continue;
-      }
-      vistos.add(g);
-      blocos.add(
-        ordenadas.where((x) => x.grupoEntregaFreteId == g).toList(),
-      );
-    }
-    return blocos;
-  }
-
-  String _rotuloGrupoLogistica(List<Venda> bloco) {
-    final nums = bloco.map((v) {
-      if (v.numeroOrcamento > 0) return '#${v.numeroOrcamento}';
-      return 'id ${v.id}';
-    }).join(', ');
-    return 'Mesmo carro · $nums';
-  }
-
   Widget _conteudoRomaneioUmaVenda(
     BuildContext context,
     Venda venda,
@@ -455,8 +430,9 @@ class _EntregasPageState extends State<EntregasPage> {
         const SizedBox(height: 4),
         Text(
           'Itens:',
-          style: Theme.of(context).textTheme.bodyMedium
-              ?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 2),
         ..._linhasItensEntrega(venda).map(
@@ -464,10 +440,9 @@ class _EntregasPageState extends State<EntregasPage> {
             padding: const EdgeInsets.only(bottom: 1),
             child: Text(
               '• $linha',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
         ),
@@ -480,10 +455,7 @@ class _EntregasPageState extends State<EntregasPage> {
               label: const Text('Separado'),
               selected: venda.cargaSeparada,
               onSelected: (v) {
-                _atualizarChecklistCarga(
-                  venda,
-                  separado: v,
-                );
+                _atualizarChecklistCarga(venda, separado: v);
                 setDialogState(() {
                   venda.cargaSeparada = v;
                 });
@@ -493,10 +465,7 @@ class _EntregasPageState extends State<EntregasPage> {
               label: const Text('Carregado'),
               selected: venda.cargaCarregada,
               onSelected: (v) {
-                _atualizarChecklistCarga(
-                  venda,
-                  carregado: v,
-                );
+                _atualizarChecklistCarga(venda, carregado: v);
                 setDialogState(() {
                   venda.cargaCarregada = v;
                 });
@@ -536,10 +505,10 @@ class _EntregasPageState extends State<EntregasPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              _rotuloGrupoLogistica(bloco),
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              rotuloGrupoLogistica(bloco),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             Text('${bloco.length} pedidos no mesmo veiculo'),
             const Divider(height: 16),
@@ -554,11 +523,10 @@ class _EntregasPageState extends State<EntregasPage> {
     return _conteudoRomaneioUmaVenda(context, bloco.single, setDialogState);
   }
 
-  Future<void> _abrirRomaneioDoDia() async {
-    final hoje = DateTime.now();
-    final base = DateTime(hoje.year, hoje.month, hoje.day);
-    final doDia = _entregasDoDia(base);
-    final blocosRom = _blocosEntregaComCarretoAgrupado(doDia);
+  Future<void> _abrirRomaneioVisual() async {
+    final doDia = _entregasParaRomaneio();
+    final blocosRom = blocosEntregaComCarretoAgrupado(doDia);
+    final titulo = _rotuloPeriodoRomaneio();
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -566,11 +534,11 @@ class _EntregasPageState extends State<EntregasPage> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text('Romaneio do dia'),
+              title: Text('Romaneio — $titulo'),
               content: SizedBox(
                 width: 700,
                 child: doDia.isEmpty
-                    ? const Text('Nao ha entregas marcadas para hoje.')
+                    ? Text(_mensagemRomaneioVazio())
                     : ListView.separated(
                         shrinkWrap: true,
                         itemCount: blocosRom.length,
@@ -602,14 +570,81 @@ class _EntregasPageState extends State<EntregasPage> {
       final d = v.dataEntregaMarcada?.toLocal();
       if (d == null) return false;
       return DateTime(d.year, d.month, d.day) == base;
-    }).toList()
-      ..sort((a, b) {
+    }).toList()..sort((a, b) {
+      final pa = _pesoPrioridade(a.prioridadeEntrega);
+      final pb = _pesoPrioridade(b.prioridadeEntrega);
+      final byP = pb.compareTo(pa);
+      if (byP != 0) return byP;
+      return (a.janelaEntrega).compareTo(b.janelaEntrega);
+    });
+  }
+
+  String _rotuloPeriodoRomaneio() {
+    final chave = _chaveDiaPlanejamentoSelecionado;
+    if (chave == 'Sem data marcada') return 'Sem data marcada';
+    if (chave == null) {
+      final n = DateTime.now();
+      return DateFormat('dd/MM/yyyy').format(DateTime(n.year, n.month, n.day));
+    }
+    return chave;
+  }
+
+  List<Venda> _entregasParaRomaneio() {
+    final chave = _chaveDiaPlanejamentoSelecionado;
+    if (chave == 'Sem data marcada') {
+      final lista = _entregas
+          .where((v) => v.dataEntregaMarcada == null)
+          .toList();
+      lista.sort((a, b) {
         final pa = _pesoPrioridade(a.prioridadeEntrega);
         final pb = _pesoPrioridade(b.prioridadeEntrega);
         final byP = pb.compareTo(pa);
         if (byP != 0) return byP;
         return (a.janelaEntrega).compareTo(b.janelaEntrega);
       });
+      return lista;
+    }
+    DateTime base;
+    if (chave == null) {
+      final n = DateTime.now();
+      base = DateTime(n.year, n.month, n.day);
+    } else {
+      try {
+        base = DateFormat('dd/MM/yyyy').parse(chave);
+      } catch (_) {
+        final n = DateTime.now();
+        base = DateTime(n.year, n.month, n.day);
+      }
+    }
+    return _entregasDoDia(base);
+  }
+
+  String _mensagemRomaneioVazio() {
+    final chave = _chaveDiaPlanejamentoSelecionado;
+    if (chave == 'Sem data marcada') {
+      return 'Nao ha entregas sem data marcada na lista atual.';
+    }
+    if (chave == null) {
+      return 'Nao ha entregas marcadas para hoje na lista atual.';
+    }
+    return 'Nao ha entregas marcadas para esta data na lista atual.';
+  }
+
+  String _nomeArquivoRomaneioPdf() {
+    final chave = _chaveDiaPlanejamentoSelecionado;
+    final agora = DateTime.now();
+    if (chave == 'Sem data marcada') {
+      return 'romaneio_sem_data_${DateFormat('yyyyMMdd').format(agora)}.pdf';
+    }
+    if (chave == null) {
+      return 'romaneio_${DateFormat('yyyyMMdd').format(agora)}.pdf';
+    }
+    try {
+      final d = DateFormat('dd/MM/yyyy').parse(chave);
+      return 'romaneio_${DateFormat('yyyyMMdd').format(d)}.pdf';
+    } catch (_) {
+      return 'romaneio_${DateFormat('yyyyMMdd').format(agora)}.pdf';
+    }
   }
 
   List<String> _linhasItensEntrega(Venda venda) {
@@ -634,9 +669,7 @@ class _EntregasPageState extends State<EntregasPage> {
       margin: const pw.EdgeInsets.only(bottom: 8),
       padding: const pw.EdgeInsets.only(bottom: 6),
       decoration: const pw.BoxDecoration(
-        border: pw.Border(
-          bottom: pw.BorderSide(width: 0.5),
-        ),
+        border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
       ),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -657,10 +690,7 @@ class _EntregasPageState extends State<EntregasPage> {
           pw.SizedBox(height: 3),
           pw.Text(
             'Itens:',
-            style: pw.TextStyle(
-              fontSize: 11,
-              fontWeight: pw.FontWeight.bold,
-            ),
+            style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
           ),
           pw.SizedBox(height: 2),
           ..._linhasItensEntrega(venda).map(
@@ -687,90 +717,28 @@ class _EntregasPageState extends State<EntregasPage> {
     );
   }
 
-  Future<Uint8List> _gerarRomaneioHojePdfBytes(List<Venda> entregasDia) async {
-    final doc = pw.Document();
-    final agora = DateTime.now();
-    final dataHoje = DateFormat('dd/MM/yyyy').format(agora);
-    final horaEmissao = DateFormat('dd/MM/yyyy HH:mm').format(agora);
-    doc.addPage(
-      pw.Page(
-        build: (context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(
-                'Romaneio de Entregas - $dataHoje',
-                style: pw.TextStyle(
-                  fontSize: 16,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.SizedBox(height: 4),
-              pw.Text('Emitido em: $horaEmissao'),
-              pw.Text('Total de entregas: ${entregasDia.length}'),
-              pw.SizedBox(height: 10),
-              pw.Divider(),
-              ..._blocosEntregaComCarretoAgrupado(entregasDia).expand((bloco) {
-                if (bloco.length >= 2 &&
-                    bloco.first.grupoEntregaFreteId > 0) {
-                  return [
-                    pw.Container(
-                      margin: const pw.EdgeInsets.only(bottom: 8),
-                      padding: const pw.EdgeInsets.all(6),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(width: 0.7),
-                      ),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text(
-                            _rotuloGrupoLogistica(bloco),
-                            style: pw.TextStyle(
-                              fontWeight: pw.FontWeight.bold,
-                              fontSize: 11,
-                            ),
-                          ),
-                          pw.Text(
-                            '${bloco.length} pedidos no mesmo veiculo',
-                            style: const pw.TextStyle(fontSize: 9.5),
-                          ),
-                          pw.SizedBox(height: 4),
-                          ...bloco.map(_pdfRomaneioUmaEntrega),
-                        ],
-                      ),
-                    ),
-                  ];
-                }
-                return bloco.map(_pdfRomaneioUmaEntrega);
-              }),
-            ],
-          );
-        },
-      ),
-    );
-    return doc.save();
-  }
-
-  Future<void> _exportarOuImprimirRomaneioHoje() async {
-    final base = DateTime(
-      DateTime.now().year,
-      DateTime.now().month,
-      DateTime.now().day,
-    );
-    final entregasDia = _entregasDoDia(base);
+  Future<void> _exportarOuImprimirRomaneio() async {
+    final entregasDia = _entregasParaRomaneio();
     if (entregasDia.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nao ha entregas para hoje.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_mensagemRomaneioVazio())));
       return;
     }
-    final pdfBytes = await _gerarRomaneioHojePdfBytes(entregasDia);
+    final titulo = _rotuloPeriodoRomaneio();
+    final emissao = DateTime.now();
+    final pdfBytes = await gerarEntregasRomaneioPdfBytes(
+      entregasDia: entregasDia,
+      tituloPeriodo: titulo,
+      emissao: emissao,
+      pdfUmaEntrega: _pdfRomaneioUmaEntrega,
+    );
     if (!mounted) return;
     final acao = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Romaneio de hoje'),
+        title: Text('Romaneio — $titulo'),
         content: const Text('Deseja imprimir ou exportar em PDF?'),
         actions: [
           TextButton(
@@ -797,13 +765,14 @@ class _EntregasPageState extends State<EntregasPage> {
     }
     final arquivo = await FilePicker.platform.saveFile(
       dialogTitle: 'Salvar romaneio em PDF',
-      fileName:
-          'romaneio_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
+      fileName: _nomeArquivoRomaneioPdf(),
       type: FileType.custom,
       allowedExtensions: const ['pdf'],
     );
     if (arquivo == null) return;
-    final path = arquivo.toLowerCase().endsWith('.pdf') ? arquivo : '$arquivo.pdf';
+    final path = arquivo.toLowerCase().endsWith('.pdf')
+        ? arquivo
+        : '$arquivo.pdf';
     await File(path).writeAsBytes(pdfBytes, flush: true);
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -850,9 +819,17 @@ class _EntregasPageState extends State<EntregasPage> {
   String _extrairBairro(Venda venda) {
     final endereco = venda.enderecoEntrega.trim();
     if (endereco.isEmpty) return 'Sem bairro';
-    final partesPipe = endereco.split('|').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final partesPipe = endereco
+        .split('|')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
     if (partesPipe.length >= 2) return partesPipe[1];
-    final partesVirgula = endereco.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final partesVirgula = endereco
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
     if (partesVirgula.length >= 2) return partesVirgula[1];
     return partesPipe.isNotEmpty ? partesPipe.first : 'Sem bairro';
   }
@@ -916,9 +893,7 @@ class _EntregasPageState extends State<EntregasPage> {
                 )
               : DropdownButtonFormField<String>(
                   initialValue: selecionado.isEmpty ? null : selecionado,
-                  decoration: const InputDecoration(
-                    labelText: 'Motorista',
-                  ),
+                  decoration: const InputDecoration(labelText: 'Motorista'),
                   items: motoristas
                       .map(
                         (m) => DropdownMenuItem<String>(
@@ -962,9 +937,9 @@ class _EntregasPageState extends State<EntregasPage> {
       ).showSnackBar(const SnackBar(content: Text('Motorista atualizado.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao atualizar motorista: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao atualizar motorista: $e')),
+      );
     }
   }
 
@@ -1187,9 +1162,9 @@ class _EntregasPageState extends State<EntregasPage> {
     try {
       if (!widget.podeGerenciarStatusEntrega) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_mensagemSemPermissaoStatus())),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_mensagemSemPermissaoStatus())));
         return;
       }
       final statusAnterior = venda.statusEntrega;
@@ -1197,7 +1172,9 @@ class _EntregasPageState extends State<EntregasPage> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_mensagemBloqueioTransicao(statusAnterior, novoStatus)),
+            content: Text(
+              _mensagemBloqueioTransicao(statusAnterior, novoStatus),
+            ),
           ),
         );
         return;
@@ -1240,9 +1217,9 @@ class _EntregasPageState extends State<EntregasPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao atualizar status: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao atualizar status: $e')));
     }
   }
 
@@ -1252,7 +1229,9 @@ class _EntregasPageState extends State<EntregasPage> {
     final motivo = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Motivo da ${_rotuloStatusEntrega(novoStatus).toLowerCase()}'),
+        title: Text(
+          'Motivo da ${_rotuloStatusEntrega(novoStatus).toLowerCase()}',
+        ),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -1284,7 +1263,9 @@ class _EntregasPageState extends State<EntregasPage> {
       if (!mounted) return null;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Motivo obrigatorio para reagendar ou cancelar entrega.'),
+          content: Text(
+            'Motivo obrigatorio para reagendar ou cancelar entrega.',
+          ),
         ),
       );
       return null;
@@ -1306,9 +1287,9 @@ class _EntregasPageState extends State<EntregasPage> {
         saiu: saiu,
       )) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_mensagemChecklistInvalido())),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_mensagemChecklistInvalido())));
         return;
       }
       widget.vendaRepository.atualizarChecklistCargaEntrega(
@@ -1364,8 +1345,7 @@ class _EntregasPageState extends State<EntregasPage> {
                         child: ListView.separated(
                           shrinkWrap: true,
                           itemCount: itensLista.length,
-                          separatorBuilder: (_, _) =>
-                              const Divider(height: 10),
+                          separatorBuilder: (_, _) => const Divider(height: 10),
                           itemBuilder: (context, index) {
                             final item = itensLista[index];
                             final q = _quantidadeExibicaoEntrega(venda, item);
@@ -1416,12 +1396,7 @@ class _EntregasPageState extends State<EntregasPage> {
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        'Total na carga: ${_formatarMoeda(
-                          itensLista.fold<double>(
-                            0,
-                            (s, i) => s + _subtotalExibicaoEntrega(venda, i),
-                          ),
-                        )}',
+                        'Total na carga: ${_formatarMoeda(itensLista.fold<double>(0, (s, i) => s + _subtotalExibicaoEntrega(venda, i)))}',
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       if (usaMigrado)
@@ -1456,7 +1431,9 @@ class _EntregasPageState extends State<EntregasPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Cliente: ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}'),
+                  Text(
+                    'Cliente: ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}',
+                  ),
                   Text('Vendedor: ${_nomeVendedor(venda)}'),
                   const SizedBox(height: 8),
                   Wrap(
@@ -1526,10 +1503,7 @@ class _EntregasPageState extends State<EntregasPage> {
       venda.statusEntrega,
     );
     final progressoCarga = _progressoCarga(venda);
-    final corCarga = _corProgressoCarga(
-      context,
-      progressoCarga,
-    );
+    final corCarga = _corProgressoCarga(context, progressoCarga);
     final prioridade = venda.prioridadeEntrega;
     final historico = widget.vendaRepository.listarHistoricoEntrega(venda.id);
     final ultimoEvento = historico.isEmpty ? null : historico.last;
@@ -1561,12 +1535,8 @@ class _EntregasPageState extends State<EntregasPage> {
             ),
             Text('Vendedor: ${_nomeVendedor(venda)}'),
             Text('Endereco: ${venda.enderecoEntrega}'),
-            Text(
-              'Frete: ${_formatarMoeda(venda.valorFrete)}',
-            ),
-            Text(
-              'Criado em: ${dateFormat.format(venda.data.toLocal())}',
-            ),
+            Text('Frete: ${_formatarMoeda(venda.valorFrete)}'),
+            Text('Criado em: ${dateFormat.format(venda.data.toLocal())}'),
             Text(
               'Entrega marcada: ${venda.dataEntregaMarcada == null ? 'Sem data definida' : dataMarcadaFmt.format(venda.dataEntregaMarcada!.toLocal())}',
             ),
@@ -1576,13 +1546,9 @@ class _EntregasPageState extends State<EntregasPage> {
                 'Ultima mudanca: ${dateFormat.format(ultimoEvento.dataHora.toLocal())} por ${ultimoEvento.usuario}',
               ),
             if (_observacaoSemMotorista(venda).trim().isNotEmpty)
-              Text(
-                'Obs: ${_observacaoSemMotorista(venda)}',
-              ),
+              Text('Obs: ${_observacaoSemMotorista(venda)}'),
             const SizedBox(height: 4),
-            const Text(
-              'Clique no pedido para ver os itens comprados',
-            ),
+            const Text('Clique no pedido para ver os itens comprados'),
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
@@ -1595,19 +1561,11 @@ class _EntregasPageState extends State<EntregasPage> {
                   ),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(99),
-                    color: statusCor.withValues(
-                      alpha: 0.12,
-                    ),
-                    border: Border.all(
-                      color: statusCor.withValues(
-                        alpha: 0.4,
-                      ),
-                    ),
+                    color: statusCor.withValues(alpha: 0.12),
+                    border: Border.all(color: statusCor.withValues(alpha: 0.4)),
                   ),
                   child: Text(
-                    _rotuloStatusEntrega(
-                      venda.statusEntrega,
-                    ),
+                    _rotuloStatusEntrega(venda.statusEntrega),
                     style: TextStyle(
                       color: statusCor,
                       fontWeight: FontWeight.w600,
@@ -1623,9 +1581,7 @@ class _EntregasPageState extends State<EntregasPage> {
                     borderRadius: BorderRadius.circular(99),
                     color: Theme.of(context).colorScheme.primaryContainer,
                   ),
-                  child: Text(
-                    'Prioridade: ${_rotuloPrioridade(prioridade)}',
-                  ),
+                  child: Text('Prioridade: ${_rotuloPrioridade(prioridade)}'),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -1634,19 +1590,17 @@ class _EntregasPageState extends State<EntregasPage> {
                   ),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(99),
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
                   ),
                   child: Text(
                     'Janela: ${_rotuloJanelaEntrega(venda.janelaEntrega)}',
                   ),
                 ),
                 InkWell(
-                  borderRadius: BorderRadius.circular(
-                    99,
-                  ),
-                  onTap: () => _abrirChecklistCargaEntrega(
-                    venda,
-                  ),
+                  borderRadius: BorderRadius.circular(99),
+                  onTap: () => _abrirChecklistCargaEntrega(venda),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -1654,13 +1608,9 @@ class _EntregasPageState extends State<EntregasPage> {
                     ),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(99),
-                      color: corCarga.withValues(
-                        alpha: 0.12,
-                      ),
+                      color: corCarga.withValues(alpha: 0.12),
                       border: Border.all(
-                        color: corCarga.withValues(
-                          alpha: 0.4,
-                        ),
+                        color: corCarga.withValues(alpha: 0.4),
                       ),
                     ),
                     child: Text(
@@ -1701,14 +1651,9 @@ class _EntregasPageState extends State<EntregasPage> {
             if (venda.statusEntrega != 'entregue')
               TextButton.icon(
                 onPressed: widget.podeGerenciarStatusEntrega
-                    ? () => _atualizarStatusEntrega(
-                          venda,
-                          'entregue',
-                        )
+                    ? () => _atualizarStatusEntrega(venda, 'entregue')
                     : null,
-                icon: const Icon(
-                  Icons.check_circle_outline,
-                ),
+                icon: const Icon(Icons.check_circle_outline),
                 label: const Text('Marcar entregue'),
               ),
             PopupMenuButton<String>(
@@ -1735,9 +1680,7 @@ class _EntregasPageState extends State<EntregasPage> {
                 PopupMenuItem(
                   enabled: widget.podeGerenciarStatusEntrega,
                   value: 'saiu_entrega',
-                  child: const Text(
-                    'Status: Saiu para entrega',
-                  ),
+                  child: const Text('Status: Saiu para entrega'),
                 ),
                 PopupMenuItem(
                   enabled: widget.podeGerenciarStatusEntrega,
@@ -1794,9 +1737,12 @@ class _EntregasPageState extends State<EntregasPage> {
         children: [
           ListTile(
             dense: true,
-            leading: Icon(Icons.local_shipping_outlined, color: scheme.tertiary),
+            leading: Icon(
+              Icons.local_shipping_outlined,
+              color: scheme.tertiary,
+            ),
             title: Text(
-              _rotuloGrupoLogistica(bloco),
+              rotuloGrupoLogistica(bloco),
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             subtitle: Text('${bloco.length} pedidos no mesmo veiculo'),
@@ -1814,8 +1760,7 @@ class _EntregasPageState extends State<EntregasPage> {
                     dataMarcadaFmt,
                     dentroDeGrupoCarreto: true,
                     modoSelecao: _modoAgruparMesmoCarro,
-                    selecionada:
-                        _idsEntregasSelecionadas.contains(bloco[i].id),
+                    selecionada: _idsEntregasSelecionadas.contains(bloco[i].id),
                   ),
                   if (i < bloco.length - 1) const SizedBox(height: 10),
                 ],
@@ -1833,7 +1778,8 @@ class _EntregasPageState extends State<EntregasPage> {
     final dataMarcadaFmt = DateFormat('dd/MM/yyyy');
     final atrasadas = _contagemAtrasadasProjetada();
     final pendentesHoje = _contagemPendentesHojeProjetada();
-    final mostrarChipsResumo = _entregas.isNotEmpty ||
+    final mostrarChipsResumo =
+        _entregas.isNotEmpty ||
         atrasadas > 0 ||
         pendentesHoje > 0 ||
         _filtroResumoLista != _FiltroResumoEntregas.nenhum;
@@ -1856,14 +1802,14 @@ class _EntregasPageState extends State<EntregasPage> {
     final listaExibicao = _chaveDiaPlanejamentoSelecionado == null
         ? _entregas
         : _entregas
-            .where(
-              (v) => _vendaNaChaveDiaPlanejamento(
-                v,
-                _chaveDiaPlanejamentoSelecionado!,
-                dataMarcadaFmt,
-              ),
-            )
-            .toList();
+              .where(
+                (v) => _vendaNaChaveDiaPlanejamento(
+                  v,
+                  _chaveDiaPlanejamentoSelecionado!,
+                  dataMarcadaFmt,
+                ),
+              )
+              .toList();
     final groupedLista = <String, List<Venda>>{};
     for (final venda in listaExibicao) {
       final chaveGrupo = _agrupamento == 'motorista'
@@ -1871,242 +1817,25 @@ class _EntregasPageState extends State<EntregasPage> {
           : _extrairBairro(venda);
       groupedLista.putIfAbsent(chaveGrupo, () => <Venda>[]).add(venda);
     }
-    final gruposLista = groupedLista.keys.toList()..sort((a, b) => a.compareTo(b));
+    final gruposLista = groupedLista.keys.toList()
+      ..sort((a, b) => a.compareTo(b));
     return Scaffold(
-      appBar: AppBar(title: const Text('Entregas')),
+      appBar: AppBar(
+        title: const Text('Entregas'),
+        actions: [
+          IconButton(
+            tooltip: 'Atualizar lista',
+            icon: const Icon(Icons.refresh),
+            onPressed: () async {
+              await _atualizarListaEntregas();
+            },
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    SizedBox(
-                      key: ValueKey('f_status_$_filtrosDropdownNonce'),
-                      width: 220,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _statusSelecionado,
-                        decoration: const InputDecoration(labelText: 'Status'),
-                        items: _statuses
-                            .map(
-                              (s) => DropdownMenuItem<String>(
-                                value: s,
-                                child: Text(_rotuloStatusFiltro(s)),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() => _statusSelecionado = value);
-                          _carregarEntregas();
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      key: ValueKey('f_motorista_$_filtrosDropdownNonce'),
-                      width: 240,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _filtroMotorista,
-                        decoration: const InputDecoration(
-                          labelText: 'Motorista',
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: 'todos',
-                            child: Text('Todos'),
-                          ),
-                          ...motoristasAtivos.map(
-                            (m) => DropdownMenuItem(
-                              value: m.nome.trim().toLowerCase(),
-                              child: Text(m.nome),
-                            ),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() => _filtroMotorista = value);
-                          _carregarEntregas();
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      key: ValueKey('f_vendedor_$_filtrosDropdownNonce'),
-                      width: 240,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _filtroVendedor,
-                        decoration: const InputDecoration(
-                          labelText: 'Vendedor',
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: 'todos',
-                            child: Text('Todos'),
-                          ),
-                          ..._vendedoresDisponiveis.map(
-                            (nome) => DropdownMenuItem(
-                              value: nome.toLowerCase(),
-                              child: Text(nome),
-                            ),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() => _filtroVendedor = value);
-                          _carregarEntregas();
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      key: ValueKey('f_agrup_$_filtrosDropdownNonce'),
-                      width: 220,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _agrupamento,
-                        decoration: const InputDecoration(
-                          labelText: 'Agrupar por',
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'bairro',
-                            child: Text('Bairro'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'motorista',
-                            child: Text('Motorista'),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() => _agrupamento = value);
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      key: ValueKey('f_dataMarc_$_filtrosDropdownNonce'),
-                      width: 220,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _filtroDataMarcada,
-                        decoration: const InputDecoration(
-                          labelText: 'Data marcada',
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'todos',
-                            child: Text('Todas'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'hoje',
-                            child: Text('Hoje'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'amanha',
-                            child: Text('Amanha'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'sem_data',
-                            child: Text('Sem data marcada'),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() => _filtroDataMarcada = value);
-                          _carregarEntregas();
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 160,
-                      child: TextField(
-                        controller: _numeroNotaController,
-                        decoration: const InputDecoration(
-                          labelText: 'N. da nota',
-                          hintText: 'ex: 1234 ou #1234',
-                          prefixIcon: Icon(Icons.tag_outlined),
-                        ),
-                        keyboardType: TextInputType.number,
-                        onSubmitted: (_) => _carregarEntregas(),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 280,
-                      child: TextField(
-                        controller: _bairroController,
-                        decoration: const InputDecoration(
-                          labelText: 'Filtrar por bairro/endereco',
-                          prefixIcon: Icon(Icons.location_on_outlined),
-                        ),
-                        onSubmitted: (_) => _carregarEntregas(),
-                      ),
-                    ),
-                    OutlinedButton(
-                      onPressed: _carregarEntregas,
-                      child: const Text('Aplicar filtro'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _redefinirFiltrosPadrao,
-                      icon: const Icon(Icons.filter_alt_off_outlined),
-                      label: const Text('Limpar tudo'),
-                    ),
-                    OutlinedButton(
-                      onPressed: _aplicarPeriodoMarcadasParaHoje,
-                      child: const Text('Hoje'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _selecionarPeriodoPersonalizado,
-                      icon: const Icon(Icons.date_range_outlined),
-                      label: const Text('Periodo personalizado'),
-                    ),
-                    Chip(label: Text(_rotuloPeriodoSelecionado())),
-                    FilterChip(
-                      avatar: Icon(
-                        Icons.merge_type_outlined,
-                        color: _modoAgruparMesmoCarro
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
-                      ),
-                      label: Text(
-                        _modoAgruparMesmoCarro
-                            ? 'Mesmo carro (${_idsEntregasSelecionadas.length} sel.)'
-                            : 'Agrupar mesmo carro',
-                      ),
-                      selected: _modoAgruparMesmoCarro,
-                      onSelected: (v) {
-                        setState(() {
-                          _modoAgruparMesmoCarro = v;
-                          if (!v) _idsEntregasSelecionadas.clear();
-                        });
-                      },
-                    ),
-                    if (_modoAgruparMesmoCarro) ...[
-                      Tooltip(
-                        message:
-                            'Somente carreto, mesmo cliente. Marque 2+ entregas.',
-                        child: FilledButton.icon(
-                          onPressed: _idsEntregasSelecionadas.length >= 2
-                              ? _confirmarAgrupamentoMesmoCarro
-                              : null,
-                          icon: const Icon(Icons.local_shipping_outlined),
-                          label: const Text('Confirmar agrupamento'),
-                        ),
-                      ),
-                      OutlinedButton(
-                        onPressed: () =>
-                            setState(_idsEntregasSelecionadas.clear),
-                        child: const Text('Limpar selecao'),
-                      ),
-                      OutlinedButton(
-                        onPressed: _removerAgrupamentoSelecionadas,
-                        child: const Text('Tirar agrupamento'),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
             if (mostrarChipsResumo)
               Card(
                 child: Padding(
@@ -2124,7 +1853,8 @@ class _EntregasPageState extends State<EntregasPage> {
                         ),
                         label: Text('Atrasadas: $atrasadas'),
                         selected:
-                            _filtroResumoLista == _FiltroResumoEntregas.atrasadas,
+                            _filtroResumoLista ==
+                            _FiltroResumoEntregas.atrasadas,
                         onSelected: (ligar) {
                           setState(() {
                             _filtroResumoLista = ligar
@@ -2142,7 +1872,8 @@ class _EntregasPageState extends State<EntregasPage> {
                               : Colors.grey,
                         ),
                         label: Text('Pendentes hoje: $pendentesHoje'),
-                        selected: _filtroResumoLista ==
+                        selected:
+                            _filtroResumoLista ==
                             _FiltroResumoEntregas.pendentesHoje,
                         onSelected: (ligar) {
                           setState(() {
@@ -2158,6 +1889,244 @@ class _EntregasPageState extends State<EntregasPage> {
                 ),
               ),
             if (mostrarChipsResumo) const SizedBox(height: 10),
+            ExpansionTile(
+              initiallyExpanded: false,
+              leading: const Icon(Icons.tune_outlined),
+              title: const Text('Filtros e periodo'),
+              children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        SizedBox(
+                          key: ValueKey('f_status_$_filtrosDropdownNonce'),
+                          width: 220,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _statusSelecionado,
+                            decoration: const InputDecoration(
+                              labelText: 'Status',
+                            ),
+                            items: _statuses
+                                .map(
+                                  (s) => DropdownMenuItem<String>(
+                                    value: s,
+                                    child: Text(_rotuloStatusFiltro(s)),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setState(() => _statusSelecionado = value);
+                              _carregarEntregas();
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          key: ValueKey('f_motorista_$_filtrosDropdownNonce'),
+                          width: 240,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _filtroMotorista,
+                            decoration: const InputDecoration(
+                              labelText: 'Motorista',
+                            ),
+                            items: [
+                              const DropdownMenuItem(
+                                value: 'todos',
+                                child: Text('Todos'),
+                              ),
+                              ...motoristasAtivos.map(
+                                (m) => DropdownMenuItem(
+                                  value: m.nome.trim().toLowerCase(),
+                                  child: Text(m.nome),
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setState(() => _filtroMotorista = value);
+                              _carregarEntregas();
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          key: ValueKey('f_vendedor_$_filtrosDropdownNonce'),
+                          width: 240,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _filtroVendedor,
+                            decoration: const InputDecoration(
+                              labelText: 'Vendedor',
+                            ),
+                            items: [
+                              const DropdownMenuItem(
+                                value: 'todos',
+                                child: Text('Todos'),
+                              ),
+                              ..._vendedoresDisponiveis.map(
+                                (nome) => DropdownMenuItem(
+                                  value: nome.toLowerCase(),
+                                  child: Text(nome),
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setState(() => _filtroVendedor = value);
+                              _carregarEntregas();
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          key: ValueKey('f_agrup_$_filtrosDropdownNonce'),
+                          width: 220,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _agrupamento,
+                            decoration: const InputDecoration(
+                              labelText: 'Agrupar por',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'bairro',
+                                child: Text('Bairro'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'motorista',
+                                child: Text('Motorista'),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setState(() => _agrupamento = value);
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          key: ValueKey('f_dataMarc_$_filtrosDropdownNonce'),
+                          width: 220,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _filtroDataMarcada,
+                            decoration: const InputDecoration(
+                              labelText: 'Data marcada',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'todos',
+                                child: Text('Todas'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'hoje',
+                                child: Text('Hoje'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'amanha',
+                                child: Text('Amanha'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'sem_data',
+                                child: Text('Sem data marcada'),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setState(() => _filtroDataMarcada = value);
+                              _carregarEntregas();
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          width: 160,
+                          child: TextField(
+                            controller: _numeroNotaController,
+                            decoration: const InputDecoration(
+                              labelText: 'N. da nota',
+                              hintText: 'ex: 1234 ou #1234',
+                              prefixIcon: Icon(Icons.tag_outlined),
+                            ),
+                            keyboardType: TextInputType.number,
+                            onSubmitted: (_) => _carregarEntregas(),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 280,
+                          child: TextField(
+                            controller: _bairroController,
+                            decoration: const InputDecoration(
+                              labelText: 'Filtrar por bairro/endereco',
+                              prefixIcon: Icon(Icons.location_on_outlined),
+                            ),
+                            onSubmitted: (_) => _carregarEntregas(),
+                          ),
+                        ),
+                        OutlinedButton(
+                          onPressed: _carregarEntregas,
+                          child: const Text('Aplicar filtro'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _redefinirFiltrosPadrao,
+                          icon: const Icon(Icons.filter_alt_off_outlined),
+                          label: const Text('Limpar tudo'),
+                        ),
+                        OutlinedButton(
+                          onPressed: _aplicarPeriodoMarcadasParaHoje,
+                          child: const Text('Hoje'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _selecionarPeriodoPersonalizado,
+                          icon: const Icon(Icons.date_range_outlined),
+                          label: const Text('Periodo personalizado'),
+                        ),
+                        Chip(label: Text(_rotuloPeriodoSelecionado())),
+                        FilterChip(
+                          avatar: Icon(
+                            Icons.merge_type_outlined,
+                            color: _modoAgruparMesmoCarro
+                                ? Theme.of(context).colorScheme.primary
+                                : null,
+                          ),
+                          label: Text(
+                            _modoAgruparMesmoCarro
+                                ? 'Mesmo carro (${_idsEntregasSelecionadas.length} sel.)'
+                                : 'Agrupar mesmo carro',
+                          ),
+                          selected: _modoAgruparMesmoCarro,
+                          onSelected: (v) {
+                            setState(() {
+                              _modoAgruparMesmoCarro = v;
+                              if (!v) _idsEntregasSelecionadas.clear();
+                            });
+                          },
+                        ),
+                        if (_modoAgruparMesmoCarro) ...[
+                          Tooltip(
+                            message:
+                                'Somente carreto, mesmo cliente. Marque 2+ entregas.',
+                            child: FilledButton.icon(
+                              onPressed: _idsEntregasSelecionadas.length >= 2
+                                  ? _confirmarAgrupamentoMesmoCarro
+                                  : null,
+                              icon: const Icon(Icons.local_shipping_outlined),
+                              label: const Text('Confirmar agrupamento'),
+                            ),
+                          ),
+                          OutlinedButton(
+                            onPressed: () =>
+                                setState(_idsEntregasSelecionadas.clear),
+                            child: const Text('Limpar selecao'),
+                          ),
+                          OutlinedButton(
+                            onPressed: _removerAgrupamentoSelecionadas,
+                            child: const Text('Tirar agrupamento'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
             if (_entregas.isNotEmpty)
               Card(
                 child: Padding(
@@ -2177,11 +2146,13 @@ class _EntregasPageState extends State<EntregasPage> {
                             .map(
                               (dia) => FilterChip(
                                 label: Text('$dia: ${resumoPorDia[dia]}'),
-                                selected: _chaveDiaPlanejamentoSelecionado == dia,
+                                selected:
+                                    _chaveDiaPlanejamentoSelecionado == dia,
                                 onSelected: (ligar) {
                                   setState(() {
-                                    _chaveDiaPlanejamentoSelecionado =
-                                        ligar ? dia : null;
+                                    _chaveDiaPlanejamentoSelecionado = ligar
+                                        ? dia
+                                        : null;
                                   });
                                 },
                               ),
@@ -2196,12 +2167,12 @@ class _EntregasPageState extends State<EntregasPage> {
                           runSpacing: 8,
                           children: [
                             OutlinedButton.icon(
-                              onPressed: _abrirRomaneioDoDia,
+                              onPressed: _abrirRomaneioVisual,
                               icon: const Icon(Icons.assignment_outlined),
-                              label: const Text('Ver romaneio de hoje'),
+                              label: const Text('Ver romaneio'),
                             ),
                             ElevatedButton.icon(
-                              onPressed: _exportarOuImprimirRomaneioHoje,
+                              onPressed: _exportarOuImprimirRomaneio,
                               icon: const Icon(Icons.picture_as_pdf_outlined),
                               label: const Text('Imprimir/Exportar romaneio'),
                             ),
@@ -2214,61 +2185,78 @@ class _EntregasPageState extends State<EntregasPage> {
               ),
             if (_entregas.isNotEmpty) const SizedBox(height: 10),
             Expanded(
-              child: _entregas.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'Nenhuma entrega encontrada para os filtros.',
-                      ),
-                    )
-                  : listaExibicao.isEmpty
-                  ? Center(
-                      child: Text(
-                        _chaveDiaPlanejamentoSelecionado == null
-                            ? 'Nenhuma entrega encontrada para os filtros.'
-                            : 'Nenhuma entrega para o dia selecionado no planejamento.',
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: gruposLista.length,
-                      itemBuilder: (context, bairroIndex) {
-                        final grupo = gruposLista[bairroIndex];
-                        final vendasBairro =
-                            groupedLista[grupo] ?? const <Venda>[];
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
-                              child: Text(
-                                '${_agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}: $grupo (${vendasBairro.length})',
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
+              child: RefreshIndicator(
+                onRefresh: _atualizarListaEntregas,
+                child: _entregas.isEmpty
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: const [
+                          SizedBox(height: 48),
+                          Center(
+                            child: Text(
+                              'Nenhuma entrega encontrada para os filtros.',
                             ),
-                            for (final bloco in _blocosEntregaComCarretoAgrupado(
-                              vendasBairro,
-                            ))
-                              if (bloco.length >= 2 &&
-                                  bloco.first.grupoEntregaFreteId > 0)
-                                _buildPainelGrupoCarretoLista(
-                                  bloco,
-                                  dateFormat,
-                                  dataMarcadaFmt,
-                                )
-                              else
-                                ...bloco.map(
-                                  (v) => _buildCardEntrega(
-                                    v,
+                          ),
+                        ],
+                      )
+                    : listaExibicao.isEmpty
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          const SizedBox(height: 48),
+                          Center(
+                            child: Text(
+                              _chaveDiaPlanejamentoSelecionado == null
+                                  ? 'Nenhuma entrega encontrada para os filtros.'
+                                  : 'Nenhuma entrega para o dia selecionado no planejamento.',
+                            ),
+                          ),
+                        ],
+                      )
+                    : ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        itemCount: gruposLista.length,
+                        itemBuilder: (context, bairroIndex) {
+                          final grupo = gruposLista[bairroIndex];
+                          final vendasBairro =
+                              groupedLista[grupo] ?? const <Venda>[];
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
+                                child: Text(
+                                  '${_agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}: $grupo (${vendasBairro.length})',
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                              ),
+                              for (final bloco
+                                  in blocosEntregaComCarretoAgrupado(
+                                    vendasBairro,
+                                  ))
+                                if (bloco.length >= 2 &&
+                                    bloco.first.grupoEntregaFreteId > 0)
+                                  _buildPainelGrupoCarretoLista(
+                                    bloco,
                                     dateFormat,
                                     dataMarcadaFmt,
-                                    modoSelecao: _modoAgruparMesmoCarro,
-                                    selecionada:
-                                        _idsEntregasSelecionadas.contains(v.id),
+                                  )
+                                else
+                                  ...bloco.map(
+                                    (v) => _buildCardEntrega(
+                                      v,
+                                      dateFormat,
+                                      dataMarcadaFmt,
+                                      modoSelecao: _modoAgruparMesmoCarro,
+                                      selecionada: _idsEntregasSelecionadas
+                                          .contains(v.id),
+                                    ),
                                   ),
-                                ),
-                          ],
-                        );
-                      },
-                    ),
+                            ],
+                          );
+                        },
+                      ),
+              ),
             ),
           ],
         ),

@@ -1,6 +1,7 @@
 import '../model/cliente.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'sync/sync_write_trigger.dart';
 
 class ClienteRepository {
   ClienteRepository(this._db);
@@ -33,9 +34,19 @@ class ClienteRepository {
     }).toList();
   }
 
-  int salvar(Cliente cliente) => _db.clienteBox.put(cliente);
+  int salvar(Cliente cliente) {
+    final id = _db.clienteBox.put(cliente);
+    notificarAlteracaoParaRede();
+    return id;
+  }
 
-  bool remover(int id) => _db.clienteBox.remove(id);
+  bool remover(int id) {
+    final ok = _db.clienteBox.remove(id);
+    if (ok) {
+      notificarAlteracaoParaRede();
+    }
+    return ok;
+  }
 
   Cliente? obterPorId(int id) => _db.clienteBox.get(id);
 }

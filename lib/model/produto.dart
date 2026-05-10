@@ -28,6 +28,7 @@ class Produto {
     this.preco3 = 0,
     required this.precoVenda,
     DateTime? criadoEm,
+    this.ativo = true,
   })  : estoqueReal = estoqueReal ?? estoque ?? 0,
         criadoEm = criadoEm ?? DateTime.now();
 
@@ -73,6 +74,9 @@ class Produto {
 
   @Property(type: PropertyType.dateUtc)
   DateTime criadoEm;
+
+  /// Quando `false`, o produto nao aparece no PDV/pesquisa de venda, mas permanece no cadastro e no historico.
+  bool ativo;
 
   // Mantem compatibilidade com o codigo legado enquanto a migracao
   // para estoqueReal/estoqueReservado e finalizada.

@@ -136,6 +136,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
   String? _categoriaSelecionada;
   String? _subcategoriaSelecionada;
   int? _produtoEmEdicaoId;
+  bool _produtoAtivo = true;
   bool _gerarSkuAutomatico = true;
   final _formKey = GlobalKey<FormState>();
   bool _tentouSalvar = false;
@@ -221,6 +222,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
         _unidadeSelecionada != 'UN' ||
         _categoriaSelecionada != null ||
         _subcategoriaSelecionada != null ||
+        !_produtoAtivo ||
         _fotoPathAtual.trim().isNotEmpty ||
         (_fotoOrigemLocalPath?.trim().isNotEmpty ?? false) ||
         _subcategoriaLivreController.text.trim().isNotEmpty;
@@ -348,6 +350,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
       _categoriaSelecionada = null;
       _subcategoriaSelecionada = null;
       _produtoEmEdicaoId = null;
+      _produtoAtivo = true;
       _gerarSkuAutomatico = true;
       _tentouSalvar = false;
       _fotoPathAtual = '';
@@ -910,6 +913,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
       ncm: ncm,
       estoque: estoque,
       quantidadeMinima: quantidadeMinima,
+      ativo: _produtoAtivo,
       precoCusto: precoCusto!,
       custoMedio: custoMedioVal < 0 ? 0.0 : custoMedioVal,
       preco1: preco1!,
@@ -977,6 +981,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
       _estoqueController.text = produto.estoque.toString();
       _quantidadeMinimaController.text = produto.quantidadeMinima.toString();
       _unidadeSelecionada = _normalizarUnidade(produto.unidade);
+      _produtoAtivo = produto.ativo;
       _status = 'Editando produto: ${produto.nome}';
       _statusEhErro = false;
       _gerarSkuAutomatico = false;
@@ -1567,6 +1572,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
         preco3: preco3Imp,
         precoVenda: preco,
         criadoEm: existente?.criadoEm,
+        ativo: existente?.ativo ?? true,
       );
       widget.produtoRepository.salvar(produto);
       if (existente != null) {
@@ -1623,9 +1629,12 @@ class _ProdutosPageState extends State<ProdutosPage> {
     final pesquisaController = TextEditingController();
     final resultadosScrollController = ScrollController();
     final pesquisaFocusNode = FocusNode();
+    var somenteInativosLista = false;
     List<Produto> resultados = widget.produtoRepository.pesquisar(
       '',
       limite: 80,
+      somenteAtivos: !somenteInativosLista,
+      somenteInativos: somenteInativosLista,
     );
     int indiceSelecionado = resultados.isEmpty ? -1 : 0;
 
@@ -1733,6 +1742,52 @@ class _ProdutosPageState extends State<ProdutosPage> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              height: 28,
+                              width: 28,
+                              child: Checkbox(
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                visualDensity: VisualDensity.compact,
+                                value: somenteInativosLista,
+                                onChanged: (v) {
+                                  if (v == null) return;
+                                  setDialogState(() {
+                                    somenteInativosLista = v;
+                                    resultados =
+                                        widget.produtoRepository.pesquisar(
+                                      pesquisaController.text,
+                                      limite: 80,
+                                      somenteAtivos: !somenteInativosLista,
+                                      somenteInativos: somenteInativosLista,
+                                    );
+                                    indiceSelecionado =
+                                        resultados.isEmpty ? -1 : 0;
+                                  });
+                                  WidgetsBinding.instance
+                                      .addPostFrameCallback((_) {
+                                    if (resultadosScrollController.hasClients) {
+                                      resultadosScrollController.jumpTo(0);
+                                    }
+                                  });
+                                },
+                              ),
+                            ),
+                            Flexible(
+                              child: Text(
+                                'Somente inativos',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
                       TextField(
                         controller: pesquisaController,
                         focusNode: pesquisaFocusNode,
@@ -1746,6 +1801,8 @@ class _ProdutosPageState extends State<ProdutosPage> {
                             resultados = widget.produtoRepository.pesquisar(
                               value,
                               limite: 80,
+                              somenteAtivos: !somenteInativosLista,
+                              somenteInativos: somenteInativosLista,
                             );
                             indiceSelecionado = resultados.isEmpty ? -1 : 0;
                           });
@@ -1819,7 +1876,8 @@ class _ProdutosPageState extends State<ProdutosPage> {
                                       ),
                                       subtitle: RichText(
                                         text: spanComDestaque(
-                                          'SKU: ${produto.codigoInterno} | Categoria: ${produto.categoria.isEmpty ? '-' : produto.categoria}',
+                                          'SKU: ${produto.codigoInterno} | Categoria: ${produto.categoria.isEmpty ? '-' : produto.categoria}'
+                                          '${produto.ativo ? '' : ' · Inativo'}',
                                           consulta,
                                           estiloSubtitulo,
                                         ),
@@ -2322,6 +2380,15 @@ class _ProdutosPageState extends State<ProdutosPage> {
                   ),
                 ),
               ],
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Produto ativo na venda'),
+              subtitle: const Text(
+                'Inativo permanece no cadastro e no historico, mas nao aparece no PDV.',
+              ),
+              value: _produtoAtivo,
+              onChanged: (v) => setState(() => _produtoAtivo = v),
             ),
             const SizedBox(height: 12),
             Row(

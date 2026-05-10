@@ -44,6 +44,7 @@ class ObjectBox {
   late final Box<Vendedor> vendedorBox;
   late final Box<Funcionario> funcionarioBox;
   late final Directory productImagesDir;
+  late final String storeDirectoryPath;
 
   static Future<ObjectBox> create() async {
     final baseDir = Platform.isWindows
@@ -61,6 +62,7 @@ class ObjectBox {
     final store = await openStore(directory: objectBoxDir.path);
     final instance = ObjectBox._create(store);
     instance.productImagesDir = productImagesDir;
+    instance.storeDirectoryPath = objectBoxDir.path;
     return instance;
   }
 }

@@ -15,6 +15,7 @@ import '../data/cliente_repository.dart';
 import '../data/mensageria_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
+import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../domain/pagamento_orcamento.dart';
@@ -2176,6 +2177,8 @@ class _CaixaPageState extends State<CaixaPage> {
         venda.id,
         permitirVendaSemEstoque: _permitirVendaSemEstoque,
       );
+      await LanSyncScheduler.solicitarSyncImediato();
+      if (!mounted) return;
       final vendaFinalizada = widget.vendaRepository.obterPorId(venda.id) ?? venda;
       final clienteId = vendaFinalizada.cliente.targetId;
       if (clienteId != 0) {
@@ -2199,9 +2202,13 @@ class _CaixaPageState extends State<CaixaPage> {
         _tipoDesconto = 'percentual';
         _valorRecebido = null;
       });
+      final numCupom =
+          vendaFinalizada.numeroOrcamento > 0
+              ? vendaFinalizada.numeroOrcamento
+              : venda.numeroOrcamento;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Venda #${venda.numeroOrcamento} finalizada.'),
+          content: Text('Venda #$numCupom finalizada.'),
         ),
       );
       await _mostrarAcoesNotaPosVenda(

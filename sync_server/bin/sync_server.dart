@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
+import 'package:shelf_web_socket/shelf_web_socket.dart';
 import 'package:sqlite3/sqlite3.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Servidor de sincronizacao na LAN.
 ///
@@ -17,6 +20,9 @@ import 'package:sqlite3/sqlite3.dart';
 ///   PORT — porta (padrao 8787)
 ///   SYNC_DB_PATH — caminho do arquivo SQLite
 late Database _db;
+
+/// Clientes WebSocket para aviso instantaneo de novas revisoes apos push.
+final List<StreamSink<Object?>> _wsClientes = [];
 
 /// Pasta do .exe (AOT) ou pasta atual ao rodar com `dart run`.
 String _diretorioBaseInstalacao() {
@@ -45,6 +51,18 @@ void main(List<String> args) async {
     ..get('/health', _health)
     ..get('/sync/meta', _meta)
     ..get('/sync/pull', _pull)
+    ..get(
+      '/sync/stream',
+      webSocketHandler((WebSocketChannel channel, _) {
+        final sink = channel.sink;
+        _wsClientes.add(sink);
+        channel.stream.listen(
+          (_) {},
+          onDone: () => _wsClientes.remove(sink),
+          onError: (_) => _wsClientes.remove(sink),
+        );
+      }),
+    )
     ..post('/sync/push', _push);
 
   final handler =
@@ -53,8 +71,18 @@ void main(List<String> args) async {
   final server = await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
   // ignore: avoid_print
   print(
-    'sistema_vendas sync server | db=$dbPath | http://${server.address.address}:$port',
+    'sistema_vendas sync server | db=$dbPath | '
+    'http://${server.address.address}:$port | ws=/sync/stream',
   );
+}
+
+void _broadcastNovaRevision(int revision) {
+  final msg = jsonEncode({'type': 'revision', 'revision': revision});
+  for (final sink in List<StreamSink<Object?>>.from(_wsClientes)) {
+    try {
+      sink.add(msg);
+    } catch (_) {}
+  }
 }
 
 void _initSchema(Database db) {
@@ -77,9 +105,64 @@ CREATE TABLE IF NOT EXISTS id_map (
   PRIMARY KEY (device_id, entity, local_id)
 );
 ''');
+  db.execute('''
+CREATE TABLE IF NOT EXISTS orcamento_seq (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  next_num INTEGER NOT NULL
+);
+''');
   db.execute(
     'CREATE INDEX IF NOT EXISTS idx_changelog_entity ON changelog (entity, entity_id);',
   );
+  db.execute(
+    'INSERT OR IGNORE INTO orcamento_seq (id, next_num) VALUES (1, 1);',
+  );
+  _alinharOrcamentoSeqAoHistorico(db);
+}
+
+/// Garante que o proximo numero emitido pelo servidor seja > qualquer orcamento ja gravado.
+void _alinharOrcamentoSeqAoHistorico(Database db) {
+  final rs = db.select(
+    'SELECT payload FROM changelog WHERE entity = ?',
+    ['venda'],
+  );
+  var maxN = 0;
+  for (final row in rs) {
+    try {
+      final raw = row['payload'];
+      if (raw == null) continue;
+      final j = jsonDecode(raw.toString()) as Map<String, dynamic>;
+      final n = (j['numeroOrcamento'] as num?)?.toInt() ?? 0;
+      if (n > maxN) maxN = n;
+    } catch (_) {}
+  }
+  if (maxN <= 0) return;
+  final sel = db.select('SELECT next_num FROM orcamento_seq WHERE id = 1');
+  final atual = sel.isEmpty ? 1 : (sel.first['next_num'] as int?) ?? 1;
+  if (maxN >= atual) {
+    db.execute(
+      'UPDATE orcamento_seq SET next_num = ? WHERE id = 1',
+      [maxN + 1],
+    );
+  }
+}
+
+/// Proximo numero de orcamento unico na rede (transacao BEGIN IMMEDIATE ja deve estar ativa).
+int _alocarNumeroOrcamentoServidor(Database db) {
+  final sel = db.prepare('SELECT next_num FROM orcamento_seq WHERE id = 1');
+  final rs = sel.select([]);
+  sel.dispose();
+  if (rs.isEmpty) {
+    db.execute(
+      'INSERT OR REPLACE INTO orcamento_seq (id, next_num) VALUES (1, 2);',
+    );
+    return 1;
+  }
+  final atual = (rs.first['next_num'] as int?) ?? 1;
+  db.execute(
+    'UPDATE orcamento_seq SET next_num = next_num + 1 WHERE id = 1',
+  );
+  return atual;
 }
 
 Response _health(Request request) {
@@ -92,7 +175,7 @@ Response _health(Request request) {
 Response _meta(Request request) {
   final now = DateTime.now().toUtc().toIso8601String();
   return Response.ok(
-    jsonEncode({'serverTime': now, 'schemaVersion': 1}),
+    jsonEncode({'serverTime': now, 'schemaVersion': 2}),
     headers: {'content-type': 'application/json'},
   );
 }
@@ -167,6 +250,7 @@ Future<Response> _push(Request request) async {
   }
 
   final mappings = <Map<String, dynamic>>[];
+  final numeroCorrections = <Map<String, dynamic>>[];
   final now = DateTime.now().millisecondsSinceEpoch;
 
   try {
@@ -205,6 +289,7 @@ Future<Response> _push(Request request) async {
           : <String, dynamic>{};
 
       var globalId = 0;
+      var vendaNovaNaRede = false;
 
       final existing = _db.select(
         'SELECT global_id FROM id_map WHERE device_id = ? AND entity = ? AND local_id = ?',
@@ -214,6 +299,7 @@ Future<Response> _push(Request request) async {
         globalId = existing.first['global_id'] as int;
       } else {
         globalId = _allocateGlobalId(_db, entity);
+        vendaNovaNaRede = entity == 'venda';
         final ins = _db.prepare(
           'INSERT OR REPLACE INTO id_map (device_id, entity, local_id, global_id) VALUES (?, ?, ?, ?)',
         );
@@ -230,6 +316,15 @@ Future<Response> _push(Request request) async {
       }
 
       payload['id'] = globalId;
+
+      if (entity == 'venda' && vendaNovaNaRede) {
+        final servidorNum = _alocarNumeroOrcamentoServidor(_db);
+        payload['numeroOrcamento'] = servidorNum;
+        numeroCorrections.add({
+          'globalId': globalId,
+          'numeroOrcamento': servidorNum,
+        });
+      }
 
       final stmt = _db.prepare(
         'INSERT INTO changelog (entity, entity_id, op, payload, ts) VALUES (?, ?, ?, ?, ?)',
@@ -260,11 +355,14 @@ Future<Response> _push(Request request) async {
   final appliedRevision =
       maxRevRs.isEmpty ? 0 : (maxRevRs.first['r'] as int?) ?? 0;
 
+  _broadcastNovaRevision(appliedRevision);
+
   return Response.ok(
     jsonEncode({
       'ok': true,
       'appliedRevision': appliedRevision,
       'mappings': mappings,
+      'numeroCorrections': numeroCorrections,
     }),
     headers: {'content-type': 'application/json'},
   );

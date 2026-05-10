@@ -75,7 +75,7 @@
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "26:6338301039957375252",
+      "lastPropertyId": "27:6227758820947378730",
       "name": "Produto",
       "properties": [
         {
@@ -203,6 +203,11 @@
           "id": "26:6338301039957375252",
           "name": "custoMedio",
           "type": 8
+        },
+        {
+          "id": "27:6227758820947378730",
+          "name": "ativo",
+          "type": 1
         }
       ],
       "relations": []

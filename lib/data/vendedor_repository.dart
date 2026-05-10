@@ -1,6 +1,7 @@
 import '../model/vendedor.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'sync/sync_write_trigger.dart';
 
 class VendedorRepository {
   VendedorRepository(this._db);
@@ -34,9 +35,19 @@ class VendedorRepository {
     }).toList();
   }
 
-  int salvar(Vendedor vendedor) => _db.vendedorBox.put(vendedor);
+  int salvar(Vendedor vendedor) {
+    final id = _db.vendedorBox.put(vendedor);
+    notificarAlteracaoParaRede();
+    return id;
+  }
 
-  bool remover(int id) => _db.vendedorBox.remove(id);
+  bool remover(int id) {
+    final ok = _db.vendedorBox.remove(id);
+    if (ok) {
+      notificarAlteracaoParaRede();
+    }
+    return ok;
+  }
 
   Vendedor? obterPorId(int id) => _db.vendedorBox.get(id);
 

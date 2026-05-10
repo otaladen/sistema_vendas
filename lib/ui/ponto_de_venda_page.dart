@@ -12,6 +12,7 @@ import '../domain/pagamento_orcamento.dart';
 import '../data/app_config_repository.dart';
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
+import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
@@ -288,7 +289,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       if (adicionouViaComandoRapido) {
         setState(() {
           _pesquisaController.clear();
-          _produtos = widget.produtoRepository.listarTodos();
+          _produtos = widget.produtoRepository.listarTodos(somenteAtivos: true);
           _indiceListaProduto = _produtos.isEmpty ? null : 0;
         });
       }
@@ -813,7 +814,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
 
   void _carregarDadosIniciais() {
     setState(() {
-      _produtos = widget.produtoRepository.listarTodos();
+      _produtos = widget.produtoRepository.listarTodos(somenteAtivos: true);
       _clientes = widget.clienteRepository
           .listarTodos()
           .where((c) => c.ativo)
@@ -1612,6 +1613,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
               _enderecosClienteSelecionado().isNotEmpty) ...[
             const SizedBox(height: 8),
             DropdownButtonFormField<int>(
+              isExpanded: true,
               initialValue: _indiceEnderecoSelecionado.clamp(
                 0,
                 _enderecosClienteSelecionado().length - 1,
@@ -1619,6 +1621,31 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
               decoration: const InputDecoration(
                 labelText: 'Endereco para entrega',
               ),
+              selectedItemBuilder: (context) {
+                final enderecos = _enderecosClienteSelecionado();
+                return List.generate(enderecos.length, (index) {
+                  final endereco = enderecos[index];
+                  final rotulo = endereco.rotulo.trim().isNotEmpty
+                      ? endereco.rotulo.trim()
+                      : 'Endereco ${index + 1}';
+                  final resumo = endereco.resumo();
+                  final texto =
+                      resumo.isEmpty ? rotulo : '$rotulo - $resumo';
+                  return Tooltip(
+                    message: texto,
+                    waitDuration: const Duration(milliseconds: 400),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        texto,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                      ),
+                    ),
+                  );
+                });
+              },
               items: List.generate(_enderecosClienteSelecionado().length, (
                 index,
               ) {
@@ -1632,6 +1659,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                   child: Text(
                     resumo.isEmpty ? rotulo : '$rotulo - $resumo',
                     overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
                   ),
                 );
               }),
@@ -2028,6 +2056,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       );
       final orcamentoEdicaoId = _orcamentoEmEdicaoId;
       int orcamentoId;
+      final descontoPdV = _valorDescontoReaisPdV();
       if (orcamentoEdicaoId != null) {
         widget.vendaRepository.atualizarOrcamento(
           orcamentoEdicaoId,
@@ -2036,6 +2065,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           entrega: entrega,
           clienteId: _clienteSelecionadoId,
           vendedorId: _vendedorSelecionadoId,
+          descontoEmReais: descontoPdV,
         );
         orcamentoId = orcamentoEdicaoId;
       } else {
@@ -2045,15 +2075,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
           entrega: entrega,
           clienteId: _clienteSelecionadoId,
           vendedorId: _vendedorSelecionadoId,
+          descontoEmReais: descontoPdV,
         );
       }
-      final descontoPdV = _valorDescontoReaisPdV();
-      if (descontoPdV > 0.009) {
-        widget.vendaRepository.aplicarDescontoNoOrcamento(
-          orcamentoId,
-          descontoPdV,
-        );
-      }
+      await LanSyncScheduler.solicitarSyncImediato();
+      if (!mounted) return;
       final vendaSalva = widget.vendaRepository.obterPorId(orcamentoId);
       final numeroOrcamentoSalvo =
           vendaSalva?.numeroOrcamento ?? _orcamentoEmEdicaoNumero;

@@ -10,6 +10,7 @@ import 'entregas_page.dart';
 import 'listagem_vendas_page.dart';
 import 'ponto_de_venda_page.dart';
 import 'relatorios_page.dart';
+import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
 
 const Color _corPontoDeVenda = Color(0xFF2E7D32);
@@ -27,6 +28,7 @@ class VendasPage extends StatelessWidget {
     required this.vendedorRepository,
     required this.motoristaRepository,
     required this.usuarioAtual,
+    required this.onLogout,
     required this.podeLeituraParcialCaixa,
     required this.podeManutencaoAuditoriaCaixa,
     required this.podeCancelarVendas,
@@ -39,6 +41,7 @@ class VendasPage extends StatelessWidget {
   final VendedorRepository vendedorRepository;
   final MotoristaRepository motoristaRepository;
   final String usuarioAtual;
+  final VoidCallback onLogout;
   final bool podeLeituraParcialCaixa;
   final bool podeManutencaoAuditoriaCaixa;
   final bool podeCancelarVendas;
@@ -47,7 +50,12 @@ class VendasPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Vendas')),
+      appBar: AppBar(
+        title: const Text('Vendas'),
+        actions: [
+          ContaSessaoAppBarActions(login: usuarioAtual, onLogout: onLogout),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -87,7 +95,8 @@ class VendasPage extends StatelessWidget {
                       vendedorRepository: vendedorRepository,
                       usuarioAtual: usuarioAtual,
                       podeLeituraParcialCaixa: podeLeituraParcialCaixa,
-                      podeManutencaoAuditoriaCaixa: podeManutencaoAuditoriaCaixa,
+                      podeManutencaoAuditoriaCaixa:
+                          podeManutencaoAuditoriaCaixa,
                     ),
                   ),
                 );

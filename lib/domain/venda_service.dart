@@ -87,6 +87,7 @@ class VendaService {
     DadosEntregaOrcamento? entrega,
     int? clienteId,
     int? vendedorId,
+    double descontoEmReais = 0,
   }) {
     return _vendaRepository.registrarOrcamento(
       itens,
@@ -96,6 +97,7 @@ class VendaService {
           DadosEntregaOrcamento(tipoEntrega: 'retirada', valorFrete: 0),
       clienteId: clienteId,
       vendedorId: vendedorId,
+      descontoEmReais: descontoEmReais,
     );
   }
 
