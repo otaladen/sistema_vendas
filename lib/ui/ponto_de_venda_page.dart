@@ -2574,9 +2574,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     final dataHora = DateFormat('dd/MM/yyyy HH:mm').format(dataEmissao);
     final validade = dataEmissao.add(Duration(days: _validadeOrcamentoDias));
     final validadeFmt = DateFormat('dd/MM/yyyy').format(validade);
-    final subtotalProdutos = (venda.total - venda.valorFrete)
-        .clamp(0, double.infinity)
-        .toDouble();
+    final descontoOrcamento = venda.descontoImplicitoTotal;
     doc.addPage(
       pw.Page(
         pageFormat: empresa.modeloPdf == 'a4'
@@ -2690,13 +2688,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
               ),
               pw.Divider(),
               pw.Text(
-                'Subtotal: ${_formatarMoeda(subtotalProdutos)}',
+                'Subtotal produtos: ${_formatarMoeda(venda.somaSubtotalItens)}',
                 style: const pw.TextStyle(fontSize: 9),
               ),
               pw.Text(
                 'Frete: ${_formatarMoeda(venda.valorFrete)}',
                 style: const pw.TextStyle(fontSize: 9),
               ),
+              if (descontoOrcamento > 0)
+                pw.Text(
+                  'Desconto: - ${_formatarMoeda(descontoOrcamento)}',
+                  style: const pw.TextStyle(fontSize: 9),
+                ),
               pw.Text(
                 'Total: ${_formatarMoeda(venda.total)}',
                 style: pw.TextStyle(

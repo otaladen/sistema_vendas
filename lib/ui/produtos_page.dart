@@ -23,6 +23,25 @@ class ProdutosPage extends StatefulWidget {
 }
 
 class _ProdutosPageState extends State<ProdutosPage> {
+  static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+
+  static ButtonStyle get _estiloBotaoElevadoCompacto => ElevatedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+
+  /// Larguras fixas para dados curtos (nao esticar ate metade da tela).
+  static const double _wQtdInteira = 158;
+  static const double _wNcm = 200;
+  static const double _wMoeda = 182;
+
   static const List<String> _unidades = ['UN', 'M', 'M2', 'M3', 'KG', 'SC', 'CX', 'LT'];
   static const String _categoriaOutros = 'Outros';
   static const Map<String, List<String>> _categoriasMateriaisConstrucao = {
@@ -1379,7 +1398,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
                         setSt(() => atualizarExistentes = v ?? true);
                       },
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     const Text(
                       'Paradox TabEst1: Codigo, CodInterno ou CodEx, Produto, PrecoVenda, Quantidade, '
                       'PrecoCusto, CustoMedio, EstMinimo, Fabricante, Unidade, Obs (opcionais).\n'
@@ -1940,7 +1959,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
             ? AutovalidateMode.always
             : AutovalidateMode.disabled,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
           child: RawScrollbar(
             controller: _scrollController,
             thumbVisibility: true,
@@ -1954,7 +1973,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
               padding: const EdgeInsets.only(right: 10),
               children: [
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
@@ -1970,17 +1989,17 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 children: [
                   Icon(
                     Icons.inventory_2_outlined,
-                    size: 30,
+                    size: 24,
                     color: theme.colorScheme.primary,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Cadastro de Produtos',
-                          style: theme.textTheme.titleLarge?.copyWith(
+                          style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -1995,49 +2014,55 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 ],
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 6),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
+                style: _estiloBotaoContornoCompacto,
                 onPressed: _abrirPesquisaProduto,
-                icon: const Icon(Icons.search),
+                icon: const Icon(Icons.search, size: 18),
                 label: const Text('Pesquisar produto'),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
+                    style: _estiloBotaoContornoCompacto,
                     onPressed: _irParaPrimeiroProduto,
                     child: const Text('|< Primeiro'),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Expanded(
                   child: OutlinedButton(
+                    style: _estiloBotaoContornoCompacto,
                     onPressed: _irParaProdutoAnterior,
                     child: const Text('< Anterior'),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Expanded(
                   child: OutlinedButton(
+                    style: _estiloBotaoContornoCompacto,
                     onPressed: _irParaProximoProduto,
                     child: const Text('Proximo >'),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Expanded(
                   child: OutlinedButton(
+                    style: _estiloBotaoContornoCompacto,
                     onPressed: _irParaUltimoProduto,
                     child: const Text('Ultimo >|'),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 6),
             _buildSectionTitle(context, 'Identificacao', Icons.qr_code_2_outlined),
+            const SizedBox(height: 4),
             TextFormField(
               controller: _codigoInternoController,
               enabled: !_gerarSkuAutomatico,
@@ -2048,6 +2073,8 @@ class _ProdutosPageState extends State<ProdutosPage> {
               ),
             ),
             CheckboxListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
               value: _gerarSkuAutomatico,
               onChanged: (value) {
                 setState(() {
@@ -2066,27 +2093,29 @@ class _ProdutosPageState extends State<ProdutosPage> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
+                    style: _estiloBotaoContornoCompacto,
                     onPressed: _importarFotoProduto,
-                    icon: const Icon(Icons.add_a_photo_outlined),
+                    icon: const Icon(Icons.add_a_photo_outlined, size: 18),
                     label: Text(_fotoPreviewPath() == null ? 'Importar foto' : 'Trocar foto'),
                   ),
                 ),
                 if (_fotoPreviewPath() != null) ...[
                   const SizedBox(width: 8),
                   OutlinedButton.icon(
+                    style: _estiloBotaoContornoCompacto,
                     onPressed: _removerFotoProduto,
-                    icon: const Icon(Icons.delete_outline),
+                    icon: const Icon(Icons.delete_outline, size: 18),
                     label: const Text('Remover'),
                   ),
                 ],
               ],
             ),
             if (_fotoPreviewPath() != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
-                  height: 180,
+                  height: 140,
                   width: double.infinity,
                   color: Colors.grey.shade100,
                   child: Image.file(
@@ -2104,7 +2133,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 ),
               ),
             ],
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             TextFormField(
               controller: _nomeController,
               validator: _validarNome,
@@ -2113,9 +2142,9 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 helperText: 'Padrao sugerido: Nome + Marca + Volume (ex: Tinta Coral 18L)',
               ),
             ),
-            const SizedBox(height: 8),
-            _buildSectionTitle(context, 'Classificacao e dados tecnicos', Icons.category_outlined),
             const SizedBox(height: 6),
+            _buildSectionTitle(context, 'Classificacao e dados tecnicos', Icons.category_outlined),
+            const SizedBox(height: 4),
             Row(
               children: [
                 Expanded(
@@ -2169,7 +2198,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
               ],
             ),
             if (_categoriaSelecionada == _categoriaOutros) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               TextFormField(
                 controller: _subcategoriaLivreController,
                 validator: _validarSubcategoria,
@@ -2179,15 +2208,23 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 ),
               ),
             ],
-            const SizedBox(height: 8),
-            _buildSectionTitle(context, 'Unidade e codigos', Icons.straighten_outlined),
             const SizedBox(height: 6),
+            _buildSectionTitle(context, 'Unidade e codigos', Icons.straighten_outlined),
+            const SizedBox(height: 4),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
+                SizedBox(
+                  width: 120,
                   child: DropdownButtonFormField<String>(
+                    isDense: true,
+                    isExpanded: true,
                     initialValue: _unidadeSelecionada,
-                    decoration: const InputDecoration(labelText: 'Unidade'),
+                    decoration: const InputDecoration(
+                      labelText: 'Unidade',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
                     items: const [
                       DropdownMenuItem(value: 'UN', child: Text('UN - Unidade')),
                       DropdownMenuItem(value: 'M', child: Text('M - Metro')),
@@ -2211,14 +2248,17 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 Expanded(
                   child: TextField(
                     controller: _codigoBarrasController,
-                    decoration: const InputDecoration(labelText: 'Codigo de barras'),
+                    decoration: const InputDecoration(
+                      labelText: 'Codigo de barras',
+                      isDense: true,
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            _buildSectionTitle(context, 'Dados comerciais e tecnicos', Icons.storefront_outlined),
             const SizedBox(height: 6),
+            _buildSectionTitle(context, 'Dados comerciais e tecnicos', Icons.storefront_outlined),
+            const SizedBox(height: 4),
             Row(
               children: [
                 Expanded(
@@ -2236,7 +2276,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Row(
               children: [
                 Expanded(
@@ -2254,18 +2294,21 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _ncmController,
-                    decoration: const InputDecoration(labelText: 'NCM'),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                width: _wNcm,
+                child: TextField(
+                  controller: _ncmController,
+                  decoration: const InputDecoration(
+                    labelText: 'NCM',
+                    isDense: true,
                   ),
                 ),
-              ],
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             TextField(
               controller: _descricaoController,
               maxLines: 3,
@@ -2274,83 +2317,92 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 helperText: 'Use para orientar o vendedor: beneficios, aplicacao e diferenciais.',
               ),
             ),
-            const SizedBox(height: 8),
-            _buildSectionTitle(context, 'Precos e margem', Icons.price_change_outlined),
             const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _precoCustoController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [RealInputFormatter()],
-                    validator: _validarPrecoCusto,
-                    decoration: const InputDecoration(
-                      labelText: 'Preco de custo',
-                      helperText: 'Nao pode ser negativo',
+            _buildSectionTitle(context, 'Precos e margem', Icons.price_change_outlined),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.end,
+                children: [
+                  SizedBox(
+                    width: _wMoeda,
+                    child: TextFormField(
+                      controller: _precoCustoController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [RealInputFormatter()],
+                      validator: _validarPrecoCusto,
+                      decoration: const InputDecoration(
+                        labelText: 'Preco de custo',
+                        helperText: 'Nao pode ser negativo',
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setState(() {}),
                     ),
-                    onChanged: (_) => setState(() {}),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    controller: _custoMedioController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [RealInputFormatter()],
-                    validator: _validarCustoMedio,
-                    decoration: const InputDecoration(
-                      labelText: 'Custo medio',
-                      helperText: 'Opcional (ex.: CustoMedio do sistema antigo)',
+                  SizedBox(
+                    width: _wMoeda,
+                    child: TextFormField(
+                      controller: _custoMedioController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [RealInputFormatter()],
+                      validator: _validarCustoMedio,
+                      decoration: const InputDecoration(
+                        labelText: 'Custo medio',
+                        helperText: 'Opcional',
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setState(() {}),
                     ),
-                    onChanged: (_) => setState(() {}),
                   ),
-                ),
-              ],
+                  SizedBox(
+                    width: _wMoeda,
+                    child: TextFormField(
+                      controller: _preco1Controller,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [RealInputFormatter()],
+                      validator: _validarPrecoTabela,
+                      decoration: const InputDecoration(
+                        labelText: 'A Prazo',
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  SizedBox(
+                    width: _wMoeda,
+                    child: TextFormField(
+                      controller: _preco2Controller,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [RealInputFormatter()],
+                      validator: _validarPrecoTabela,
+                      decoration: const InputDecoration(
+                        labelText: 'À Vista',
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  SizedBox(
+                    width: _wMoeda,
+                    child: TextFormField(
+                      controller: _preco3Controller,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [RealInputFormatter()],
+                      validator: _validarPrecoTabela,
+                      decoration: const InputDecoration(
+                        labelText: 'Atacado',
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _preco1Controller,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [RealInputFormatter()],
-                    validator: _validarPrecoTabela,
-                    decoration: const InputDecoration(labelText: 'A Prazo'),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    controller: _preco2Controller,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [RealInputFormatter()],
-                    validator: _validarPrecoTabela,
-                    decoration: const InputDecoration(labelText: 'À Vista'),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _preco3Controller,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [RealInputFormatter()],
-                    validator: _validarPrecoTabela,
-                    decoration: const InputDecoration(labelText: 'Atacado'),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const Expanded(child: SizedBox()),
-              ],
-            ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
@@ -2359,29 +2411,43 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 'Atacado -> Markup: ${markup3.toStringAsFixed(2)}% | Margem: ${margem3.toStringAsFixed(2)}%',
               ),
             ),
-            const SizedBox(height: 8),
-            _buildSectionTitle(context, 'Estoque', Icons.warehouse_outlined),
             const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _estoqueController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Quantidade em estoque'),
+            _buildSectionTitle(context, 'Estoque', Icons.warehouse_outlined),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: _wQtdInteira,
+                    child: TextField(
+                      controller: _estoqueController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Qtd. estoque',
+                        isDense: true,
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _quantidadeMinimaController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Quantidade minima'),
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: _wQtdInteira,
+                    child: TextField(
+                      controller: _quantidadeMinimaController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Qtd. minima',
+                        isDense: true,
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             SwitchListTile(
+              dense: true,
               contentPadding: EdgeInsets.zero,
               title: const Text('Produto ativo na venda'),
               subtitle: const Text(
@@ -2390,11 +2456,12 @@ class _ProdutosPageState extends State<ProdutosPage> {
               value: _produtoAtivo,
               onChanged: (v) => setState(() => _produtoAtivo = v),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 6),
             Row(
               children: [
                 Expanded(
                   child: ElevatedButton(
+                    style: _estiloBotaoElevadoCompacto,
                     onPressed: _salvarProduto,
                     child: Text(_produtoEmEdicaoId == null ? 'Incluir' : 'Salvar edicao'),
                   ),
@@ -2402,6 +2469,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton(
+                    style: _estiloBotaoContornoCompacto,
                     onPressed: _limparFormularioComConfirmacao,
                     child: Text(_produtoEmEdicaoId == null ? 'Limpar' : 'Cancelar edicao'),
                   ),
@@ -2409,13 +2477,10 @@ class _ProdutosPageState extends State<ProdutosPage> {
               ],
             ),
             if (_produtoEmEdicaoId != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: _excluirProdutoEmEdicao,
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Excluir produto'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Theme.of(context).colorScheme.error,
                     side: BorderSide(
@@ -2423,11 +2488,18 @@ class _ProdutosPageState extends State<ProdutosPage> {
                         alpha: 0.5,
                       ),
                     ),
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
+                  onPressed: _excluirProdutoEmEdicao,
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: const Text('Excluir produto'),
                 ),
               ),
             ],
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             if (_status.isNotEmpty)
               Container(
                 width: double.infinity,
@@ -2464,12 +2536,13 @@ class _ProdutosPageState extends State<ProdutosPage> {
   Widget _buildSectionTitle(BuildContext context, String title, IconData icon) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(width: 6),
+        Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 5),
         Text(
           title,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
             fontWeight: FontWeight.w700,
+            fontSize: 13,
           ),
         ),
       ],

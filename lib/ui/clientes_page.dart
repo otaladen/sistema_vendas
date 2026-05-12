@@ -30,6 +30,30 @@ class ClientesPage extends StatefulWidget {
 }
 
 class _ClientesPageState extends State<ClientesPage> {
+  static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+
+  static ButtonStyle get _estiloBotaoElevadoCompacto => ElevatedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+
+  static const double _wTipoPessoa = 172;
+  static const double _wDoc = 228;
+  static const double _wIe = 200;
+  static const double _wFone = 184;
+  static const double _wLimite = 188;
+  static const double _wCep = 120;
+  static const double _wNumero = 88;
+  static const double _wUf = 72;
+  static const double _limiarDuasColunas = 700.0;
+
   final _nomeRazaoController = TextEditingController();
   final _nomeFantasiaController = TextEditingController();
   final _documentoController = TextEditingController();
@@ -838,7 +862,7 @@ class _ClientesPageState extends State<ClientesPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Cadastro de Clientes')),
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: RawScrollbar(
           controller: _scrollController,
           thumbVisibility: true,
@@ -852,7 +876,7 @@ class _ClientesPageState extends State<ClientesPage> {
             padding: const EdgeInsets.only(right: 10),
             children: [
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
@@ -868,17 +892,17 @@ class _ClientesPageState extends State<ClientesPage> {
                   children: [
                     Icon(
                       Icons.badge_outlined,
-                      size: 30,
+                      size: 24,
                       color: theme.colorScheme.primary,
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             'Cadastro de Clientes',
-                            style: theme.textTheme.titleLarge?.copyWith(
+                            style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -894,170 +918,271 @@ class _ClientesPageState extends State<ClientesPage> {
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
+                  style: _estiloBotaoContornoCompacto,
                   onPressed: _abrirPesquisaCliente,
-                  icon: const Icon(Icons.search),
+                  icon: const Icon(Icons.search, size: 18),
                   label: const Text('Pesquisar cliente'),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: _irParaPrimeiroCliente,
                       child: const Text('|< Primeiro'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: OutlinedButton(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: _irParaClienteAnterior,
                       child: const Text('< Anterior'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: OutlinedButton(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: _irParaProximoCliente,
                       child: const Text('Proximo >'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: OutlinedButton(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: _irParaUltimoCliente,
                       child: const Text('Ultimo >|'),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 8),
               _buildSectionCard(
                 context: context,
                 title: 'Dados principais',
                 icon: Icons.person_outline,
                 children: [
-                  DropdownButtonFormField<String>(
-                    initialValue: _tipoPessoa,
-                    decoration: const InputDecoration(
-                      labelText: 'Tipo de pessoa',
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'fisica', child: Text('Fisica')),
-                      DropdownMenuItem(
-                        value: 'juridica',
-                        child: Text('Juridica'),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) {
-                        setState(() {
-                          _tipoPessoa = v;
-                          _documentoController.clear();
-                          if (_tipoPessoa == 'fisica') {
-                            _inscricaoController.clear();
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SizedBox(
+                      width: _wTipoPessoa,
+                      child: DropdownButtonFormField<String>(
+                        isDense: true,
+                        isExpanded: true,
+                        initialValue: _tipoPessoa,
+                        decoration: const InputDecoration(
+                          labelText: 'Tipo de pessoa',
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'fisica', child: Text('Fisica')),
+                          DropdownMenuItem(
+                            value: 'juridica',
+                            child: Text('Juridica'),
+                          ),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() {
+                              _tipoPessoa = v;
+                              _documentoController.clear();
+                              if (_tipoPessoa == 'fisica') {
+                                _inscricaoController.clear();
+                              }
+                            });
                           }
-                        });
-                      }
-                    },
+                        },
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _nomeRazaoController,
                     textCapitalization: TextCapitalization.words,
                     decoration: const InputDecoration(
                       labelText: 'Nome / Razao social',
+                      isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _nomeFantasiaController,
                     textCapitalization: TextCapitalization.words,
                     decoration: const InputDecoration(
                       labelText: 'Nome fantasia (opcional)',
+                      isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _documentoController,
-                          decoration: InputDecoration(
-                            labelText: _tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ',
-                          ),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [_cpfCnpjFormatter],
-                        ),
-                      ),
-                      if (_tipoPessoa == 'juridica') ...[
-                        const SizedBox(width: 8),
-                        Expanded(
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      children: [
+                        SizedBox(
+                          width: _wDoc,
                           child: TextField(
-                            controller: _inscricaoController,
-                            decoration: const InputDecoration(
-                              labelText: 'Inscricao Estadual',
+                            controller: _documentoController,
+                            decoration: InputDecoration(
+                              labelText:
+                                  _tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ',
+                              isDense: true,
                             ),
                             keyboardType: TextInputType.number,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(
-                                RegExp(r'[0-9A-Za-z]'),
+                            inputFormatters: [_cpfCnpjFormatter],
+                          ),
+                        ),
+                        if (_tipoPessoa == 'juridica')
+                          SizedBox(
+                            width: _wIe,
+                            child: TextField(
+                              controller: _inscricaoController,
+                              decoration: const InputDecoration(
+                                labelText: 'Inscricao Estadual',
+                                isDense: true,
                               ),
-                              LengthLimitingTextInputFormatter(20),
-                            ],
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'[0-9A-Za-z]'),
+                                ),
+                                LengthLimitingTextInputFormatter(20),
+                              ],
+                            ),
                           ),
-                        ),
                       ],
-                    ],
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              _buildSectionCard(
-                context: context,
-                title: 'Contato',
-                icon: Icons.phone_outlined,
-                children: [
-                  Row(
+              const SizedBox(height: 8),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final cardContato = _buildSectionCard(
+                    context: context,
+                    title: 'Contato',
+                    icon: Icons.phone_outlined,
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _telefoneController,
-                          decoration: const InputDecoration(
-                            labelText: 'Telefone',
-                          ),
-                          keyboardType: TextInputType.phone,
-                          inputFormatters: [_telefoneFormatter],
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            SizedBox(
+                              width: _wFone,
+                              child: TextField(
+                                controller: _telefoneController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Telefone',
+                                  isDense: true,
+                                ),
+                                keyboardType: TextInputType.phone,
+                                inputFormatters: [_telefoneFormatter],
+                              ),
+                            ),
+                            SizedBox(
+                              width: _wFone,
+                              child: TextField(
+                                controller: _whatsappController,
+                                decoration: const InputDecoration(
+                                  labelText: 'WhatsApp',
+                                  isDense: true,
+                                ),
+                                keyboardType: TextInputType.phone,
+                                inputFormatters: [_telefoneFormatter],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _whatsappController,
-                          decoration: const InputDecoration(
-                            labelText: 'WhatsApp',
-                          ),
-                          keyboardType: TextInputType.phone,
-                          inputFormatters: [_telefoneFormatter],
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _emailController,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          isDense: true,
                         ),
+                        keyboardType: TextInputType.emailAddress,
+                        textCapitalization: TextCapitalization.none,
+                        inputFormatters: [_emailFormatter],
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(labelText: 'Email'),
-                    keyboardType: TextInputType.emailAddress,
-                    textCapitalization: TextCapitalization.none,
-                    inputFormatters: [_emailFormatter],
-                  ),
-                ],
+                  );
+                  final cardComercial = _buildSectionCard(
+                    context: context,
+                    title: 'Comercial',
+                    icon: Icons.payments_outlined,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: SizedBox(
+                          width: _wLimite,
+                          child: TextField(
+                            controller: _limiteController,
+                            decoration: const InputDecoration(
+                              labelText: 'Limite de credito',
+                              isDense: true,
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [_limiteCreditoFormatter],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _observacoesController,
+                        maxLines: 2,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: const InputDecoration(
+                          labelText: 'Observacoes',
+                          isDense: true,
+                        ),
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        value: _ativo,
+                        onChanged: (v) => setState(() => _ativo = v),
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Cliente ativo'),
+                      ),
+                    ],
+                  );
+
+                  final usarDuasColunas = constraints.hasBoundedWidth &&
+                      constraints.maxWidth >= _limiarDuasColunas;
+                  if (!usarDuasColunas) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        cardContato,
+                        const SizedBox(height: 8),
+                        cardComercial,
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: cardContato),
+                      const SizedBox(width: 10),
+                      Expanded(child: cardComercial),
+                    ],
+                  );
+                },
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               _buildSectionCard(
                 context: context,
                 title: 'Endereco',
@@ -1074,7 +1199,7 @@ class _ClientesPageState extends State<ClientesPage> {
                     referenciaController: _referenciaController,
                   ),
                   for (var i = 0; i < _enderecosExtras.length; i++) ...[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                     _buildEnderecoForm(
                       titulo: 'Endereco adicional ${i + 1}',
                       cepController: _enderecosExtras[i].cepController,
@@ -1097,6 +1222,7 @@ class _ClientesPageState extends State<ClientesPage> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: OutlinedButton.icon(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: () {
                         setState(() {
                           _enderecosExtras.add(
@@ -1110,44 +1236,7 @@ class _ClientesPageState extends State<ClientesPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              _buildSectionCard(
-                context: context,
-                title: 'Comercial',
-                icon: Icons.payments_outlined,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _limiteController,
-                          decoration: const InputDecoration(
-                            labelText: 'Limite de credito',
-                          ),
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: [_limiteCreditoFormatter],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _observacoesController,
-                    maxLines: 2,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(labelText: 'Observacoes'),
-                  ),
-                  SwitchListTile(
-                    value: _ativo,
-                    onChanged: (v) => setState(() => _ativo = v),
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Cliente ativo'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Card(
                 elevation: 0,
                 shape: RoundedRectangleBorder(
@@ -1433,8 +1522,9 @@ class _ClientesPageState extends State<ClientesPage> {
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
+                      style: _estiloBotaoElevadoCompacto,
                       onPressed: _salvarCliente,
-                      icon: const Icon(Icons.save_outlined),
+                      icon: const Icon(Icons.save_outlined, size: 18),
                       label: Text(
                         emEdicao ? 'Salvar edicao' : 'Salvar cliente',
                       ),
@@ -1443,11 +1533,13 @@ class _ClientesPageState extends State<ClientesPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: OutlinedButton.icon(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: _limparFormulario,
                       icon: Icon(
                         emEdicao
                             ? Icons.close
                             : Icons.cleaning_services_outlined,
+                        size: 18,
                       ),
                       label: Text(emEdicao ? 'Cancelar edicao' : 'Limpar'),
                     ),
@@ -1477,23 +1569,24 @@ class _ClientesPageState extends State<ClientesPage> {
         side: BorderSide(color: theme.colorScheme.outlineVariant),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icon, size: 20, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
+                Icon(icon, size: 17, color: theme.colorScheme.primary),
+                const SizedBox(width: 6),
                 Text(
                   title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             ...children,
           ],
         ),
@@ -1534,42 +1627,57 @@ class _ClientesPageState extends State<ClientesPage> {
           ],
         ),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
+            SizedBox(
+              width: _wCep,
               child: TextField(
                 controller: cepController,
-                decoration: const InputDecoration(labelText: 'CEP'),
+                decoration: const InputDecoration(
+                  labelText: 'CEP',
+                  isDense: true,
+                ),
                 keyboardType: TextInputType.number,
                 inputFormatters: [_cepFormatter],
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              flex: 2,
               child: TextField(
                 controller: enderecoController,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(labelText: 'Endereco'),
+                decoration: const InputDecoration(
+                  labelText: 'Endereco',
+                  isDense: true,
+                ),
               ),
             ),
             const SizedBox(width: 8),
-            Expanded(
+            SizedBox(
+              width: _wNumero,
               child: TextField(
                 controller: numeroController,
-                decoration: const InputDecoration(labelText: 'Numero'),
+                decoration: const InputDecoration(
+                  labelText: 'Nº',
+                  isDense: true,
+                ),
                 inputFormatters: [LengthLimitingTextInputFormatter(10)],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 6),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: TextField(
                 controller: bairroController,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(labelText: 'Bairro'),
+                decoration: const InputDecoration(
+                  labelText: 'Bairro',
+                  isDense: true,
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -1577,15 +1685,21 @@ class _ClientesPageState extends State<ClientesPage> {
               child: TextField(
                 controller: cidadeController,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(labelText: 'Cidade'),
+                decoration: const InputDecoration(
+                  labelText: 'Cidade',
+                  isDense: true,
+                ),
               ),
             ),
             const SizedBox(width: 8),
             SizedBox(
-              width: 90,
+              width: _wUf,
               child: TextField(
                 controller: ufController,
-                decoration: const InputDecoration(labelText: 'UF'),
+                decoration: const InputDecoration(
+                  labelText: 'UF',
+                  isDense: true,
+                ),
                 textCapitalization: TextCapitalization.characters,
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
@@ -1596,11 +1710,14 @@ class _ClientesPageState extends State<ClientesPage> {
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 6),
         TextField(
           controller: referenciaController,
           textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(labelText: 'Referencia'),
+          decoration: const InputDecoration(
+            labelText: 'Referencia',
+            isDense: true,
+          ),
         ),
       ],
     );

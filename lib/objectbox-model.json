@@ -214,7 +214,7 @@
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "33:2512507411449777360",
+      "lastPropertyId": "34:2506218753024703458",
       "name": "Venda",
       "properties": [
         {
@@ -383,6 +383,11 @@
           "id": "33:2512507411449777360",
           "name": "grupoEntregaFreteId",
           "type": 6
+        },
+        {
+          "id": "34:2506218753024703458",
+          "name": "complementoEntregaJson",
+          "type": 9
         }
       ],
       "relations": []

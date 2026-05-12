@@ -30,6 +30,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
   bool _podeEntregas = false;
   bool _podeFinanceiro = false;
   bool _podeConfiguracoes = false;
+  bool _podeAutorizarSegundaViaCupom = false;
   String _status = '';
 
   @override
@@ -71,6 +72,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeEntregas = false;
       _podeFinanceiro = false;
       _podeConfiguracoes = false;
+      _podeAutorizarSegundaViaCupom = false;
     });
   }
 
@@ -86,6 +88,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeEntregas = true;
       _podeFinanceiro = true;
       _podeConfiguracoes = true;
+      _podeAutorizarSegundaViaCupom = true;
     }
   }
 
@@ -123,6 +126,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       podeEntregas: _podeEntregas,
       podeFinanceiro: _podeFinanceiro,
       podeConfiguracoes: _podeConfiguracoes,
+      podeAutorizarSegundaViaCupom: _podeAutorizarSegundaViaCupom,
     );
     await widget.usuarioRepository.salvar(usuario);
     await _carregar();
@@ -147,6 +151,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeEntregas = u.podeEntregas;
       _podeFinanceiro = u.podeFinanceiro;
       _podeConfiguracoes = u.podeConfiguracoes;
+      _podeAutorizarSegundaViaCupom = u.podeAutorizarSegundaViaCupom;
       _status = 'Editando usuario: ${u.nome}';
     });
   }
@@ -258,6 +263,17 @@ class _UsuariosPageState extends State<UsuariosPage> {
             value: _podeConfiguracoes,
             onChanged: _admin ? null : (v) => setState(() => _podeConfiguracoes = v ?? false),
             title: const Text('Configuracoes'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          CheckboxListTile(
+            value: _podeAutorizarSegundaViaCupom,
+            onChanged: _admin
+                ? null
+                : (v) => setState(() => _podeAutorizarSegundaViaCupom = v ?? false),
+            title: const Text('Autorizar segunda via do cupom'),
+            subtitle: const Text(
+              'Pode informar login e senha para reimprimir cupom na listagem de vendas ou no caixa.',
+            ),
             contentPadding: EdgeInsets.zero,
           ),
           const SizedBox(height: 10),

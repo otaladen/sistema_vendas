@@ -8,6 +8,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../data/app_config_repository.dart';
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
@@ -18,7 +19,10 @@ import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import '../services/cupom_nao_fiscal_venda_pdf.dart';
 import 'clientes_page.dart';
+import 'cupom_venda_impressao_helper.dart';
+import 'segunda_via_cupom_autorizacao.dart';
 import 'registrar_devolucao_troca_page.dart';
 
 /// Lista vendas já finalizadas no Caixa (`status == finalizada`), com filtros e busca.
@@ -49,6 +53,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
   final _buscaController = TextEditingController();
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
+  final AppConfigRepository _configRepository = AppConfigRepository();
 
   String _periodoPreset = 'ultimos_30';
   String _formaPagamento = 'todos';
@@ -420,6 +425,109 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _segundaViaCupom(Venda vIn) async {
+    final v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
+    if (v.cancelada) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nao e possivel emitir cupom de venda cancelada.'),
+        ),
+      );
+      return;
+    }
+    if (v.status != 'finalizada') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Segunda via disponivel apenas para vendas finalizadas.'),
+        ),
+      );
+      return;
+    }
+    final autorizado = await solicitarSenhaAutorizacaoSegundaViaCupom(
+      context,
+      _usuarioRepository,
+    );
+    if (!mounted || !autorizado) return;
+    final config = await _configRepository.carregarEmpresaConfig();
+    if (!mounted) return;
+    final infer = CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(v);
+    final nomeArquivo =
+        'venda_${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}_2via.pdf';
+    await mostrarFluxoImpressaoCupomVenda(
+      context,
+      config: config,
+      title: 'Segunda via do cupom',
+      content: 'Deseja imprimir ou gerar PDF da segunda via?',
+      gerarPdfBytes: () => CupomNaoFiscalVendaPdf.gerarBytes(
+        venda: v,
+        config: config,
+        cliente: _clienteDaVenda(v),
+        vendedor: _vendedorDaVenda(v),
+        totalRecebido: infer.recebido,
+        troco: infer.troco,
+        segundaVia: true,
+        dataCabecalhoVenda: v.data,
+      ),
+      suggestedFileName: nomeArquivo,
+    );
+  }
+
+  Future<void> _mostrarModalItensVenda(Venda v) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('Produtos — ${_rotuloVendaUsuario(v)}'),
+          content: SizedBox(
+            width: 440,
+            child: v.itens.isEmpty
+                ? const Text('Nenhum item registrado nesta venda.')
+                : ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 420),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final item in v.itens)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '${item.quantidade}x ${item.nomeProduto}',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    _formatarMoeda(item.subtotal),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Fechar'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1219,6 +1327,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                         final rotuloVend = _rotuloVendedorUmLinha(v);
                         return Card(
                           child: ListTile(
+                            onTap: () => _mostrarModalItensVenda(v),
                             isThreeLine: true,
                             leading: CircleAvatar(
                               child: Text(
@@ -1248,8 +1357,20 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 Text(
                                   '${_rotuloTipoEntrega(v.tipoEntrega)} | '
                                   '${_linhaRetiradaFutura(v)} | '
-                                  'Itens: ${v.itens.length}',
+                                  '${v.itens.length} itens',
                                 ),
+                                if (v.itens.isNotEmpty)
+                                  Text(
+                                    'Toque para ver os produtos',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .outline,
+                                        ),
+                                  ),
                                 if (!v.cancelada &&
                                     v.status == 'finalizada' &&
                                     (widget.vendaRepository
@@ -1337,8 +1458,12 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                     child: Text(
                                       _formatarMoeda(v.total),
                                       textAlign: TextAlign.right,
-                                      style: Theme.of(context).textTheme.titleMedium
-                                          ?.copyWith(fontWeight: FontWeight.bold),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                     ),
                                   ),
                                   PopupMenuButton<String>(
@@ -1352,11 +1477,18 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                         _abrirPagarFreteCarreto(v);
                                       } else if (value == 'devolucao') {
                                         _abrirRegistrarDevolucaoTroca(v);
+                                      } else if (value == 'segunda_via') {
+                                        _segundaViaCupom(v);
                                       } else if (value == 'cancelar') {
                                         _cancelarVenda(v);
                                       }
                                     },
                                     itemBuilder: (context) => [
+                                      if (!v.cancelada && v.status == 'finalizada')
+                                        const PopupMenuItem<String>(
+                                          value: 'segunda_via',
+                                          child: Text('Segunda via do cupom'),
+                                        ),
                                       if (_podePagarFreteCarreto(v))
                                         const PopupMenuItem<String>(
                                           value: 'pagar_frete',

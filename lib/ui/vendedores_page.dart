@@ -17,6 +17,26 @@ class VendedoresPage extends StatefulWidget {
 }
 
 class _VendedoresPageState extends State<VendedoresPage> {
+  static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+
+  static ButtonStyle get _estiloBotaoPrimarioCompacto => FilledButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+
+  static const double _wCodigo = 132;
+  static const double _wFone = 184;
+  static const double _wPct = 168;
+  static const double _wMeta = 188;
+  static const double _limiarDuasColunas = 700.0;
+
   final _codigoController = TextEditingController();
   final _nomeCompletoController = TextEditingController();
   final _apelidoController = TextEditingController();
@@ -204,7 +224,7 @@ class _VendedoresPageState extends State<VendedoresPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Cadastro de vendedores')),
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: RawScrollbar(
           controller: _scrollController,
           thumbVisibility: true,
@@ -218,7 +238,7 @@ class _VendedoresPageState extends State<VendedoresPage> {
             padding: const EdgeInsets.only(right: 10),
             children: [
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
@@ -235,17 +255,17 @@ class _VendedoresPageState extends State<VendedoresPage> {
                   children: [
                     Icon(
                       Icons.point_of_sale_outlined,
-                      size: 30,
+                      size: 24,
                       color: theme.colorScheme.primary,
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             'Equipe de vendas',
-                            style: theme.textTheme.titleLarge?.copyWith(
+                            style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -261,41 +281,51 @@ class _VendedoresPageState extends State<VendedoresPage> {
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               if (_status.isNotEmpty) ...[
                 _buildStatusBanner(context, _status),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
               ],
               _buildSectionCard(
                 context: context,
                 title: 'Identificacao',
                 icon: Icons.badge_outlined,
                 children: [
-                  TextField(
-                    controller: _codigoController,
-                    decoration: const InputDecoration(
-                      labelText: 'Codigo interno',
-                      hintText: 'Sequencial automatico (1, 2, 3…)',
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SizedBox(
+                      width: _wCodigo,
+                      child: TextField(
+                        controller: _codigoController,
+                        decoration: const InputDecoration(
+                          labelText: 'Codigo interno',
+                          hintText: 'Auto (1, 2, 3…)',
+                          isDense: true,
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
                     ),
-                    keyboardType: TextInputType.number,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _nomeCompletoController,
                     decoration: const InputDecoration(
                       labelText: 'Nome completo',
+                      isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _apelidoController,
                     decoration: const InputDecoration(
                       labelText: 'Apelido na loja (opcional)',
-                      hintText: 'Nome curto para telas e cupom',
+                      hintText: 'Telas e cupom',
+                      isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 4),
                   SwitchListTile(
+                    dense: true,
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Ativo para vendas'),
                     subtitle: const Text(
@@ -306,83 +336,133 @@ class _VendedoresPageState extends State<VendedoresPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              _buildSectionCard(
-                context: context,
-                title: 'Contato com cliente',
-                icon: Icons.phone_outlined,
-                children: [
-                  Row(
+              const SizedBox(height: 8),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final cardContato = _buildSectionCard(
+                    context: context,
+                    title: 'Contato com cliente',
+                    icon: Icons.phone_outlined,
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _telefoneController,
-                          decoration: const InputDecoration(
-                            labelText: 'Telefone / loja',
-                          ),
-                          keyboardType: TextInputType.phone,
-                          inputFormatters: [_telefoneFormatter],
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            SizedBox(
+                              width: _wFone,
+                              child: TextField(
+                                controller: _telefoneController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Telefone / loja',
+                                  isDense: true,
+                                ),
+                                keyboardType: TextInputType.phone,
+                                inputFormatters: [_telefoneFormatter],
+                              ),
+                            ),
+                            SizedBox(
+                              width: _wFone,
+                              child: TextField(
+                                controller: _whatsappController,
+                                decoration: const InputDecoration(
+                                  labelText: 'WhatsApp',
+                                  isDense: true,
+                                ),
+                                keyboardType: TextInputType.phone,
+                                inputFormatters: [_telefoneFormatter],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _whatsappController,
-                          decoration: const InputDecoration(
-                            labelText: 'WhatsApp',
-                          ),
-                          keyboardType: TextInputType.phone,
-                          inputFormatters: [_telefoneFormatter],
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _emailController,
+                        decoration: const InputDecoration(
+                          labelText: 'E-mail (orcamentos)',
+                          isDense: true,
                         ),
+                        keyboardType: TextInputType.emailAddress,
+                        inputFormatters: [_emailFormatter],
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(
-                      labelText: 'E-mail (orcamentos)',
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                    inputFormatters: [_emailFormatter],
-                  ),
-                ],
+                  );
+                  final cardComercial = _buildSectionCard(
+                    context: context,
+                    title: 'Comercial',
+                    icon: Icons.trending_up,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.end,
+                          children: [
+                            SizedBox(
+                              width: _wPct,
+                              child: TextField(
+                                controller: _comissaoController,
+                                keyboardType: const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Comissao (%)',
+                                  hintText: '0 a 100',
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: _wMeta,
+                              child: TextField(
+                                controller: _metaMensalController,
+                                keyboardType: const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Meta mensal (R\$)',
+                                  hintText: 'Opcional',
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Meta em reais (referencia); detalhes nos relatorios.',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  );
+
+                  final usarDuasColunas = constraints.hasBoundedWidth &&
+                      constraints.maxWidth >= _limiarDuasColunas;
+                  if (!usarDuasColunas) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        cardContato,
+                        const SizedBox(height: 8),
+                        cardComercial,
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: cardContato),
+                      const SizedBox(width: 10),
+                      Expanded(child: cardComercial),
+                    ],
+                  );
+                },
               ),
-              const SizedBox(height: 10),
-              _buildSectionCard(
-                context: context,
-                title: 'Comercial',
-                icon: Icons.trending_up,
-                children: [
-                  TextField(
-                    controller: _comissaoController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Comissao sobre a venda (%)',
-                      hintText: '0 a 100, ex.: 1,5',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _metaMensalController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Meta mensal de vendas (R\$, opcional)',
-                      hintText: 'Referencia interna; deixe vazio se nao usar',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'A meta e um valor de referencia em reais; o acompanhamento detalhado pode ser feito em relatorios.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               _buildSectionCard(
                 context: context,
                 title: 'Observacoes comerciais',
@@ -394,29 +474,32 @@ class _VendedoresPageState extends State<VendedoresPage> {
                     decoration: const InputDecoration(
                       labelText: 'Atuacao, setor da loja, tipos de cliente...',
                       alignLabelWithHint: true,
+                      isDense: true,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
                     child: FilledButton.icon(
+                      style: _estiloBotaoPrimarioCompacto,
                       onPressed: _salvar,
-                      icon: const Icon(Icons.save_outlined),
+                      icon: const Icon(Icons.save_outlined, size: 18),
                       label: Text(emEdicao ? 'Atualizar' : 'Salvar'),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   OutlinedButton.icon(
+                    style: _estiloBotaoContornoCompacto,
                     onPressed: _limparFormulario,
-                    icon: const Icon(Icons.add),
+                    icon: const Icon(Icons.add, size: 18),
                     label: const Text('Novo'),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 14),
               Text(
                 'Vendedores cadastrados',
                 style: theme.textTheme.titleMedium,
@@ -427,7 +510,8 @@ class _VendedoresPageState extends State<VendedoresPage> {
                 onChanged: (_) => setState(() {}),
                 decoration: const InputDecoration(
                   labelText: 'Pesquisar na lista',
-                  prefixIcon: Icon(Icons.search),
+                  isDense: true,
+                  prefixIcon: Icon(Icons.search, size: 20),
                 ),
               ),
               const SizedBox(height: 8),
@@ -491,23 +575,24 @@ class _VendedoresPageState extends State<VendedoresPage> {
         side: BorderSide(color: theme.colorScheme.outlineVariant),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icon, size: 20, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
+                Icon(icon, size: 17, color: theme.colorScheme.primary),
+                const SizedBox(width: 6),
                 Text(
                   title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             ...children,
           ],
         ),

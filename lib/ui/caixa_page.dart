@@ -22,6 +22,9 @@ import '../domain/pagamento_orcamento.dart';
 import '../model/cliente.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import '../services/cupom_nao_fiscal_venda_pdf.dart';
+import 'cupom_venda_impressao_helper.dart';
+import 'segunda_via_cupom_autorizacao.dart';
 
 class CaixaPage extends StatefulWidget {
   const CaixaPage({
@@ -180,10 +183,12 @@ class _CaixaPageState extends State<CaixaPage> {
                               itemBuilder: (context, index) {
                                 final orc = resultados[index];
                                 final cliente = _clienteDaVenda(orc)?.nomeRazao ?? 'Sem cliente';
+                                final descPdv = orc.descontoImplicitoTotal;
                                 return ListTile(
                                   title: Text('Orcamento #${orc.numeroOrcamento}'),
                                   subtitle: Text(
-                                    '$cliente | Itens: ${orc.itens.length} | Total: ${_formatarMoeda(orc.total)}',
+                                    '$cliente | Itens: ${orc.itens.length} | Total: ${_formatarMoeda(orc.total)}'
+                                    '${descPdv > 0.001 ? ' | Desc. PDV: -${_formatarMoeda(descPdv)}' : ''}',
                                   ),
                                   onTap: () => Navigator.pop(context, orc),
                                 );
@@ -1921,6 +1926,8 @@ class _CaixaPageState extends State<CaixaPage> {
         return 'Roteirizada';
       case 'saiu_entrega':
         return 'Saiu para entrega';
+      case 'entregue_complemento_pendente':
+        return 'Complemento pendente';
       case 'entregue':
         return 'Entregue';
       case 'reagendada':
@@ -2215,7 +2222,6 @@ class _CaixaPageState extends State<CaixaPage> {
         venda: vendaFinalizada,
         totalRecebido: totalRecebido,
         troco: trocoFinal,
-        descontoAplicado: descontoAplicado,
       );
     } catch (e) {
       if (!mounted) return;
@@ -2223,190 +2229,6 @@ class _CaixaPageState extends State<CaixaPage> {
         context,
       ).showSnackBar(SnackBar(content: Text('Nao foi possivel finalizar: $e')));
     }
-  }
-
-  Future<Uint8List> _gerarNotaPdfBytes({
-    required Venda venda,
-    required double totalRecebido,
-    required double troco,
-    required double descontoAplicado,
-  }) async {
-    final cliente = _clienteDaVenda(venda);
-    final config = await _configRepository.carregarEmpresaConfig();
-    final logoBytes = config.logoPath.trim().isNotEmpty
-        ? await File(
-            config.logoPath,
-          ).readAsBytes().catchError((_) => Uint8List(0))
-        : Uint8List(0);
-    final doc = pw.Document();
-    final dataHora = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
-    doc.addPage(
-      pw.Page(
-        pageFormat: config.modeloPdf == 'a4'
-            ? PdfPageFormat.a4
-            : PdfPageFormat(80 * PdfPageFormat.mm, double.infinity),
-        margin: const pw.EdgeInsets.all(8),
-        build: (context) {
-          final subtotalProdutos = (venda.total - venda.valorFrete)
-              .clamp(0, double.infinity)
-              .toDouble();
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Center(
-                child: pw.Text(
-                  config.nomeLoja,
-                  style: pw.TextStyle(
-                    fontSize: 12,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-              ),
-              if (logoBytes.isNotEmpty)
-                pw.Center(
-                  child: pw.Padding(
-                    padding: const pw.EdgeInsets.only(top: 4, bottom: 4),
-                    child: pw.Image(pw.MemoryImage(logoBytes), height: 45),
-                  ),
-                ),
-              if (config.telefone.trim().isNotEmpty)
-                pw.Center(
-                  child: pw.Text(
-                    'Tel: ${config.telefone}',
-                    style: const pw.TextStyle(fontSize: 8),
-                  ),
-                ),
-              if (config.endereco.trim().isNotEmpty)
-                pw.Center(
-                  child: pw.Text(
-                    config.endereco,
-                    style: const pw.TextStyle(fontSize: 8),
-                    textAlign: pw.TextAlign.center,
-                  ),
-                ),
-              pw.Center(
-                child: pw.Text(
-                  'CUPOM NAO FISCAL',
-                  style: const pw.TextStyle(fontSize: 9),
-                ),
-              ),
-              pw.SizedBox(height: 6),
-              pw.Divider(),
-              pw.Text(
-                'VENDA #${venda.numeroOrcamento}',
-                style: pw.TextStyle(
-                  fontSize: 10,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.Text(
-                'Data: $dataHora',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              pw.Text(
-                'Cliente: ${cliente?.nomeRazao ?? 'Sem cliente'}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              pw.Text(
-                'Vendedor: ${_rotuloVendedorUmLinha(venda)}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              if ((cliente?.documento.trim().isNotEmpty ?? false))
-                pw.Text(
-                  'Documento: ${cliente!.documento}',
-                  style: const pw.TextStyle(fontSize: 9),
-                ),
-              if ((cliente?.telefone.trim().isNotEmpty ?? false))
-                pw.Text(
-                  'Telefone: ${cliente!.telefone}',
-                  style: const pw.TextStyle(fontSize: 9),
-                ),
-              pw.Text(
-                'Entrega: ${_rotuloTipoEntrega(venda.tipoEntrega)}'
-                '${venda.tipoEntrega == 'entrega_loja' ? ' | Frete: ${_formatarMoeda(venda.valorFrete)}' : ''}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              if (venda.enderecoEntrega.trim().isNotEmpty)
-                pw.Text(
-                  'Endereco: ${venda.enderecoEntrega}',
-                  style: const pw.TextStyle(fontSize: 9),
-                ),
-              pw.SizedBox(height: 10),
-              pw.Text(
-                'ITENS',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.SizedBox(height: 4),
-              ...venda.itens.map(
-                (item) => pw.Padding(
-                  padding: const pw.EdgeInsets.only(bottom: 4),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(
-                        item.nomeProduto,
-                        style: const pw.TextStyle(fontSize: 9),
-                      ),
-                      pw.Text(
-                        '${item.quantidade} x ${_formatarMoeda(item.precoUnitario)} = ${_formatarMoeda(item.subtotal)}',
-                        style: const pw.TextStyle(fontSize: 8),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              pw.Divider(),
-              pw.Text(
-                'Subtotal: ${_formatarMoeda(subtotalProdutos)}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              pw.Text(
-                'Frete: ${_formatarMoeda(venda.valorFrete)}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              if (descontoAplicado > 0)
-                pw.Text(
-                  'Desconto: - ${_formatarMoeda(descontoAplicado)}',
-                  style: const pw.TextStyle(fontSize: 9),
-                ),
-              pw.Text(
-                'TOTAL: ${_formatarMoeda(venda.total)}',
-                style: pw.TextStyle(
-                  fontSize: 10,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.Text(
-                'Pagamento: ${_rotuloPagamentoCabecalho(venda)}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              pw.Text(
-                'Recebido: ${_formatarMoeda(totalRecebido)}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              pw.Text(
-                'Troco: ${_formatarMoeda(troco)}',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.SizedBox(height: 8),
-              pw.Center(
-                child: pw.Text(
-                  config.rodapeNota,
-                  style: const pw.TextStyle(fontSize: 8),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    return doc.save();
   }
 
   Future<String?> _escolherSalvarPdf({
@@ -2447,90 +2269,190 @@ class _CaixaPageState extends State<CaixaPage> {
     required Venda venda,
     required double totalRecebido,
     required double troco,
-    required double descontoAplicado,
   }) async {
     final config = await _configRepository.carregarEmpresaConfig();
     if (!mounted) return;
-    final acao = await showDialog<String>(
+    final nomeArquivo =
+        'venda_${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}.pdf';
+    await mostrarFluxoImpressaoCupomVenda(
+      context,
+      config: config,
+      gerarPdfBytes: () => CupomNaoFiscalVendaPdf.gerarBytes(
+        venda: venda,
+        config: config,
+        cliente: _clienteDaVenda(venda),
+        vendedor: _vendedorDaVenda(venda),
+        totalRecebido: totalRecebido,
+        troco: troco,
+        segundaVia: false,
+        dataCabecalhoVenda: DateTime.now(),
+      ),
+      suggestedFileName: nomeArquivo,
+    );
+  }
+
+  Venda? _buscarVendaFinalizadaParaSegundaVia(int numeroOuId) {
+    final todas = widget.vendaRepository.listarTodas();
+    for (final v in todas) {
+      if (v.status != 'finalizada' || v.cancelada) continue;
+      if (v.numeroOrcamento == numeroOuId) return v;
+    }
+    for (final v in todas) {
+      if (v.status != 'finalizada' || v.cancelada) continue;
+      if (v.id == numeroOuId) return v;
+    }
+    return null;
+  }
+
+  static const int _ultimasVendasFinalizadasLimite = 20;
+
+  List<Venda> _ultimasVendasFinalizadasParaCaixa() {
+    final todas = widget.vendaRepository.listarTodas();
+    final lista = todas
+        .where((v) => v.status == 'finalizada' && !v.cancelada)
+        .toList()
+      ..sort((a, b) => b.data.compareTo(a.data));
+    if (lista.length <= _ultimasVendasFinalizadasLimite) {
+      return lista;
+    }
+    return lista.sublist(0, _ultimasVendasFinalizadasLimite);
+  }
+
+  Future<void> _emitirSegundaViaCupomParaVenda(Venda vIn) async {
+    final autorizado = await solicitarSenhaAutorizacaoSegundaViaCupom(
+      context,
+      _usuarioRepository,
+    );
+    if (!mounted || !autorizado) return;
+    final v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
+    if (!mounted) return;
+    if (v.cancelada) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nao e possivel emitir cupom de venda cancelada.'),
+        ),
+      );
+      return;
+    }
+    if (v.status != 'finalizada') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Segunda via disponivel apenas para vendas finalizadas.'),
+        ),
+      );
+      return;
+    }
+    final config = await _configRepository.carregarEmpresaConfig();
+    if (!mounted) return;
+    final infer = CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(v);
+    final nomeArquivo =
+        'venda_${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}_2via.pdf';
+    await mostrarFluxoImpressaoCupomVenda(
+      context,
+      config: config,
+      title: 'Segunda via do cupom',
+      content: 'Deseja imprimir ou gerar PDF da segunda via?',
+      gerarPdfBytes: () => CupomNaoFiscalVendaPdf.gerarBytes(
+        venda: v,
+        config: config,
+        cliente: _clienteDaVenda(v),
+        vendedor: _vendedorDaVenda(v),
+        totalRecebido: infer.recebido,
+        troco: infer.troco,
+        segundaVia: true,
+        dataCabecalhoVenda: v.data,
+      ),
+      suggestedFileName: nomeArquivo,
+    );
+  }
+
+  Future<void> _abrirSegundaViaCupom() async {
+    final numeroController = TextEditingController();
+    final encontrada = await showDialog<Venda>(
       context: context,
-      builder: (context) {
+      builder: (ctx) {
         return AlertDialog(
-          title: const Text('Cupom da venda'),
-          content: const Text('Deseja imprimir o cupom agora ou gerar PDF?'),
+          title: const Text('Segunda via do cupom'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Informe o numero da venda no cupom ou o ID interno.',
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: numeroController,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Numero da venda ou ID',
+                    hintText: 'Ex.: 1042',
+                  ),
+                  onSubmitted: (_) {
+                    final n = int.tryParse(
+                      numeroController.text.replaceAll(RegExp(r'[^0-9]'), ''),
+                    );
+                    if (n == null) return;
+                    final v = _buscarVendaFinalizadaParaSegundaVia(n);
+                    if (v == null) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Venda nao encontrada, cancelada ou ainda nao finalizada.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+                    Navigator.pop(ctx, v);
+                  },
+                ),
+              ],
+            ),
+          ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, 'fechar'),
-              child: const Text('Fechar'),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
             ),
-            OutlinedButton.icon(
-              onPressed: () => Navigator.pop(context, 'pdf'),
-              icon: const Icon(Icons.picture_as_pdf_outlined),
-              label: const Text('Mandar cupom em PDF'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => Navigator.pop(context, 'direto'),
-              icon: const Icon(Icons.print),
-              label: const Text('Impressao direta'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () => Navigator.pop(context, 'imprimir'),
-              icon: const Icon(Icons.print_outlined),
-              label: const Text('Imprimir cupom'),
+            ElevatedButton(
+              onPressed: () {
+                final n = int.tryParse(
+                  numeroController.text.replaceAll(RegExp(r'[^0-9]'), ''),
+                );
+                if (n == null) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                      content: Text('Digite um numero valido.'),
+                    ),
+                  );
+                  return;
+                }
+                final v = _buscarVendaFinalizadaParaSegundaVia(n);
+                if (v == null) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Venda nao encontrada, cancelada ou ainda nao finalizada.',
+                      ),
+                    ),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, v);
+              },
+              child: const Text('Continuar'),
             ),
           ],
         );
       },
     );
-    if (!mounted || acao == null || acao == 'fechar') return;
-    try {
-      final pdfBytes = await _gerarNotaPdfBytes(
-        venda: venda,
-        totalRecebido: totalRecebido,
-        troco: troco,
-        descontoAplicado: descontoAplicado,
-      );
-      if (acao == 'imprimir') {
-        await Printing.layoutPdf(onLayout: (_) async => pdfBytes);
-        return;
-      }
-      if (acao == 'direto') {
-        final printer = await _obterImpressoraPadrao(config.impressoraPadrao);
-        if (printer == null) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Impressora padrao nao configurada/encontrada.'),
-            ),
-          );
-          return;
-        }
-        await Printing.directPrintPdf(
-          printer: printer,
-          onLayout: (_) async => pdfBytes,
-          name: 'Venda ${venda.numeroOrcamento}',
-          format: config.modeloPdf == 'a4'
-              ? PdfPageFormat.a4
-              : PdfPageFormat(80 * PdfPageFormat.mm, double.infinity),
-        );
-        return;
-      }
-      final path = await _escolherSalvarPdf(
-        bytes: pdfBytes,
-        suggestedFileName: 'venda_${venda.numeroOrcamento}.pdf',
-        initialDirectory: config.pastaPadraoPdf.trim().isEmpty
-            ? null
-            : config.pastaPadraoPdf.trim(),
-      );
-      if (!mounted || path == null) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('PDF salvo em: $path')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel gerar/imprimir nota: $e')),
-      );
-    }
+    numeroController.dispose();
+    if (!mounted || encontrada == null) return;
+    await _emitirSegundaViaCupomParaVenda(encontrada);
   }
 
   Future<bool?> _mostrarResumoFechamentoVenda({
@@ -2773,7 +2695,6 @@ class _CaixaPageState extends State<CaixaPage> {
     final clienteSelecionado = selecionado == null
         ? null
         : _clienteDaVenda(selecionado);
-    final totalSelecionado = selecionado?.total ?? 0;
     final descontoSelecionado = selecionado == null
         ? 0.0
         : _descontoAplicado(selecionado);
@@ -2781,9 +2702,8 @@ class _CaixaPageState extends State<CaixaPage> {
         ? 0.0
         : _totalComDesconto(selecionado);
     final freteSelecionado = selecionado?.valorFrete ?? 0;
-    final subtotalProdutos = (totalSelecionado - freteSelecionado)
-        .clamp(0, double.infinity)
-        .toDouble();
+    final subtotalProdutos = selecionado?.somaSubtotalItens ?? 0;
+    final descontoPdvOrcamento = selecionado?.descontoImplicitoTotal ?? 0;
     final parteDinheiroResumo = selecionado == null
         ? 0.0
         : _parteDinheiroNaFinalizacao(selecionado, totalComDesconto);
@@ -2883,19 +2803,60 @@ class _CaixaPageState extends State<CaixaPage> {
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: selecionado == null
-                    ? Column(
-                        children: [
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: _abrirPesquisaOrcamento,
-                              icon: const Icon(Icons.search),
-                              label: const Text('Pesquisar orcamento para importar'),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Expanded(child: _buildPainelStatusCaixa(context)),
-                        ],
+                    ? LayoutBuilder(
+                        builder: (context, constraints) {
+                          final lista = _buildListaOrcamentos(context);
+                          final painel = _buildPainelStatusCaixa(
+                            context,
+                            compact: constraints.maxWidth < 720,
+                          );
+                          final ladoALado = constraints.maxWidth >= 720;
+                          return Column(
+                            children: [
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: _abrirPesquisaOrcamento,
+                                  icon: const Icon(Icons.search),
+                                  label: const Text(
+                                    'Pesquisar orcamento para importar',
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: _abrirSegundaViaCupom,
+                                  icon: const Icon(Icons.receipt_long_outlined),
+                                  label: const Text('Segunda via da nota'),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Expanded(
+                                child: ladoALado
+                                    ? Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          Expanded(flex: 5, child: lista),
+                                          const SizedBox(width: 12),
+                                          Expanded(flex: 6, child: painel),
+                                        ],
+                                      )
+                                    : Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          Expanded(flex: 5, child: lista),
+                                          const SizedBox(height: 12),
+                                          Expanded(flex: 6, child: painel),
+                                        ],
+                                      ),
+                              ),
+                            ],
+                          );
+                        },
                       )
                     : Column(
                         children: [
@@ -2948,6 +2909,12 @@ class _CaixaPageState extends State<CaixaPage> {
                                   label: const Text('Pesquisar orcamento'),
                                 ),
                                 const SizedBox(width: 8),
+                                OutlinedButton.icon(
+                                  onPressed: _abrirSegundaViaCupom,
+                                  icon: const Icon(Icons.receipt_long_outlined),
+                                  label: const Text('Segunda via'),
+                                ),
+                                const SizedBox(width: 8),
                                 Text(
                                   'Orcamento #${selecionado.numeroOrcamento}',
                                   style: theme.textTheme.titleMedium,
@@ -2987,23 +2954,51 @@ class _CaixaPageState extends State<CaixaPage> {
                                                 color: Colors.grey.shade300,
                                               ),
                                             ),
-                                            child: Row(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
-                                                Expanded(
-                                                  child: Text(
-                                                    'Pagamento: ${_rotuloPagamentoCabecalho(selecionado)}',
-                                                  ),
-                                                ),
-                                                Text(
-                                                  'TOTAL: ${_formatarMoeda(totalComDesconto)}',
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .titleMedium
-                                                      ?.copyWith(
-                                                        fontWeight:
-                                                            FontWeight.bold,
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Text(
+                                                        'Pagamento: ${_rotuloPagamentoCabecalho(selecionado)}',
                                                       ),
+                                                    ),
+                                                    Text(
+                                                      'TOTAL: ${_formatarMoeda(totalComDesconto)}',
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .titleMedium
+                                                          ?.copyWith(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                          ),
+                                                    ),
+                                                  ],
                                                 ),
+                                                if (descontoPdvOrcamento >
+                                                    0.001)
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                      top: 6,
+                                                    ),
+                                                    child: Text(
+                                                      'Desconto (PDV): -${_formatarMoeda(descontoPdvOrcamento)}',
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .bodySmall
+                                                          ?.copyWith(
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            color: Theme.of(
+                                                                    context)
+                                                                .colorScheme
+                                                                .tertiary,
+                                                          ),
+                                                    ),
+                                                  ),
                                               ],
                                             ),
                                           ),
@@ -3535,12 +3530,28 @@ class _CaixaPageState extends State<CaixaPage> {
                                                     ),
                                                   ),
                                                 ),
+                                                if (descontoPdvOrcamento >
+                                                    0.001) ...[
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: _buildResumoCard(
+                                                      context,
+                                                      label: 'DESCONTO PDV',
+                                                      valor:
+                                                          '- ${_formatarMoeda(descontoPdvOrcamento)}',
+                                                    ),
+                                                  ),
+                                                ],
                                                 if (_mostrarCampoDescontoCaixa) ...[
                                                   const SizedBox(width: 8),
                                                   Expanded(
                                                     child: _buildResumoCard(
                                                       context,
-                                                      label: 'DESCONTO',
+                                                      label:
+                                                          descontoPdvOrcamento >
+                                                                  0.001
+                                                              ? 'DESCONTO CAIXA'
+                                                              : 'DESCONTO',
                                                       valor: '- ${_formatarMoeda(descontoSelecionado)}',
                                                     ),
                                                   ),
@@ -3845,7 +3856,94 @@ class _CaixaPageState extends State<CaixaPage> {
                 ),
               ),
             ],
+            const SizedBox(height: 12),
+            Text(
+              'Ultimas vendas finalizadas',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Toque na venda para segunda via do cupom (ex.: impressora falhou).',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            if (compact)
+              SizedBox(
+                height: 200,
+                width: double.infinity,
+                child: _buildListaUltimasVendasFinalizadasCaixa(context),
+              )
+            else
+              Expanded(
+                child: _buildListaUltimasVendasFinalizadasCaixa(context),
+              ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildListaUltimasVendasFinalizadasCaixa(BuildContext context) {
+    final lista = _ultimasVendasFinalizadasParaCaixa();
+    final dtCurto = DateFormat('dd/MM HH:mm');
+    if (lista.isEmpty) {
+      return Center(
+        child: Text(
+          'Nenhuma venda finalizada ainda.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      );
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: ListView.separated(
+          padding: EdgeInsets.zero,
+          itemCount: lista.length,
+          separatorBuilder: (context, index) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final v = lista[index];
+            final cliente = _clienteDaVenda(v);
+            final badge = v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '${v.id}';
+            return ListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              leading: CircleAvatar(
+                radius: 16,
+                child: Text(
+                  badge,
+                  style: const TextStyle(fontSize: 10),
+                ),
+              ),
+              title: Text(
+                'Venda #${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ),
+              subtitle: Text(
+                '${dtCurto.format(v.data.toLocal())} · '
+                '${cliente?.nomeRazao ?? 'Sem cliente'} · '
+                '${v.itens.length} itens',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              trailing: Text(
+                _formatarMoeda(v.total),
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              onTap: () => _emitirSegundaViaCupomParaVenda(v),
+            );
+          },
         ),
       ),
     );
@@ -3973,6 +4071,7 @@ class _CaixaPageState extends State<CaixaPage> {
                         final sufV = vendOrc != null
                             ? ' · ${_rotuloVendedorUmLinha(orc)}'
                             : '';
+                        final descPdv = orc.descontoImplicitoTotal;
                         return ListTile(
                           selected: _selecionado?.id == orc.id,
                           leading: CircleAvatar(
@@ -3980,7 +4079,8 @@ class _CaixaPageState extends State<CaixaPage> {
                           ),
                           title: Text('Orcamento #${orc.numeroOrcamento}'),
                           subtitle: Text(
-                            'Itens: ${orc.itens.length} | Total: ${_formatarMoeda(orc.total)}$sufV',
+                            'Itens: ${orc.itens.length} | Total: ${_formatarMoeda(orc.total)}'
+                            '${descPdv > 0.001 ? ' | Desc. PDV: -${_formatarMoeda(descPdv)}' : ''}$sufV',
                           ),
                           onTap: () {
                             setState(() {

@@ -38,6 +38,7 @@ class Venda {
     this.vendaOrigemFreteRetiradaId = 0,
     this.idOrcamentoFreteRetiradaAberto = 0,
     this.grupoEntregaFreteId = 0,
+    this.complementoEntregaJson = '',
   }) : data = data ?? DateTime.now();
 
   @Id()
@@ -84,6 +85,10 @@ class Venda {
   /// Define-se manualmente ao agrupar notas; 0 = sem grupo.
   int grupoEntregaFreteId;
 
+  /// JSON: lista de itens em falta na ida (`ComplementoEntregaCodec`).
+  /// Usado com [statusEntrega] `entregue_complemento_pendente` ou pendencia em aberto.
+  String complementoEntregaJson;
+
   final cliente = ToOne<Cliente>();
   final vendedor = ToOne<Vendedor>();
 
@@ -92,4 +97,19 @@ class Venda {
 
   @Backlink('venda')
   final historicoEntrega = ToMany<HistoricoEntrega>();
+
+  /// Soma dos subtotais das linhas (precos nas linhas do pedido).
+  double get somaSubtotalItens =>
+      itens.fold<double>(0, (s, ItemVenda i) => s + i.subtotal);
+
+  /// Desconto aplicado sobre o bruto (itens + frete) ate chegar em [total], quando
+  /// [total] foi reduzido sem alterar [precoUnitario] nas linhas (ex.: PDV e caixa).
+  double get descontoImplicitoTotal {
+    final bruto = somaSubtotalItens + valorFrete;
+    final d = bruto - total;
+    if (d <= 0.009) {
+      return 0;
+    }
+    return d;
+  }
 }

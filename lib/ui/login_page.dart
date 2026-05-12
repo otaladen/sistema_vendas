@@ -103,6 +103,7 @@ class _LoginPageState extends State<LoginPage> {
         podeEntregas: true,
         podeFinanceiro: true,
         podeConfiguracoes: true,
+        podeAutorizarSegundaViaCupom: true,
       );
       await widget.usuarioRepository.salvar(admin);
       if (!mounted) return;

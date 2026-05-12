@@ -15,6 +15,7 @@ class UsuarioSistema {
     this.podeEntregas = false,
     this.podeFinanceiro = false,
     this.podeConfiguracoes = false,
+    this.podeAutorizarSegundaViaCupom = false,
   });
 
   final String id;
@@ -32,6 +33,8 @@ class UsuarioSistema {
   final bool podeEntregas;
   final bool podeFinanceiro;
   final bool podeConfiguracoes;
+  /// Autoriza informar login/senha para emitir segunda via do cupom (caixa / listagem).
+  final bool podeAutorizarSegundaViaCupom;
 
   UsuarioSistema copyWith({
     String? id,
@@ -49,6 +52,7 @@ class UsuarioSistema {
     bool? podeEntregas,
     bool? podeFinanceiro,
     bool? podeConfiguracoes,
+    bool? podeAutorizarSegundaViaCupom,
   }) {
     return UsuarioSistema(
       id: id ?? this.id,
@@ -68,6 +72,8 @@ class UsuarioSistema {
       podeEntregas: podeEntregas ?? this.podeEntregas,
       podeFinanceiro: podeFinanceiro ?? this.podeFinanceiro,
       podeConfiguracoes: podeConfiguracoes ?? this.podeConfiguracoes,
+      podeAutorizarSegundaViaCupom:
+          podeAutorizarSegundaViaCupom ?? this.podeAutorizarSegundaViaCupom,
     );
   }
 
@@ -88,6 +94,7 @@ class UsuarioSistema {
       'podeEntregas': podeEntregas,
       'podeFinanceiro': podeFinanceiro,
       'podeConfiguracoes': podeConfiguracoes,
+      'podeAutorizarSegundaViaCupom': podeAutorizarSegundaViaCupom,
     };
   }
 
@@ -109,6 +116,14 @@ class UsuarioSistema {
       podeEntregas: map['podeEntregas'] == true,
       podeFinanceiro: map['podeFinanceiro'] == true,
       podeConfiguracoes: map['podeConfiguracoes'] == true,
+      podeAutorizarSegundaViaCupom: () {
+        if (map['podeAutorizarSegundaViaCupom'] == true) return true;
+        if (!map.containsKey('podeAutorizarSegundaViaCupom') &&
+            map['admin'] == true) {
+          return true;
+        }
+        return false;
+      }(),
     );
   }
 }

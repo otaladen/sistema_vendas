@@ -19,6 +19,32 @@ class FuncionariosPage extends StatefulWidget {
 }
 
 class _FuncionariosPageState extends State<FuncionariosPage> {
+  static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+
+  static ButtonStyle get _estiloBotaoPrimarioCompacto => FilledButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+
+  static const double _wCodigo = 132;
+  static const double _wData = 232;
+  static const double _wCpf = 200;
+  static const double _wRg = 168;
+  static const double _wPis = 220;
+  static const double _wFone = 184;
+  static const double _wCep = 120;
+  static const double _wNumero = 88;
+  static const double _wUf = 72;
+  static const double _wMoeda = 176;
+  static const double _wDiaPag = 132;
+
   final _codigoController = TextEditingController();
   final _nomeController = TextEditingController();
   final _cargoController = TextEditingController();
@@ -680,7 +706,7 @@ class _FuncionariosPageState extends State<FuncionariosPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Cadastro de funcionarios')),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: RawScrollbar(
           controller: _scrollController,
           thumbVisibility: true,
@@ -692,96 +718,126 @@ class _FuncionariosPageState extends State<FuncionariosPage> {
             children: [
               if (_status.isNotEmpty) ...[
                 _buildStatusBanner(context, _status),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
               ],
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: _irPrimeiroFuncionario,
                       child: const Text('|< Primeiro'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: OutlinedButton(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: _irFuncionarioAnterior,
                       child: const Text('< Anterior'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: OutlinedButton(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: _irProximoFuncionario,
                       child: const Text('Proximo >'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: OutlinedButton(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: _irUltimoFuncionario,
                       child: const Text('Ultimo >|'),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
+                  style: _estiloBotaoContornoCompacto,
                   onPressed: _abrirPesquisaFuncionario,
-                  icon: const Icon(Icons.search),
+                  icon: const Icon(Icons.search, size: 18),
                   label: const Text('Pesquisar funcionario'),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               _buildSectionCard(
                 context: context,
                 title: 'Dados principais',
                 icon: Icons.badge_outlined,
                 children: [
-                  TextField(
-                    controller: _codigoController,
-                    decoration: const InputDecoration(
-                      labelText: 'Codigo interno',
-                      hintText: 'Ex.: F01',
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SizedBox(
+                      width: _wCodigo,
+                      child: TextField(
+                        controller: _codigoController,
+                        decoration: const InputDecoration(
+                          labelText: 'Codigo interno',
+                          hintText: 'Ex.: F01',
+                          isDense: true,
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _nomeController,
-                    decoration: const InputDecoration(labelText: 'Nome completo'),
+                    decoration: const InputDecoration(
+                      labelText: 'Nome completo',
+                      isDense: true,
+                    ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _cargoController,
-                    decoration: const InputDecoration(labelText: 'Cargo'),
+                    decoration: const InputDecoration(
+                      labelText: 'Cargo',
+                      isDense: true,
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _selecionarDataNascimento,
-                          icon: const Icon(Icons.cake_outlined),
-                          label: Text(
-                            'Nascimento: ${_dateFormat.format(_dataNascimento)}',
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: _wData,
+                          child: OutlinedButton.icon(
+                            style: _estiloBotaoContornoCompacto,
+                            onPressed: _selecionarDataNascimento,
+                            icon: const Icon(Icons.cake_outlined, size: 18),
+                            label: Text(
+                              'Nasc.: ${_dateFormat.format(_dataNascimento)}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _selecionarDataAdmissao,
-                          icon: const Icon(Icons.event_available_outlined),
-                          label: Text(
-                            'Admissao: ${_dateFormat.format(_dataAdmissao)}',
+                        SizedBox(
+                          width: _wData,
+                          child: OutlinedButton.icon(
+                            style: _estiloBotaoContornoCompacto,
+                            onPressed: _selecionarDataAdmissao,
+                            icon: const Icon(Icons.event_available_outlined, size: 18),
+                            label: Text(
+                              'Admissao: ${_dateFormat.format(_dataAdmissao)}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   SwitchListTile(
+                    dense: true,
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Funcionario ativo'),
                     value: _ativo,
@@ -789,207 +845,305 @@ class _FuncionariosPageState extends State<FuncionariosPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              _buildSectionCard(
-                context: context,
-                title: 'Documentacao',
-                icon: Icons.assignment_ind_outlined,
-                children: [
-                  Row(
+              const SizedBox(height: 8),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final docCard = _buildSectionCard(
+                    context: context,
+                    title: 'Documentacao',
+                    icon: Icons.assignment_ind_outlined,
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _cpfController,
-                          decoration: const InputDecoration(labelText: 'CPF'),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            SizedBox(
+                              width: _wCpf,
+                              child: TextField(
+                                controller: _cpfController,
+                                decoration: const InputDecoration(
+                                  labelText: 'CPF',
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: _wRg,
+                              child: TextField(
+                                controller: _rgController,
+                                decoration: const InputDecoration(
+                                  labelText: 'RG',
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _rgController,
-                          decoration: const InputDecoration(labelText: 'RG'),
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: SizedBox(
+                          width: _wPis,
+                          child: TextField(
+                            controller: _pisController,
+                            decoration: const InputDecoration(
+                              labelText: 'PIS',
+                              isDense: true,
+                            ),
+                          ),
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _pisController,
-                    decoration: const InputDecoration(labelText: 'PIS'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              _buildSectionCard(
-                context: context,
-                title: 'Contato',
-                icon: Icons.phone_outlined,
-                children: [
-                  Row(
+                  );
+                  final contCard = _buildSectionCard(
+                    context: context,
+                    title: 'Contato',
+                    icon: Icons.phone_outlined,
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _telefoneController,
-                          decoration: const InputDecoration(labelText: 'Telefone'),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            SizedBox(
+                              width: _wFone,
+                              child: TextField(
+                                controller: _telefoneController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Telefone',
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: _wFone,
+                              child: TextField(
+                                controller: _whatsappController,
+                                decoration: const InputDecoration(
+                                  labelText: 'WhatsApp',
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _whatsappController,
-                          decoration: const InputDecoration(labelText: 'WhatsApp'),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _emailController,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          isDense: true,
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(labelText: 'Email'),
-                  ),
-                ],
+                  );
+
+                  const limiarDuasColunas = 700.0;
+                  final largura = constraints.maxWidth;
+                  final usarDuasColunas =
+                      constraints.hasBoundedWidth && largura >= limiarDuasColunas;
+                  if (!usarDuasColunas) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        docCard,
+                        const SizedBox(height: 8),
+                        contCard,
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: docCard),
+                      const SizedBox(width: 10),
+                      Expanded(child: contCard),
+                    ],
+                  );
+                },
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               _buildSectionCard(
                 context: context,
                 title: 'Endereco',
                 icon: Icons.location_on_outlined,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
+                      SizedBox(
+                        width: _wCep,
                         child: TextField(
                           controller: _cepController,
-                          decoration: const InputDecoration(labelText: 'CEP'),
+                          decoration: const InputDecoration(
+                            labelText: 'CEP',
+                            isDense: true,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        flex: 2,
                         child: TextField(
                           controller: _enderecoController,
-                          decoration: const InputDecoration(labelText: 'Endereco'),
+                          decoration: const InputDecoration(
+                            labelText: 'Endereco',
+                            isDense: true,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Expanded(
+                      SizedBox(
+                        width: _wNumero,
                         child: TextField(
                           controller: _numeroController,
-                          decoration: const InputDecoration(labelText: 'Numero'),
+                          decoration: const InputDecoration(
+                            labelText: 'Nº',
+                            isDense: true,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: TextField(
                           controller: _bairroController,
-                          decoration: const InputDecoration(labelText: 'Bairro'),
+                          decoration: const InputDecoration(
+                            labelText: 'Bairro',
+                            isDense: true,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextField(
                           controller: _cidadeController,
-                          decoration: const InputDecoration(labelText: 'Cidade'),
+                          decoration: const InputDecoration(
+                            labelText: 'Cidade',
+                            isDense: true,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       SizedBox(
-                        width: 100,
+                        width: _wUf,
                         child: TextField(
                           controller: _ufController,
                           inputFormatters: [
                             FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
                             LengthLimitingTextInputFormatter(2),
                           ],
-                          decoration: const InputDecoration(labelText: 'UF'),
+                          decoration: const InputDecoration(
+                            labelText: 'UF',
+                            isDense: true,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               _buildSectionCard(
                 context: context,
                 title: 'Financeiro e observacoes',
                 icon: Icons.payments_outlined,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _salarioController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.end,
+                      children: [
+                        SizedBox(
+                          width: _wMoeda,
+                          child: TextField(
+                            controller: _salarioController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Salario (R\$)',
+                              isDense: true,
+                            ),
                           ),
-                          decoration: const InputDecoration(labelText: 'Salario (R\$)'),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _diaPagamentoController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Dia pagamento (1-31)',
+                        SizedBox(
+                          width: _wDiaPag,
+                          child: TextField(
+                            controller: _diaPagamentoController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Dia pag.',
+                              helperText: '1-31',
+                              isDense: true,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                        SizedBox(
+                          width: _wMoeda,
+                          child: TextField(
+                            controller: _descontoController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Desconto (R\$)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: _wMoeda,
+                          child: TextField(
+                            controller: _adiantamentoController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Adiantam. (R\$)',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _descontoController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Desconto atual (R\$)',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _adiantamentoController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Adiantamento atual (R\$)',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _historicoFinanceiroController,
                     maxLines: 2,
                     decoration: const InputDecoration(
                       labelText: 'Historico financeiro (datas e observacoes)',
+                      isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _observacoesController,
                     maxLines: 3,
-                    decoration: const InputDecoration(labelText: 'Observacoes'),
+                    decoration: const InputDecoration(
+                      labelText: 'Observacoes',
+                      isDense: true,
+                    ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Row(
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
+                          style: _estiloBotaoContornoCompacto,
                           onPressed: _incluirVale,
-                          icon: const Icon(Icons.add_card_outlined),
+                          icon: const Icon(Icons.add_card_outlined, size: 18),
                           label: const Text('Incluir vale'),
                         ),
                       ),
@@ -1038,25 +1192,28 @@ class _FuncionariosPageState extends State<FuncionariosPage> {
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
                     child: FilledButton.icon(
+                      style: _estiloBotaoPrimarioCompacto,
                       onPressed: _salvar,
-                      icon: const Icon(Icons.save_outlined),
+                      icon: const Icon(Icons.save_outlined, size: 18),
                       label: Text(emEdicao ? 'Atualizar' : 'Salvar'),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   OutlinedButton.icon(
+                    style: _estiloBotaoContornoCompacto,
                     onPressed: _limparFormulario,
-                    icon: const Icon(Icons.add),
+                    icon: const Icon(Icons.add, size: 18),
                     label: const Text('Novo'),
                   ),
                   if (emEdicao) ...[
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     OutlinedButton.icon(
+                      style: _estiloBotaoContornoCompacto,
                       onPressed: () {
                         final atualId = _funcionarioEmEdicaoId;
                         if (atualId == null) return;
@@ -1066,6 +1223,7 @@ class _FuncionariosPageState extends State<FuncionariosPage> {
                       },
                       icon: Icon(
                         Icons.delete_outline,
+                        size: 18,
                         color: theme.colorScheme.error,
                       ),
                       label: Text(
@@ -1076,7 +1234,7 @@ class _FuncionariosPageState extends State<FuncionariosPage> {
                   ],
                 ],
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
               ExpansionTile(
                 tilePadding: EdgeInsets.zero,
                 title: Text(
@@ -1162,23 +1320,24 @@ class _FuncionariosPageState extends State<FuncionariosPage> {
         side: BorderSide(color: theme.colorScheme.outlineVariant),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icon, size: 20, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
+                Icon(icon, size: 17, color: theme.colorScheme.primary),
+                const SizedBox(width: 6),
                 Text(
                   title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             ...children,
           ],
         ),

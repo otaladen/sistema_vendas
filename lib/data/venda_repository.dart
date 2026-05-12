@@ -1131,7 +1131,11 @@ class VendaRepository {
     }).toList();
   }
 
-  void atualizarStatusEntrega(int vendaId, String novoStatus) {
+  void atualizarStatusEntrega(
+    int vendaId,
+    String novoStatus, {
+    String? complementoEntregaJson,
+  }) {
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
       if (venda == null) {
@@ -1143,6 +1147,17 @@ class VendaRepository {
         );
       }
       venda.statusEntrega = novoStatus;
+      if (novoStatus == 'entregue') {
+        venda.complementoEntregaJson = '';
+      } else if (novoStatus == 'entregue_complemento_pendente') {
+        final j = complementoEntregaJson?.trim() ?? '';
+        if (j.isEmpty) {
+          throw StateError(
+            'Registro de itens em falta obrigatorio para entrega com complemento pendente.',
+          );
+        }
+        venda.complementoEntregaJson = j;
+      }
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita();
@@ -1199,6 +1214,34 @@ class VendaRepository {
         throw StateError('Somente entregas da loja possuem motorista.');
       }
       venda.motoristaEntrega = motorista.trim();
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita();
+  }
+
+  /// Define ou remove a data de entrega agendada (somente dia local; hora ignorada).
+  void atualizarDataEntregaMarcada(int vendaId, DateTime? novaData) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda/Orcamento $vendaId nao encontrado.');
+      }
+      if (venda.tipoEntrega != 'entrega_loja') {
+        throw StateError(
+          'Somente entregas da loja possuem data de entrega marcada.',
+        );
+      }
+      if (venda.status != 'finalizada') {
+        throw StateError(
+          'Somente vendas finalizadas podem ter data de entrega ajustada aqui.',
+        );
+      }
+      if (novaData != null) {
+        final d = novaData.toLocal();
+        venda.dataEntregaMarcada = DateTime(d.year, d.month, d.day);
+      } else {
+        venda.dataEntregaMarcada = null;
+      }
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita();
