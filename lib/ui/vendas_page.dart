@@ -113,9 +113,11 @@ class VendasPage extends StatelessWidget {
                   MaterialPageRoute(
                     builder: (_) => EntregasPage(
                       vendaRepository: vendaRepository,
+                      produtoRepository: produtoRepository,
                       motoristaRepository: motoristaRepository,
                       usuarioAtual: usuarioAtual,
                       podeGerenciarStatusEntrega: podeGerenciarEntregas,
+                      podeRegistrarDevolucaoTrocaSemSenha: podeCancelarVendas,
                     ),
                   ),
                 );

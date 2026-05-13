@@ -280,7 +280,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(34, 2506218753024703458),
+    lastPropertyId: const obx_int.IdUid(35, 5732368228333512180),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -485,6 +485,12 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(34, 2506218753024703458),
         name: 'complementoEntregaJson',
         type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(35, 5732368228333512180),
+        name: 'carretoReservaAteSaida',
+        type: 1,
         flags: 0,
       ),
     ],
@@ -1576,7 +1582,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final complementoEntregaJsonOffset = fbb.writeString(
           object.complementoEntregaJson,
         );
-        fbb.startTable(35);
+        fbb.startTable(36);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -1610,6 +1616,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addInt64(30, object.vendaOrigemFreteRetiradaId);
         fbb.addInt64(32, object.grupoEntregaFreteId);
         fbb.addOffset(33, complementoEntregaJsonOffset);
+        fbb.addBool(34, object.carretoReservaAteSaida);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1723,6 +1730,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
           50,
           false,
         );
+        final carretoReservaAteSaidaParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          72,
+          false,
+        );
         final entregaPendenteParam = const fb.BoolReader().vTableGet(
           buffer,
           rootOffset,
@@ -1783,6 +1796,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           cargaSeparada: cargaSeparadaParam,
           cargaCarregada: cargaCarregadaParam,
           cargaSaiu: cargaSaiuParam,
+          carretoReservaAteSaida: carretoReservaAteSaidaParam,
           entregaPendente: entregaPendenteParam,
           cancelada: canceladaParam,
           motivoCancelamento: motivoCancelamentoParam,
@@ -3024,6 +3038,11 @@ class Venda_ {
   /// See [Venda.complementoEntregaJson].
   static final complementoEntregaJson = obx.QueryStringProperty<Venda>(
     _entities[2].properties[32],
+  );
+
+  /// See [Venda.carretoReservaAteSaida].
+  static final carretoReservaAteSaida = obx.QueryBooleanProperty<Venda>(
+    _entities[2].properties[33],
   );
 
   /// see [Venda.itens]

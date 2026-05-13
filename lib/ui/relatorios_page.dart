@@ -450,7 +450,7 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
                       return ListTile(
                         dense: true,
                         title: Text(
-                          '#${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id} · ${_fmt(v.total)}',
+                          '${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id} · ${_fmt(v.total)}',
                         ),
                         subtitle: Text(
                           '${_dh.format(v.data.toLocal())} · '
@@ -1297,7 +1297,7 @@ class RelatorioOrcamentosAbertosPage extends StatelessWidget {
                       final c = cliente(v);
                       return ListTile(
                         title: Text(
-                          'Orc. #${v.numeroOrcamento} · ${fmt(v.total)}',
+                          'Orc. ${v.numeroOrcamento} · ${fmt(v.total)}',
                         ),
                         subtitle: Text(
                           '${DateFormat('dd/MM/yyyy HH:mm').format(v.data.toLocal())} · '

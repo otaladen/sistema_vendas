@@ -30,6 +30,7 @@ class Venda {
     this.cargaSeparada = false,
     this.cargaCarregada = false,
     this.cargaSaiu = false,
+    this.carretoReservaAteSaida = false,
     this.entregaPendente = false,
     this.cancelada = false,
     this.motivoCancelamento = '',
@@ -68,6 +69,11 @@ class Venda {
   bool cargaSeparada;
   bool cargaCarregada;
   bool cargaSaiu;
+
+  /// Carreto com estoque reservado na finalizacao; baixa fisica ao marcar [cargaSaiu].
+  /// `false` em vendas antigas (baixa no caixa) e em migracoes retirada futura > carreto.
+  bool carretoReservaAteSaida;
+
   bool entregaPendente;
   bool cancelada;
   String motivoCancelamento;

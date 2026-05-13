@@ -24,3 +24,11 @@ class HistoricoEntrega {
 
   final venda = ToOne<Venda>();
 }
+
+/// Valores sinteticos em [HistoricoEntrega.statusNovo] para eventos que nao sao transicao de status de roteiro.
+class HistoricoEntregaEventos {
+  HistoricoEntregaEventos._();
+
+  static const devolucao = 'entrega_evento_devolucao';
+  static const troca = 'entrega_evento_troca';
+}

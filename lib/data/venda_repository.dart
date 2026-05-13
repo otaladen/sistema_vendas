@@ -1,3 +1,4 @@
+import '../domain/complemento_entrega_codec.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
@@ -168,11 +169,14 @@ class DadosEntregaOrcamento {
 }
 
 class VendaRepository {
-  VendaRepository(this._db);
+  VendaRepository(this._db, {void Function()? onAposEscrita})
+    : _onAposEscrita = onAposEscrita;
 
   final ObjectBox _db;
+  final void Function()? _onAposEscrita;
 
   void _notificarRedeAposEscrita() {
+    _onAposEscrita?.call();
     notificarAlteracaoParaRede();
   }
 
@@ -260,7 +264,7 @@ class VendaRepository {
         }
 
         if (!permitirVendaSemEstoque &&
-            produto.estoqueReal < input.quantidade) {
+            produto.estoqueLivreParaVenda < input.quantidade) {
           throw StateError('Estoque insuficiente para ${produto.nome}.');
         }
 
@@ -533,7 +537,7 @@ class VendaRepository {
           ? '${mae.numeroOrcamento}'
           : '${mae.id}';
       final item = ItemVenda(
-        nomeProduto: 'Frete carreto (ref. venda #$refMae)',
+        nomeProduto: 'Frete carreto (ref. venda $refMae)',
         quantidade: 1,
         precoTipo: 'preco1',
         precoUnitario: valorFreteCobrado,
@@ -684,7 +688,7 @@ class VendaRepository {
         '${dataHora.minute.toString().padLeft(2, '0')}]';
     final linha =
         '$prefixo CAIXA: Migrada para carreto apos pagamento do frete '
-        '(orc. #${filho.numeroOrcamento}).';
+        '(orc. ${filho.numeroOrcamento}).';
     final atualObs = mae.observacaoEntrega.trim();
     mae.observacaoEntrega = atualObs.isEmpty ? linha : '$atualObs\n$linha';
 
@@ -851,13 +855,14 @@ class VendaRepository {
 
       if (!filhoFreteRetirada) {
         if (venda.entregaPendente) {
+          venda.carretoReservaAteSaida = false;
           if (!permitirVendaSemEstoque) {
             for (final item in venda.itens) {
               final produto = item.produto.target;
               if (produto == null) {
                 throw StateError('Produto do item ${item.id} nao encontrado.');
               }
-              if (produto.estoqueReal < item.quantidade) {
+              if (produto.estoqueLivreParaVenda < item.quantidade) {
                 throw StateError(
                   'Estoque insuficiente para reservar ${produto.nome}.',
                 );
@@ -871,14 +876,39 @@ class VendaRepository {
               _db.produtoBox.put(produto);
             }
           }
+        } else if (venda.tipoEntrega == 'entrega_loja') {
+          venda.carretoReservaAteSaida = true;
+          if (!permitirVendaSemEstoque) {
+            for (final item in venda.itens) {
+              final produto = item.produto.target;
+              if (produto == null) {
+                throw StateError('Produto do item ${item.id} nao encontrado.');
+              }
+              if (produto.estoqueLivreParaVenda < item.quantidade) {
+                throw StateError(
+                  'Estoque insuficiente para reservar ${produto.nome} '
+                  '(livre ${produto.estoqueLivreParaVenda}, '
+                  'pedido ${item.quantidade}).',
+                );
+              }
+            }
+          }
+          for (final item in venda.itens) {
+            final produto = item.produto.target;
+            if (produto != null) {
+              produto.estoqueReservado += item.quantidade;
+              _db.produtoBox.put(produto);
+            }
+          }
         } else {
+          venda.carretoReservaAteSaida = false;
           for (final item in venda.itens) {
             final produto = item.produto.target;
             if (produto == null) {
               throw StateError('Produto do item ${item.id} nao encontrado.');
             }
             if (!permitirVendaSemEstoque &&
-                produto.estoqueReal < item.quantidade) {
+                produto.estoqueLivreParaVenda < item.quantidade) {
               throw StateError('Estoque insuficiente para ${produto.nome}.');
             }
           }
@@ -904,6 +934,155 @@ class VendaRepository {
       }
     });
     _notificarRedeAposEscrita();
+  }
+
+  static int _quantidadeItemParaEstoqueCarreto(ItemVenda item) {
+    final q = item.quantidade - item.quantidadeDevolvida;
+    return q < 0 ? 0 : q;
+  }
+
+  void _baixarEstoqueCarretoAoMarcarSaida(Venda venda) {
+    for (final item in venda.itens) {
+      final produto = item.produto.target;
+      if (produto == null) continue;
+      final q = _quantidadeItemParaEstoqueCarreto(item);
+      if (q <= 0) continue;
+      if (produto.estoqueReservado < q) {
+        throw StateError(
+          'Reservado insuficiente para ${produto.nome} ao marcar saida do carreto '
+          '(reservado ${produto.estoqueReservado}, precisa $q).',
+        );
+      }
+      if (produto.estoqueReal < q) {
+        throw StateError(
+          'Estoque fisico insuficiente para ${produto.nome} ao marcar saida '
+          '(real ${produto.estoqueReal}, precisa $q).',
+        );
+      }
+      produto.estoqueReservado -= q;
+      produto.estoqueReal -= q;
+      _db.produtoBox.put(produto);
+    }
+  }
+
+  void _estornarBaixaEstoqueCarretoAoDesmarcarSaida(Venda venda) {
+    for (final item in venda.itens) {
+      final produto = item.produto.target;
+      if (produto == null) continue;
+      var q = _quantidadeItemParaEstoqueCarreto(item);
+      if (q <= 0) continue;
+      if (venda.statusEntrega == 'entregue_complemento_pendente' &&
+          venda.complementoEntregaJson.trim().isNotEmpty) {
+        final m = _quantidadeComplementoDeclaradaPorItem(
+          venda.complementoEntregaJson,
+          item.id,
+        );
+        q -= m;
+        if (q < 0) q = 0;
+      }
+      if (q <= 0) continue;
+      produto.estoqueReal += q;
+      produto.estoqueReservado += q;
+      _db.produtoBox.put(produto);
+    }
+  }
+
+  int _quantidadeComplementoDeclaradaPorItem(String json, int itemVendaId) {
+    var s = 0;
+    for (final l in ComplementoEntregaCodec.decode(json)) {
+      if (l.itemVendaId == itemVendaId) s += l.quantidade;
+    }
+    return s;
+  }
+
+  bool _vendaCarretoReservaComSaidaParaEstoqueComplemento(Venda v) {
+    return v.tipoEntrega == 'entrega_loja' &&
+        v.carretoReservaAteSaida &&
+        v.cargaSaiu &&
+        v.status == 'finalizada' &&
+        !v.cancelada;
+  }
+
+  /// Volta ao fisico + reservado o que nao saiu na ida (apos baixa total no "Saiu").
+  void _creditarEstoqueComplementoFaltaNaIda(
+    Venda venda,
+    List<LinhaComplementoEntrega> linhas,
+  ) {
+    if (!_vendaCarretoReservaComSaidaParaEstoqueComplemento(venda)) return;
+    final porItem = <int, int>{};
+    for (final l in linhas) {
+      if (l.itemVendaId <= 0 || l.quantidade <= 0) continue;
+      porItem[l.itemVendaId] = (porItem[l.itemVendaId] ?? 0) + l.quantidade;
+    }
+    if (porItem.isEmpty) {
+      throw StateError('Complemento sem linhas validas para estoque.');
+    }
+    for (final e in porItem.entries) {
+      final item = _db.itemVendaBox.get(e.key);
+      if (item == null || item.venda.targetId != venda.id) {
+        throw StateError('Item de venda ${e.key} invalido no complemento.');
+      }
+      final maxQ = _quantidadeItemParaEstoqueCarreto(item);
+      if (e.value > maxQ) {
+        throw StateError(
+          'Falta declarada (${e.value}) de "${item.nomeProduto}" excede o '
+          'entregavel da linha ($maxQ).',
+        );
+      }
+      final produto = item.produto.target;
+      if (produto == null) {
+        throw StateError('Produto do item ${item.id} nao encontrado.');
+      }
+      produto.estoqueReservado += e.value;
+      produto.estoqueReal += e.value;
+      _db.produtoBox.put(produto);
+    }
+  }
+
+  /// Segunda viagem: baixa o que havia sido creditado ao registrar o complemento.
+  void _baixarEstoqueComplementoEntregaAoConcluir(
+    Venda venda,
+    List<LinhaComplementoEntrega> linhas,
+  ) {
+    if (!_vendaCarretoReservaComSaidaParaEstoqueComplemento(venda)) return;
+    final porItem = <int, int>{};
+    for (final l in linhas) {
+      if (l.itemVendaId <= 0 || l.quantidade <= 0) continue;
+      porItem[l.itemVendaId] = (porItem[l.itemVendaId] ?? 0) + l.quantidade;
+    }
+    if (porItem.isEmpty) return;
+    for (final e in porItem.entries) {
+      final item = _db.itemVendaBox.get(e.key);
+      if (item == null || item.venda.targetId != venda.id) {
+        throw StateError('Item de venda ${e.key} invalido no complemento.');
+      }
+      final maxQ = _quantidadeItemParaEstoqueCarreto(item);
+      if (e.value > maxQ) {
+        throw StateError(
+          'Quantidade do complemento (${e.value}) de "${item.nomeProduto}" '
+          'excede o entregavel da linha ($maxQ).',
+        );
+      }
+      final produto = item.produto.target;
+      if (produto == null) {
+        throw StateError('Produto do item ${item.id} nao encontrado.');
+      }
+      if (produto.estoqueReservado < e.value) {
+        throw StateError(
+          'Reservado insuficiente para ${produto.nome} ao concluir complemento '
+          '(reservado ${produto.estoqueReservado}, precisa ${e.value}).',
+        );
+      }
+      if (produto.estoqueReal < e.value) {
+        throw StateError(
+          'Estoque fisico insuficiente para ${produto.nome} ao concluir complemento '
+          '(real ${produto.estoqueReal}, precisa ${e.value}).',
+        );
+      }
+      produto.estoqueReservado -= e.value;
+      produto.estoqueReal -= e.value;
+      _db.produtoBox.put(produto);
+    }
   }
 
   void atualizarQuantidadeItemOrcamento(
@@ -1146,17 +1325,30 @@ class VendaRepository {
           'Somente pedidos de entrega podem ter status de entrega.',
         );
       }
-      venda.statusEntrega = novoStatus;
-      if (novoStatus == 'entregue') {
-        venda.complementoEntregaJson = '';
-      } else if (novoStatus == 'entregue_complemento_pendente') {
+      final statusAnterior = venda.statusEntrega;
+
+      if (novoStatus == 'entregue_complemento_pendente') {
         final j = complementoEntregaJson?.trim() ?? '';
         if (j.isEmpty) {
           throw StateError(
             'Registro de itens em falta obrigatorio para entrega com complemento pendente.',
           );
         }
+        final linhas = ComplementoEntregaCodec.decode(j);
+        venda.statusEntrega = novoStatus;
         venda.complementoEntregaJson = j;
+        _creditarEstoqueComplementoFaltaNaIda(venda, linhas);
+      } else if (novoStatus == 'entregue') {
+        final linhasComplemento = statusAnterior == 'entregue_complemento_pendente'
+            ? ComplementoEntregaCodec.decode(venda.complementoEntregaJson)
+            : const <LinhaComplementoEntrega>[];
+        venda.statusEntrega = novoStatus;
+        venda.complementoEntregaJson = '';
+        if (linhasComplemento.isNotEmpty) {
+          _baixarEstoqueComplementoEntregaAoConcluir(venda, linhasComplemento);
+        }
+      } else {
+        venda.statusEntrega = novoStatus;
       }
       _db.vendaBox.put(venda);
     });
@@ -1196,9 +1388,22 @@ class VendaRepository {
           'Somente entregas da loja possuem checklist de carga.',
         );
       }
+      final saiuAntes = venda.cargaSaiu;
       if (separado != null) venda.cargaSeparada = separado;
       if (carregado != null) venda.cargaCarregada = carregado;
       if (saiu != null) venda.cargaSaiu = saiu;
+      final saiuDepois = venda.cargaSaiu;
+
+      if (venda.carretoReservaAteSaida &&
+          venda.status == 'finalizada' &&
+          !venda.cancelada) {
+        if (!saiuAntes && saiuDepois) {
+          _baixarEstoqueCarretoAoMarcarSaida(venda);
+        } else if (saiuAntes && !saiuDepois) {
+          _estornarBaixaEstoqueCarretoAoDesmarcarSaida(venda);
+        }
+      }
+
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita();
@@ -1303,6 +1508,26 @@ class VendaRepository {
     _notificarRedeAposEscrita();
   }
 
+  void _anexarLinhaObservacaoEntregaEmVenda(
+    Venda venda,
+    String status,
+    String motivo,
+    String usuario,
+  ) {
+    final motivoLimpo = motivo.trim();
+    if (motivoLimpo.isEmpty) return;
+    final quem = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
+    final dataHora = DateTime.now().toLocal();
+    final prefixo =
+        '[${dataHora.day.toString().padLeft(2, '0')}/'
+        '${dataHora.month.toString().padLeft(2, '0')}/'
+        '${dataHora.year} ${dataHora.hour.toString().padLeft(2, '0')}:'
+        '${dataHora.minute.toString().padLeft(2, '0')}]';
+    final linha = '$prefixo ${status.toUpperCase()} por $quem: $motivoLimpo';
+    final atual = venda.observacaoEntrega.trim();
+    venda.observacaoEntrega = atual.isEmpty ? linha : '$atual\n$linha';
+  }
+
   void registrarOcorrenciaEntrega({
     required int vendaId,
     required String status,
@@ -1314,16 +1539,7 @@ class VendaRepository {
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
       if (venda == null) return;
-      final quem = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
-      final dataHora = DateTime.now().toLocal();
-      final prefixo =
-          '[${dataHora.day.toString().padLeft(2, '0')}/'
-          '${dataHora.month.toString().padLeft(2, '0')}/'
-          '${dataHora.year} ${dataHora.hour.toString().padLeft(2, '0')}:'
-          '${dataHora.minute.toString().padLeft(2, '0')}]';
-      final linha = '$prefixo ${status.toUpperCase()} por $quem: $motivoLimpo';
-      final atual = venda.observacaoEntrega.trim();
-      venda.observacaoEntrega = atual.isEmpty ? linha : '$atual\n$linha';
+      _anexarLinhaObservacaoEntregaEmVenda(venda, status, motivoLimpo, usuario);
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita();
@@ -1574,6 +1790,16 @@ class VendaRepository {
             produto.estoqueReservado = (reservadoAtual - item.quantidade)
                 .clamp(0, reservadoAtual)
                 .toInt();
+          } else if (venda.tipoEntrega == 'entrega_loja' &&
+              venda.carretoReservaAteSaida) {
+            if (venda.cargaSaiu) {
+              produto.estoqueReal += item.quantidade;
+            } else {
+              final reservadoAtual = produto.estoqueReservado;
+              produto.estoqueReservado = (reservadoAtual - item.quantidade)
+                  .clamp(0, reservadoAtual)
+                  .toInt();
+            }
           } else {
             produto.estoqueReal += item.quantidade;
           }
@@ -1738,6 +1964,30 @@ class VendaRepository {
           linha.produto.target = p;
           _db.linhaTrocaSaidaBox.put(linha);
         }
+      }
+
+      if (venda.tipoEntrega == 'entrega_loja') {
+        final hist = HistoricoEntrega(
+          statusAnterior: venda.statusEntrega,
+          statusNovo: tipoLimpo == 'troca'
+              ? HistoricoEntregaEventos.troca
+              : HistoricoEntregaEventos.devolucao,
+          usuario: regSalvo.registradoPor,
+          dataHora: DateTime.now(),
+        );
+        hist.venda.target = venda;
+        _db.historicoEntregaBox.put(hist);
+
+        final statusObs = tipoLimpo == 'troca'
+            ? 'Troca material (retorno)'
+            : 'Devolucao material (retorno)';
+        _anexarLinhaObservacaoEntregaEmVenda(
+          venda,
+          statusObs,
+          motivoLimpo,
+          regSalvo.registradoPor,
+        );
+        _db.vendaBox.put(venda);
       }
 
       return regId;
@@ -1925,6 +2175,11 @@ class VendaRepository {
       if (daCliente > 0) {
         produto.estoqueReal += daCliente;
       }
+    } else if (venda.tipoEntrega == 'entrega_loja' &&
+        venda.carretoReservaAteSaida &&
+        !venda.cargaSaiu) {
+      final r = produto.estoqueReservado;
+      produto.estoqueReservado = (r - qtd).clamp(0, r).toInt();
     } else {
       produto.estoqueReal += qtd;
     }

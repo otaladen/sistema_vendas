@@ -218,16 +218,26 @@ class _MyAppState extends State<MyApp> {
               usuarioRepository: _usuarioRepository,
               onLoginSuccess: _entrar,
             )
-          : MainMenuPage(
-              produtoRepository: ProdutoRepository(widget.objectBox),
-              clienteRepository: ClienteRepository(widget.objectBox),
-              vendaRepository: VendaRepository(widget.objectBox),
-              vendedorRepository: VendedorRepository(widget.objectBox),
-              funcionarioRepository: FuncionarioRepository(widget.objectBox),
-              motoristaRepository: MotoristaRepository(widget.objectBox),
-              usuarioLogado: _usuarioLogado!,
-              onLogout: _sair,
-              lanSyncScheduler: widget.lanSyncScheduler,
+          : Builder(
+              builder: (context) {
+                final produtoRepository =
+                    ProdutoRepository(widget.objectBox);
+                final vendaRepository = VendaRepository(
+                  widget.objectBox,
+                  onAposEscrita: produtoRepository.invalidarCacheBusca,
+                );
+                return MainMenuPage(
+                  produtoRepository: produtoRepository,
+                  clienteRepository: ClienteRepository(widget.objectBox),
+                  vendaRepository: vendaRepository,
+                  vendedorRepository: VendedorRepository(widget.objectBox),
+                  funcionarioRepository: FuncionarioRepository(widget.objectBox),
+                  motoristaRepository: MotoristaRepository(widget.objectBox),
+                  usuarioLogado: _usuarioLogado!,
+                  onLogout: _sair,
+                  lanSyncScheduler: widget.lanSyncScheduler,
+                );
+              },
             ),
     );
   }

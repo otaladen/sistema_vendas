@@ -67,7 +67,7 @@ class CupomNaoFiscalVendaPdf {
       case 'entrega_loja':
         return 'Carreto';
       case 'retirada_futura':
-        return 'Retirada futura';
+        return 'Retirada Futura';
       case 'retirada':
       default:
         return 'Leva Agora';
@@ -185,7 +185,7 @@ class CupomNaoFiscalVendaPdf {
               pw.SizedBox(height: 6),
               pw.Divider(),
               pw.Text(
-                'VENDA #${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}',
+                'VENDA ${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}',
                 style: pw.TextStyle(
                   fontSize: 10,
                   fontWeight: pw.FontWeight.bold,
@@ -220,10 +220,25 @@ class CupomNaoFiscalVendaPdf {
                   'Telefone: ${cliente!.telefone}',
                   style: const pw.TextStyle(fontSize: 9),
                 ),
-              pw.Text(
-                'Entrega: ${rotuloTipoEntrega(venda.tipoEntrega)}'
-                '${venda.tipoEntrega == 'entrega_loja' ? ' | Frete: ${formatarMoeda(venda.valorFrete)}' : ''}',
-                style: const pw.TextStyle(fontSize: 9),
+              pw.RichText(
+                text: pw.TextSpan(
+                  style: const pw.TextStyle(fontSize: 9),
+                  children: [
+                    const pw.TextSpan(text: 'Entrega: '),
+                    pw.TextSpan(
+                      text: rotuloTipoEntrega(venda.tipoEntrega),
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    if (venda.tipoEntrega == 'entrega_loja')
+                      pw.TextSpan(
+                        text:
+                            ' | Frete: ${formatarMoeda(venda.valorFrete)}',
+                      ),
+                  ],
+                ),
               ),
               if (venda.enderecoEntrega.trim().isNotEmpty)
                 pw.Text(

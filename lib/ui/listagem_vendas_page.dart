@@ -215,12 +215,12 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   /// Numero da venda no cupom; se nao houver sequencial, cai no ID interno (caso raro).
   String _rotuloVendaUsuario(Venda v) {
-    if (v.numeroOrcamento > 0) return 'Venda #${v.numeroOrcamento}';
+    if (v.numeroOrcamento > 0) return 'Venda ${v.numeroOrcamento}';
     return 'Venda ${v.id}';
   }
 
   String _badgeNumeroVenda(Venda v) {
-    if (v.numeroOrcamento > 0) return '#${v.numeroOrcamento}';
+    if (v.numeroOrcamento > 0) return '${v.numeroOrcamento}';
     return '${v.id}';
   }
 
@@ -1680,7 +1680,7 @@ class _DialogoFreteCarretoRetiradaFuturaState
             ? '${widget.vendaMae.numeroOrcamento}'
             : '${widget.vendaMae.id}';
     return AlertDialog(
-      title: Text('Frete carreto — ref. venda #$ref'),
+      title: Text('Frete carreto — ref. venda $ref'),
       content: SizedBox(
         width: 500,
         child: SingleChildScrollView(
@@ -1799,7 +1799,7 @@ class _DialogoFreteCarretoRetiradaFuturaState
               ),
               const SizedBox(height: 8),
               Text(
-                'O total da venda #$ref nao e alterado; o frete entra em orcamento separado '
+                'O total da venda $ref nao e alterado; o frete entra em orcamento separado '
                 'para pagamento no caixa. Ao pagar, a venda mae vira carreto e aparece em Entregas.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),

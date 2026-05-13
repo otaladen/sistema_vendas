@@ -185,7 +185,7 @@ class _CaixaPageState extends State<CaixaPage> {
                                 final cliente = _clienteDaVenda(orc)?.nomeRazao ?? 'Sem cliente';
                                 final descPdv = orc.descontoImplicitoTotal;
                                 return ListTile(
-                                  title: Text('Orcamento #${orc.numeroOrcamento}'),
+                                  title: Text('Orcamento ${orc.numeroOrcamento}'),
                                   subtitle: Text(
                                     '$cliente | Itens: ${orc.itens.length} | Total: ${_formatarMoeda(orc.total)}'
                                     '${descPdv > 0.001 ? ' | Desc. PDV: -${_formatarMoeda(descPdv)}' : ''}',
@@ -2215,7 +2215,7 @@ class _CaixaPageState extends State<CaixaPage> {
               : venda.numeroOrcamento;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Venda #$numCupom finalizada.'),
+          content: Text('Venda $numCupom finalizada.'),
         ),
       );
       await _mostrarAcoesNotaPosVenda(
@@ -2470,7 +2470,7 @@ class _CaixaPageState extends State<CaixaPage> {
       builder: (context) {
         final semantic = Theme.of(context).extension<AppSemanticColors>();
         return AlertDialog(
-          title: Text('Venda #$numeroOrcamento finalizada'),
+          title: Text('Venda $numeroOrcamento finalizada'),
           content: SizedBox(
             width: 520,
             child: Column(
@@ -2916,7 +2916,7 @@ class _CaixaPageState extends State<CaixaPage> {
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  'Orcamento #${selecionado.numeroOrcamento}',
+                                  'Orcamento ${selecionado.numeroOrcamento}',
                                   style: theme.textTheme.titleMedium,
                                 ),
                                 if (selecionado.entregaPendente) ...[
@@ -3924,7 +3924,7 @@ class _CaixaPageState extends State<CaixaPage> {
                 ),
               ),
               title: Text(
-                'Venda #${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
+                'Venda ${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
               ),
               subtitle: Text(
@@ -4077,7 +4077,7 @@ class _CaixaPageState extends State<CaixaPage> {
                           leading: CircleAvatar(
                             child: Text('${orc.numeroOrcamento}'),
                           ),
-                          title: Text('Orcamento #${orc.numeroOrcamento}'),
+                          title: Text('Orcamento ${orc.numeroOrcamento}'),
                           subtitle: Text(
                             'Itens: ${orc.itens.length} | Total: ${_formatarMoeda(orc.total)}'
                             '${descPdv > 0.001 ? ' | Desc. PDV: -${_formatarMoeda(descPdv)}' : ''}$sufV',

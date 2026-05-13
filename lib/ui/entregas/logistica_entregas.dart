@@ -23,7 +23,7 @@ List<List<Venda>> blocosEntregaComCarretoAgrupado(List<Venda> ordenadas) {
 
 String rotuloGrupoLogistica(List<Venda> bloco) {
   final nums = bloco.map((v) {
-    if (v.numeroOrcamento > 0) return '#${v.numeroOrcamento}';
+    if (v.numeroOrcamento > 0) return '${v.numeroOrcamento}';
     return 'id ${v.id}';
   }).join(', ');
   return 'Mesmo carro · $nums';

@@ -95,11 +95,11 @@ class _EstoquePageState extends State<EstoquePage> {
 
       if (incluirCustos) {
         linhas.add(
-          'SKU;Nome;Unidade;Categoria;Estoque;Reservado;Minimo;Preco1;PrecoAVista;Preco3;PrecoAPrazo;Custo;CustoMedio',
+          'SKU;Nome;Unidade;Categoria;Fisico;Reservado;Livre;Minimo;Preco1;PrecoAVista;Preco3;PrecoAPrazo;Custo;CustoMedio',
         );
       } else {
         linhas.add(
-          'SKU;Nome;Unidade;Categoria;Estoque;Reservado;Minimo;Preco1;PrecoAVista;Preco3;PrecoAPrazo',
+          'SKU;Nome;Unidade;Categoria;Fisico;Reservado;Livre;Minimo;Preco1;PrecoAVista;Preco3;PrecoAPrazo',
         );
       }
 
@@ -109,8 +109,9 @@ class _EstoquePageState extends State<EstoquePage> {
           _csvSeguro(produto.nome),
           _csvSeguro(produto.unidade),
           _csvSeguro(produto.categoria),
-          produto.estoque.toString(),
+          produto.estoqueReal.toString(),
           produto.estoqueReservado.toString(),
+          produto.estoqueLivreParaVenda.toString(),
           produto.quantidadeMinima.toString(),
           _formatarNumeroCsv(produto.preco1),
           _formatarNumeroCsv(_precoAVista(produto)),
@@ -497,7 +498,9 @@ class _EstoquePageState extends State<EstoquePage> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'SKU: ${produto.codigoInterno} | Estoque: ${produto.estoque} | Reservado: ${produto.estoqueReservado} | Minimo: ${produto.quantidadeMinima}',
+                              'SKU: ${produto.codigoInterno} | Livre: ${produto.estoqueLivreParaVenda} · '
+                              'Fis: ${produto.estoqueReal} · Res: ${produto.estoqueReservado} | '
+                              'Minimo: ${produto.quantidadeMinima}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),

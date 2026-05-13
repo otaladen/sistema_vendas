@@ -18,19 +18,23 @@ class SyncService {
     SyncCursorStorage? cursorStorage,
   })  : _db = objectBox,
         _configRepository = configRepository,
-        _cursorStorage = cursorStorage ?? SyncCursorStorage(),
-        _produtoRepo = ProdutoRepository(objectBox),
-        _clienteRepo = ClienteRepository(objectBox),
-        _vendedorRepo = VendedorRepository(objectBox),
-        _vendaRepo = VendaRepository(objectBox);
+        _cursorStorage = cursorStorage ?? SyncCursorStorage() {
+    _produtoRepo = ProdutoRepository(objectBox);
+    _clienteRepo = ClienteRepository(objectBox);
+    _vendedorRepo = VendedorRepository(objectBox);
+    _vendaRepo = VendaRepository(
+      objectBox,
+      onAposEscrita: _produtoRepo.invalidarCacheBusca,
+    );
+  }
 
   final ObjectBox _db;
   final AppConfigRepository _configRepository;
   final SyncCursorStorage _cursorStorage;
-  final ProdutoRepository _produtoRepo;
-  final ClienteRepository _clienteRepo;
-  final VendedorRepository _vendedorRepo;
-  final VendaRepository _vendaRepo;
+  late final ProdutoRepository _produtoRepo;
+  late final ClienteRepository _clienteRepo;
+  late final VendedorRepository _vendedorRepo;
+  late final VendaRepository _vendaRepo;
 
   /// Retorna mensagem de erro ou null se OK.
   Future<String?> executarSync() async {

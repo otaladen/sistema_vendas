@@ -405,7 +405,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
         children: [
           Text(
             v.numeroOrcamento > 0
-                ? 'Venda #${v.numeroOrcamento} (id ${v.id})'
+                ? 'Venda ${v.numeroOrcamento} (id ${v.id})'
                 : 'Venda ${v.id}',
             style: Theme.of(context).textTheme.titleLarge,
           ),

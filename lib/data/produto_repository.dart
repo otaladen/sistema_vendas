@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../model/produto.dart';
@@ -8,7 +9,7 @@ import '../objectbox.g.dart';
 import 'objectbox.dart';
 import 'sync/sync_write_trigger.dart';
 
-class ProdutoRepository {
+class ProdutoRepository extends ChangeNotifier {
   ProdutoRepository(this._db);
 
   final ObjectBox _db;
@@ -480,7 +481,7 @@ class ProdutoRepository {
 
   int salvar(Produto produto) {
     final id = _db.produtoBox.put(produto);
-    _invalidarCacheBusca();
+    invalidarCacheBusca();
     notificarAlteracaoParaRede();
     return id;
   }
@@ -488,7 +489,7 @@ class ProdutoRepository {
   bool remover(int id) {
     final ok = _db.produtoBox.remove(id);
     if (ok) {
-      _invalidarCacheBusca();
+      invalidarCacheBusca();
       notificarAlteracaoParaRede();
     }
     return ok;
@@ -504,6 +505,13 @@ class ProdutoRepository {
     _cacheItemCount = -1;
     _cacheVendaCount = -1;
     _cacheMontadoEm = null;
+  }
+
+  /// Chamado apos operacoes que alteram [Produto.estoqueReal] / [Produto.estoqueReservado]
+  /// fora deste repositorio (ex.: finalizacao de venda, checklist de entrega).
+  void invalidarCacheBusca() {
+    _invalidarCacheBusca();
+    notifyListeners();
   }
 }
 

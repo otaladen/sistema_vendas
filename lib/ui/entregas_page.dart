@@ -7,32 +7,41 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../data/motorista_repository.dart';
+import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../domain/complemento_entrega_codec.dart';
+import '../model/historico_entrega.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
 import 'entregas/logistica_entregas.dart';
 import 'entregas/romaneio_pdf.dart';
+import 'registrar_devolucao_troca_page.dart';
 
 /// Filtro rapido pelos contadores de resumo (atrasadas / pendentes hoje).
 enum _FiltroResumoEntregas { nenhum, atrasadas, pendentesHoje }
 
 const _kMenuMarcarDataEntrega = '__acao_marcar_data_entrega__';
 const _kMenuLimparDataEntrega = '__acao_limpar_data_entrega__';
+const _kMenuDevolucaoPosCarreto = '__acao_devolucao_pos_carreto__';
 
 class EntregasPage extends StatefulWidget {
   const EntregasPage({
     super.key,
     required this.vendaRepository,
+    required this.produtoRepository,
     required this.motoristaRepository,
     required this.usuarioAtual,
     required this.podeGerenciarStatusEntrega,
+    required this.podeRegistrarDevolucaoTrocaSemSenha,
   });
 
   final VendaRepository vendaRepository;
+  final ProdutoRepository produtoRepository;
   final MotoristaRepository motoristaRepository;
   final String usuarioAtual;
   final bool podeGerenciarStatusEntrega;
+  /// Mesmo criterio da listagem de vendas (admin / financeiro / auditoria de caixa).
+  final bool podeRegistrarDevolucaoTrocaSemSenha;
 
   @override
   State<EntregasPage> createState() => _EntregasPageState();
@@ -122,8 +131,61 @@ class _EntregasPageState extends State<EntregasPage> {
     return _quantidadeExibicaoEntrega(v, item) * item.precoUnitario;
   }
 
+  /// Mesma base da listagem de vendas (venda finalizada, itens ainda devolviveis).
+  bool _podeRegistrarDevolucaoTrocaBase(Venda v) {
+    if (v.cancelada || v.status != 'finalizada') return false;
+    if (v.vendaOrigemFreteRetiradaId > 0) return false;
+    return v.itens.any((i) => i.quantidade - i.quantidadeDevolvida > 0);
+  }
+
+  /// Carreto com checklist "Saiu" e entrega em andamento ou concluida (mercadoria pode voltar).
+  bool _podeDevolucaoPosCarretoNaEntrega(Venda v) {
+    if (!_podeRegistrarDevolucaoTrocaBase(v)) return false;
+    if (v.tipoEntrega != 'entrega_loja') return false;
+    if (!v.cargaSaiu) return false;
+    return v.statusEntrega == 'saiu_entrega' ||
+        v.statusEntrega == 'entregue' ||
+        v.statusEntrega == 'entregue_complemento_pendente';
+  }
+
+  Future<void> _abrirRegistrarDevolucaoPosCarreto(Venda vIn) async {
+    final v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
+    if (!_podeDevolucaoPosCarretoNaEntrega(v)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Neste atalho: carreto com carga que ja saiu e quantidade ainda '
+            'devolvivel. Nos demais casos use Vendas > Listagem > Devolucao / troca.',
+          ),
+        ),
+      );
+      return;
+    }
+    final ok = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RegistrarDevolucaoTrocaPage(
+          vendaRepository: widget.vendaRepository,
+          produtoRepository: widget.produtoRepository,
+          vendaId: v.id,
+          usuarioAtual: widget.usuarioAtual,
+          podeRegistrarSemSenha: widget.podeRegistrarDevolucaoTrocaSemSenha,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (ok == true) {
+      _carregarEntregas();
+    }
+  }
+
   String _rotuloStatusEntrega(String status) {
     switch (status) {
+      case HistoricoEntregaEventos.devolucao:
+        return 'Devolucao registrada';
+      case HistoricoEntregaEventos.troca:
+        return 'Troca registrada';
       case 'pendente':
         return 'Pendente';
       case 'roteirizada':
@@ -449,7 +511,7 @@ class _EntregasPageState extends State<EntregasPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '#${venda.numeroOrcamento} · ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}',
+          '${venda.numeroOrcamento} · ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}',
           style: Theme.of(context).textTheme.titleSmall,
         ),
         const SizedBox(height: 2),
@@ -708,7 +770,7 @@ class _EntregasPageState extends State<EntregasPage> {
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Text(
-            '#${venda.numeroOrcamento} - $cliente',
+            '${venda.numeroOrcamento} - $cliente',
             style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
           ),
           pw.Text(
@@ -779,7 +841,7 @@ class _EntregasPageState extends State<EntregasPage> {
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Text(
-            '#${venda.numeroOrcamento} $cliente',
+            '${venda.numeroOrcamento} $cliente',
             style: pw.TextStyle(
               fontSize: fsTituloPedido,
               fontWeight: pw.FontWeight.bold,
@@ -1069,7 +1131,7 @@ class _EntregasPageState extends State<EntregasPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Motorista #${venda.numeroOrcamento}'),
+          title: Text('Motorista ${venda.numeroOrcamento}'),
           content: motoristas.isEmpty
               ? const Text(
                   'Nenhum motorista ativo cadastrado. Cadastre em Cadastros > Motoristas.',
@@ -1181,7 +1243,7 @@ class _EntregasPageState extends State<EntregasPage> {
       builder: (context) => AlertDialog(
         title: const Text('Limpar data de entrega'),
         content: Text(
-          'Remover a data marcada da venda #${venda.numeroOrcamento}?',
+          'Remover a data marcada da venda ${venda.numeroOrcamento}?',
         ),
         actions: [
           TextButton(
@@ -1403,7 +1465,7 @@ class _EntregasPageState extends State<EntregasPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Historico da entrega #${venda.numeroOrcamento}'),
+          title: Text('Historico da entrega ${venda.numeroOrcamento}'),
           content: SizedBox(
             width: 620,
             child: historico.isEmpty
@@ -1615,10 +1677,12 @@ class _EntregasPageState extends State<EntregasPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Concluir complemento #${venda.numeroOrcamento}'),
+        title: Text('Concluir complemento ${venda.numeroOrcamento}'),
         content: const Text(
           'Confirma que os itens em falta ja foram entregues ao cliente? '
-          'O status passara para Entregue e o registro de complemento sera limpo.',
+          'O status passara para Entregue e o registro de complemento sera limpo. '
+          'No carreto com reserva ate a saida, o estoque baixa de novo pelas '
+          'quantidades do complemento (segunda viagem).',
         ),
         actions: [
           TextButton(
@@ -1678,7 +1742,7 @@ class _EntregasPageState extends State<EntregasPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: Text('Faltou item na ida — #${venda.numeroOrcamento}'),
+          title: Text('Faltou item na ida — ${venda.numeroOrcamento}'),
           content: SizedBox(
             width: 520,
             child: SingleChildScrollView(
@@ -1688,7 +1752,9 @@ class _EntregasPageState extends State<EntregasPage> {
                 children: [
                   const Text(
                     'Informe quantas unidades faltaram na ida para cada linha. '
-                    'Pelo menos um item deve ter falta maior que zero.',
+                    'Pelo menos um item deve ter falta maior que zero. '
+                    'No carreto com reserva ate a saida, o estoque fisico e reservado '
+                    'serao ajustados (volta o que nao saiu na ida).',
                   ),
                   const SizedBox(height: 10),
                   for (final item in itens) ...[
@@ -1841,8 +1907,8 @@ class _EntregasPageState extends State<EntregasPage> {
         return AlertDialog(
           title: Text(
             usaMigrado
-                ? 'Itens para entrega #${venda.numeroOrcamento}'
-                : 'Itens do pedido #${venda.numeroOrcamento}',
+                ? 'Itens para entrega ${venda.numeroOrcamento}'
+                : 'Itens do pedido ${venda.numeroOrcamento}',
           ),
           content: SizedBox(
             width: 620,
@@ -1949,7 +2015,7 @@ class _EntregasPageState extends State<EntregasPage> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: Text('Checklist de carga #${venda.numeroOrcamento}'),
+              title: Text('Checklist de carga ${venda.numeroOrcamento}'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2047,7 +2113,7 @@ class _EntregasPageState extends State<EntregasPage> {
             ? () => _alternarSelecaoEntrega(venda.id)
             : () => _abrirDetalhesItensVenda(venda),
         title: Text(
-          'Venda #${venda.numeroOrcamento} - ${_formatarMoeda(venda.total)}',
+          'Venda ${venda.numeroOrcamento} - ${_formatarMoeda(venda.total)}',
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2198,6 +2264,19 @@ class _EntregasPageState extends State<EntregasPage> {
               icon: const Icon(Icons.history),
               label: const Text('Historico'),
             ),
+            if (_podeDevolucaoPosCarretoNaEntrega(venda)) ...[
+              const SizedBox(width: 6),
+              Tooltip(
+                message:
+                    'Cliente devolveu ou avaria: devolve estoque (carreto com carga ja saida). '
+                    'Se faltou item na ida, use "Faltou item".',
+                child: OutlinedButton.icon(
+                  onPressed: () => _abrirRegistrarDevolucaoPosCarreto(venda),
+                  icon: const Icon(Icons.assignment_return_outlined),
+                  label: const Text('Devolucao'),
+                ),
+              ),
+            ],
             const SizedBox(width: 6),
             OutlinedButton.icon(
               onPressed: () => _editarMotoristaEntrega(venda),
@@ -2239,6 +2318,10 @@ class _EntregasPageState extends State<EntregasPage> {
                 }
                 if (value == _kMenuLimparDataEntrega) {
                   _limparDataEntregaMarcada(venda);
+                  return;
+                }
+                if (value == _kMenuDevolucaoPosCarreto) {
+                  _abrirRegistrarDevolucaoPosCarreto(venda);
                   return;
                 }
                 if (value.startsWith('prioridade:')) {
@@ -2297,6 +2380,13 @@ class _EntregasPageState extends State<EntregasPage> {
                   value: 'cancelada',
                   child: const Text('Status: Cancelada'),
                 ),
+                if (_podeDevolucaoPosCarretoNaEntrega(venda)) ...[
+                  const PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: _kMenuDevolucaoPosCarreto,
+                    child: const Text('Devolucao / troca (mercadoria voltou)'),
+                  ),
+                ],
                 const PopupMenuDivider(),
                 const PopupMenuItem(
                   value: 'prioridade:normal',

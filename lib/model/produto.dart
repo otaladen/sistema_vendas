@@ -82,4 +82,10 @@ class Produto {
   // para estoqueReal/estoqueReservado e finalizada.
   int get estoque => estoqueReal;
   set estoque(int value) => estoqueReal = value;
+
+  /// Fisico menos comprometido em [estoqueReservado] (retirada futura, carreto ate sair).
+  int get estoqueLivreParaVenda {
+    final livre = estoqueReal - estoqueReservado;
+    return livre < 0 ? 0 : livre;
+  }
 }

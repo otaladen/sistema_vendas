@@ -1347,7 +1347,7 @@ class _ClientesPageState extends State<ClientesPage> {
                             itemBuilder: (context, index) {
                               final compra = compras[index];
                               final nota = compra.numeroOrcamento > 0
-                                  ? '#${compra.numeroOrcamento}'
+                                  ? '${compra.numeroOrcamento}'
                                   : 'ID ${compra.id}';
                               return ListTile(
                                 dense: true,

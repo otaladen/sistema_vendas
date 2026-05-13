@@ -150,12 +150,32 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handlerCheckoutF7PdV);
+    widget.produtoRepository.addListener(_onProdutoRepositoryChanged);
     _carregarDadosIniciais();
     _carregarConfiguracaoVendaSemEstoque();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _pesquisaFocus.requestFocus();
     });
+  }
+
+  void _onProdutoRepositoryChanged() {
+    if (!mounted) return;
+    final t = _pesquisaController.text.trim();
+    if (t.isEmpty) {
+      _carregarDadosIniciais();
+    } else {
+      _pesquisar(focarListaAposPesquisar: false);
+    }
+  }
+
+  @override
+  void didUpdateWidget(PontoDeVendaPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.produtoRepository != widget.produtoRepository) {
+      oldWidget.produtoRepository.removeListener(_onProdutoRepositoryChanged);
+      widget.produtoRepository.addListener(_onProdutoRepositoryChanged);
+    }
   }
 
   Future<void> _carregarConfiguracaoVendaSemEstoque() async {
@@ -171,6 +191,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
 
   @override
   void dispose() {
+    widget.produtoRepository.removeListener(_onProdutoRepositoryChanged);
     HardwareKeyboard.instance.removeHandler(_handlerCheckoutF7PdV);
     _checkoutF7BurstId = 0;
     _debouncePesquisa?.cancel();
@@ -617,7 +638,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     final unit = _precoPorTipo(produto, precoTipo);
     if (!_permitirVendaSemEstoque) {
       final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
-      final disp = fresh.estoqueReal;
+      final disp = fresh.estoqueLivreParaVenda;
       if (disp <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Sem estoque de ${produto.nome}.')),
@@ -731,7 +752,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       final item = _carrinho[index];
       final fresh =
           widget.produtoRepository.obterPorId(item.produto.id) ?? item.produto;
-      final disp = fresh.estoqueReal;
+      final disp = fresh.estoqueLivreParaVenda;
       if (item.quantidade + delta > disp) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1175,7 +1196,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     final precoUnit = _precoPorTipo(produto, precoTipo);
     if (!_permitirVendaSemEstoque) {
       final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
-      final disp = fresh.estoqueReal;
+      final disp = fresh.estoqueLivreParaVenda;
       if (disp <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Sem estoque de ${produto.nome}.')),
@@ -1905,7 +1926,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
             children: [
               Expanded(
                 child: Text(
-                  'Editando venda #${_orcamentoEmEdicaoNumero ?? '-'}',
+                  'Editando venda ${_orcamentoEmEdicaoNumero ?? '-'}',
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
@@ -2112,8 +2133,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
         SnackBar(
           content: Text(
             orcamentoEdicaoId != null
-                ? 'Venda #$numeroOrcamentoSalvo atualizada com sucesso.'
-                : 'Venda #$orcamentoId salva para o caixa.',
+                ? 'Venda $numeroOrcamentoSalvo atualizada com sucesso.'
+                : 'Venda $orcamentoId salva para o caixa.',
           ),
         ),
       );
@@ -2307,7 +2328,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                     'Sem cliente';
                                 return ListTile(
                                   title: Text(
-                                    'Orcamento #${orc.numeroOrcamento}',
+                                    'Orcamento ${orc.numeroOrcamento}',
                                   ),
                                   subtitle: Text(
                                     '$cliente | Itens: ${orc.itens.length} | Total: ${_formatarMoeda(orc.total)}',
@@ -2469,8 +2490,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       SnackBar(
         content: Text(
           nomesItensSemProduto.isEmpty
-              ? 'Orcamento #${selecionado.numeroOrcamento} carregado com ${drafts.length} item(ns) para edicao.'
-              : 'Orcamento #${selecionado.numeroOrcamento} carregado com ${drafts.length} item(ns). ${nomesItensSemProduto.length} item(ns) sem produto cadastrado foram ignorados.',
+              ? 'Orcamento ${selecionado.numeroOrcamento} carregado com ${drafts.length} item(ns) para edicao.'
+              : 'Orcamento ${selecionado.numeroOrcamento} carregado com ${drafts.length} item(ns). ${nomesItensSemProduto.length} item(ns) sem produto cadastrado foram ignorados.',
         ),
       ),
     );
@@ -2618,7 +2639,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                 ),
               pw.SizedBox(height: 6),
               pw.Text(
-                'Numero: #${venda.numeroOrcamento}',
+                'Numero: ${venda.numeroOrcamento}',
                 style: const pw.TextStyle(fontSize: 9),
               ),
               pw.Text(
@@ -3415,7 +3436,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                                                 ),
                                                           ),
                                                           Text(
-                                                            'Est: ${item.estoqueReal} · Res: ${item.estoqueReservado}',
+                                                            'Livre: ${item.estoqueLivreParaVenda} · Fis: ${item.estoqueReal} · Res: ${item.estoqueReservado}',
                                                             style: Theme.of(context)
                                                                 .textTheme
                                                                 .labelMedium
@@ -3613,7 +3634,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                                             children: [
                                               Expanded(
                                                 child: Text(
-                                                  'Editando venda #${_orcamentoEmEdicaoNumero ?? '-'}',
+                                                  'Editando venda ${_orcamentoEmEdicaoNumero ?? '-'}',
                                                   style: Theme.of(context)
                                                       .textTheme
                                                       .labelLarge
@@ -4038,69 +4059,103 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
         title: Text('Entrega de ${widget.clienteNome}'),
         content: SizedBox(
           width: 460,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _freteController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: const InputDecoration(
-                  labelText: 'Valor do frete',
-                  hintText: 'Ex.: 35,00',
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (widget.enderecosDisponiveis.isNotEmpty) ...[
-                DropdownButtonFormField<int>(
-                  initialValue: _indiceEnderecoSelecionado,
-                  decoration: const InputDecoration(
-                    labelText: 'Endereco do cliente',
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: _freteController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
                   ),
-                  items: List.generate(widget.enderecosDisponiveis.length, (
-                    index,
-                  ) {
-                    final endereco = widget.enderecosDisponiveis[index];
-                    final rotulo = endereco.rotulo.trim().isNotEmpty
-                        ? endereco.rotulo.trim()
-                        : 'Endereco ${index + 1}';
-                    final resumo = endereco.resumo();
-                    return DropdownMenuItem<int>(
-                      value: index,
-                      child: Text(
-                        resumo.isEmpty ? rotulo : '$rotulo - $resumo',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    );
-                  }),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() {
-                      _indiceEnderecoSelecionado = value;
-                      final endereco = widget.enderecosDisponiveis[value];
-                      _enderecoController.text = endereco.resumo();
-                      _obsController.text = endereco.referencia.trim();
-                    });
-                  },
+                  decoration: const InputDecoration(
+                    labelText: 'Valor do frete',
+                    hintText: 'Ex.: 35,00',
+                  ),
                 ),
                 const SizedBox(height: 8),
+                if (widget.enderecosDisponiveis.isNotEmpty) ...[
+                  DropdownButtonFormField<int>(
+                    isExpanded: true,
+                    initialValue: _indiceEnderecoSelecionado,
+                    decoration: const InputDecoration(
+                      labelText: 'Endereco do cliente',
+                    ),
+                    selectedItemBuilder: (context) {
+                      return List.generate(
+                        widget.enderecosDisponiveis.length,
+                        (index) {
+                          final endereco = widget.enderecosDisponiveis[index];
+                          final rotulo = endereco.rotulo.trim().isNotEmpty
+                              ? endereco.rotulo.trim()
+                              : 'Endereco ${index + 1}';
+                          final resumo = endereco.resumo();
+                          final texto = resumo.isEmpty
+                              ? rotulo
+                              : '$rotulo - $resumo';
+                          return Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: Text(
+                              texto,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        },
+                      );
+                    },
+                    items: List.generate(widget.enderecosDisponiveis.length, (
+                      index,
+                    ) {
+                      final endereco = widget.enderecosDisponiveis[index];
+                      final rotulo = endereco.rotulo.trim().isNotEmpty
+                          ? endereco.rotulo.trim()
+                          : 'Endereco ${index + 1}';
+                      final resumo = endereco.resumo();
+                      final texto = resumo.isEmpty
+                          ? rotulo
+                          : '$rotulo - $resumo';
+                      return DropdownMenuItem<int>(
+                        value: index,
+                        child: Text(
+                          texto,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _indiceEnderecoSelecionado = value;
+                        final endereco = widget.enderecosDisponiveis[value];
+                        _enderecoController.text = endereco.resumo();
+                        _obsController.text = endereco.referencia.trim();
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                TextField(
+                  controller: _enderecoController,
+                  maxLines: 3,
+                  minLines: 1,
+                  decoration: const InputDecoration(
+                    labelText: 'Endereco de entrega',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _obsController,
+                  maxLines: 3,
+                  minLines: 1,
+                  decoration: const InputDecoration(
+                    labelText: 'Observacoes da entrega',
+                  ),
+                ),
               ],
-              TextField(
-                controller: _enderecoController,
-                decoration: const InputDecoration(
-                  labelText: 'Endereco de entrega',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _obsController,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Observacoes da entrega',
-                ),
-              ),
-            ],
+            ),
           ),
         ),
         actions: [
