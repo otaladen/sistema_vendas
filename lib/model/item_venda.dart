@@ -50,10 +50,23 @@ class ItemVenda {
     return p < 0 ? 0 : p;
   }
 
+  /// Para carreto com reserva ate a saida (venda nativa, nao migrada de retirada
+  /// futura): unidades que ainda seguem para o envio apos retirada na loja.
+  int get quantidadeAindaNoCarretoAntesSaida {
+    final p = quantidade - quantidadeDevolvida - quantidadeJaRetirada;
+    return p < 0 ? 0 : p;
+  }
+
   /// Quantidade a mostrar na tela de entregas (carga / caminhao).
-  int quantidadeParaExibicaoEntrega(bool vendaUsaDestaqueCarreto) {
+  int quantidadeParaExibicaoEntrega(
+    bool vendaUsaDestaqueCarreto, {
+    bool carretoReservaNativoAntesSaida = false,
+  }) {
     if (vendaUsaDestaqueCarreto) {
       return quantidadeNoCarreto;
+    }
+    if (carretoReservaNativoAntesSaida) {
+      return quantidadeAindaNoCarretoAntesSaida;
     }
     return quantidade;
   }

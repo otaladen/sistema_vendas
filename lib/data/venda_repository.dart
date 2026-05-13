@@ -937,8 +937,11 @@ class VendaRepository {
   }
 
   static int _quantidadeItemParaEstoqueCarreto(ItemVenda item) {
-    final q = item.quantidade - item.quantidadeDevolvida;
-    return q < 0 ? 0 : q;
+    final base = item.quantidade - item.quantidadeDevolvida;
+    if (base < 0) return 0;
+    final loja = item.quantidadeJaRetirada;
+    final truck = base - loja;
+    return truck < 0 ? 0 : truck;
   }
 
   void _baixarEstoqueCarretoAoMarcarSaida(Venda venda) {
@@ -1735,6 +1738,127 @@ class VendaRepository {
     );
   }
 
+  /// Retirada parcial na **loja** antes do carro sair (carreto com reserva ate a saida).
+  /// Baixa [Produto.estoqueReservado] e [Produto.estoqueReal] na hora (mercadoria sai com o cliente).
+  /// A carga do romaneio passa a considerar [ItemVenda.quantidadeJaRetirada] ate marcar [Venda.cargaSaiu].
+  void registrarRetiradaParcialLojaCarretoAntesSaida(
+    int vendaId,
+    Map<int, int> quantidadePorItemVendaId, {
+    required String usuario,
+    String? retiradoPor,
+    bool permitirSemConferenciaEstoque = true,
+  }) {
+    final filtrado = <int, int>{};
+    for (final e in quantidadePorItemVendaId.entries) {
+      if (e.value > 0) {
+        filtrado[e.key] = e.value;
+      }
+    }
+    if (filtrado.isEmpty) {
+      throw StateError('Informe ao menos uma quantidade a retirar.');
+    }
+
+    final usuarioLimpo = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
+    final linhasLog = <String>[];
+
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      if (venda.cancelada) {
+        throw StateError('Venda cancelada nao pode registrar retirada.');
+      }
+      if (venda.status != 'finalizada') {
+        throw StateError('Somente vendas finalizadas permitem retirada na loja.');
+      }
+      if (venda.tipoEntrega != 'entrega_loja') {
+        throw StateError(
+          'Somente entregas da loja (carreto) permitem retirada na loja por esta acao.',
+        );
+      }
+      if (!venda.carretoReservaAteSaida) {
+        throw StateError(
+          'Esta entrega nao usa reserva ate a saida; use o fluxo de retirada futura ou devolucao.',
+        );
+      }
+      if (venda.cargaSaiu) {
+        throw StateError(
+          'O carro ja marcou saida; retirada na loja so e permitida ate antes disso.',
+        );
+      }
+      final migrada = venda.itens.any((i) => i.quantidadeNoCarreto > 0);
+      if (migrada) {
+        throw StateError(
+          'Venda migrada de retirada futura: use a listagem de vendas para retirada futura.',
+        );
+      }
+
+      for (final e in filtrado.entries) {
+        final itemId = e.key;
+        final qRet = e.value;
+        final item = _db.itemVendaBox.get(itemId);
+        if (item == null) {
+          throw StateError('Item de venda $itemId nao encontrado.');
+        }
+        if (item.venda.targetId != vendaId) {
+          throw StateError('Item $itemId nao pertence a esta venda.');
+        }
+        final pendente = item.quantidadeAindaNoCarretoAntesSaida;
+        if (qRet > pendente) {
+          throw StateError(
+            'Retirada de $qRet un. de "${item.nomeProduto}" excede o que ainda '
+            'segue para o carro ($pendente).',
+          );
+        }
+
+        final produto = item.produto.target;
+        if (produto == null) {
+          throw StateError('Produto do item ${item.id} nao encontrado.');
+        }
+        if (!permitirSemConferenciaEstoque) {
+          if (produto.estoqueReal < qRet) {
+            throw StateError(
+              'Estoque fisico insuficiente para retirar $qRet de ${produto.nome}.',
+            );
+          }
+          if (produto.estoqueReservado < qRet) {
+            throw StateError(
+              'Estoque reservado inconsistente para ${produto.nome}.',
+            );
+          }
+        }
+
+        produto.estoqueReal -= qRet;
+        produto.estoqueReservado -= qRet;
+        _db.produtoBox.put(produto);
+
+        item.quantidadeJaRetirada += qRet;
+        _db.itemVendaBox.put(item);
+
+        linhasLog.add('${item.nomeProduto} x$qRet');
+      }
+
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita();
+
+    final trecho = linhasLog.join('; ');
+    var motivoFinal = trecho.isEmpty
+        ? 'Retirada na loja (pre-saida) registrada.'
+        : 'Retirada na loja (pre-saida): $trecho';
+    final quemRetirou = retiradoPor?.trim() ?? '';
+    if (quemRetirou.isNotEmpty) {
+      motivoFinal = '$motivoFinal Quem retirou: $quemRetirou.';
+    }
+    registrarOcorrenciaEntrega(
+      vendaId: vendaId,
+      status: 'retirada_loja_pre_saida',
+      motivo: motivoFinal,
+      usuario: usuarioLimpo,
+    );
+  }
+
   void cancelarVenda(
     int vendaId, {
     String motivo = '',
@@ -1795,8 +1919,9 @@ class VendaRepository {
             if (venda.cargaSaiu) {
               produto.estoqueReal += item.quantidade;
             } else {
+              final qReserva = _quantidadeItemParaEstoqueCarreto(item);
               final reservadoAtual = produto.estoqueReservado;
-              produto.estoqueReservado = (reservadoAtual - item.quantidade)
+              produto.estoqueReservado = (reservadoAtual - qReserva)
                   .clamp(0, reservadoAtual)
                   .toInt();
             }

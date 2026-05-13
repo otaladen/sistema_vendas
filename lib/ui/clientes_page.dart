@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,8 @@ import '../data/mensageria_repository.dart';
 import '../data/venda_repository.dart';
 import '../model/cliente.dart';
 import '../model/mensagem_log.dart';
+import '../services/brasil_api_cep_service.dart';
+import '../services/brasil_api_cnpj_service.dart';
 import '../model/mensagem_template.dart';
 import '../model/venda.dart';
 
@@ -29,6 +32,24 @@ class ClientesPage extends StatefulWidget {
   State<ClientesPage> createState() => _ClientesPageState();
 }
 
+class _AlvoPreenchimentoCep {
+  const _AlvoPreenchimentoCep({
+    required this.cep,
+    required this.endereco,
+    required this.numero,
+    required this.bairro,
+    required this.cidade,
+    required this.uf,
+  });
+
+  final TextEditingController cep;
+  final TextEditingController endereco;
+  final TextEditingController numero;
+  final TextEditingController bairro;
+  final TextEditingController cidade;
+  final TextEditingController uf;
+}
+
 class _ClientesPageState extends State<ClientesPage> {
   static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
@@ -37,22 +58,18 @@ class _ClientesPageState extends State<ClientesPage> {
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       );
 
-  static ButtonStyle get _estiloBotaoElevadoCompacto => ElevatedButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      );
-
   static const double _wTipoPessoa = 172;
   static const double _wDoc = 228;
   static const double _wIe = 200;
-  static const double _wFone = 184;
-  static const double _wLimite = 188;
   static const double _wCep = 120;
   static const double _wNumero = 88;
   static const double _wUf = 72;
-  static const double _limiarDuasColunas = 700.0;
+  static const double _limiarDuasColunas = 880.0;
+  static const double _maxLarguraFormulario = 960;
+  static const Color _corBotaoSalvar = Color(0xFF2E7D32);
+  static const Color _corLimiteDestaque = Color(0xFF1B5E20);
+  static const Color _fundoLimiteCredito = Color(0xFFE8F5E9);
+  static const Color _bordaLimiteCredito = Color(0xFFC8E6C9);
 
   final _nomeRazaoController = TextEditingController();
   final _nomeFantasiaController = TextEditingController();
@@ -87,13 +104,24 @@ class _ClientesPageState extends State<ClientesPage> {
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   String _periodoHistorico = 'todo';
 
+  Timer? _debounceConsultaCnpj;
+  Timer? _debounceConsultaCep;
+  bool _carregandoClienteNoFormulario = false;
+  bool _consultaCnpjEmAndamento = false;
+  bool _consultaCepEmAndamento = false;
+  TextEditingController? _cepControllerEmConsulta;
+
   @override
   void initState() {
     super.initState();
+    _documentoController.addListener(_onDocumentoChanged);
   }
 
   @override
   void dispose() {
+    _debounceConsultaCnpj?.cancel();
+    _debounceConsultaCep?.cancel();
+    _documentoController.removeListener(_onDocumentoChanged);
     _nomeRazaoController.dispose();
     _nomeFantasiaController.dispose();
     _documentoController.dispose();
@@ -341,7 +369,7 @@ class _ClientesPageState extends State<ClientesPage> {
                                       selected: selecionado,
                                       selectedTileColor: Theme.of(
                                         context,
-                                      ).colorScheme.primary.withOpacity(0.08),
+                                      ).colorScheme.primary.withValues(alpha: 0.08),
                                       title: RichText(
                                         text: spanComDestaque(
                                           cliente.nomeRazao,
@@ -391,6 +419,8 @@ class _ClientesPageState extends State<ClientesPage> {
   }
 
   void _limparFormulario() {
+    _debounceConsultaCnpj?.cancel();
+    _debounceConsultaCep?.cancel();
     for (final endereco in _enderecosExtras) {
       endereco.dispose();
     }
@@ -481,7 +511,158 @@ class _ClientesPageState extends State<ClientesPage> {
     return valor.replaceAll(RegExp(r'\D'), '');
   }
 
+  void _onDocumentoChanged() {
+    _debounceConsultaCnpj?.cancel();
+    if (_carregandoClienteNoFormulario) return;
+    if (_tipoPessoa != 'juridica') return;
+    final digitos = _somenteDigitos(_documentoController.text);
+    if (digitos.length != 14) return;
+    _debounceConsultaCnpj = Timer(const Duration(milliseconds: 650), () {
+      if (!mounted) return;
+      unawaited(_executarConsultaCnpjSeAplicavel(digitos));
+    });
+  }
+
+  Future<void> _executarConsultaCnpjSeAplicavel(String cnpj14) async {
+    if (_carregandoClienteNoFormulario) return;
+    if (_tipoPessoa != 'juridica') return;
+    if (_somenteDigitos(_documentoController.text) != cnpj14) return;
+    if (_consultaCnpjEmAndamento) return;
+    setState(() => _consultaCnpjEmAndamento = true);
+    try {
+      final dados = await BrasilApiCnpjService.consultar(cnpj14);
+      if (!mounted) return;
+      if (_carregandoClienteNoFormulario) return;
+      if (_tipoPessoa != 'juridica') return;
+      if (_somenteDigitos(_documentoController.text) != cnpj14) return;
+      if (dados == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('CNPJ nao encontrado na base publica (BrasilAPI).'),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        _nomeRazaoController.text = dados.razaoSocial;
+        if (dados.nomeFantasia.isNotEmpty &&
+            _nomeFantasiaController.text.trim().isEmpty) {
+          _nomeFantasiaController.text = dados.nomeFantasia;
+        }
+        _cepController.text = dados.cep;
+        _enderecoController.text = dados.logradouro;
+        _numeroController.text = dados.numero;
+        _bairroController.text = dados.bairro;
+        _cidadeController.text = dados.municipio;
+        _ufController.text = dados.uf;
+      });
+      _cepController.value = _cepFormatter.formatEditUpdate(
+        const TextEditingValue(),
+        TextEditingValue(text: _cepController.text),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Falha ao consultar CNPJ: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _consultaCnpjEmAndamento = false);
+      }
+    }
+  }
+
+  void _buscarCnpjManualmente() {
+    final digitos = _somenteDigitos(_documentoController.text);
+    if (digitos.length != 14) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Informe o CNPJ completo (14 digitos) para buscar.'),
+        ),
+      );
+      return;
+    }
+    _debounceConsultaCnpj?.cancel();
+    unawaited(_executarConsultaCnpjSeAplicavel(digitos));
+  }
+
+  void _agendarConsultaCep(_AlvoPreenchimentoCep alvo) {
+    _debounceConsultaCep?.cancel();
+    if (_carregandoClienteNoFormulario) return;
+    final digitos = _somenteDigitos(alvo.cep.text);
+    if (digitos.length != 8) return;
+    _debounceConsultaCep = Timer(const Duration(milliseconds: 550), () {
+      if (!mounted) return;
+      unawaited(_executarConsultaCep(alvo));
+    });
+  }
+
+  Future<void> _executarConsultaCep(_AlvoPreenchimentoCep alvo) async {
+    if (_carregandoClienteNoFormulario) return;
+    final digitos = _somenteDigitos(alvo.cep.text);
+    if (digitos.length != 8) return;
+    if (_consultaCepEmAndamento) return;
+    setState(() {
+      _consultaCepEmAndamento = true;
+      _cepControllerEmConsulta = alvo.cep;
+    });
+    try {
+      final dados = await BrasilApiCepService.consultar(digitos);
+      if (!mounted) return;
+      if (_carregandoClienteNoFormulario) return;
+      if (_somenteDigitos(alvo.cep.text) != digitos) return;
+      if (dados == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('CEP nao encontrado na base publica (BrasilAPI).'),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        alvo.endereco.text = dados.logradouro;
+        alvo.bairro.text = dados.bairro;
+        alvo.cidade.text = dados.cidade;
+        alvo.uf.text = dados.uf;
+        alvo.cep.text = dados.cep;
+      });
+      alvo.cep.value = _cepFormatter.formatEditUpdate(
+        const TextEditingValue(),
+        TextEditingValue(text: alvo.cep.text),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Falha ao consultar CEP: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _consultaCepEmAndamento = false;
+          _cepControllerEmConsulta = null;
+        });
+      }
+    }
+  }
+
+  void _buscarCepManual(_AlvoPreenchimentoCep alvo) {
+    final digitos = _somenteDigitos(alvo.cep.text);
+    if (digitos.length != 8) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Informe o CEP completo (8 digitos) para buscar.'),
+        ),
+      );
+      return;
+    }
+    _debounceConsultaCep?.cancel();
+    unawaited(_executarConsultaCep(alvo));
+  }
+
   void _editarCliente(Cliente c) {
+    _debounceConsultaCnpj?.cancel();
+    _debounceConsultaCep?.cancel();
+    _carregandoClienteNoFormulario = true;
     final enderecos = c.listarEnderecos();
     final principal = enderecos.isEmpty ? EnderecoCliente() : enderecos.first;
     final extras = enderecos.length > 1
@@ -518,6 +699,9 @@ class _ClientesPageState extends State<ClientesPage> {
       _status = 'Editando cliente: ${c.nomeRazao}';
     });
     _padronizarMascarasCamposCliente();
+    _carregandoClienteNoFormulario = false;
+    _debounceConsultaCnpj?.cancel();
+    _debounceConsultaCep?.cancel();
   }
 
   List<Cliente> _clientesOrdenadosPorCadastro() {
@@ -835,6 +1019,264 @@ class _ClientesPageState extends State<ClientesPage> {
     );
   }
 
+  List<Widget> _dadosPrincipaisChildren(bool formLargoTipoENome) {
+    final dropdownTipo = DropdownButtonFormField<String>(
+      isDense: true,
+      isExpanded: true,
+      initialValue: _tipoPessoa,
+      decoration: const InputDecoration(
+        labelText: 'Tipo de pessoa',
+        isDense: true,
+      ),
+      items: const [
+        DropdownMenuItem(value: 'fisica', child: Text('Fisica')),
+        DropdownMenuItem(value: 'juridica', child: Text('Juridica')),
+      ],
+      onChanged: (v) {
+        if (v != null) {
+          _debounceConsultaCnpj?.cancel();
+          setState(() {
+            _tipoPessoa = v;
+            _documentoController.clear();
+            if (_tipoPessoa == 'fisica') {
+              _inscricaoController.clear();
+            }
+          });
+        }
+      },
+    );
+
+    final campoNomeRazao = TextField(
+      controller: _nomeRazaoController,
+      textCapitalization: TextCapitalization.words,
+      decoration: const InputDecoration(
+        labelText: 'Nome / Razao social',
+        isDense: true,
+      ),
+    );
+
+    final blocoDocumento = Align(
+      alignment: Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              SizedBox(
+                width: _wDoc,
+                child: TextField(
+                  controller: _documentoController,
+                  decoration: InputDecoration(
+                    labelText: _tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ',
+                    isDense: true,
+                    suffixIcon:
+                        _tipoPessoa == 'juridica' && _consultaCnpjEmAndamento
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : null,
+                  ),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [_cpfCnpjFormatter],
+                ),
+              ),
+              if (_tipoPessoa == 'juridica')
+                SizedBox(
+                  width: _wIe,
+                  child: TextField(
+                    controller: _inscricaoController,
+                    decoration: const InputDecoration(
+                      labelText: 'Inscricao Estadual',
+                      isDense: true,
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Za-z]')),
+                      LengthLimitingTextInputFormatter(20),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          if (_tipoPessoa == 'juridica') ...[
+            const SizedBox(height: 6),
+            OutlinedButton.icon(
+              style: _estiloBotaoContornoCompacto,
+              onPressed:
+                  _consultaCnpjEmAndamento ? null : _buscarCnpjManualmente,
+              icon: const Icon(Icons.search, size: 18),
+              label: const Text('Buscar CNPJ'),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    if (formLargoTipoENome) {
+      return [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: _wTipoPessoa, child: dropdownTipo),
+            const SizedBox(width: 10),
+            Expanded(child: campoNomeRazao),
+          ],
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _nomeFantasiaController,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Nome fantasia (opcional)',
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 6),
+        blocoDocumento,
+      ];
+    }
+
+    return [
+      Align(
+        alignment: Alignment.centerLeft,
+        child: SizedBox(width: _wTipoPessoa, child: dropdownTipo),
+      ),
+      const SizedBox(height: 6),
+      campoNomeRazao,
+      const SizedBox(height: 6),
+      TextField(
+        controller: _nomeFantasiaController,
+        textCapitalization: TextCapitalization.words,
+        decoration: const InputDecoration(
+          labelText: 'Nome fantasia (opcional)',
+          isDense: true,
+        ),
+      ),
+      const SizedBox(height: 6),
+      blocoDocumento,
+    ];
+  }
+
+  Widget _buildCardComercialComLimiteDestaque() {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.payments_outlined,
+                  size: 17,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Comercial',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              decoration: BoxDecoration(
+                color: _fundoLimiteCredito,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _bordaLimiteCredito),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.attach_money,
+                        size: 26,
+                        color: _corLimiteDestaque,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Limite de credito',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: _corLimiteDestaque,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Valor maximo que o cliente pode manter em aberto na loja.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: _corLimiteDestaque.withValues(alpha: 0.85),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _limiteController,
+                    decoration: InputDecoration(
+                      labelText: 'Valor (R\$)',
+                      isDense: true,
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.92),
+                      prefixIcon: Icon(
+                        Icons.paid_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [_limiteCreditoFormatter],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _observacoesController,
+              maxLines: 2,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Observacoes',
+                isDense: true,
+              ),
+            ),
+            SwitchListTile(
+              dense: true,
+              value: _ativo,
+              onChanged: (v) => setState(() => _ativo = v),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Cliente ativo'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -861,19 +1303,35 @@ class _ClientesPageState extends State<ClientesPage> {
       ..sort((a, b) => b.value.compareTo(a.value));
     return Scaffold(
       appBar: AppBar(title: const Text('Cadastro de Clientes')),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _salvarCliente,
+        backgroundColor: _corBotaoSalvar,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.save_outlined),
+        label: Text(emEdicao ? 'Salvar edicao' : 'Salvar cliente'),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       body: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        child: RawScrollbar(
-          controller: _scrollController,
-          thumbVisibility: true,
-          trackVisibility: true,
-          thickness: 10,
-          radius: const Radius.circular(8),
-          crossAxisMargin: 2,
-          mainAxisMargin: 4,
-          child: ListView(
-            controller: _scrollController,
-            padding: const EdgeInsets.only(right: 10),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _maxLarguraFormulario),
+            child: LayoutBuilder(
+              builder: (context, box) {
+                final formWide = box.maxWidth >= 680;
+                return RawScrollbar(
+                  controller: _scrollController,
+                  thumbVisibility: true,
+                  trackVisibility: true,
+                  thickness: 10,
+                  radius: const Radius.circular(8),
+                  crossAxisMargin: 2,
+                  mainAxisMargin: 4,
+                  child: ListView(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(0, 0, 10, 120),
+                    physics: const AlwaysScrollableScrollPhysics(),
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -929,38 +1387,30 @@ class _ClientesPageState extends State<ClientesPage> {
                 ),
               ),
               const SizedBox(height: 6),
-              Row(
+              Wrap(
+                alignment: WrapAlignment.start,
+                spacing: 6,
+                runSpacing: 6,
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: _irParaPrimeiroCliente,
-                      child: const Text('|< Primeiro'),
-                    ),
+                  OutlinedButton(
+                    style: _estiloBotaoContornoCompacto,
+                    onPressed: _irParaPrimeiroCliente,
+                    child: const Text('|< Primeiro'),
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: OutlinedButton(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: _irParaClienteAnterior,
-                      child: const Text('< Anterior'),
-                    ),
+                  OutlinedButton(
+                    style: _estiloBotaoContornoCompacto,
+                    onPressed: _irParaClienteAnterior,
+                    child: const Text('< Anterior'),
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: OutlinedButton(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: _irParaProximoCliente,
-                      child: const Text('Proximo >'),
-                    ),
+                  OutlinedButton(
+                    style: _estiloBotaoContornoCompacto,
+                    onPressed: _irParaProximoCliente,
+                    child: const Text('Proximo >'),
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: OutlinedButton(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: _irParaUltimoCliente,
-                      child: const Text('Ultimo >|'),
-                    ),
+                  OutlinedButton(
+                    style: _estiloBotaoContornoCompacto,
+                    onPressed: _irParaUltimoCliente,
+                    child: const Text('Ultimo >|'),
                   ),
                 ],
               ),
@@ -969,143 +1419,39 @@ class _ClientesPageState extends State<ClientesPage> {
                 context: context,
                 title: 'Dados principais',
                 icon: Icons.person_outline,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: SizedBox(
-                      width: _wTipoPessoa,
-                      child: DropdownButtonFormField<String>(
-                        isDense: true,
-                        isExpanded: true,
-                        initialValue: _tipoPessoa,
-                        decoration: const InputDecoration(
-                          labelText: 'Tipo de pessoa',
-                          isDense: true,
-                        ),
-                        items: const [
-                          DropdownMenuItem(value: 'fisica', child: Text('Fisica')),
-                          DropdownMenuItem(
-                            value: 'juridica',
-                            child: Text('Juridica'),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(() {
-                              _tipoPessoa = v;
-                              _documentoController.clear();
-                              if (_tipoPessoa == 'fisica') {
-                                _inscricaoController.clear();
-                              }
-                            });
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: _nomeRazaoController,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Nome / Razao social',
-                      isDense: true,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: _nomeFantasiaController,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Nome fantasia (opcional)',
-                      isDense: true,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Wrap(
-                      spacing: 10,
-                      runSpacing: 8,
-                      children: [
-                        SizedBox(
-                          width: _wDoc,
-                          child: TextField(
-                            controller: _documentoController,
-                            decoration: InputDecoration(
-                              labelText:
-                                  _tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ',
-                              isDense: true,
-                            ),
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [_cpfCnpjFormatter],
-                          ),
-                        ),
-                        if (_tipoPessoa == 'juridica')
-                          SizedBox(
-                            width: _wIe,
-                            child: TextField(
-                              controller: _inscricaoController,
-                              decoration: const InputDecoration(
-                                labelText: 'Inscricao Estadual',
-                                isDense: true,
-                              ),
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.allow(
-                                  RegExp(r'[0-9A-Za-z]'),
-                                ),
-                                LengthLimitingTextInputFormatter(20),
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
+                children: _dadosPrincipaisChildren(formWide),
               ),
               const SizedBox(height: 8),
               LayoutBuilder(
                 builder: (context, constraints) {
+                  final usarDuasColunas = constraints.hasBoundedWidth &&
+                      constraints.maxWidth >= _limiarDuasColunas;
+
                   final cardContato = _buildSectionCard(
                     context: context,
                     title: 'Contato',
                     icon: Icons.phone_outlined,
                     children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 10,
-                          runSpacing: 8,
-                          children: [
-                            SizedBox(
-                              width: _wFone,
-                              child: TextField(
-                                controller: _telefoneController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Telefone',
-                                  isDense: true,
-                                ),
-                                keyboardType: TextInputType.phone,
-                                inputFormatters: [_telefoneFormatter],
-                              ),
-                            ),
-                            SizedBox(
-                              width: _wFone,
-                              child: TextField(
-                                controller: _whatsappController,
-                                decoration: const InputDecoration(
-                                  labelText: 'WhatsApp',
-                                  isDense: true,
-                                ),
-                                keyboardType: TextInputType.phone,
-                                inputFormatters: [_telefoneFormatter],
-                              ),
-                            ),
-                          ],
+                      TextField(
+                        controller: _telefoneController,
+                        decoration: const InputDecoration(
+                          labelText: 'Telefone',
+                          isDense: true,
                         ),
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: [_telefoneFormatter],
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _whatsappController,
+                        decoration: const InputDecoration(
+                          labelText: 'WhatsApp',
+                          isDense: true,
+                        ),
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: [_telefoneFormatter],
+                      ),
+                      const SizedBox(height: 12),
                       TextField(
                         controller: _emailController,
                         decoration: const InputDecoration(
@@ -1118,50 +1464,8 @@ class _ClientesPageState extends State<ClientesPage> {
                       ),
                     ],
                   );
-                  final cardComercial = _buildSectionCard(
-                    context: context,
-                    title: 'Comercial',
-                    icon: Icons.payments_outlined,
-                    children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: SizedBox(
-                          width: _wLimite,
-                          child: TextField(
-                            controller: _limiteController,
-                            decoration: const InputDecoration(
-                              labelText: 'Limite de credito',
-                              isDense: true,
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: [_limiteCreditoFormatter],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: _observacoesController,
-                        maxLines: 2,
-                        textCapitalization: TextCapitalization.sentences,
-                        decoration: const InputDecoration(
-                          labelText: 'Observacoes',
-                          isDense: true,
-                        ),
-                      ),
-                      SwitchListTile(
-                        dense: true,
-                        value: _ativo,
-                        onChanged: (v) => setState(() => _ativo = v),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Cliente ativo'),
-                      ),
-                    ],
-                  );
+                  final cardComercial = _buildCardComercialComLimiteDestaque();
 
-                  final usarDuasColunas = constraints.hasBoundedWidth &&
-                      constraints.maxWidth >= _limiarDuasColunas;
                   if (!usarDuasColunas) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1518,37 +1822,27 @@ class _ClientesPageState extends State<ClientesPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      style: _estiloBotaoElevadoCompacto,
-                      onPressed: _salvarCliente,
-                      icon: const Icon(Icons.save_outlined, size: 18),
-                      label: Text(
-                        emEdicao ? 'Salvar edicao' : 'Salvar cliente',
-                      ),
-                    ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  style: _estiloBotaoContornoCompacto,
+                  onPressed: _limparFormulario,
+                  icon: Icon(
+                    emEdicao ? Icons.close : Icons.cleaning_services_outlined,
+                    size: 18,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: _limparFormulario,
-                      icon: Icon(
-                        emEdicao
-                            ? Icons.close
-                            : Icons.cleaning_services_outlined,
-                        size: 18,
-                      ),
-                      label: Text(emEdicao ? 'Cancelar edicao' : 'Limpar'),
-                    ),
+                  label: Text(
+                    emEdicao ? 'Cancelar edicao' : 'Limpar formulario',
                   ),
-                ],
+                ),
               ),
               const SizedBox(height: 8),
               if (_status.isNotEmpty) _buildStatusBanner(context, _status),
             ],
+                  ),
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -1605,43 +1899,92 @@ class _ClientesPageState extends State<ClientesPage> {
     required TextEditingController referenciaController,
     VoidCallback? onRemover,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                titulo,
-                style: Theme.of(
-                  context,
-                ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-              ),
+    final alvoCep = _AlvoPreenchimentoCep(
+      cep: cepController,
+      endereco: enderecoController,
+      numero: numeroController,
+      bairro: bairroController,
+      cidade: cidadeController,
+      uf: ufController,
+    );
+    final cepConsultando = _consultaCepEmAndamento &&
+        identical(_cepControllerEmConsulta, cepController);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cepCidadeUfUmaLinha = constraints.maxWidth >= 520;
+        final campoCep = SizedBox(
+          width: _wCep,
+          child: TextField(
+            controller: cepController,
+            decoration: InputDecoration(
+              labelText: 'CEP',
+              isDense: true,
+              suffixIcon: cepConsultando
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : null,
             ),
-            if (onRemover != null)
-              IconButton(
-                tooltip: 'Remover endereco',
-                onPressed: onRemover,
-                icon: const Icon(Icons.remove_circle_outline),
-              ),
-          ],
-        ),
-        Row(
+            keyboardType: TextInputType.number,
+            inputFormatters: [_cepFormatter],
+            onChanged: (_) => _agendarConsultaCep(alvoCep),
+          ),
+        );
+        final campoCidade = TextField(
+          controller: cidadeController,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Cidade',
+            isDense: true,
+          ),
+        );
+        final campoUf = SizedBox(
+          width: _wUf,
+          child: TextField(
+            controller: ufController,
+            decoration: const InputDecoration(
+              labelText: 'UF',
+              isDense: true,
+            ),
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
+              LengthLimitingTextInputFormatter(2),
+              UpperCaseTextFormatter(),
+            ],
+          ),
+        );
+
+        final linhaCepBuscar = Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: _wCep,
-              child: TextField(
-                controller: cepController,
-                decoration: const InputDecoration(
-                  labelText: 'CEP',
-                  isDense: true,
+            campoCep,
+            const SizedBox(width: 8),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  style: _estiloBotaoContornoCompacto,
+                  onPressed: cepConsultando
+                      ? null
+                      : () => _buscarCepManual(alvoCep),
+                  icon: const Icon(Icons.search, size: 18),
+                  label: const Text('Buscar CEP'),
                 ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [_cepFormatter],
               ),
             ),
-            const SizedBox(width: 8),
+          ],
+        );
+
+        final linhaEnderecoNumero = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Expanded(
               child: TextField(
                 controller: enderecoController,
@@ -1665,61 +2008,74 @@ class _ClientesPageState extends State<ClientesPage> {
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 6),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        );
+
+        final campoBairro = TextField(
+          controller: bairroController,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Bairro',
+            isDense: true,
+          ),
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: TextField(
-                controller: bairroController,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Bairro',
-                  isDense: true,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    titulo,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+                  ),
                 ),
-              ),
+                if (onRemover != null)
+                  IconButton(
+                    tooltip: 'Remover endereco',
+                    onPressed: onRemover,
+                    icon: const Icon(Icons.remove_circle_outline),
+                  ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: cidadeController,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Cidade',
-                  isDense: true,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: _wUf,
-              child: TextField(
-                controller: ufController,
-                decoration: const InputDecoration(
-                  labelText: 'UF',
-                  isDense: true,
-                ),
-                textCapitalization: TextCapitalization.characters,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
-                  LengthLimitingTextInputFormatter(2),
-                  UpperCaseTextFormatter(),
+            const SizedBox(height: 6),
+            linhaCepBuscar,
+            const SizedBox(height: 6),
+            linhaEnderecoNumero,
+            const SizedBox(height: 6),
+            campoBairro,
+            const SizedBox(height: 6),
+            if (cepCidadeUfUmaLinha)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: campoCidade),
+                  const SizedBox(width: 8),
+                  campoUf,
                 ],
+              )
+            else ...[
+              campoCidade,
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: campoUf,
+              ),
+            ],
+            const SizedBox(height: 6),
+            TextField(
+              controller: referenciaController,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Referencia',
+                isDense: true,
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 6),
-        TextField(
-          controller: referenciaController,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            labelText: 'Referencia',
-            isDense: true,
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 

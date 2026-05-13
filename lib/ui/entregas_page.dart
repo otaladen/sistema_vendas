@@ -23,6 +23,7 @@ enum _FiltroResumoEntregas { nenhum, atrasadas, pendentesHoje }
 const _kMenuMarcarDataEntrega = '__acao_marcar_data_entrega__';
 const _kMenuLimparDataEntrega = '__acao_limpar_data_entrega__';
 const _kMenuDevolucaoPosCarreto = '__acao_devolucao_pos_carreto__';
+const _kMenuRetiradaLojaCarreto = '__acao_retirada_loja_carreto__';
 
 class EntregasPage extends StatefulWidget {
   const EntregasPage({
@@ -123,8 +124,31 @@ class _EntregasPageState extends State<EntregasPage> {
         v.itens.any((i) => i.quantidadeNoCarreto > 0);
   }
 
+  /// Carreto nativo (reserva ate a saida), nao migrado de retirada futura.
+  bool _vendaCarretoReservaNativaSemMigracao(Venda v) {
+    return v.tipoEntrega == 'entrega_loja' &&
+        v.carretoReservaAteSaida &&
+        !_vendaUsaItensCarretoMigrado(v);
+  }
+
+  bool _podeRegistrarRetiradaLojaAntesSaidaCarreto(Venda v) {
+    if (v.cancelada || v.status != 'finalizada') return false;
+    if (!_vendaCarretoReservaNativaSemMigracao(v)) return false;
+    if (v.cargaSaiu) return false;
+    return v.itens.any((i) => i.quantidadeAindaNoCarretoAntesSaida > 0);
+  }
+
   int _quantidadeExibicaoEntrega(Venda v, ItemVenda item) {
-    return item.quantidadeParaExibicaoEntrega(_vendaUsaItensCarretoMigrado(v));
+    if (_vendaUsaItensCarretoMigrado(v)) {
+      return item.quantidadeParaExibicaoEntrega(true);
+    }
+    if (_vendaCarretoReservaNativaSemMigracao(v)) {
+      return item.quantidadeParaExibicaoEntrega(
+        false,
+        carretoReservaNativoAntesSaida: true,
+      );
+    }
+    return item.quantidadeParaExibicaoEntrega(false);
   }
 
   double _subtotalExibicaoEntrega(Venda v, ItemVenda item) {
@@ -172,6 +196,43 @@ class _EntregasPageState extends State<EntregasPage> {
           usuarioAtual: widget.usuarioAtual,
           podeRegistrarSemSenha: widget.podeRegistrarDevolucaoTrocaSemSenha,
         ),
+      ),
+    );
+    if (!mounted) return;
+    if (ok == true) {
+      _carregarEntregas();
+    }
+  }
+
+  Future<void> _abrirRegistrarRetiradaLojaCarretoAntesSaida(Venda vIn) async {
+    if (!widget.podeGerenciarStatusEntrega) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_mensagemSemPermissaoStatus())));
+      return;
+    }
+    final v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
+    if (!_podeRegistrarRetiradaLojaAntesSaidaCarreto(v)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Disponivel somente para carreto com reserva ate a saida, '
+            'sem migracao de retirada futura, com checklist "Saiu" ainda desmarcado '
+            'e com quantidade restante para o carro.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => _DialogRetiradaLojaCarretoAntesSaida(
+        venda: v,
+        vendaRepository: widget.vendaRepository,
+        usuario: widget.usuarioAtual,
       ),
     );
     if (!mounted) return;
@@ -744,10 +805,9 @@ class _EntregasPageState extends State<EntregasPage> {
 
   List<String> _linhasItensEntrega(Venda venda) {
     if (venda.itens.isEmpty) return const ['Sem itens cadastrados'];
-    final usa = _vendaUsaItensCarretoMigrado(venda);
     final linhas = venda.itens
         .map((item) {
-          final q = item.quantidadeParaExibicaoEntrega(usa);
+          final q = _quantidadeExibicaoEntrega(venda, item);
           return q > 0 ? '${q}x ${item.nomeProduto}' : null;
         })
         .whereType<String>()
@@ -1720,9 +1780,8 @@ class _EntregasPageState extends State<EntregasPage> {
       );
       return;
     }
-    final usa = _vendaUsaItensCarretoMigrado(venda);
     final itens = venda.itens
-        .where((i) => i.quantidadeParaExibicaoEntrega(usa) > 0)
+        .where((i) => _quantidadeExibicaoEntrega(venda, i) > 0)
         .toList();
     if (itens.isEmpty) {
       if (!mounted) return;
@@ -1926,6 +1985,16 @@ class _EntregasPageState extends State<EntregasPage> {
                         const SizedBox(height: 6),
                         Text(
                           'Somente o que segue no carreto (cliente ja pode ter retirado parte na loja).',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                      if (!usaMigrado &&
+                          _vendaCarretoReservaNativaSemMigracao(venda) &&
+                          venda.itens.any((i) => i.quantidadeJaRetirada > 0)) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Parte dos itens ja foi retirada na loja antes da saida do carro; '
+                          'abaixo consta o que ainda segue para entrega.',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -2324,6 +2393,10 @@ class _EntregasPageState extends State<EntregasPage> {
                   _abrirRegistrarDevolucaoPosCarreto(venda);
                   return;
                 }
+                if (value == _kMenuRetiradaLojaCarreto) {
+                  _abrirRegistrarRetiradaLojaCarretoAntesSaida(venda);
+                  return;
+                }
                 if (value.startsWith('prioridade:')) {
                   final p = value.split(':').last;
                   _atualizarPrioridade(venda, p);
@@ -2332,6 +2405,14 @@ class _EntregasPageState extends State<EntregasPage> {
                 _atualizarStatusEntrega(venda, value);
               },
               itemBuilder: (context) => [
+                if (_podeRegistrarRetiradaLojaAntesSaidaCarreto(venda))
+                  PopupMenuItem(
+                    enabled: widget.podeGerenciarStatusEntrega,
+                    value: _kMenuRetiradaLojaCarreto,
+                    child: const Text(
+                      'Retirada na loja (antes do carro sair)',
+                    ),
+                  ),
                 PopupMenuItem(
                   enabled: widget.podeGerenciarStatusEntrega,
                   value: _kMenuMarcarDataEntrega,
@@ -3022,6 +3103,192 @@ class _EntregasPageState extends State<EntregasPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DialogRetiradaLojaCarretoAntesSaida extends StatefulWidget {
+  const _DialogRetiradaLojaCarretoAntesSaida({
+    required this.venda,
+    required this.vendaRepository,
+    required this.usuario,
+  });
+
+  final Venda venda;
+  final VendaRepository vendaRepository;
+  final String usuario;
+
+  @override
+  State<_DialogRetiradaLojaCarretoAntesSaida> createState() =>
+      _DialogRetiradaLojaCarretoAntesSaidaState();
+}
+
+class _DialogRetiradaLojaCarretoAntesSaidaState
+    extends State<_DialogRetiradaLojaCarretoAntesSaida> {
+  late final Map<int, TextEditingController> _controllers;
+  late final TextEditingController _quemRetirouController;
+
+  @override
+  void initState() {
+    super.initState();
+    _quemRetirouController = TextEditingController();
+    _controllers = {
+      for (final it in widget.venda.itens)
+        it.id: TextEditingController(text: ''),
+    };
+  }
+
+  @override
+  void dispose() {
+    _quemRetirouController.dispose();
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _preencherPendente() {
+    for (final it in widget.venda.itens) {
+      final c = _controllers[it.id];
+      if (c != null && it.quantidadeAindaNoCarretoAntesSaida > 0) {
+        c.text = '${it.quantidadeAindaNoCarretoAntesSaida}';
+      }
+    }
+    setState(() {});
+  }
+
+  Future<void> _confirmar() async {
+    final map = <int, int>{};
+    for (final it in widget.venda.itens) {
+      final c = _controllers[it.id];
+      if (c == null) continue;
+      final q = int.tryParse(c.text.trim()) ?? 0;
+      if (q > 0) {
+        map[it.id] = q;
+      }
+    }
+    if (map.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Informe ao menos uma quantidade maior que zero.'),
+        ),
+      );
+      return;
+    }
+    try {
+      final quem = _quemRetirouController.text.trim();
+      widget.vendaRepository.registrarRetiradaParcialLojaCarretoAntesSaida(
+        widget.venda.id,
+        map,
+        usuario: widget.usuario,
+        retiradoPor: quem.isEmpty ? null : quem,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel registrar: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('Retirada na loja (antes do carro sair)'),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Informe quantas unidades o cliente esta retirando agora na loja. '
+                'So e permitido ate o checklist marcar "Saiu". O romaneio e a carga '
+                'passam a mostrar apenas o que ainda segue no carro.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: _preencherPendente,
+                  child: const Text(
+                    'Preencher com toda a quantidade ainda destinada ao carro',
+                  ),
+                ),
+              ),
+              TextField(
+                controller: _quemRetirouController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Quem retirou (opcional)',
+                  hintText: 'Nome de quem leva a mercadoria',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              for (final it in widget.venda.itens)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              it.nomeProduto,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Ainda para o carro: '
+                              '${it.quantidadeAindaNoCarretoAntesSaida} un.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(
+                        width: 88,
+                        child: TextField(
+                          controller: _controllers[it.id],
+                          enabled: it.quantidadeAindaNoCarretoAntesSaida > 0,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.right,
+                          decoration: const InputDecoration(
+                            labelText: 'Qtd',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _confirmar,
+          child: const Text('Registrar retirada'),
+        ),
+      ],
     );
   }
 }
