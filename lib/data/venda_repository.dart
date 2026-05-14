@@ -56,6 +56,33 @@ class PeriodoFiltro {
   final DateTime fim;
 }
 
+/// Linha de saida do produto em vendas finalizadas (relatorio por periodo).
+class SaidaProdutoRelatorioLinha {
+  const SaidaProdutoRelatorioLinha({
+    required this.dataVenda,
+    required this.quantidade,
+    required this.valorUnitario,
+    required this.total,
+    required this.nota,
+    required this.lucro,
+    required this.acrescimo,
+    required this.clienteNome,
+    required this.vendaId,
+    required this.itemVendaId,
+  });
+
+  final DateTime dataVenda;
+  final int quantidade;
+  final double valorUnitario;
+  final double total;
+  final int nota;
+  final double lucro;
+  final double acrescimo;
+  final String clienteNome;
+  final int vendaId;
+  final int itemVendaId;
+}
+
 class ItemVendaInput {
   ItemVendaInput({
     required this.produtoId,
@@ -168,6 +195,47 @@ class DadosEntregaOrcamento {
   final DateTime? dataEntregaMarcada;
 }
 
+/// Filtros da [ListagemVendasPage]: condicoes aplicadas no ObjectBox (sem `getAll`).
+class FiltroListagemVendas {
+  const FiltroListagemVendas({
+    required this.textoBusca,
+    this.dataInicioUtc,
+    this.dataFimUtc,
+    required this.filtroCancelamento,
+    required this.canceladaPorFiltro,
+    required this.formaPagamento,
+    required this.tipoEntrega,
+    required this.entregaPendente,
+    this.clienteId,
+    this.vendedorId,
+  });
+
+  final String textoBusca;
+  final DateTime? dataInicioUtc;
+  final DateTime? dataFimUtc;
+
+  /// `ativas` | `canceladas` | `todas`
+  final String filtroCancelamento;
+
+  /// `todos` ou valor exato (como no dropdown de cancelamentos).
+  final String canceladaPorFiltro;
+  final String formaPagamento;
+  final String tipoEntrega;
+
+  /// `todos` | `sim` | `nao`
+  final String entregaPendente;
+  final int? clienteId;
+  final int? vendedorId;
+}
+
+/// Pagina da listagem de vendas + total de linhas que obedecem ao [FiltroListagemVendas].
+class ListagemVendasPagina {
+  const ListagemVendasPagina({required this.vendas, required this.total});
+
+  final List<Venda> vendas;
+  final int total;
+}
+
 class VendaRepository {
   VendaRepository(this._db, {void Function()? onAposEscrita})
     : _onAposEscrita = onAposEscrita;
@@ -188,6 +256,209 @@ class VendaRepository {
     final vendas = query.find();
     query.close();
     return vendas;
+  }
+
+  Query<Venda> _queryListagemVendasOrdenada(Condition<Venda> cond, FiltroListagemVendas f) {
+    final qb = _db.vendaBox.query(cond);
+    if (f.filtroCancelamento == 'canceladas') {
+      qb.order(Venda_.canceladaEm, flags: Order.descending);
+    } else {
+      qb.order(Venda_.data, flags: Order.descending);
+    }
+    return qb.build();
+  }
+
+  Condition<Venda> _condicaoListagemVendas(FiltroListagemVendas f) {
+    Condition<Venda> c = Venda_.status.equals('finalizada');
+    switch (f.filtroCancelamento) {
+      case 'ativas':
+        c = c & Venda_.cancelada.equals(false);
+        break;
+      case 'canceladas':
+        c = c & Venda_.cancelada.equals(true);
+        break;
+      default:
+        break;
+    }
+    if (f.canceladaPorFiltro != 'todos') {
+      final u = f.canceladaPorFiltro.trim();
+      if (u.isNotEmpty) {
+        c = c & Venda_.canceladaPor.equals(u, caseSensitive: false);
+      }
+    }
+    if (f.dataInicioUtc != null) {
+      c = c & Venda_.data.greaterOrEqualDate(f.dataInicioUtc!);
+    }
+    if (f.dataFimUtc != null) {
+      c = c & Venda_.data.lessOrEqualDate(f.dataFimUtc!);
+    }
+    if (f.formaPagamento != 'todos') {
+      c = c & Venda_.formaPagamento.equals(f.formaPagamento);
+    }
+    if (f.tipoEntrega != 'todos') {
+      c = c & Venda_.tipoEntrega.equals(f.tipoEntrega);
+    }
+    if (f.entregaPendente == 'sim') {
+      c = c & Venda_.entregaPendente.equals(true);
+    } else if (f.entregaPendente == 'nao') {
+      c = c & Venda_.entregaPendente.equals(false);
+    }
+    if (f.clienteId != null) {
+      c = c & Venda_.cliente.equals(f.clienteId!);
+    }
+    if (f.vendedorId != null) {
+      c = c & Venda_.vendedor.equals(f.vendedorId!);
+    }
+
+    final tb = f.textoBusca.trim();
+    if (tb.isEmpty) {
+      return c;
+    }
+    final lower = tb.toLowerCase();
+    final orPartes = <Condition<Venda>>[];
+    final asInt = int.tryParse(tb.replaceAll(RegExp(r'[^0-9]'), ''));
+    if (asInt != null) {
+      orPartes.add(Venda_.id.equals(asInt));
+      orPartes.add(Venda_.numeroOrcamento.equals(asInt));
+    }
+
+    final qc = _db.clienteBox
+        .query(
+          Cliente_.nomeRazao
+              .contains(lower, caseSensitive: false)
+              .or(Cliente_.nomeFantasia.contains(lower, caseSensitive: false)),
+        )
+        .build();
+    try {
+      final idsCliente = qc.find().map((e) => e.id).toList();
+      if (idsCliente.isNotEmpty) {
+        orPartes.add(Venda_.cliente.oneOf(idsCliente));
+      }
+    } finally {
+      qc.close();
+    }
+
+    final qv = _db.vendedorBox
+        .query(
+          Vendedor_.codigoInterno
+              .contains(lower, caseSensitive: false)
+              .or(Vendedor_.nomeCompleto.contains(lower, caseSensitive: false))
+              .or(Vendedor_.apelido.contains(lower, caseSensitive: false)),
+        )
+        .build();
+    try {
+      final idsVendedor = qv.find().map((e) => e.id).toList();
+      if (idsVendedor.isNotEmpty) {
+        orPartes.add(Venda_.vendedor.oneOf(idsVendedor));
+      }
+    } finally {
+      qv.close();
+    }
+
+    final qi = _db.itemVendaBox
+        .query(
+          ItemVenda_.nomeProduto.contains(lower, caseSensitive: false),
+        )
+        .build();
+    try {
+      final idsVenda = <int>{};
+      for (final it in qi.find()) {
+        final vid = it.venda.targetId;
+        if (vid != 0) {
+          idsVenda.add(vid);
+        }
+      }
+      if (idsVenda.isNotEmpty) {
+        orPartes.add(Venda_.id.oneOf(idsVenda.toList()));
+      }
+    } finally {
+      qi.close();
+    }
+
+    final Condition<Venda> textoCond;
+    if (orPartes.isEmpty) {
+      textoCond = Venda_.id.equals(0);
+    } else if (orPartes.length == 1) {
+      textoCond = orPartes.first;
+    } else {
+      textoCond = orPartes.reduce((a, b) => a | b);
+    }
+    return c & textoCond;
+  }
+
+  /// Total de vendas finalizadas que obedecem ao filtro (sem paginacao).
+  int contarListagemVendas(FiltroListagemVendas f) {
+    final cond = _condicaoListagemVendas(f);
+    final query = _db.vendaBox.query(cond).build();
+    try {
+      return query.count();
+    } finally {
+      query.close();
+    }
+  }
+
+  /// Uma pagina de resultados + total; [limite] tipico 20. Use [offset] 0 na primeira carga.
+  ListagemVendasPagina listarListagemVendasPaginaComTotal(
+    FiltroListagemVendas f, {
+    required int offset,
+    required int limite,
+  }) {
+    final cond = _condicaoListagemVendas(f);
+    final qCount = _db.vendaBox.query(cond).build();
+    final total = qCount.count();
+    qCount.close();
+
+    final query = _queryListagemVendasOrdenada(cond, f);
+    try {
+      query.offset = offset;
+      query.limit = limite;
+      final vendas = query.find();
+      return ListagemVendasPagina(vendas: vendas, total: total);
+    } finally {
+      query.close();
+    }
+  }
+
+  /// Todas as vendas do filtro (sem limite). Use com cuidado em exportacoes.
+  List<Venda> listarListagemVendasCompleto(FiltroListagemVendas f) {
+    final cond = _condicaoListagemVendas(f);
+    final query = _queryListagemVendasOrdenada(cond, f);
+    try {
+      return query.find();
+    } finally {
+      query.close();
+    }
+  }
+
+  /// Valores distintos de [Venda.canceladaPor] para filtros/UI, sem carregar
+  /// entidades [Venda] (property query + `distinct` no ObjectBox).
+  List<String> listarDistintosCanceladaPor() {
+    final cond = Venda_.status
+        .equals('finalizada')
+        .and(Venda_.cancelada.equals(true))
+        .and(Venda_.canceladaPor.notEquals('', caseSensitive: true));
+    final q = _db.vendaBox.query(cond).build();
+    try {
+      final pq = q.property<String>(Venda_.canceladaPor);
+      pq.distinct = true;
+      try {
+        final raw = pq.find();
+        final unicos = <String>{};
+        for (final s in raw) {
+          final t = s.trim();
+          if (t.isNotEmpty) {
+            unicos.add(t);
+          }
+        }
+        final lista = unicos.toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+        return lista;
+      } finally {
+        pq.close();
+      }
+    } finally {
+      q.close();
+    }
   }
 
   Venda? obterPorId(int id) => _db.vendaBox.get(id);
@@ -232,6 +503,77 @@ class VendaRepository {
               !venda.data.toUtc().isAfter(fimUtc),
         )
         .toList();
+  }
+
+  /// Itens de venda finalizada (nao cancelada) com o [produtoId], data da venda no intervalo.
+  /// Quantidade liquida = vendida menos devolvida na linha; linhas com quantidade zero sao omitidas.
+  List<SaidaProdutoRelatorioLinha> listarSaidasProdutoPeriodo({
+    required int produtoId,
+    required DateTime inicio,
+    required DateTime fim,
+  }) {
+    final inicioUtc = inicio.toUtc();
+    final fimUtc = fim.toUtc();
+    final qb = _db.itemVendaBox.query(ItemVenda_.produto.equals(produtoId));
+    qb.link(
+      ItemVenda_.venda,
+      Venda_.status
+          .equals('finalizada')
+          .and(Venda_.cancelada.equals(false))
+          .and(Venda_.data.greaterOrEqualDate(inicioUtc))
+          .and(Venda_.data.lessOrEqualDate(fimUtc)),
+    );
+    final query = qb.build();
+    try {
+      final itens = query.find();
+      final vendasPorId = <int, Venda>{};
+      for (final it in itens) {
+        final vid = it.venda.targetId;
+        if (vid > 0) {
+          vendasPorId.putIfAbsent(vid, () => _db.vendaBox.get(vid)!);
+        }
+      }
+      final out = <SaidaProdutoRelatorioLinha>[];
+      for (final item in itens) {
+        final v = vendasPorId[item.venda.targetId];
+        if (v == null) continue;
+        final qtd = item.quantidade - item.quantidadeDevolvida;
+        if (qtd <= 0) continue;
+        final brutoLinha = qtd * item.precoUnitario;
+        final somaIt = v.somaSubtotalItens;
+        var acres = 0.0;
+        if (somaIt > 0.0001) {
+          acres = v.descontoImplicitoTotal * (brutoLinha / somaIt);
+        }
+        final cli = v.cliente.target;
+        final nomeCli = (cli?.nomeRazao ?? '').trim();
+        final nota = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
+        out.add(
+          SaidaProdutoRelatorioLinha(
+            dataVenda: v.data.toLocal(),
+            quantidade: qtd,
+            valorUnitario: item.precoUnitario,
+            total: brutoLinha,
+            nota: nota,
+            lucro: qtd * (item.precoUnitario - item.precoCustoUnitario),
+            acrescimo: acres,
+            clienteNome: nomeCli.isEmpty ? '-' : nomeCli,
+            vendaId: v.id,
+            itemVendaId: item.id,
+          ),
+        );
+      }
+      out.sort((a, b) {
+        final c = a.dataVenda.compareTo(b.dataVenda);
+        if (c != 0) return c;
+        final d = a.vendaId.compareTo(b.vendaId);
+        if (d != 0) return d;
+        return a.itemVendaId.compareTo(b.itemVendaId);
+      });
+      return out;
+    } finally {
+      query.close();
+    }
   }
 
   int registrarVenda(

@@ -49,13 +49,18 @@ class ListagemVendasPage extends StatefulWidget {
 }
 
 class _ListagemVendasPageState extends State<ListagemVendasPage> {
+  static const int _tamPaginaListagem = 20;
+
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
+  final DateFormat _dataDia = DateFormat('dd/MM/yyyy');
   final _buscaController = TextEditingController();
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
   final AppConfigRepository _configRepository = AppConfigRepository();
 
   String _periodoPreset = 'ultimos_30';
+  DateTime? _dataPersonalizadaInicio;
+  DateTime? _dataPersonalizadaFim;
   String _formaPagamento = 'todos';
   String _tipoEntrega = 'todos';
   String _entregaPendente = 'todos';
@@ -65,10 +70,14 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   int? _vendedorIdFiltro;
 
   List<Venda> _resultados = [];
+  List<String> _distintosCanceladaPor = [];
+  int _offsetListagem = 0;
+  int _totalListagemVendas = 0;
 
   @override
   void initState() {
     super.initState();
+    _distintosCanceladaPor = widget.vendaRepository.listarDistintosCanceladaPor();
     _pesquisar();
   }
 
@@ -279,10 +288,77 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         return (inicio, fim);
       case 'ano_atual':
         return (DateTime(now.year, 1, 1), fimDia);
+      case 'personalizado':
+        final di = _dataPersonalizadaInicio;
+        final df = _dataPersonalizadaFim;
+        if (di == null || df == null) {
+          return (null, null);
+        }
+        var inicio = DateTime(di.year, di.month, di.day);
+        var fim = DateTime(df.year, df.month, df.day, 23, 59, 59, 999);
+        if (inicio.isAfter(fim)) {
+          final t = inicio;
+          inicio = DateTime(df.year, df.month, df.day);
+          fim = DateTime(t.year, t.month, t.day, 23, 59, 59, 999);
+        }
+        return (inicio, fim);
       case 'todo':
       default:
         return (null, null);
     }
+  }
+
+  Future<void> _escolherDataInicioPersonalizado() async {
+    final hoje = DateTime.now();
+    final inicial = _dataPersonalizadaInicio ??
+        DateTime(hoje.year, hoje.month, hoje.day);
+    final d = await showDatePicker(
+      context: context,
+      initialDate: inicial,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(hoje.year + 1, 12, 31),
+    );
+    if (!mounted || d == null) return;
+    setState(() {
+      _dataPersonalizadaInicio = DateTime(d.year, d.month, d.day);
+      if (_dataPersonalizadaFim != null &&
+          _dataPersonalizadaInicio!.isAfter(_dataPersonalizadaFim!)) {
+        _dataPersonalizadaFim = DateTime(
+          _dataPersonalizadaInicio!.year,
+          _dataPersonalizadaInicio!.month,
+          _dataPersonalizadaInicio!.day,
+          23,
+          59,
+          59,
+          999,
+        );
+      }
+    });
+  }
+
+  Future<void> _escolherDataFimPersonalizado() async {
+    final hoje = DateTime.now();
+    final inicial = _dataPersonalizadaFim ??
+        _dataPersonalizadaInicio ??
+        DateTime(hoje.year, hoje.month, hoje.day);
+    final d = await showDatePicker(
+      context: context,
+      initialDate: inicial,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(hoje.year + 1, 12, 31),
+    );
+    if (!mounted || d == null) return;
+    setState(() {
+      _dataPersonalizadaFim = DateTime(d.year, d.month, d.day, 23, 59, 59, 999);
+      if (_dataPersonalizadaInicio != null &&
+          _dataPersonalizadaInicio!.isAfter(_dataPersonalizadaFim!)) {
+        _dataPersonalizadaInicio = DateTime(
+          _dataPersonalizadaFim!.year,
+          _dataPersonalizadaFim!.month,
+          _dataPersonalizadaFim!.day,
+        );
+      }
+    });
   }
 
   String _rotuloFormaPagamento(String forma) {
@@ -532,98 +608,61 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   void _pesquisar() {
-    final todas = widget.vendaRepository.listarTodas();
-    Iterable<Venda> it = todas.where((v) => v.status == 'finalizada');
-
-    if (_filtroCancelamento == 'ativas') {
-      it = it.where((v) => !v.cancelada);
-    } else if (_filtroCancelamento == 'canceladas') {
-      it = it.where((v) => v.cancelada);
-    }
-    if (_canceladaPorFiltro != 'todos') {
-      final usuarioFiltro = _canceladaPorFiltro.trim().toLowerCase();
-      it = it.where(
-        (v) => v.cancelada && v.canceladaPor.trim().toLowerCase() == usuarioFiltro,
-      );
-    }
-
-    final range = _limitesPeriodo();
-    if (range.$1 != null && range.$2 != null) {
-      final inicioUtc = range.$1!.toUtc();
-      final fimUtc = range.$2!.toUtc();
-      it = it.where((v) {
-        final d = v.data.toUtc();
-        return !d.isBefore(inicioUtc) && !d.isAfter(fimUtc);
-      });
-    }
-
-    if (_formaPagamento != 'todos') {
-      it = it.where((v) => v.formaPagamento == _formaPagamento);
-    }
-    if (_tipoEntrega != 'todos') {
-      it = it.where((v) => v.tipoEntrega == _tipoEntrega);
-    }
-    if (_entregaPendente == 'sim') {
-      it = it.where((v) => v.entregaPendente);
-    } else if (_entregaPendente == 'nao') {
-      it = it.where((v) => !v.entregaPendente);
-    }
-    if (_clienteIdFiltro != null) {
-      final cid = _clienteIdFiltro!;
-      it = it.where((v) => v.cliente.targetId == cid);
-    }
-    if (_vendedorIdFiltro != null) {
-      final vid = _vendedorIdFiltro!;
-      it = it.where((v) => v.vendedor.targetId == vid);
-    }
-
-    final q = _buscaController.text.trim();
-    if (q.isNotEmpty) {
-      final lower = q.toLowerCase();
-      final asInt = int.tryParse(q.replaceAll(RegExp(r'[^0-9]'), ''));
-      it = it.where((v) {
-        if (asInt != null) {
-          if (v.id == asInt || v.numeroOrcamento == asInt) return true;
-        }
-        final cliente = _clienteDaVenda(v);
-        if (cliente != null &&
-            cliente.nomeRazao.toLowerCase().contains(lower)) {
-          return true;
-        }
-        final vend = _vendedorDaVenda(v);
-        if (vend != null) {
-          final camposV = [
-            vend.codigoInterno,
-            vend.nomeCompleto,
-            vend.apelido,
-          ].map((e) => e.toLowerCase());
-          if (camposV.any((c) => c.contains(lower))) return true;
-        }
-        for (final item in v.itens) {
-          if (item.nomeProduto.toLowerCase().contains(lower)) return true;
-        }
-        return false;
-      });
-    }
-
-    final lista = it.toList()
-      ..sort((a, b) {
-        if (_filtroCancelamento == 'canceladas') {
-          final aCanceladaEm = a.canceladaEm ?? a.data;
-          final bCanceladaEm = b.canceladaEm ?? b.data;
-          return bCanceladaEm.compareTo(aCanceladaEm);
-        }
-        return b.data.compareTo(a.data);
-      });
-
+    final filtros = _montarFiltroListagemAtual();
+    final pagina = widget.vendaRepository.listarListagemVendasPaginaComTotal(
+      filtros,
+      offset: 0,
+      limite: _tamPaginaListagem,
+    );
+    final distintosCancel = widget.vendaRepository.listarDistintosCanceladaPor();
     setState(() {
-      _resultados = lista;
+      _resultados = pagina.vendas;
+      _totalListagemVendas = pagina.total;
+      _offsetListagem = pagina.vendas.length;
+      _distintosCanceladaPor = distintosCancel;
+      if (_canceladaPorFiltro != 'todos' &&
+          !_distintosCanceladaPor.contains(_canceladaPorFiltro)) {
+        _canceladaPorFiltro = 'todos';
+      }
     });
+  }
+
+  void _carregarMaisVendas() {
+    if (_resultados.length >= _totalListagemVendas) {
+      return;
+    }
+    final pagina = widget.vendaRepository.listarListagemVendasPaginaComTotal(
+      _montarFiltroListagemAtual(),
+      offset: _offsetListagem,
+      limite: _tamPaginaListagem,
+    );
+    setState(() {
+      _resultados.addAll(pagina.vendas);
+      _offsetListagem += pagina.vendas.length;
+    });
+  }
+
+  FiltroListagemVendas _montarFiltroListagemAtual() {
+    final range = _limitesPeriodo();
+    return FiltroListagemVendas(
+      textoBusca: _buscaController.text,
+      dataInicioUtc: range.$1?.toUtc(),
+      dataFimUtc: range.$2?.toUtc(),
+      filtroCancelamento: _filtroCancelamento,
+      canceladaPorFiltro: _canceladaPorFiltro,
+      formaPagamento: _formaPagamento,
+      tipoEntrega: _tipoEntrega,
+      entregaPendente: _entregaPendente,
+      clienteId: _clienteIdFiltro,
+      vendedorId: _vendedorIdFiltro,
+    );
   }
 
   void _limparFiltros() {
     setState(() {
       _periodoPreset = 'ultimos_30';
+      _dataPersonalizadaInicio = null;
+      _dataPersonalizadaFim = null;
       _formaPagamento = 'todos';
       _tipoEntrega = 'todos';
       _entregaPendente = 'todos';
@@ -639,7 +678,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   String _csvEscape(String texto) => '"${texto.replaceAll('"', '""')}"';
 
   Future<void> _exportarCancelamentosCsv() async {
-    final canceladas = _resultados.where((v) => v.cancelada).toList();
+    final canceladas = widget.vendaRepository
+        .listarListagemVendasCompleto(_montarFiltroListagemAtual())
+        .where((v) => v.cancelada)
+        .toList();
     if (canceladas.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Nao ha vendas canceladas para exportar.')),
@@ -747,7 +789,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   Future<void> _exportarCancelamentosPdf() async {
-    final canceladas = _resultados.where((v) => v.cancelada).toList();
+    final canceladas = widget.vendaRepository
+        .listarListagemVendasCompleto(_montarFiltroListagemAtual())
+        .where((v) => v.cancelada)
+        .toList();
     if (canceladas.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Nao ha vendas canceladas para exportar.')),
@@ -959,13 +1004,6 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         .where((c) => c.ativo)
         .toList();
     final vendedores = widget.vendedorRepository.listarAtivos();
-    final usuariosCancelamento = widget.vendaRepository
-        .listarTodas()
-        .where((v) => v.cancelada && v.canceladaPor.trim().isNotEmpty)
-        .map((v) => v.canceladaPor.trim())
-        .toSet()
-        .toList()
-      ..sort();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Listagem de Vendas')),
@@ -1027,9 +1065,35 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 value: 'todo',
                                 child: Text('Todo o periodo'),
                               ),
+                              DropdownMenuItem(
+                                value: 'personalizado',
+                                child: Text('Datas escolhidas'),
+                              ),
                             ],
                             onChanged: (v) {
-                              if (v != null) setState(() => _periodoPreset = v);
+                              if (v == null) return;
+                              setState(() {
+                                _periodoPreset = v;
+                                if (v == 'personalizado' &&
+                                    (_dataPersonalizadaInicio == null ||
+                                        _dataPersonalizadaFim == null)) {
+                                  final n = DateTime.now();
+                                  _dataPersonalizadaInicio = DateTime(
+                                    n.year,
+                                    n.month,
+                                    n.day,
+                                  ).subtract(const Duration(days: 29));
+                                  _dataPersonalizadaFim = DateTime(
+                                    n.year,
+                                    n.month,
+                                    n.day,
+                                    23,
+                                    59,
+                                    59,
+                                    999,
+                                  );
+                                }
+                              });
                             },
                           ),
                         ),
@@ -1046,7 +1110,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 value: 'todos',
                                 child: Text('Todos'),
                               ),
-                              ...usuariosCancelamento.map(
+                              ..._distintosCanceladaPor.map(
                                 (u) => DropdownMenuItem(
                                   value: u,
                                   child: Text(
@@ -1245,6 +1309,38 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                         ),
                       ],
                     ),
+                    if (_periodoPreset == 'personalizado') ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _escolherDataInicioPersonalizado,
+                            icon: const Icon(Icons.event_outlined, size: 18),
+                            label: Text(
+                              _dataPersonalizadaInicio == null
+                                  ? 'Data inicial'
+                                  : 'De ${_dataDia.format(_dataPersonalizadaInicio!)}',
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _escolherDataFimPersonalizado,
+                            icon: const Icon(Icons.event_outlined, size: 18),
+                            label: Text(
+                              _dataPersonalizadaFim == null
+                                  ? 'Data final'
+                                  : 'Ate ${_dataDia.format(_dataPersonalizadaFim!)}',
+                            ),
+                          ),
+                          Text(
+                            'Inclui o dia inteiro de cada data. Depois use Pesquisar.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 12,
@@ -1305,9 +1401,27 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
               ),
             ),
             const SizedBox(height: 12),
-            Text(
-              '${_resultados.length} venda(s) encontrada(s)',
-              style: Theme.of(context).textTheme.titleSmall,
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Text(
+                    _totalListagemVendas == 0
+                        ? 'Nenhuma venda encontrada com os filtros.'
+                        : 'Mostrando ${_resultados.length} de $_totalListagemVendas venda(s). '
+                            'Paginas de $_tamPaginaListagem.',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                if (_resultados.length < _totalListagemVendas)
+                  FilledButton.tonal(
+                    onPressed: _carregarMaisVendas,
+                    child: const Text('Carregar mais 20'),
+                  ),
+              ],
             ),
             const SizedBox(height: 8),
             Expanded(

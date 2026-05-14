@@ -50,7 +50,8 @@ class _AlvoPreenchimentoCep {
   final TextEditingController uf;
 }
 
-class _ClientesPageState extends State<ClientesPage> {
+class _ClientesPageState extends State<ClientesPage>
+    with SingleTickerProviderStateMixin {
   static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -64,8 +65,9 @@ class _ClientesPageState extends State<ClientesPage> {
   static const double _wCep = 120;
   static const double _wNumero = 88;
   static const double _wUf = 72;
-  static const double _limiarDuasColunas = 880.0;
-  static const double _maxLarguraFormulario = 960;
+  static const double _maxLarguraFormulario = 1120;
+  static const Color _fundoPainelCadastro = Color(0xFFE8EEF5);
+  static const Color _bordaPainelCadastro = Color(0xFFB0BEC5);
   static const Color _corBotaoSalvar = Color(0xFF2E7D32);
   static const Color _corLimiteDestaque = Color(0xFF1B5E20);
   static const Color _fundoLimiteCredito = Color(0xFFE8F5E9);
@@ -87,6 +89,10 @@ class _ClientesPageState extends State<ClientesPage> {
   final _referenciaController = TextEditingController();
   final _limiteController = TextEditingController();
   final _observacoesController = TextEditingController();
+  final _rgController = TextEditingController();
+  final _ocupacaoController = TextEditingController();
+  String _sexoCliente = '';
+  DateTime? _dataNascimentoCliente;
   final List<_EnderecoFormControllers> _enderecosExtras = [];
 
   int? _clienteEmEdicaoId;
@@ -98,9 +104,9 @@ class _ClientesPageState extends State<ClientesPage> {
   late final _cepFormatter = _CepInputFormatter();
   late final _emailFormatter = _EmailInputFormatter();
   late final _limiteCreditoFormatter = _MoedaInputFormatter();
-  final ScrollController _scrollController = ScrollController();
   final MensageriaRepository _mensageriaRepository = MensageriaRepository();
   final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
+  final DateFormat _dataNascimentoFmt = DateFormat('dd/MM/yyyy');
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   String _periodoHistorico = 'todo';
 
@@ -110,15 +116,21 @@ class _ClientesPageState extends State<ClientesPage> {
   bool _consultaCnpjEmAndamento = false;
   bool _consultaCepEmAndamento = false;
   TextEditingController? _cepControllerEmConsulta;
+  final ScrollController _scrollAbaEndereco = ScrollController();
+  final ScrollController _scrollAbaHistorico = ScrollController();
+
+  late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 5, vsync: this);
     _documentoController.addListener(_onDocumentoChanged);
   }
 
   @override
   void dispose() {
+    _tabController.dispose();
     _debounceConsultaCnpj?.cancel();
     _debounceConsultaCep?.cancel();
     _documentoController.removeListener(_onDocumentoChanged);
@@ -138,10 +150,13 @@ class _ClientesPageState extends State<ClientesPage> {
     _referenciaController.dispose();
     _limiteController.dispose();
     _observacoesController.dispose();
+    _rgController.dispose();
+    _ocupacaoController.dispose();
     for (final endereco in _enderecosExtras) {
       endereco.dispose();
     }
-    _scrollController.dispose();
+    _scrollAbaEndereco.dispose();
+    _scrollAbaHistorico.dispose();
     super.dispose();
   }
 
@@ -442,6 +457,10 @@ class _ClientesPageState extends State<ClientesPage> {
       _enderecosExtras.clear();
       _limiteController.clear();
       _observacoesController.clear();
+      _rgController.clear();
+      _ocupacaoController.clear();
+      _sexoCliente = '';
+      _dataNascimentoCliente = null;
       _tipoPessoa = 'fisica';
       _ativo = true;
       _clienteEmEdicaoId = null;
@@ -475,6 +494,15 @@ class _ClientesPageState extends State<ClientesPage> {
       nomeRazao: nomeRazao,
       nomeFantasia: _nomeFantasiaController.text.trim(),
       documento: _somenteDigitos(_documentoController.text),
+      rg: _tipoPessoa == 'fisica' ? _rgController.text.trim() : '',
+      dataNascimento: _tipoPessoa == 'fisica' && _dataNascimentoCliente != null
+          ? DateTime.utc(
+              _dataNascimentoCliente!.year,
+              _dataNascimentoCliente!.month,
+              _dataNascimentoCliente!.day,
+            )
+          : null,
+      sexo: _tipoPessoa == 'fisica' ? _sexoCliente : '',
       inscricaoEstadual: _tipoPessoa == 'juridica'
           ? _inscricaoController.text.trim().toUpperCase()
           : '',
@@ -491,6 +519,7 @@ class _ClientesPageState extends State<ClientesPage> {
       enderecosJson: existente?.enderecosJson ?? '',
       limiteCredito: limiteCredito,
       observacoes: _observacoesController.text.trim(),
+      ocupacao: _ocupacaoController.text.trim(),
       ativo: _ativo,
       criadoEm: existente?.criadoEm,
     );
@@ -509,6 +538,112 @@ class _ClientesPageState extends State<ClientesPage> {
 
   String _somenteDigitos(String valor) {
     return valor.replaceAll(RegExp(r'\D'), '');
+  }
+
+  Future<void> _selecionarDataNascimentoCliente() async {
+    final hoje = DateTime.now();
+    final inicial = _dataNascimentoCliente ??
+        DateTime(hoje.year - 25, hoje.month, hoje.day);
+    final d = await showDatePicker(
+      context: context,
+      initialDate: inicial.isAfter(hoje) ? hoje : inicial,
+      firstDate: DateTime(1900),
+      lastDate: hoje,
+    );
+    if (d != null && mounted) {
+      setState(() => _dataNascimentoCliente = d);
+    }
+  }
+
+  List<Widget> _camposPessoaFisicaIdentificacao() {
+    if (_tipoPessoa != 'fisica') return const [];
+    final theme = Theme.of(context);
+    final textoNasc = _dataNascimentoCliente == null
+        ? 'Nao informado'
+        : _dataNascimentoFmt.format(_dataNascimentoCliente!);
+    return [
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: 168,
+            child: TextField(
+              controller: _rgController,
+              decoration: const InputDecoration(
+                labelText: 'RG',
+                isDense: true,
+              ),
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Za-z.\-\s]')),
+                LengthLimitingTextInputFormatter(18),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 212,
+            child: InputDecorator(
+              decoration: InputDecoration(
+                labelText: 'Nascimento',
+                isDense: true,
+                suffixIcon: IconButton(
+                  tooltip: 'Limpar data',
+                  icon: const Icon(Icons.clear, size: 20),
+                  onPressed: _dataNascimentoCliente == null
+                      ? null
+                      : () => setState(() => _dataNascimentoCliente = null),
+                ),
+              ),
+              child: InkWell(
+                onTap: _selecionarDataNascimentoCliente,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          textoNasc,
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                      ),
+                      Icon(
+                        Icons.calendar_today_outlined,
+                        size: 18,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 200,
+            child: DropdownButtonFormField<String>(
+              key: ValueKey<String>(_sexoCliente),
+              initialValue: _sexoCliente,
+              decoration: const InputDecoration(
+                labelText: 'Sexo',
+                isDense: true,
+              ),
+              items: const [
+                DropdownMenuItem(value: '', child: Text('Nao informado')),
+                DropdownMenuItem(value: 'M', child: Text('Masculino')),
+                DropdownMenuItem(value: 'F', child: Text('Feminino')),
+                DropdownMenuItem(value: 'O', child: Text('Outro')),
+              ],
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => _sexoCliente = v);
+              },
+            ),
+          ),
+        ],
+      ),
+    ];
   }
 
   void _onDocumentoChanged() {
@@ -677,6 +812,15 @@ class _ClientesPageState extends State<ClientesPage> {
       _nomeRazaoController.text = c.nomeRazao;
       _nomeFantasiaController.text = c.nomeFantasia;
       _documentoController.text = c.documento;
+      _rgController.text = c.rg;
+      _dataNascimentoCliente = c.dataNascimento == null
+          ? null
+          : DateTime(
+              c.dataNascimento!.toUtc().year,
+              c.dataNascimento!.toUtc().month,
+              c.dataNascimento!.toUtc().day,
+            );
+      _sexoCliente = c.sexo;
       _inscricaoController.text = c.inscricaoEstadual;
       _telefoneController.text = c.telefone;
       _whatsappController.text = c.whatsapp;
@@ -695,6 +839,7 @@ class _ClientesPageState extends State<ClientesPage> {
           .toStringAsFixed(2)
           .replaceAll('.', ',');
       _observacoesController.text = c.observacoes;
+      _ocupacaoController.text = c.ocupacao;
       _ativo = c.ativo;
       _status = 'Editando cliente: ${c.nomeRazao}';
     });
@@ -1141,6 +1286,7 @@ class _ClientesPageState extends State<ClientesPage> {
         ),
         const SizedBox(height: 6),
         blocoDocumento,
+        ..._camposPessoaFisicaIdentificacao(),
       ];
     }
 
@@ -1162,6 +1308,7 @@ class _ClientesPageState extends State<ClientesPage> {
       ),
       const SizedBox(height: 6),
       blocoDocumento,
+      ..._camposPessoaFisicaIdentificacao(),
     ];
   }
 
@@ -1254,6 +1401,16 @@ class _ClientesPageState extends State<ClientesPage> {
                 ],
               ),
             ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _ocupacaoController,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Ocupacao / profissao',
+                isDense: true,
+                prefixIcon: Icon(Icons.work_outline, size: 20),
+              ),
+            ),
             const SizedBox(height: 8),
             TextField(
               controller: _observacoesController,
@@ -1273,6 +1430,628 @@ class _ClientesPageState extends State<ClientesPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildBarraFerramentasCadastro() {
+    final theme = Theme.of(context);
+    final iconStyle = IconButton.styleFrom(
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.all(6),
+      minimumSize: const Size(36, 36),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: 'Primeiro cliente',
+              style: iconStyle,
+              onPressed: _irParaPrimeiroCliente,
+              icon: const Icon(Icons.first_page),
+            ),
+            IconButton(
+              tooltip: 'Cliente anterior',
+              style: iconStyle,
+              onPressed: _irParaClienteAnterior,
+              icon: const Icon(Icons.chevron_left),
+            ),
+            IconButton(
+              tooltip: 'Proximo cliente',
+              style: iconStyle,
+              onPressed: _irParaProximoCliente,
+              icon: const Icon(Icons.chevron_right),
+            ),
+            IconButton(
+              tooltip: 'Ultimo cliente',
+              style: iconStyle,
+              onPressed: _irParaUltimoCliente,
+              icon: const Icon(Icons.last_page),
+            ),
+            const VerticalDivider(width: 16),
+            IconButton(
+              tooltip: 'Pesquisar cliente',
+              style: iconStyle,
+              onPressed: _abrirPesquisaCliente,
+              icon: const Icon(Icons.search),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPainelComAbas({
+    required ThemeData theme,
+    required bool emEdicao,
+    required bool formWide,
+    required List<Venda> compras,
+    required double totalGasto,
+    required double ticketMedio,
+    required Venda? ultimaCompra,
+    required int quantidadeItens,
+    required List<MapEntry<String, int>> topProdutos,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          labelPadding: const EdgeInsets.symmetric(horizontal: 14),
+          tabs: const [
+            Tab(text: 'Basicos'),
+            Tab(text: 'Contato'),
+            Tab(text: 'Comercial'),
+            Tab(text: 'Endereco'),
+            Tab(text: 'Historico'),
+          ],
+        ),
+        Expanded(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: _fundoPainelCadastro,
+              border: Border.all(color: _bordaPainelCadastro),
+            ),
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildScrollAba(
+                  _buildAbaBasicos(theme, emEdicao, formWide),
+                ),
+                _buildScrollAba(
+                  _buildAbaContato(theme),
+                ),
+                _buildScrollAba(
+                  Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: _buildCardComercialComLimiteDestaque(),
+                  ),
+                ),
+                _buildScrollAbaEndereco(theme),
+                _buildScrollAbaHistorico(
+                  theme: theme,
+                  emEdicao: emEdicao,
+                  compras: compras,
+                  totalGasto: totalGasto,
+                  ticketMedio: ticketMedio,
+                  ultimaCompra: ultimaCompra,
+                  quantidadeItens: quantidadeItens,
+                  topProdutos: topProdutos,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScrollAba(Widget child) {
+    return Scrollbar(
+      thumbVisibility: true,
+      trackVisibility: true,
+      child: SingleChildScrollView(
+        primary: false,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 48),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _buildScrollAbaEndereco(ThemeData theme) {
+    return Scrollbar(
+      controller: _scrollAbaEndereco,
+      thumbVisibility: true,
+      trackVisibility: true,
+      child: ListView(
+        controller: _scrollAbaEndereco,
+        primary: false,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 96),
+        children: [
+          Card(
+            color: theme.colorScheme.surface,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: theme.colorScheme.outlineVariant),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.location_on_outlined,
+                        size: 17,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Endereco',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  _buildEnderecoForm(
+                    titulo: 'Endereco principal',
+                    cepController: _cepController,
+                    enderecoController: _enderecoController,
+                    numeroController: _numeroController,
+                    bairroController: _bairroController,
+                    cidadeController: _cidadeController,
+                    ufController: _ufController,
+                    referenciaController: _referenciaController,
+                  ),
+                  for (var i = 0; i < _enderecosExtras.length; i++) ...[
+                    const SizedBox(height: 8),
+                    _buildEnderecoForm(
+                      titulo: 'Endereco adicional ${i + 1}',
+                      cepController: _enderecosExtras[i].cepController,
+                      enderecoController:
+                          _enderecosExtras[i].enderecoController,
+                      numeroController: _enderecosExtras[i].numeroController,
+                      bairroController: _enderecosExtras[i].bairroController,
+                      cidadeController: _enderecosExtras[i].cidadeController,
+                      ufController: _enderecosExtras[i].ufController,
+                      referenciaController:
+                          _enderecosExtras[i].referenciaController,
+                      onRemover: () {
+                        final removido = _enderecosExtras.removeAt(i);
+                        removido.dispose();
+                        setState(() {});
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      style: _estiloBotaoContornoCompacto,
+                      onPressed: () {
+                        setState(() {
+                          _enderecosExtras.add(
+                            _EnderecoFormControllers.vazio(),
+                          );
+                        });
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted) return;
+                          if (!_scrollAbaEndereco.hasClients) return;
+                          final pos = _scrollAbaEndereco.position;
+                          pos.animateTo(
+                            pos.maxScrollExtent,
+                            duration: const Duration(milliseconds: 280),
+                            curve: Curves.easeOut,
+                          );
+                        });
+                      },
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Adicionar endereco'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAbaBasicos(ThemeData theme, bool emEdicao, bool formWide) {
+    final codigoTexto = emEdicao && _clienteEmEdicaoId != null
+        ? 'Codigo: $_clienteEmEdicaoId'
+        : 'Codigo: - (novo)';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Material(
+          color: theme.colorScheme.surface,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(6),
+            side: BorderSide(color: theme.colorScheme.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.tag, size: 18, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  codigoTexto,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _buildSectionCard(
+          context: context,
+          title: 'Identificacao',
+          icon: Icons.person_outline,
+          children: _dadosPrincipaisChildren(formWide),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAbaContato(ThemeData theme) {
+    return _buildSectionCard(
+      context: context,
+      title: 'Contato',
+      icon: Icons.phone_outlined,
+      children: [
+        TextField(
+          controller: _telefoneController,
+          decoration: const InputDecoration(
+            labelText: 'Telefone',
+            isDense: true,
+          ),
+          keyboardType: TextInputType.phone,
+          inputFormatters: [_telefoneFormatter],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _whatsappController,
+          decoration: const InputDecoration(
+            labelText: 'WhatsApp',
+            isDense: true,
+          ),
+          keyboardType: TextInputType.phone,
+          inputFormatters: [_telefoneFormatter],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _emailController,
+          decoration: const InputDecoration(
+            labelText: 'E-mail',
+            isDense: true,
+          ),
+          keyboardType: TextInputType.emailAddress,
+          textCapitalization: TextCapitalization.none,
+          inputFormatters: [_emailFormatter],
+        ),
+      ],
+    );
+  }
+
+  /// Historico sem [ExpansionTile]: o corpo do tile usa [Expansible] com
+  /// [ClipRect]/[Align.heightFactor], o que pode truncar listas longas dentro
+  /// de scroll. Aqui um [ListView] com [ScrollController] ligado ao [Scrollbar].
+  Widget _buildScrollAbaHistorico({
+    required ThemeData theme,
+    required bool emEdicao,
+    required List<Venda> compras,
+    required double totalGasto,
+    required double ticketMedio,
+    required Venda? ultimaCompra,
+    required int quantidadeItens,
+    required List<MapEntry<String, int>> topProdutos,
+  }) {
+    final tituloSecao = theme.textTheme.titleSmall?.copyWith(
+      fontWeight: FontWeight.w600,
+    );
+    return Scrollbar(
+      controller: _scrollAbaHistorico,
+      thumbVisibility: true,
+      trackVisibility: true,
+      child: ListView(
+        controller: _scrollAbaHistorico,
+        primary: false,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 48),
+        children: [
+          Card(
+            elevation: 0,
+            color: theme.colorScheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: BorderSide(color: theme.colorScheme.outlineVariant),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 12, 10, 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.history_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Historico de compras',
+                          style: tituloSecao,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (!emEdicao)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            'Salve o cliente para habilitar o historico de compras.',
+                          ),
+                        )
+                      else ...[
+                        DropdownButtonFormField<String>(
+                          initialValue: _periodoHistorico,
+                          decoration: const InputDecoration(
+                            labelText: 'Periodo do historico',
+                            isDense: true,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'todo',
+                              child: Text('Todo o periodo'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'ultimos_30',
+                              child: Text('Ultimos 30 dias'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'ultimos_90',
+                              child: Text('Ultimos 90 dias'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'ano_atual',
+                              child: Text('Ano atual'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() => _periodoHistorico = value);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Total ja gasto na loja: ${_formatarMoeda(totalGasto)}',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text('Ticket medio: ${_formatarMoeda(ticketMedio)}'),
+                        Text('Total de itens comprados: $quantidadeItens'),
+                        Text(
+                          'Ultima compra: ${ultimaCompra == null ? 'Nao disponivel' : _dataHora.format(ultimaCompra.data.toLocal())}',
+                        ),
+                        Text('Compras registradas: ${compras.length}'),
+                        if (topProdutos.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Top produtos',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          ...topProdutos
+                              .take(3)
+                              .map((e) => Text('${e.key} - ${e.value} un')),
+                        ],
+                        const SizedBox(height: 8),
+                        if (compras.isEmpty)
+                          const Text(
+                            'Este cliente ainda nao tem compras finalizadas.',
+                          )
+                        else
+                          ...compras.map((compra) {
+                            final nota = compra.numeroOrcamento > 0
+                                ? '${compra.numeroOrcamento}'
+                                : 'ID ${compra.id}';
+                            return ListTile(
+                              dense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 0,
+                              ),
+                              leading: const Icon(
+                                Icons.receipt_long_outlined,
+                                size: 20,
+                              ),
+                              title: Text('Nota/Orcamento: $nota'),
+                              subtitle: Text(
+                                _dataHora.format(compra.data.toLocal()),
+                              ),
+                              trailing: Text(
+                                _formatarMoeda(compra.total),
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            );
+                          }),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            elevation: 0,
+            color: theme.colorScheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: BorderSide(color: theme.colorScheme.outlineVariant),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 12, 10, 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.chat_bubble_outline,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Mensagens enviadas',
+                          style: tituloSecao,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: !emEdicao
+                      ? const Text(
+                          'Salve o cliente para habilitar logs de mensagens.',
+                        )
+                      : FutureBuilder<List<MensagemLog>>(
+                          key: ValueKey<int?>(_clienteEmEdicaoId),
+                          future: _mensageriaRepository.listarLogsPorCliente(
+                            _clienteEmEdicaoId!,
+                          ),
+                          builder: (context, snapshot) {
+                            final logs = snapshot.data ?? const <MensagemLog>[];
+                            final clienteAtual = _clienteEmEdicaoAtual();
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 8),
+                                child: LinearProgressIndicator(),
+                              );
+                            }
+                            if (clienteAtual == null) {
+                              return const Text('Cliente nao encontrado.');
+                            }
+                            if (logs.isEmpty) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _enviarMensagemManualCliente(
+                                          clienteAtual,
+                                        ),
+                                    icon: const Icon(
+                                      Icons.send_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Enviar mensagem agora'),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'Nenhum log de mensagem para este cliente.',
+                                  ),
+                                ],
+                              );
+                            }
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                OutlinedButton.icon(
+                                  onPressed: () =>
+                                      _enviarMensagemManualCliente(clienteAtual),
+                                  icon: const Icon(
+                                    Icons.send_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Enviar mensagem agora'),
+                                ),
+                                const SizedBox(height: 8),
+                                ...logs.map((log) {
+                                  final enviado = log.resultado == 'enviado';
+                                  return ListTile(
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 2,
+                                    ),
+                                    leading: Icon(
+                                      enviado
+                                          ? Icons.check_circle_outline
+                                          : Icons.error_outline,
+                                      size: 20,
+                                      color: enviado
+                                          ? theme.colorScheme.primary
+                                          : theme.colorScheme.error,
+                                    ),
+                                    title: Text(
+                                      '${log.canal.toUpperCase()} - ${_rotuloStatusMensagem(log.statusEntrega)}',
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                    subtitle: Text(
+                                      '${_dataHora.format(log.criadoEm.toLocal())}\n${log.destino}',
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                    isThreeLine: true,
+                                    trailing: log.resultado == 'falhou'
+                                        ? IconButton(
+                                            tooltip: 'Ver erro',
+                                            onPressed: () =>
+                                                _verErroDetalhadoLogCliente(
+                                                  log,
+                                                ),
+                                            icon: const Icon(
+                                              Icons.error_outline,
+                                              size: 20,
+                                            ),
+                                          )
+                                        : null,
+                                  );
+                                }),
+                              ],
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1320,526 +2099,91 @@ class _ClientesPageState extends State<ClientesPage> {
             child: LayoutBuilder(
               builder: (context, box) {
                 final formWide = box.maxWidth >= 680;
-                return RawScrollbar(
-                  controller: _scrollController,
-                  thumbVisibility: true,
-                  trackVisibility: true,
-                  thickness: 10,
-                  radius: const Radius.circular(8),
-                  crossAxisMargin: 2,
-                  mainAxisMargin: 4,
-                  child: ListView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(0, 0, 10, 120),
-                    physics: const AlwaysScrollableScrollPhysics(),
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      theme.colorScheme.primaryContainer,
-                      theme.colorScheme.surfaceContainerHighest,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(
-                      Icons.badge_outlined,
-                      size: 24,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: theme.colorScheme.outlineVariant,
+                        ),
+                      ),
+                      child: Row(
                         children: [
-                          Text(
-                            'Cadastro de Clientes',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                          Icon(
+                            Icons.badge_outlined,
+                            color: theme.colorScheme.primary,
                           ),
-                          Text(
-                            emEdicao
-                                ? 'Modo edicao ativo: revise os dados e salve.'
-                                : 'Preencha os dados para registrar um novo cliente.',
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  style: _estiloBotaoContornoCompacto,
-                  onPressed: _abrirPesquisaCliente,
-                  icon: const Icon(Icons.search, size: 18),
-                  label: const Text('Pesquisar cliente'),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                alignment: WrapAlignment.start,
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  OutlinedButton(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _irParaPrimeiroCliente,
-                    child: const Text('|< Primeiro'),
-                  ),
-                  OutlinedButton(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _irParaClienteAnterior,
-                    child: const Text('< Anterior'),
-                  ),
-                  OutlinedButton(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _irParaProximoCliente,
-                    child: const Text('Proximo >'),
-                  ),
-                  OutlinedButton(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _irParaUltimoCliente,
-                    child: const Text('Ultimo >|'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              _buildSectionCard(
-                context: context,
-                title: 'Dados principais',
-                icon: Icons.person_outline,
-                children: _dadosPrincipaisChildren(formWide),
-              ),
-              const SizedBox(height: 8),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final usarDuasColunas = constraints.hasBoundedWidth &&
-                      constraints.maxWidth >= _limiarDuasColunas;
-
-                  final cardContato = _buildSectionCard(
-                    context: context,
-                    title: 'Contato',
-                    icon: Icons.phone_outlined,
-                    children: [
-                      TextField(
-                        controller: _telefoneController,
-                        decoration: const InputDecoration(
-                          labelText: 'Telefone',
-                          isDense: true,
-                        ),
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [_telefoneFormatter],
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _whatsappController,
-                        decoration: const InputDecoration(
-                          labelText: 'WhatsApp',
-                          isDense: true,
-                        ),
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [_telefoneFormatter],
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _emailController,
-                        decoration: const InputDecoration(
-                          labelText: 'Email',
-                          isDense: true,
-                        ),
-                        keyboardType: TextInputType.emailAddress,
-                        textCapitalization: TextCapitalization.none,
-                        inputFormatters: [_emailFormatter],
-                      ),
-                    ],
-                  );
-                  final cardComercial = _buildCardComercialComLimiteDestaque();
-
-                  if (!usarDuasColunas) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        cardContato,
-                        const SizedBox(height: 8),
-                        cardComercial,
-                      ],
-                    );
-                  }
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: cardContato),
-                      const SizedBox(width: 10),
-                      Expanded(child: cardComercial),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 8),
-              _buildSectionCard(
-                context: context,
-                title: 'Endereco',
-                icon: Icons.location_on_outlined,
-                children: [
-                  _buildEnderecoForm(
-                    titulo: 'Endereco principal',
-                    cepController: _cepController,
-                    enderecoController: _enderecoController,
-                    numeroController: _numeroController,
-                    bairroController: _bairroController,
-                    cidadeController: _cidadeController,
-                    ufController: _ufController,
-                    referenciaController: _referenciaController,
-                  ),
-                  for (var i = 0; i < _enderecosExtras.length; i++) ...[
-                    const SizedBox(height: 8),
-                    _buildEnderecoForm(
-                      titulo: 'Endereco adicional ${i + 1}',
-                      cepController: _enderecosExtras[i].cepController,
-                      enderecoController:
-                          _enderecosExtras[i].enderecoController,
-                      numeroController: _enderecosExtras[i].numeroController,
-                      bairroController: _enderecosExtras[i].bairroController,
-                      cidadeController: _enderecosExtras[i].cidadeController,
-                      ufController: _enderecosExtras[i].ufController,
-                      referenciaController:
-                          _enderecosExtras[i].referenciaController,
-                      onRemover: () {
-                        final removido = _enderecosExtras.removeAt(i);
-                        removido.dispose();
-                        setState(() {});
-                      },
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: () {
-                        setState(() {
-                          _enderecosExtras.add(
-                            _EnderecoFormControllers.vazio(),
-                          );
-                        });
-                      },
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Adicionar endereco'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: theme.colorScheme.outlineVariant),
-                ),
-                child: ExpansionTile(
-                  initiallyExpanded: false,
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-                  leading: Icon(
-                    Icons.history_outlined,
-                    color: theme.colorScheme.primary,
-                  ),
-                  title: Text(
-                    'Historico de Compras',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  childrenPadding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                  children: [
-                    if (!emEdicao)
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 8),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Salve o cliente para habilitar o historico de compras.',
-                          ),
-                        ),
-                      )
-                    else ...[
-                      DropdownButtonFormField<String>(
-                        initialValue: _periodoHistorico,
-                        decoration: const InputDecoration(
-                          labelText: 'Periodo do historico',
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'todo',
-                            child: Text('Todo o periodo'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'ultimos_30',
-                            child: Text('Ultimos 30 dias'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'ultimos_90',
-                            child: Text('Ultimos 90 dias'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'ano_atual',
-                            child: Text('Ano atual'),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() {
-                            _periodoHistorico = value;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Total ja gasto na loja: ${_formatarMoeda(totalGasto)}',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text('Ticket medio: ${_formatarMoeda(ticketMedio)}'),
-                      Text('Total de itens comprados: $quantidadeItens'),
-                      Text(
-                        'Ultima compra: ${ultimaCompra == null ? 'Nao disponivel' : _dataHora.format(ultimaCompra.data.toLocal())}',
-                      ),
-                      const SizedBox(height: 8),
-                      Text('Compras registradas: ${compras.length}'),
-                      const SizedBox(height: 8),
-                      if (topProdutos.isNotEmpty) ...[
-                        Text(
-                          'Top produtos comprados',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        ...topProdutos
-                            .take(3)
-                            .map(
-                              (entry) =>
-                                  Text('${entry.key} - ${entry.value} un'),
-                            ),
-                        const SizedBox(height: 8),
-                      ],
-                      const SizedBox(height: 10),
-                      if (compras.isEmpty)
-                        const Text(
-                          'Este cliente ainda nao tem compras finalizadas.',
-                        )
-                      else
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 260),
-                          child: ListView.separated(
-                            shrinkWrap: true,
-                            itemCount: compras.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: 6),
-                            itemBuilder: (context, index) {
-                              final compra = compras[index];
-                              final nota = compra.numeroOrcamento > 0
-                                  ? '${compra.numeroOrcamento}'
-                                  : 'ID ${compra.id}';
-                              return ListTile(
-                                dense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                leading: const Icon(
-                                  Icons.receipt_long_outlined,
-                                ),
-                                title: Text('Nota/Orcamento: $nota'),
-                                subtitle: Text(
-                                  _dataHora.format(compra.data.toLocal()),
-                                ),
-                                trailing: Text(
-                                  _formatarMoeda(compra.total),
-                                  style: theme.textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: theme.colorScheme.outlineVariant),
-                ),
-                child: ExpansionTile(
-                  initiallyExpanded: false,
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-                  leading: Icon(
-                    Icons.chat_bubble_outline,
-                    color: theme.colorScheme.primary,
-                  ),
-                  title: Text(
-                    'Mensagens enviadas',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  childrenPadding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                  children: [
-                    if (!emEdicao)
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Salve o cliente para habilitar logs de mensagens.',
-                        ),
-                      )
-                    else
-                      FutureBuilder<List<MensagemLog>>(
-                        future: _mensageriaRepository.listarLogsPorCliente(
-                          _clienteEmEdicaoId!,
-                        ),
-                        builder: (context, snapshot) {
-                          final logs = snapshot.data ?? const <MensagemLog>[];
-                          final clienteAtual = _clienteEmEdicaoAtual();
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: LinearProgressIndicator(),
-                            );
-                          }
-                          if (clienteAtual == null) {
-                            return const Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text('Cliente nao encontrado.'),
-                            );
-                          }
-                          if (logs.isEmpty) {
-                            return Column(
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: () =>
-                                        _enviarMensagemManualCliente(
-                                          clienteAtual,
-                                        ),
-                                    icon: const Icon(Icons.send_outlined),
-                                    label: const Text('Enviar mensagem agora'),
+                                Text(
+                                  'Cadastro de Clientes',
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  'Nenhum log de mensagem para este cliente.',
+                                Text(
+                                  emEdicao
+                                      ? 'Registro em edicao'
+                                      : 'Novo cliente',
+                                  style: theme.textTheme.bodySmall,
                                 ),
                               ],
-                            );
-                          }
-                          return Column(
-                            children: [
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  onPressed: () => _enviarMensagemManualCliente(
-                                    clienteAtual,
-                                  ),
-                                  icon: const Icon(Icons.send_outlined),
-                                  label: const Text('Enviar mensagem agora'),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxHeight: 220,
-                                ),
-                                child: ListView.separated(
-                                  shrinkWrap: true,
-                                  itemCount: logs.length,
-                                  separatorBuilder: (_, _) =>
-                                      const SizedBox(height: 6),
-                                  itemBuilder: (context, index) {
-                                    final log = logs[index];
-                                    final enviado = log.resultado == 'enviado';
-                                    return ListTile(
-                                      dense: true,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                          ),
-                                      leading: Icon(
-                                        enviado
-                                            ? Icons.check_circle_outline
-                                            : Icons.error_outline,
-                                        color: enviado
-                                            ? theme.colorScheme.primary
-                                            : theme.colorScheme.error,
-                                      ),
-                                      title: Text(
-                                        '${log.canal.toUpperCase()} - ${_rotuloStatusMensagem(log.statusEntrega)}',
-                                      ),
-                                      subtitle: Text(
-                                        '${_dataHora.format(log.criadoEm.toLocal())}\nDestino: ${log.destino}',
-                                      ),
-                                      isThreeLine: true,
-                                      trailing: log.resultado == 'falhou'
-                                          ? IconButton(
-                                              tooltip: 'Ver erro detalhado',
-                                              onPressed: () =>
-                                                  _verErroDetalhadoLogCliente(
-                                                    log,
-                                                  ),
-                                              icon: const Icon(
-                                                Icons.error_outline,
-                                              ),
-                                            )
-                                          : null,
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          );
-                        },
+                            ),
+                          ),
+                        ],
                       ),
+                    ),
+                    const SizedBox(height: 6),
+                    _buildBarraFerramentasCadastro(),
+                    const SizedBox(height: 6),
+                    Expanded(
+                      child: _buildPainelComAbas(
+                        theme: theme,
+                        emEdicao: emEdicao,
+                        formWide: formWide,
+                        compras: compras,
+                        totalGasto: totalGasto,
+                        ticketMedio: ticketMedio,
+                        ultimaCompra: ultimaCompra,
+                        quantidadeItens: quantidadeItens,
+                        topProdutos: topProdutos,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        style: _estiloBotaoContornoCompacto,
+                        onPressed: _limparFormulario,
+                        icon: Icon(
+                          emEdicao
+                              ? Icons.close
+                              : Icons.cleaning_services_outlined,
+                          size: 18,
+                        ),
+                        label: Text(
+                          emEdicao
+                              ? 'Cancelar edicao'
+                              : 'Limpar formulario',
+                        ),
+                      ),
+                    ),
+                    if (_status.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      _buildStatusBanner(context, _status),
+                    ],
+                    const SizedBox(height: 72),
                   ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  style: _estiloBotaoContornoCompacto,
-                  onPressed: _limparFormulario,
-                  icon: Icon(
-                    emEdicao ? Icons.close : Icons.cleaning_services_outlined,
-                    size: 18,
-                  ),
-                  label: Text(
-                    emEdicao ? 'Cancelar edicao' : 'Limpar formulario',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (_status.isNotEmpty) _buildStatusBanner(context, _status),
-            ],
-                  ),
                 );
               },
             ),

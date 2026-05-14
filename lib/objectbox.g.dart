@@ -511,7 +511,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(4, 8923372746033765628),
     name: 'Cliente',
-    lastPropertyId: const obx_int.IdUid(21, 7312456789012345678),
+    lastPropertyId: const obx_int.IdUid(25, 2510086867183108992),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -637,6 +637,30 @@ final _entities = <obx_int.ModelEntity>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(21, 7312456789012345678),
         name: 'enderecosJson',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(22, 1704717448417316736),
+        name: 'rg',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(23, 3190892869132455483),
+        name: 'dataNascimento',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(24, 3801891724597133033),
+        name: 'sexo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(25, 2510086867183108992),
+        name: 'ocupacao',
         type: 9,
         flags: 0,
       ),
@@ -1870,7 +1894,10 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final referenciaOffset = fbb.writeString(object.referencia);
         final observacoesOffset = fbb.writeString(object.observacoes);
         final enderecosJsonOffset = fbb.writeString(object.enderecosJson);
-        fbb.startTable(22);
+        final rgOffset = fbb.writeString(object.rg);
+        final sexoOffset = fbb.writeString(object.sexo);
+        final ocupacaoOffset = fbb.writeString(object.ocupacao);
+        fbb.startTable(26);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, tipoPessoaOffset);
         fbb.addOffset(2, nomeRazaoOffset);
@@ -1892,12 +1919,21 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addBool(18, object.ativo);
         fbb.addInt64(19, object.criadoEm.millisecondsSinceEpoch);
         fbb.addOffset(20, enderecosJsonOffset);
+        fbb.addOffset(21, rgOffset);
+        fbb.addInt64(22, object.dataNascimento?.millisecondsSinceEpoch);
+        fbb.addOffset(23, sexoOffset);
+        fbb.addOffset(24, ocupacaoOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
       objectFromFB: (obx.Store store, ByteData fbData) {
         final buffer = fb.BufferContext(fbData);
         final rootOffset = buffer.derefObject(0);
+        final dataNascimentoValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          48,
+        );
         final idParam = const fb.Int64Reader().vTableGet(
           buffer,
           rootOffset,
@@ -1916,6 +1952,18 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final documentoParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 12, '');
+        final rgParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 46, '');
+        final dataNascimentoParam = dataNascimentoValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                dataNascimentoValue,
+                isUtc: true,
+              );
+        final sexoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 50, '');
         final inscricaoEstadualParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 14, '');
@@ -1961,6 +2009,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final observacoesParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 38, '');
+        final ocupacaoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 52, '');
         final ativoParam = const fb.BoolReader().vTableGet(
           buffer,
           rootOffset,
@@ -1977,6 +2028,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           nomeRazao: nomeRazaoParam,
           nomeFantasia: nomeFantasiaParam,
           documento: documentoParam,
+          rg: rgParam,
+          dataNascimento: dataNascimentoParam,
+          sexo: sexoParam,
           inscricaoEstadual: inscricaoEstadualParam,
           telefone: telefoneParam,
           whatsapp: whatsappParam,
@@ -1991,6 +2045,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           enderecosJson: enderecosJsonParam,
           limiteCredito: limiteCreditoParam,
           observacoes: observacoesParam,
+          ocupacao: ocupacaoParam,
           ativo: ativoParam,
           criadoEm: criadoEmParam,
         );
@@ -3160,6 +3215,26 @@ class Cliente_ {
   /// See [Cliente.enderecosJson].
   static final enderecosJson = obx.QueryStringProperty<Cliente>(
     _entities[3].properties[20],
+  );
+
+  /// See [Cliente.rg].
+  static final rg = obx.QueryStringProperty<Cliente>(
+    _entities[3].properties[21],
+  );
+
+  /// See [Cliente.dataNascimento].
+  static final dataNascimento = obx.QueryDateProperty<Cliente>(
+    _entities[3].properties[22],
+  );
+
+  /// See [Cliente.sexo].
+  static final sexo = obx.QueryStringProperty<Cliente>(
+    _entities[3].properties[23],
+  );
+
+  /// See [Cliente.ocupacao].
+  static final ocupacao = obx.QueryStringProperty<Cliente>(
+    _entities[3].properties[24],
   );
 }
 

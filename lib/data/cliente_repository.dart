@@ -25,6 +25,8 @@ class ClienteRepository {
         cliente.nomeRazao,
         cliente.nomeFantasia,
         cliente.documento,
+        cliente.rg,
+        cliente.ocupacao,
         cliente.telefone,
         cliente.whatsapp,
         cliente.email,

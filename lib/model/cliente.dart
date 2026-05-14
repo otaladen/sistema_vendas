@@ -85,6 +85,9 @@ class Cliente {
     required this.nomeRazao,
     this.nomeFantasia = '',
     this.documento = '',
+    this.rg = '',
+    this.dataNascimento,
+    this.sexo = '',
     this.inscricaoEstadual = '',
     this.telefone = '',
     this.whatsapp = '',
@@ -99,6 +102,7 @@ class Cliente {
     this.enderecosJson = '',
     this.limiteCredito = 0,
     this.observacoes = '',
+    this.ocupacao = '',
     this.ativo = true,
     DateTime? criadoEm,
   }) : criadoEm = criadoEm ?? DateTime.now();
@@ -110,6 +114,10 @@ class Cliente {
   String nomeRazao;
   String nomeFantasia;
   String documento; // CPF/CNPJ
+  String rg;
+  @Property(type: PropertyType.dateUtc)
+  DateTime? dataNascimento;
+  String sexo; // M | F | O | '' (nao informado)
   String inscricaoEstadual;
   String telefone;
   String whatsapp;
@@ -124,6 +132,7 @@ class Cliente {
   String enderecosJson;
   double limiteCredito;
   String observacoes;
+  String ocupacao;
   bool ativo;
 
   @Property(type: PropertyType.dateUtc)

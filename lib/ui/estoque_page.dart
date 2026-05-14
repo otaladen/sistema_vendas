@@ -1,16 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 
 import '../data/produto_repository.dart';
 import '../model/produto.dart';
+import '../services/pdf_tabela_produtos_texto.dart';
 
 final NumberFormat _moedaBRL = NumberFormat('#,##0.00', 'pt_BR');
 
@@ -43,10 +41,6 @@ class _EstoquePageState extends State<EstoquePage> {
   }
 
   String _formatarNumeroCsv(double valor) {
-    return valor.toStringAsFixed(2).replaceAll('.', ',');
-  }
-
-  String _formatarMoedaPdfRapida(num valor) {
     return valor.toStringAsFixed(2).replaceAll('.', ',');
   }
 
@@ -160,140 +154,23 @@ class _EstoquePageState extends State<EstoquePage> {
       return;
     }
 
-    _mostrarProgressoExportacao(context);
     try {
       final produtos = widget.produtoRepository.listarTodos();
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final tipoArquivo = incluirCustos ? 'tabela_preco_custo' : 'tabela_precos';
       final arquivo = File(p.join(pastaDestino, '${tipoArquivo}_$timestamp.pdf'));
       final titulo = incluirCustos
-          ? 'Tabela de Preco e Custo - Estoque'
-          : 'Tabela de Precos - Estoque';
+          ? 'Tabela Preco+Custo - Estoque'
+          : 'Tabela Precos - Estoque';
 
-      final documento = pw.Document();
-      // Mantem margem de seguranca para evitar overflow vertical da tabela.
-      const porPagina = 52;
-      final totalPaginas = (produtos.length / porPagina).ceil().clamp(1, 9999);
-      for (var pagina = 0; pagina < totalPaginas; pagina++) {
-        final inicio = pagina * porPagina;
-        final fim = math.min(inicio + porPagina, produtos.length);
-        final recorte = produtos.sublist(inicio, fim);
-        final linhas = recorte.map((p) {
-          final colCodigo = p.codigoInterno;
-          final colProduto = p.nome;
-          final colPreco = _formatarMoedaPdfRapida(p.precoVenda);
-          final colPrecoVista = _formatarMoedaPdfRapida(_precoAVista(p));
-          if (!incluirCustos) {
-            return [colCodigo, colProduto, colPreco, colPrecoVista];
-          }
-          final colCusto = _formatarMoedaPdfRapida(p.precoCusto);
-          return [colCodigo, colProduto, colPreco, colPrecoVista, colCusto];
-        }).toList();
-
-        documento.addPage(
-          pw.Page(
-            pageFormat: PdfPageFormat.a4,
-            margin: const pw.EdgeInsets.fromLTRB(18, 14, 18, 14),
-            build: (context) {
-              return pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        DateFormat('dd/MM/yyyy').format(DateTime.now()),
-                        style: const pw.TextStyle(fontSize: 7),
-                      ),
-                      pw.Text(
-                        titulo.toUpperCase(),
-                        style: pw.TextStyle(
-                          fontSize: 8,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                      pw.Text(
-                        'Pagina ${pagina + 1}',
-                        style: const pw.TextStyle(fontSize: 7),
-                      ),
-                    ],
-                  ),
-                  pw.SizedBox(height: 6),
-                  pw.Table(
-                    border: pw.TableBorder.all(
-                      color: const PdfColor(0.75, 0.75, 0.75),
-                      width: 0.4,
-                    ),
-                    columnWidths: incluirCustos
-                        ? {
-                            0: const pw.FixedColumnWidth(52),
-                            1: const pw.FlexColumnWidth(),
-                            2: const pw.FixedColumnWidth(48),
-                            3: const pw.FixedColumnWidth(48),
-                            4: const pw.FixedColumnWidth(48),
-                          }
-                        : {
-                            0: const pw.FixedColumnWidth(52),
-                            1: const pw.FlexColumnWidth(),
-                            2: const pw.FixedColumnWidth(52),
-                            3: const pw.FixedColumnWidth(52),
-                          },
-                    children: [
-                      pw.TableRow(
-                        decoration: const pw.BoxDecoration(
-                          color: PdfColor(0.92, 0.92, 0.92),
-                        ),
-                        children: incluirCustos
-                            ? [
-                                _cellCabecalho('Codigo'),
-                                _cellCabecalho('Produto'),
-                                _cellCabecalho('A prazo'),
-                                _cellCabecalho('A vista'),
-                                _cellCabecalho('Custo'),
-                              ]
-                            : [
-                                _cellCabecalho('Codigo'),
-                                _cellCabecalho('Produto'),
-                                _cellCabecalho('A prazo'),
-                                _cellCabecalho('A vista'),
-                              ],
-                      ),
-                      ...linhas.map(
-                        (c) => pw.TableRow(
-                          children: incluirCustos
-                              ? [
-                                  _cellDado(c[0]),
-                                  _cellDado(c[1]),
-                                  _cellDadoDireita(c[2]),
-                                  _cellDadoDireita(c[3]),
-                                  _cellDadoDireita(c[4]),
-                                ]
-                              : [
-                                  _cellDado(c[0]),
-                                  _cellDado(c[1]),
-                                  _cellDadoDireita(c[2]),
-                                  _cellDadoDireita(c[3]),
-                                ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-      }
-
-      final bytes = await documento.save().timeout(
-        const Duration(seconds: 25),
-        onTimeout: () => throw Exception(
-          'Tempo excedido ao gerar PDF. Para grande volume, use CSV.',
-        ),
+      final bytes = await gerarPdfTabelaProdutosTexto(
+        produtos: produtos,
+        incluirCustos: incluirCustos,
+        titulo: titulo,
+        incluirColunaEstoque: false,
       );
       await arquivo.writeAsBytes(bytes);
       if (!context.mounted) return;
-      await Navigator.of(context, rootNavigator: true).maybePop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 6),
@@ -302,7 +179,6 @@ class _EstoquePageState extends State<EstoquePage> {
       );
     } catch (e) {
       if (!context.mounted) return;
-      await Navigator.of(context, rootNavigator: true).maybePop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 7),
@@ -310,43 +186,6 @@ class _EstoquePageState extends State<EstoquePage> {
         ),
       );
     }
-  }
-
-  pw.Widget _cellCabecalho(String texto) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 2),
-      child: pw.Text(
-        texto,
-        style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
-      ),
-    );
-  }
-
-  pw.Widget _cellDado(String texto) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 1.8),
-      child: pw.Text(
-        texto,
-        maxLines: 1,
-        overflow: pw.TextOverflow.clip,
-        style: const pw.TextStyle(fontSize: 7),
-      ),
-    );
-  }
-
-  pw.Widget _cellDadoDireita(String texto) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 1.8),
-      child: pw.Align(
-        alignment: pw.Alignment.centerRight,
-        child: pw.Text(
-          texto,
-          maxLines: 1,
-          overflow: pw.TextOverflow.clip,
-          style: const pw.TextStyle(fontSize: 7),
-        ),
-      ),
-    );
   }
 
   @override

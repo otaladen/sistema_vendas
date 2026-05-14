@@ -1,5 +1,11 @@
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
+import 'package:printing/printing.dart';
 
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
@@ -9,6 +15,8 @@ import '../model/cliente.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import '../services/pdf_relatorio_texto.dart';
+import '../services/pdf_tabela_produtos_texto.dart';
 import 'widgets/hub_nav_button.dart';
 
 const Color _corRelVendasPeriodo = Color(0xFF1565C0);
@@ -18,6 +26,8 @@ const Color _corRelComissao = Color(0xFF6A1B9A);
 const Color _corRelTopClientes = Color(0xFF0277BD);
 const Color _corRelEstoqueMin = Color(0xFFE65100);
 const Color _corRelOrcamentos = Color(0xFF3949AB);
+const Color _corRelTabelaPrecos = Color(0xFF455A64);
+const Color _corRelSaidasProduto = Color(0xFF5D4037);
 
 /// Hub de relatorios gerenciais (material de construcao).
 class RelatoriosPage extends StatelessWidget {
@@ -137,6 +147,39 @@ class RelatoriosPage extends StatelessWidget {
               context,
               MaterialPageRoute<void>(
                 builder: (_) => RelatorioEstoqueMinimoPage(
+                  produtoRepository: produtoRepository,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          HubNavButton(
+            icon: Icons.unarchive_outlined,
+            corDestaque: _corRelSaidasProduto,
+            titulo: 'Saidas por produto',
+            subtitulo:
+                'Lista vendas finalizadas do item no periodo: quantidade, valores, lucro e cliente.',
+            onTap: () => Navigator.push<void>(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => RelatorioSaidasProdutoPage(
+                  vendaRepository: vendaRepository,
+                  produtoRepository: produtoRepository,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          HubNavButton(
+            icon: Icons.table_chart_outlined,
+            corDestaque: _corRelTabelaPrecos,
+            titulo: 'Tabela de precos',
+            subtitulo:
+                'PDF em ordem alfabetica com estoque; precos de venda ou preco com custo; opcao de listar somente ativos.',
+            onTap: () => Navigator.push<void>(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => RelatorioTabelaPrecosPage(
                   produtoRepository: produtoRepository,
                 ),
               ),
@@ -1306,6 +1349,439 @@ class RelatorioOrcamentosAbertosPage extends StatelessWidget {
                         ),
                       );
                     },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- Tabela de precos (export PDF) ---
+
+class RelatorioTabelaPrecosPage extends StatefulWidget {
+  const RelatorioTabelaPrecosPage({super.key, required this.produtoRepository});
+
+  final ProdutoRepository produtoRepository;
+
+  @override
+  State<RelatorioTabelaPrecosPage> createState() =>
+      _RelatorioTabelaPrecosPageState();
+}
+
+class _RelatorioTabelaPrecosPageState extends State<RelatorioTabelaPrecosPage> {
+  bool _somenteAtivos = false;
+
+  Future<void> _exportarPdf({required bool incluirCustos}) async {
+    final pastaDestino = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Escolha a pasta para exportar o PDF',
+    );
+    if (pastaDestino == null || pastaDestino.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final base = widget.produtoRepository.listarTodos();
+      final filtrado = _somenteAtivos
+          ? base.where((p) => p.ativo).toList()
+          : List<Produto>.from(base);
+      final produtos = filtrado
+        ..sort(
+          (a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()),
+        );
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final tipoArquivo =
+          incluirCustos ? 'tabela_preco_custo' : 'tabela_precos';
+      final sufixoAtivos = _somenteAtivos ? '_ativos_' : '_';
+      final arquivo = File(
+        p.join(
+          pastaDestino,
+          '${tipoArquivo}_relatorio$sufixoAtivos$timestamp.pdf',
+        ),
+      );
+      final titulo = incluirCustos
+          ? 'Tabela Preco+Custo (alfabetica)'
+          : 'Tabela Precos (alfabetica)';
+
+      final bytes = await gerarPdfTabelaProdutosTexto(
+        produtos: produtos,
+        incluirCustos: incluirCustos,
+        titulo: titulo,
+        incluirColunaEstoque: true,
+      );
+      await arquivo.writeAsBytes(bytes);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text('PDF exportado com sucesso em: ${arquivo.path}'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 7),
+          content: Text('Falha ao exportar PDF: $e'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Tabela de precos')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text(
+            'Exporte o cadastro completo em ordem alfabetica por nome do produto. '
+            'As colunas de preco seguem o mesmo padrao da exportacao em Estoque '
+            '(a prazo = preco de venda principal; a vista = preco 2 quando informado). '
+            'O PDF inclui a quantidade em estoque (saldo fisico). '
+            'Formato leve: texto tabulado em Courier, sem grade nem sombras.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            value: _somenteAtivos,
+            onChanged: (v) => setState(() => _somenteAtivos = v),
+            title: const Text('Somente produtos ativos'),
+            subtitle: const Text(
+              'Quando ligado, itens inativos no cadastro nao entram no PDF.',
+            ),
+            secondary: Icon(
+              Icons.inventory_2_outlined,
+              color: _corRelTabelaPrecos,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: _corRelTabelaPrecos.withValues(alpha: 0.15),
+                child: Icon(
+                  Icons.picture_as_pdf_outlined,
+                  color: _corRelTabelaPrecos,
+                ),
+              ),
+              title: const Text('PDF — precos de venda'),
+              subtitle: const Text(
+                'Codigo, produto, estoque, a prazo e a vista (sem custo).',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _exportarPdf(incluirCustos: false),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: _corRelTabelaPrecos.withValues(alpha: 0.15),
+                child: Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: _corRelTabelaPrecos,
+                ),
+              ),
+              title: const Text('PDF — preco e custo'),
+              subtitle: const Text(
+                'Inclui estoque e coluna de custo cadastrado (preco de custo).',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _exportarPdf(incluirCustos: true),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- Saidas por produto ---
+
+class RelatorioSaidasProdutoPage extends StatefulWidget {
+  const RelatorioSaidasProdutoPage({
+    super.key,
+    required this.vendaRepository,
+    required this.produtoRepository,
+  });
+
+  final VendaRepository vendaRepository;
+  final ProdutoRepository produtoRepository;
+
+  @override
+  State<RelatorioSaidasProdutoPage> createState() =>
+      _RelatorioSaidasProdutoPageState();
+}
+
+class _RelatorioSaidasProdutoPageState extends State<RelatorioSaidasProdutoPage> {
+  LimitesPeriodo? _limites;
+  Produto? _produto;
+  List<Produto> _cacheProdutos = [];
+  List<SaidaProdutoRelatorioLinha> _linhas = [];
+
+  final NumberFormat _nfMoeda = NumberFormat('#,##0.00', 'pt_BR');
+  final NumberFormat _nfInt = NumberFormat('#,##0', 'pt_BR');
+
+  @override
+  void initState() {
+    super.initState();
+    _cacheProdutos = widget.produtoRepository.listarTodos();
+  }
+
+  void _carregar() {
+    final p = _produto;
+    final lim = _limites;
+    if (p == null || lim == null) {
+      setState(() => _linhas = []);
+      return;
+    }
+    final lista = widget.vendaRepository.listarSaidasProdutoPeriodo(
+      produtoId: p.id,
+      inicio: lim.$1,
+      fim: lim.$2,
+    );
+    setState(() => _linhas = lista);
+  }
+
+  String _fmtMoeda(double v) => 'R\$ ${_nfMoeda.format(v)}';
+
+  String _linhaPdf(SaidaProdutoRelatorioLinha l) {
+    String t(String s, int w) =>
+        s.length > w ? s.substring(0, w) : s.padRight(w);
+    String n(String s, int w) => s.padLeft(w);
+    final d = DateFormat('dd/MM/yyyy').format(l.dataVenda);
+    return '${t(d, 12)} ${n(_nfInt.format(l.quantidade), 12)} '
+        '${n(_nfMoeda.format(l.valorUnitario), 12)} '
+        '${n(_nfMoeda.format(l.total), 12)} '
+        '${n('${l.nota}', 8)} '
+        '${n(_nfMoeda.format(l.lucro), 12)} '
+        '${n(_nfMoeda.format(l.acrescimo), 10)} '
+        '${t(l.clienteNome, 26)}';
+  }
+
+  List<String> _montarPaginasPdf(String tituloProduto, String periodoRotulo) {
+    const maxLinhas = 52;
+    final cab = StringBuffer()
+      ..writeln('SAIDAS DO PRODUTO (vendas finalizadas)')
+      ..writeln(tituloProduto)
+      ..writeln('Periodo: $periodoRotulo')
+      ..writeln()
+      ..writeln(
+        '${'DATA'.padRight(12)} ${'QTD'.padLeft(12)} ${'VLR_UNIT'.padLeft(12)} '
+        '${'TOTAL'.padLeft(12)} ${'NOTA'.padLeft(8)} ${'LUCRO'.padLeft(12)} '
+        '${'ACRESC'.padLeft(10)} ${'CLIENTE'.padRight(26)}',
+      )
+      ..writeln('-' * 96);
+
+    for (final l in _linhas) {
+      cab.writeln(_linhaPdf(l));
+    }
+    cab.writeln('-' * 96);
+    final tQ = _linhas.fold<int>(0, (s, e) => s + e.quantidade);
+    final tV = _linhas.fold<double>(0, (s, e) => s + e.total);
+    final tL = _linhas.fold<double>(0, (s, e) => s + e.lucro);
+    String pn(String s, int w) => s.padLeft(w);
+    cab.writeln(
+      '${'TOTAIS'.padRight(12)} ${pn(_nfInt.format(tQ), 12)} ${''.padLeft(12)} '
+      '${pn(_nfMoeda.format(tV), 12)} ${''.padLeft(8)} ${pn(_nfMoeda.format(tL), 12)}',
+    );
+
+    final texto = cab.toString();
+    final linhas = texto.split('\n');
+    final paginas = <String>[];
+    for (var i = 0; i < linhas.length; i += maxLinhas) {
+      final fim = math.min(i + maxLinhas, linhas.length);
+      paginas.add(linhas.sublist(i, fim).join('\n'));
+    }
+    return paginas.isEmpty ? <String>['(vazio)'] : paginas;
+  }
+
+  Future<void> _imprimirPdf() async {
+    if (_produto == null || _limites == null || _linhas.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecione produto e periodo com linhas para imprimir.')),
+      );
+      return;
+    }
+    final ini = DateFormat('dd/MM/yyyy').format(_limites!.$1);
+    final fim = DateFormat('dd/MM/yyyy').format(_limites!.$2);
+    final bytes = await gerarPdfRelatorioTextoPaginas(
+      _montarPaginasPdf(_produto!.nome, '$ini a $fim'),
+    );
+    if (!mounted) return;
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
+  }
+
+  Future<void> _salvarPdf() async {
+    if (_produto == null || _limites == null || _linhas.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nada para exportar neste periodo.')),
+      );
+      return;
+    }
+    final pasta = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Pasta para salvar o PDF',
+    );
+    if (pasta == null || pasta.trim().isEmpty) return;
+    final ini = DateFormat('yyyyMMdd').format(_limites!.$1);
+    final fim = DateFormat('yyyyMMdd').format(_limites!.$2);
+    final seguro = _produto!.codigoInterno.replaceAll(RegExp(r'[^\w\-]+'), '_');
+    final arquivo = File(p.join(pasta, 'saidas_produto_${seguro}_$ini-$fim.pdf'));
+    try {
+      final iniFmt = DateFormat('dd/MM/yyyy').format(_limites!.$1);
+      final fimFmt = DateFormat('dd/MM/yyyy').format(_limites!.$2);
+      final bytes = await gerarPdfRelatorioTextoPaginas(
+        _montarPaginasPdf(_produto!.nome, '$iniFmt a $fimFmt'),
+      );
+      await arquivo.writeAsBytes(bytes);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('PDF salvo: ${arquivo.path}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao salvar: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tQ = _linhas.fold<int>(0, (s, e) => s + e.quantidade);
+    final tV = _linhas.fold<double>(0, (s, e) => s + e.total);
+    final tL = _linhas.fold<double>(0, (s, e) => s + e.lucro);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Saidas por produto'),
+        actions: [
+          IconButton(
+            tooltip: 'Imprimir / PDF',
+            onPressed: _imprimirPdf,
+            icon: const Icon(Icons.print_outlined),
+          ),
+          IconButton(
+            tooltip: 'Salvar PDF na pasta',
+            onPressed: _salvarPdf,
+            icon: const Icon(Icons.save_alt_outlined),
+          ),
+        ],
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Autocomplete<Produto>(
+                  displayStringForOption: (p) => '${p.codigoInterno} · ${p.nome}',
+                  optionsBuilder: (TextEditingValue te) {
+                    final t = te.text.trim().toLowerCase();
+                    if (t.length < 2) {
+                      return const Iterable<Produto>.empty();
+                    }
+                    return _cacheProdutos.where((p) {
+                      return p.nome.toLowerCase().contains(t) ||
+                          p.codigoInterno.toLowerCase().contains(t);
+                    }).take(40);
+                  },
+                  onSelected: (p) {
+                    setState(() => _produto = p);
+                    _carregar();
+                  },
+                  fieldViewBuilder:
+                      (context, textEditingController, focusNode, onFieldSubmitted) {
+                    return TextField(
+                      controller: textEditingController,
+                      focusNode: focusNode,
+                      decoration: const InputDecoration(
+                        labelText: 'Produto (digite 2+ caracteres)',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onEditingComplete: onFieldSubmitted,
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                _SeletorPeriodo(
+                  onChanged: (lim) {
+                    setState(() => _limites = lim);
+                    _carregar();
+                  },
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _carregar,
+                  icon: const Icon(Icons.refresh_outlined),
+                  label: const Text('Atualizar listagem'),
+                ),
+              ],
+            ),
+          ),
+          if (_produto != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Produto: ${_produto!.nome} (${_produto!.codigoInterno})',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Quantidade total: ${_nfInt.format(tQ)} · Valor total: ${_fmtMoeda(tV)} · Lucro total: ${_fmtMoeda(tL)}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _linhas.isEmpty
+                ? Center(
+                    child: Text(
+                      _produto == null
+                          ? 'Selecione um produto acima.'
+                          : 'Nenhuma saida no periodo (vendas finalizadas, quantidade liquida > 0).',
+                    ),
+                  )
+                : Scrollbar(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(8),
+                      itemCount: _linhas.length,
+                      itemBuilder: (context, i) {
+                        final l = _linhas[i];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          child: ListTile(
+                            dense: true,
+                            title: Text(
+                              '${DateFormat('dd/MM/yyyy').format(l.dataVenda)} · '
+                              'Qtd ${_nfInt.format(l.quantidade)} · '
+                              'Total ${_fmtMoeda(l.total)}',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            subtitle: Text(
+                              'Unit ${_fmtMoeda(l.valorUnitario)} · '
+                              'Lucro ${_fmtMoeda(l.lucro)} · '
+                              'Acresc ${_fmtMoeda(l.acrescimo)} · '
+                              'Nota ${l.nota} · '
+                              '${l.clienteNome}',
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
           ),
         ],

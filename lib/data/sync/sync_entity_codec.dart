@@ -73,6 +73,9 @@ class SyncEntityCodec {
       'nomeRazao': c.nomeRazao,
       'nomeFantasia': c.nomeFantasia,
       'documento': c.documento,
+      'rg': c.rg,
+      'dataNascimento': c.dataNascimento?.toUtc().toIso8601String(),
+      'sexo': c.sexo,
       'inscricaoEstadual': c.inscricaoEstadual,
       'telefone': c.telefone,
       'whatsapp': c.whatsapp,
@@ -87,6 +90,7 @@ class SyncEntityCodec {
       'enderecosJson': c.enderecosJson,
       'limiteCredito': c.limiteCredito,
       'observacoes': c.observacoes,
+      'ocupacao': c.ocupacao,
       'ativo': c.ativo,
       'criadoEm': c.criadoEm.toUtc().toIso8601String(),
     };
@@ -99,6 +103,11 @@ class SyncEntityCodec {
       nomeRazao: (m['nomeRazao'] ?? '').toString(),
       nomeFantasia: (m['nomeFantasia'] ?? '').toString(),
       documento: (m['documento'] ?? '').toString(),
+      rg: (m['rg'] ?? '').toString(),
+      dataNascimento: DateTime.tryParse(
+        (m['dataNascimento'] ?? '').toString(),
+      )?.toUtc(),
+      sexo: (m['sexo'] ?? '').toString(),
       inscricaoEstadual: (m['inscricaoEstadual'] ?? '').toString(),
       telefone: (m['telefone'] ?? '').toString(),
       whatsapp: (m['whatsapp'] ?? '').toString(),
@@ -113,6 +122,7 @@ class SyncEntityCodec {
       enderecosJson: (m['enderecosJson'] ?? '').toString(),
       limiteCredito: (m['limiteCredito'] as num?)?.toDouble() ?? 0,
       observacoes: (m['observacoes'] ?? '').toString(),
+      ocupacao: (m['ocupacao'] ?? '').toString(),
       ativo: m['ativo'] == true,
       criadoEm: DateTime.tryParse((m['criadoEm'] ?? '').toString())?.toUtc(),
     );
