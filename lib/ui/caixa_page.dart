@@ -23,6 +23,7 @@ import '../model/cliente.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../services/cupom_nao_fiscal_venda_pdf.dart';
+import '../services/print_service.dart';
 import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
 
@@ -33,6 +34,8 @@ class CaixaPage extends StatefulWidget {
     required this.produtoRepository,
     required this.vendaRepository,
     required this.vendedorRepository,
+    required this.appConfigRepository,
+    required this.printService,
     required this.usuarioAtual,
     required this.podeLeituraParcialCaixa,
     required this.podeManutencaoAuditoriaCaixa,
@@ -42,6 +45,8 @@ class CaixaPage extends StatefulWidget {
   final ProdutoRepository produtoRepository;
   final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
+  final AppConfigRepository appConfigRepository;
+  final PrintService printService;
   final String usuarioAtual;
   final bool podeLeituraParcialCaixa;
   final bool podeManutencaoAuditoriaCaixa;
@@ -62,7 +67,6 @@ class _CaixaPageState extends State<CaixaPage> {
   final ScrollController _orcamentosScrollController = ScrollController();
   final ScrollController _itensScrollController = ScrollController();
   final _descontoController = TextEditingController();
-  final _configRepository = AppConfigRepository();
   late final MensageriaRepository _mensageriaRepository;
   final _usuarioRepository = UsuarioRepository();
   double? _valorRecebido;
@@ -97,7 +101,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _carregarLimiteDivergenciaCaixa() async {
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     setState(() {
       _limiteDivergenciaSemSupervisor = config.limiteDivergenciaCaixa;
@@ -510,6 +514,7 @@ class _CaixaPageState extends State<CaixaPage> {
                               filtradosCount: filtrados.length,
                             );
                             if (acao == null) return;
+                            if (!context.mounted) return;
                             if (acao == 'older_60' || acao == 'older_90') {
                               final dias = acao == 'older_60' ? 60 : 90;
                               final limite = DateTime.now().subtract(Duration(days: dias));
@@ -520,7 +525,7 @@ class _CaixaPageState extends State<CaixaPage> {
                                 return !em.isBefore(limite);
                               }).toList();
                               await _salvarAuditoriaCaixa(registros);
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               setDialogState(() {});
                               final removidos = antes - registros.length;
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -548,7 +553,7 @@ class _CaixaPageState extends State<CaixaPage> {
                                 return !idsFiltrados.contains(chave);
                               }).toList();
                               await _salvarAuditoriaCaixa(registros);
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               setDialogState(() {});
                               final removidos = antes - registros.length;
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -928,6 +933,11 @@ class _CaixaPageState extends State<CaixaPage> {
       fundoController.dispose();
       return;
     }
+    if (!mounted) {
+      operadorController.dispose();
+      fundoController.dispose();
+      return;
+    }
     final operador = operadorController.text.trim();
     final fundo = _parseValor(fundoController.text) ?? 0;
     operadorController.dispose();
@@ -1020,6 +1030,11 @@ class _CaixaPageState extends State<CaixaPage> {
       },
     );
     if (confirmar != true) {
+      valorController.dispose();
+      obsController.dispose();
+      return;
+    }
+    if (!mounted) {
       valorController.dispose();
       obsController.dispose();
       return;
@@ -1397,7 +1412,7 @@ class _CaixaPageState extends State<CaixaPage> {
     required double declaradoCredito,
     required String observacao,
   }) async {
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
     final logoBytes = config.logoPath.trim().isNotEmpty
         ? await File(
             config.logoPath,
@@ -1522,7 +1537,8 @@ class _CaixaPageState extends State<CaixaPage> {
     required String observacao,
   }) async {
     if (!mounted) return;
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!mounted) return;
     final acao = await showDialog<String>(
       context: context,
       builder: (context) {
@@ -1577,7 +1593,8 @@ class _CaixaPageState extends State<CaixaPage> {
         return;
       }
       if (acao == 'direto') {
-        final printer = await _obterImpressoraPadrao(config.impressoraPadrao);
+        final printer = await widget.printService
+            .resolverImpressoraPorNome(config.impressoraPadrao);
         if (printer == null) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2254,28 +2271,18 @@ class _CaixaPageState extends State<CaixaPage> {
     return file.path;
   }
 
-  Future<Printer?> _obterImpressoraPadrao(String printerName) async {
-    if (printerName.trim().isEmpty) return null;
-    final printers = await Printing.listPrinters();
-    for (final printer in printers) {
-      if (printer.name == printerName) {
-        return printer;
-      }
-    }
-    return null;
-  }
-
   Future<void> _mostrarAcoesNotaPosVenda({
     required Venda venda,
     required double totalRecebido,
     required double troco,
   }) async {
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     final nomeArquivo =
         'venda_${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}.pdf';
     await mostrarFluxoImpressaoCupomVenda(
       context,
+      printService: widget.printService,
       config: config,
       gerarPdfBytes: () => CupomNaoFiscalVendaPdf.gerarBytes(
         venda: venda,
@@ -2342,13 +2349,14 @@ class _CaixaPageState extends State<CaixaPage> {
       );
       return;
     }
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     final infer = CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(v);
     final nomeArquivo =
         'venda_${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}_2via.pdf';
     await mostrarFluxoImpressaoCupomVenda(
       context,
+      printService: widget.printService,
       config: config,
       title: 'Segunda via do cupom',
       content: 'Deseja imprimir ou gerar PDF da segunda via?',
@@ -3965,53 +3973,6 @@ class _CaixaPageState extends State<CaixaPage> {
           visualDensity: VisualDensity.compact,
           alignment: Alignment.centerLeft,
         ),
-      ),
-    );
-  }
-
-  Widget _buildAcoesCaixaCompact(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 6,
-        children: [
-          OutlinedButton.icon(
-            onPressed: _caixaAberto ? null : _abrirCaixa,
-            icon: const Icon(Icons.lock_open_outlined),
-            label: const Text('Abrir caixa'),
-          ),
-          OutlinedButton.icon(
-            onPressed: _caixaAberto ? () => _registrarMovimentoCaixa(suprimento: true) : null,
-            icon: const Icon(Icons.add_circle_outline),
-            label: const Text('Suprimento'),
-          ),
-          OutlinedButton.icon(
-            onPressed: _caixaAberto ? () => _registrarMovimentoCaixa(suprimento: false) : null,
-            icon: const Icon(Icons.remove_circle_outline),
-            label: const Text('Sangria'),
-          ),
-          OutlinedButton.icon(
-            onPressed: _caixaAberto ? _fecharCaixa : null,
-            icon: const Icon(Icons.task_alt_outlined),
-            label: const Text('Fechamento'),
-          ),
-          OutlinedButton.icon(
-            onPressed: widget.podeLeituraParcialCaixa ? _mostrarLeituraParcial : null,
-            icon: const Icon(Icons.analytics_outlined),
-            label: const Text('Leitura parcial'),
-          ),
-          OutlinedButton.icon(
-            onPressed: _abrirHistoricoAuditoria,
-            icon: const Icon(Icons.fact_check_outlined),
-            label: const Text('Auditoria'),
-          ),
-        ],
       ),
     );
   }

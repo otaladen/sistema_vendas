@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../data/models/conta_pagar.dart';
 import '../model/item_venda.dart';
 import '../model/linha_devolucao_entrada.dart';
 import '../model/linha_troca_saida.dart';
@@ -40,6 +41,7 @@ class ObjectBox {
     nfeImportadaRegistroBox = Box<NfeImportadaRegistro>(store);
     kitOrcamentoBox = Box<KitOrcamento>(store);
     kitOrcamentoItemBox = Box<KitOrcamentoItem>(store);
+    contaPagarBox = Box<ContaPagar>(store);
   }
 
   late final Store store;
@@ -60,6 +62,7 @@ class ObjectBox {
   late final Box<NfeImportadaRegistro> nfeImportadaRegistroBox;
   late final Box<KitOrcamento> kitOrcamentoBox;
   late final Box<KitOrcamentoItem> kitOrcamentoItemBox;
+  late final Box<ContaPagar> contaPagarBox;
   late final Directory productImagesDir;
   late final String storeDirectoryPath;
 

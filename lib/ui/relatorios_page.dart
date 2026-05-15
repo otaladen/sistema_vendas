@@ -278,7 +278,8 @@ class _SeletorPeriodoState extends State<_SeletorPeriodo> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         DropdownButtonFormField<String>(
-          value: _preset,
+          key: ValueKey(_preset),
+          initialValue: _preset,
           decoration: const InputDecoration(labelText: 'Periodo'),
           items: const [
             DropdownMenuItem(value: 'hoje', child: Text('Hoje')),
@@ -946,7 +947,8 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: DropdownButtonFormField<int?>(
-              value: _filtroVendedorId,
+              key: ValueKey(_filtroVendedorId),
+              initialValue: _filtroVendedorId,
               decoration: const InputDecoration(
                 labelText: 'Filtrar por vendedor',
                 border: OutlineInputBorder(),

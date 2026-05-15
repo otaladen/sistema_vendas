@@ -110,6 +110,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       return;
     }
 
+    if (!context.mounted) return;
     _mostrarProgressoExportacao(context);
     try {
       final produtos = widget.produtoRepository.listarTodos();
@@ -156,6 +157,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       );
       if (!context.mounted) return;
       await Navigator.of(context, rootNavigator: true).maybePop();
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 6),
@@ -165,6 +167,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     } catch (e) {
       if (!context.mounted) return;
       await Navigator.of(context, rootNavigator: true).maybePop();
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 7),

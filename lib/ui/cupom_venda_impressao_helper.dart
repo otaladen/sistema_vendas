@@ -7,6 +7,7 @@ import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
+import '../services/print_service.dart';
 
 Future<String?> escolherSalvarPdfCupomVenda({
   required Uint8List bytes,
@@ -31,20 +32,10 @@ Future<String?> escolherSalvarPdfCupomVenda({
   return file.path;
 }
 
-Future<Printer?> obterImpressoraPadrao(String printerName) async {
-  if (printerName.trim().isEmpty) return null;
-  final printers = await Printing.listPrinters();
-  for (final printer in printers) {
-    if (printer.name == printerName) {
-      return printer;
-    }
-  }
-  return null;
-}
-
 /// Dialogo padrao: imprimir, impressao direta ou PDF (mesmo fluxo do Caixa).
 Future<void> mostrarFluxoImpressaoCupomVenda(
   BuildContext context, {
+  required PrintService printService,
   required EmpresaConfig config,
   required Future<Uint8List> Function() gerarPdfBytes,
   required String suggestedFileName,
@@ -91,7 +82,8 @@ Future<void> mostrarFluxoImpressaoCupomVenda(
       return;
     }
     if (acao == 'direto') {
-      final printer = await obterImpressoraPadrao(config.impressoraPadrao);
+      final printer =
+          await printService.resolverImpressoraPorNome(config.impressoraPadrao);
       if (printer == null) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(

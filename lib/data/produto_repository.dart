@@ -10,6 +10,30 @@ import '../objectbox.g.dart';
 import 'objectbox.dart';
 import 'sync/sync_write_trigger.dart';
 
+/// Media ponderada (quantidade interna * custo unitario da nota) sobre todas as
+/// [HistoricoEntrada] do produto. Retorna null se nao houver linhas validas.
+double? calcularCustoMedioPonderadoEntradasNfe(ObjectBox db, int produtoId) {
+  if (produtoId <= 0) return null;
+  final q = db.historicoEntradaBox
+      .query(HistoricoEntrada_.produto.equals(produtoId))
+      .build();
+  try {
+    var somaValor = 0.0;
+    var somaQtd = 0;
+    for (final h in q.find()) {
+      final qtd = h.quantidadeEntradaEstoque;
+      final unit = h.precoCustoUnitarioNota;
+      if (qtd <= 0 || unit <= 0) continue;
+      somaValor += qtd * unit;
+      somaQtd += qtd;
+    }
+    if (somaQtd <= 0) return null;
+    return somaValor / somaQtd;
+  } finally {
+    q.close();
+  }
+}
+
 class ProdutoRepository extends ChangeNotifier {
   ProdutoRepository(this._db);
 
@@ -72,7 +96,9 @@ class ProdutoRepository extends ChangeNotifier {
   void _migrarCampoAtivoLegadoUmaVez() {
     if (_migracaoAtivoLegadoOk) return;
     try {
-      final flag = File(p.join(_db.storeDirectoryPath, '.migracao_produto_ativo_v1'));
+      final flag = File(
+        p.join(_db.storeDirectoryPath, '.migracao_produto_ativo_v1'),
+      );
       if (flag.existsSync()) {
         _migracaoAtivoLegadoOk = true;
         return;
@@ -524,6 +550,59 @@ class ProdutoRepository extends ChangeNotifier {
       return q.find();
     } finally {
       q.close();
+    }
+  }
+
+  /// Media ponderada das entradas de NF-e; null se nao houver historico valido.
+  double? calcularCustoMedioPonderadoPorEntradasNfe(int produtoId) =>
+      calcularCustoMedioPonderadoEntradasNfe(_db, produtoId);
+
+  /// Atualiza [Produto.custoMedio]: prioridade entradas NF-e; senao [legadoImportacao];
+  /// senao [Produto.precoCusto].
+  void sincronizarCustoMedioInteligenteParaProduto(
+    int produtoId, {
+    double? legadoImportacao,
+  }) {
+    final p = _db.produtoBox.get(produtoId);
+    if (p == null) return;
+    final cm = calcularCustoMedioPonderadoEntradasNfe(_db, produtoId);
+    if (cm != null) {
+      p.custoMedio = cm;
+    } else if (legadoImportacao != null && legadoImportacao > 0) {
+      p.custoMedio = legadoImportacao;
+    } else {
+      p.custoMedio = p.precoCusto < 0 ? 0 : p.precoCusto;
+    }
+    _db.produtoBox.put(p);
+    invalidarCacheBusca();
+    notificarAlteracaoParaRede();
+  }
+
+  /// Recalcula custo medio para varios produtos (uma notificacao ao final).
+  void sincronizarCustoMedioInteligenteParaProdutos(
+    Iterable<int> produtoIds, {
+    Map<int, double>? legadoImportacaoPorId,
+  }) {
+    final vistos = <int>{};
+    for (final id in produtoIds) {
+      if (id <= 0 || vistos.contains(id)) continue;
+      vistos.add(id);
+      final p = _db.produtoBox.get(id);
+      if (p == null) continue;
+      final legado = legadoImportacaoPorId?[id];
+      final cm = calcularCustoMedioPonderadoEntradasNfe(_db, id);
+      if (cm != null) {
+        p.custoMedio = cm;
+      } else if (legado != null && legado > 0) {
+        p.custoMedio = legado;
+      } else {
+        p.custoMedio = p.precoCusto < 0 ? 0 : p.precoCusto;
+      }
+      _db.produtoBox.put(p);
+    }
+    if (vistos.isNotEmpty) {
+      invalidarCacheBusca();
+      notificarAlteracaoParaRede();
     }
   }
 

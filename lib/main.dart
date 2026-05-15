@@ -17,6 +17,7 @@ import 'data/usuario_repository.dart';
 import 'data/venda_repository.dart';
 import 'data/vendedor_repository.dart';
 import 'model/usuario_sistema.dart';
+import 'services/print_service.dart';
 import 'ui/login_page.dart';
 import 'ui/main_menu_page.dart';
 
@@ -90,10 +91,12 @@ class _MyAppState extends State<MyApp> {
   UsuarioSistema? _usuarioLogado;
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
   Timer? _timerBackupAutomatico;
+  late final PrintService _printService;
 
   @override
   void initState() {
     super.initState();
+    _printService = PrintService(widget.appConfigRepository);
     _timerBackupAutomatico = Timer.periodic(
       const Duration(minutes: 5),
       (_) => AutoBackupService.tentarExecutarSeDevido(
@@ -255,6 +258,7 @@ class _MyAppState extends State<MyApp> {
                   onAposEscrita: produtoRepository.invalidarCacheBusca,
                 );
                 return MainMenuPage(
+                  objectBox: widget.objectBox,
                   produtoRepository: produtoRepository,
                   clienteRepository: ClienteRepository(widget.objectBox),
                   vendaRepository: vendaRepository,
@@ -264,6 +268,8 @@ class _MyAppState extends State<MyApp> {
                   usuarioLogado: _usuarioLogado!,
                   onLogout: _sair,
                   lanSyncScheduler: widget.lanSyncScheduler,
+                  appConfigRepository: widget.appConfigRepository,
+                  printService: _printService,
                 );
               },
             ),

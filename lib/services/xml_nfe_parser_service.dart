@@ -64,6 +64,8 @@ class XmlParserService {
     final emitente = _extrairEmitente(infNFe);
     final ideInfo = _extrairIde(infNFe);
     final itens = _extrairItens(infNFe);
+    final valorTotalNota = _extrairValorTotalNota(infNFe, itens);
+    final duplicatas = _extrairDuplicatas(infNFe);
 
     if (emitente.cnpj.length != 11 && emitente.cnpj.length != 14) {
       throw FormatException(
@@ -77,6 +79,8 @@ class XmlParserService {
       dataEmissao: ideInfo.dataEmissao,
       emitente: emitente,
       itens: itens,
+      duplicatas: duplicatas,
+      valorTotalNota: valorTotalNota,
     );
   }
 
@@ -203,6 +207,118 @@ class XmlParserService {
     }
 
     return itens;
+  }
+
+  /// `total/ICMSTot/vNF` ou, se ausente, soma de `qCom * vUnCom` dos itens.
+  static double _extrairValorTotalNota(
+    XmlElement infNFe,
+    List<ItemNotaTemporario> itens,
+  ) {
+    XmlElement? total;
+    for (final c in infNFe.childElements) {
+      if (c.name.local == 'total') {
+        total = c;
+        break;
+      }
+    }
+    if (total != null) {
+      for (final c in total.childElements) {
+        if (c.name.local != 'ICMSTot') continue;
+        final vnf = _primeiroTexto(c, 'vNF');
+        if (vnf != null && vnf.trim().isNotEmpty) {
+          final v = _parseDecimal(vnf);
+          if (v > 0) return v;
+        }
+      }
+    }
+    var soma = 0.0;
+    for (final it in itens) {
+      soma += it.quantidadeComercial * it.valorUnitarioComercial;
+    }
+    return soma;
+  }
+
+  /// Lê `<cobr>` direto em [infNFe] e cada `<dup>` (`nDup`, `dVenc`, `vDup`).
+  static List<NfeDuplicataXml> _extrairDuplicatas(XmlElement infNFe) {
+    XmlElement? cobr;
+    for (final c in infNFe.childElements) {
+      if (c.name.local == 'cobr') {
+        cobr = c;
+        break;
+      }
+    }
+    if (cobr == null) {
+      return const [];
+    }
+
+    final brutas = <({String nDup, String dVenc, String vDup})>[];
+    for (final c in cobr.childElements) {
+      if (c.name.local != 'dup') continue;
+      final nDup = _primeiroTexto(c, 'nDup')?.trim() ?? '';
+      final dVenc = _primeiroTexto(c, 'dVenc')?.trim() ?? '';
+      final vDup = _primeiroTexto(c, 'vDup')?.trim() ?? '';
+      if (dVenc.isEmpty && vDup.isEmpty && nDup.isEmpty) continue;
+      brutas.add((nDup: nDup, dVenc: dVenc, vDup: vDup));
+    }
+    if (brutas.isEmpty) {
+      return const [];
+    }
+
+    final total = brutas.length;
+    final out = <NfeDuplicataXml>[];
+    for (var i = 0; i < brutas.length; i++) {
+      final b = brutas[i];
+      if (b.dVenc.isEmpty) {
+        throw FormatException(
+          'Duplicata ${i + 1}: dVenc ausente ou vazio.',
+        );
+      }
+      if (b.vDup.isEmpty) {
+        throw FormatException(
+          'Duplicata ${i + 1}: vDup ausente ou vazio.',
+        );
+      }
+      final valor = _parseDecimal(b.vDup);
+      if (valor < 0) {
+        throw FormatException(
+          'Duplicata ${i + 1}: valor vDup invalido.',
+        );
+      }
+      final dataVenc = _parseDataDup(b.dVenc);
+      final nParcela = b.nDup.isNotEmpty
+          ? b.nDup
+          : '${(i + 1).toString().padLeft(3, '0')}/'
+                '${total.toString().padLeft(3, '0')}';
+      out.add(
+        NfeDuplicataXml(
+          numeroParcela: nParcela,
+          dataVencimento: dataVenc,
+          valorParcela: valor,
+        ),
+      );
+    }
+    return out;
+  }
+
+  /// Data de duplicata (`YYYY-MM-DD` ou ISO); normaliza para UTC meia-noite do dia civil.
+  static DateTime _parseDataDup(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) {
+      throw const FormatException('Data de vencimento da duplicata vazia.');
+    }
+    final iso = DateTime.tryParse(t);
+    if (iso != null) {
+      return DateTime.utc(iso.year, iso.month, iso.day);
+    }
+    final slash = RegExp(r'^(\d{2})/(\d{2})/(\d{4})$');
+    final m = slash.firstMatch(t);
+    if (m != null) {
+      final dia = int.parse(m.group(1)!);
+      final mes = int.parse(m.group(2)!);
+      final ano = int.parse(m.group(3)!);
+      return DateTime.utc(ano, mes, dia);
+    }
+    throw FormatException('Data de vencimento da duplicata invalida: "$raw"');
   }
 
   static String? _primeiroTexto(XmlElement parent, String localName) {

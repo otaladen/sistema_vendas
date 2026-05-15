@@ -9,6 +9,7 @@ import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/usuario_sistema.dart';
+import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'funcionarios_page.dart';
 import 'kits_orcamento_page.dart';
@@ -36,6 +37,7 @@ class CadastrosPage extends StatelessWidget {
     required this.funcionarioRepository,
     required this.motoristaRepository,
     required this.usuarioLogado,
+    required this.printService,
   });
 
   final ProdutoRepository produtoRepository;
@@ -45,6 +47,7 @@ class CadastrosPage extends StatelessWidget {
   final FuncionarioRepository funcionarioRepository;
   final MotoristaRepository motoristaRepository;
   final UsuarioSistema usuarioLogado;
+  final PrintService printService;
 
   bool get _podeCadastros =>
       usuarioLogado.admin || usuarioLogado.podeCadastros;
@@ -68,7 +71,10 @@ class CadastrosPage extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                     builder: (_) =>
-                        ProdutosPage(produtoRepository: produtoRepository),
+                        ProdutosPage(
+                          produtoRepository: produtoRepository,
+                          printService: printService,
+                        ),
                   ),
                 );
               },

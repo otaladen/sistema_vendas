@@ -12,29 +12,37 @@ import '../main.dart';
 import '../data/produto_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../model/produto.dart';
+import '../services/print_service.dart';
 import '../services/produto_imagem_service.dart';
 import 'widgets/abas_historico_produto_widget.dart';
 
+class _CadastroProdutoSalvarIntent extends Intent {
+  const _CadastroProdutoSalvarIntent();
+}
+
+class _CadastroProdutoCancelarIntent extends Intent {
+  const _CadastroProdutoCancelarIntent();
+}
+
 class ProdutosPage extends StatefulWidget {
-  const ProdutosPage({super.key, required this.produtoRepository});
+  const ProdutosPage({
+    super.key,
+    required this.produtoRepository,
+    required this.printService,
+  });
 
   final ProdutoRepository produtoRepository;
+  final PrintService printService;
 
   @override
   State<ProdutosPage> createState() => _ProdutosPageState();
 }
 
 class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
-  static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
+  static ButtonStyle get _estiloBotaoContornoCompacto =>
+      OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      );
-
-  static ButtonStyle get _estiloBotaoElevadoCompacto => ElevatedButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       );
@@ -42,9 +50,34 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   /// Larguras fixas para dados curtos (nao esticar ate metade da tela).
   static const double _wQtdInteira = 158;
   static const double _wNcm = 200;
-  static const double _wMoeda = 182;
 
-  static const List<String> _unidades = ['UN', 'M', 'M2', 'M3', 'KG', 'SC', 'CX', 'LT'];
+  /// Área fixa quadrada da pré-visualização da foto no cadastro de produto.
+  static const double _erpFotoPreviewSide = 176;
+
+  /// Largura mínima para alinhar a foto à direita do formulário (senão empilha).
+  static const double _erpFotoPreviewSideBySideBreakpoint = 680;
+
+  /// Layout inputs à esquerda + painel KPI à direita no card de preços.
+  static const double _erpPrecosKpiBreakpoint = 960;
+
+  /// Rodapé fixo: empilha botões abaixo desta largura.
+  static const double _erpRodapeAcaoBreakpoint = 520;
+
+  /// Escala de espacamento do cadastro ERP (8 / 16 / 24).
+  static const double _erpGap8 = 8;
+  static const double _erpGap16 = 16;
+  static const double _erpGap24 = 24;
+
+  static const List<String> _unidades = [
+    'UN',
+    'M',
+    'M2',
+    'M3',
+    'KG',
+    'SC',
+    'CX',
+    'LT',
+  ];
   static const String _categoriaOutros = 'Outros';
   static const Map<String, List<String>> _categoriasMateriaisConstrucao = {
     'Cimento e Argamassas': ['Cimento', 'Argamassa', 'Rejunte', 'Cal'],
@@ -68,7 +101,13 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       'Aco para Construcao',
       'Vergalhao',
     ],
-    'Tintas e Acessorios': ['Tinta Acrilica', 'Tinta Esmalte', 'Selador', 'Verniz', 'Rolo e Pincel'],
+    'Tintas e Acessorios': [
+      'Tinta Acrilica',
+      'Tinta Esmalte',
+      'Selador',
+      'Verniz',
+      'Rolo e Pincel',
+    ],
     'Hidraulica': [
       'Tubos e Conexoes',
       'Registros',
@@ -99,8 +138,20 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       'Chapas e Cantoneiras',
       'Fixadores',
     ],
-    'Madeiras e Chapas': ['Compensado', 'MDF', 'OSB', 'Vigas e Ripas', 'Portas e Batentes'],
-    'Pisos e Revestimentos': ['Piso Ceramico', 'Porcelanato', 'Revestimento de Parede', 'Rodape', 'Pastilha'],
+    'Madeiras e Chapas': [
+      'Compensado',
+      'MDF',
+      'OSB',
+      'Vigas e Ripas',
+      'Portas e Batentes',
+    ],
+    'Pisos e Revestimentos': [
+      'Piso Ceramico',
+      'Porcelanato',
+      'Revestimento de Parede',
+      'Rodape',
+      'Pastilha',
+    ],
     'Loucas e Metais': [
       'Vaso Sanitario',
       'Lavatório',
@@ -118,7 +169,13 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       'Aditivo para Concreto',
       'Desmoldante',
     ],
-    'Ferramentas': ['Manuais', 'Eletricas', 'Medicao', 'EPIs', 'Acessorios de Corte'],
+    'Ferramentas': [
+      'Manuais',
+      'Eletricas',
+      'Medicao',
+      'EPIs',
+      'Acessorios de Corte',
+    ],
     'Jardinagem e Externo': [
       'Mangueira',
       'Grama Sintetica',
@@ -146,7 +203,6 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   final _ncmController = TextEditingController();
   final _localizacaoController = TextEditingController();
   final _precoCustoController = TextEditingController();
-  final _custoMedioController = TextEditingController();
   final _preco1Controller = TextEditingController();
   final _preco2Controller = TextEditingController();
   final _preco3Controller = TextEditingController();
@@ -167,6 +223,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   bool _fotoFoiRemovida = false;
   final ScrollController _scrollController = ScrollController();
   int _historicoVersao = 0;
+  final FocusNode _cadastroKeyboardFocusNode =
+      FocusNode(debugLabel: 'produtosCadastroTeclado');
 
   String _status = '';
   bool _statusEhErro = false;
@@ -186,8 +244,7 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   }
 
   bool _bloquearSyncProdutos() =>
-      _temDadosNoFormulario() ||
-      SafeSyncRefreshMixin.focoEmCampoDeTexto();
+      _temDadosNoFormulario() || SafeSyncRefreshMixin.focoEmCampoDeTexto();
 
   void _atualizarAposSyncRede() {
     if (!mounted || _bloquearSyncProdutos()) return;
@@ -217,7 +274,6 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     _ncmController.dispose();
     _localizacaoController.dispose();
     _precoCustoController.dispose();
-    _custoMedioController.dispose();
     _preco1Controller.dispose();
     _preco2Controller.dispose();
     _preco3Controller.dispose();
@@ -225,6 +281,7 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     _quantidadeMinimaController.dispose();
     _subcategoriaLivreController.dispose();
     _scrollController.dispose();
+    _cadastroKeyboardFocusNode.dispose();
     super.dispose();
   }
 
@@ -235,8 +292,10 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   bool _skuJaExiste(String skuNormalizado) {
     final produtos = widget.produtoRepository.listarTodos();
     for (final produto in produtos) {
-      final mesmoSku = produto.codigoInterno.trim().toLowerCase() == skuNormalizado;
-      final emEdicao = _produtoEmEdicaoId != null && produto.id == _produtoEmEdicaoId;
+      final mesmoSku =
+          produto.codigoInterno.trim().toLowerCase() == skuNormalizado;
+      final emEdicao =
+          _produtoEmEdicaoId != null && produto.id == _produtoEmEdicaoId;
       if (mesmoSku && !emEdicao) {
         return true;
       }
@@ -256,14 +315,15 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _ncmController,
       _localizacaoController,
       _precoCustoController,
-      _custoMedioController,
       _preco1Controller,
       _preco2Controller,
       _preco3Controller,
       _estoqueController,
       _quantidadeMinimaController,
     ];
-    final existeTexto = controllers.any((controller) => controller.text.trim().isNotEmpty);
+    final existeTexto = controllers.any(
+      (controller) => controller.text.trim().isNotEmpty,
+    );
     return existeTexto ||
         _produtoEmEdicaoId != null ||
         _unidadeSelecionada != 'UN' ||
@@ -276,13 +336,460 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   }
 
   String? _fotoPreviewPath() {
-    if (_fotoOrigemLocalPath != null && _fotoOrigemLocalPath!.trim().isNotEmpty) {
+    if (_fotoOrigemLocalPath != null &&
+        _fotoOrigemLocalPath!.trim().isNotEmpty) {
       return _fotoOrigemLocalPath;
     }
     if (_fotoPathAtual.trim().isNotEmpty) {
       return _fotoPathAtual;
     }
     return null;
+  }
+
+  // --- Layout ERP (cadastro de produtos) ---
+
+  TextStyle _erpLabelStyle(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w700,
+      color: cs.onSurface.withValues(alpha: 0.72),
+    );
+  }
+
+  Widget _erpFieldLabel(String text, BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: _erpGap8),
+      child: Text(text, style: _erpLabelStyle(context)),
+    );
+  }
+
+  InputDecoration _erpInputDecoration(
+    BuildContext context, {
+    String? hint,
+    String? helper,
+    Widget? suffixIcon,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final subtle = cs.outline.withValues(alpha: 0.5);
+    return InputDecoration(
+      isDense: true,
+      hintText: hint,
+      helperText: helper,
+      helperMaxLines: 3,
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: subtle),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: cs.primary, width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: cs.error),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: cs.error, width: 2),
+      ),
+    );
+  }
+
+  Widget _erpSurfaceCard({
+    required BuildContext context,
+    required String title,
+    IconData? icon,
+    required List<Widget> children,
+  }) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: _erpGap16),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.75)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(_erpGap24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 22, color: cs.primary),
+                const SizedBox(width: _erpGap8),
+              ],
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: _erpGap16),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _erpResponsiveGrid(BuildContext context, List<Widget> fields) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth;
+        final cols = maxW >= 1200
+            ? 4
+            : maxW >= 960
+            ? 3
+            : maxW >= 640
+            ? 2
+            : 1;
+        const gap = _erpGap16;
+        final usable = maxW - gap * (cols - 1);
+        final cellW = cols > 0 ? usable / cols : maxW;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: fields
+              .map((w) => SizedBox(width: cols <= 1 ? maxW : cellW, child: w))
+              .toList(),
+        );
+      },
+    );
+  }
+
+  Widget _erpFinancialMetricChip(
+    BuildContext context,
+    String metricName,
+    double pct,
+  ) {
+    final theme = Theme.of(context);
+    final positive = pct > 0;
+    final bg = positive
+        ? Colors.green.shade50
+        : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.85);
+    final fg = positive
+        ? Colors.green.shade800
+        : theme.colorScheme.onSurface.withValues(alpha: 0.52);
+    final bd = positive
+        ? Colors.green.shade200
+        : theme.colorScheme.outlineVariant.withValues(alpha: 0.55);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: bd),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          '$metricName: ${pct.toStringAsFixed(2)}%',
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            color: fg,
+            height: 1.15,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _erpKpiLinhaTabelaPreco(
+    BuildContext context, {
+    required String titulo,
+    required double margem,
+    required double markup,
+    bool isLast = false,
+  }) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : _erpGap8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(_erpGap16),
+        decoration: BoxDecoration(
+          color: cs.surface.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.65)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              titulo,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: _erpGap8),
+            Wrap(
+              spacing: _erpGap8,
+              runSpacing: _erpGap8,
+              children: [
+                _erpFinancialMetricChip(context, 'Margem', margem),
+                _erpFinancialMetricChip(context, 'Markup', markup),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _erpPainelResumoFinanceiroKpis(
+    BuildContext context, {
+    required double margem1,
+    required double markup1,
+    required double margem2,
+    required double markup2,
+    required double margem3,
+    required double markup3,
+  }) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(_erpGap16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            cs.surfaceContainerHighest.withValues(alpha: 0.5),
+            cs.surfaceContainerHighest.withValues(alpha: 0.22),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.insights_outlined, size: 22, color: cs.primary),
+              const SizedBox(width: _erpGap8),
+              Expanded(
+                child: Text(
+                  'Indicadores de rentabilidade',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: _erpGap16),
+          _erpKpiLinhaTabelaPreco(
+            context,
+            titulo: 'A prazo (Preco 1)',
+            margem: margem1,
+            markup: markup1,
+          ),
+          _erpKpiLinhaTabelaPreco(
+            context,
+            titulo: 'A vista (Preco 2)',
+            margem: margem2,
+            markup: markup2,
+          ),
+          _erpKpiLinhaTabelaPreco(
+            context,
+            titulo: 'Atacado (Preco 3)',
+            margem: margem3,
+            markup: markup3,
+            isLast: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _erpRodapeAcaoCadastroProduto(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    final saveStyle = ElevatedButton.styleFrom(
+      backgroundColor: cs.primary,
+      foregroundColor: cs.onPrimary,
+      elevation: 2,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+    );
+
+    final cancelStyle = OutlinedButton.styleFrom(
+      foregroundColor: Color.lerp(cs.onSurface, cs.error, 0.35)!,
+      side: BorderSide(color: cs.outline.withValues(alpha: 0.42)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+    );
+
+    final etiquetaStyle = OutlinedButton.styleFrom(
+      foregroundColor: cs.onSurfaceVariant,
+      side: BorderSide(color: cs.outline.withValues(alpha: 0.55)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < _erpRodapeAcaoBreakpoint;
+
+        Widget salvar = Tooltip(
+          message: 'Salvar cadastro (F10)',
+          child: ElevatedButton.icon(
+            style: saveStyle,
+            onPressed: _salvarProduto,
+            icon: const Icon(Icons.save_rounded),
+            label: const Text(
+              'Salvar (F10)',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        );
+
+        Widget cancelar = Tooltip(
+          message: 'Cancelar / limpar (Esc)',
+          child: OutlinedButton(
+            style: cancelStyle,
+            onPressed: _limparFormularioComConfirmacao,
+            child: const Text('Cancelar (Esc)'),
+          ),
+        );
+
+        Widget etiqueta = Tooltip(
+          message: 'Imprimir etiqueta de teste (F11)',
+          child: OutlinedButton.icon(
+            style: etiquetaStyle,
+            onPressed: _imprimirEtiquetaProduto,
+            icon: const Icon(Icons.print_rounded),
+            label: const Text('Imprimir Etiqueta (F11)'),
+          ),
+        );
+
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(width: double.infinity, child: cancelar),
+              const SizedBox(height: _erpGap8),
+              SizedBox(width: double.infinity, child: etiqueta),
+              const SizedBox(height: _erpGap8),
+              SizedBox(width: double.infinity, child: salvar),
+            ],
+          );
+        }
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            cancelar,
+            const SizedBox(width: _erpGap16),
+            etiqueta,
+            const SizedBox(width: _erpGap16),
+            salvar,
+          ],
+        );
+      },
+    );
+  }
+
+  /// Quadrado dedicado à pré-visualização (sempre visível; estado vazio elegante).
+  Widget _erpProdutoFotoPreviewSquare(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final path = _fotoPreviewPath();
+    final side = _erpFotoPreviewSide;
+
+    Widget child;
+    if (path != null) {
+      child = ColoredBox(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
+        child: Image.file(
+          File(path),
+          fit: BoxFit.contain,
+          width: side,
+          height: side,
+          errorBuilder: (context, error, stackTrace) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(_erpGap16),
+                child: Text(
+                  'Nao foi possivel carregar a imagem.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: cs.onSurface.withValues(alpha: 0.65),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    } else {
+      child = DecoratedBox(
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.42),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.85)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.photo_library_outlined,
+              size: 42,
+              color: cs.outline.withValues(alpha: 0.9),
+            ),
+            const SizedBox(height: _erpGap8),
+            Text(
+              'Sem imagem',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurface.withValues(alpha: 0.5),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: side,
+      height: side,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Material(type: MaterialType.transparency, child: child),
+      ),
+    );
   }
 
   String _normalizarNomeProduto(String nome) {
@@ -386,7 +893,6 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _ncmController.clear();
       _localizacaoController.clear();
       _precoCustoController.clear();
-      _custoMedioController.clear();
       _preco1Controller.clear();
       _preco2Controller.clear();
       _preco3Controller.clear();
@@ -438,7 +944,9 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       builder: (context) {
         return AlertDialog(
           title: const Text('Limpar formulario'),
-          content: const Text('Existem dados preenchidos. Deseja limpar os campos?'),
+          content: const Text(
+            'Existem dados preenchidos. Deseja limpar os campos?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -506,6 +1014,30 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     _definirStatus('Produto excluido com sucesso.', erro: false);
   }
 
+  /// Custo medio para exibicao: ponderado pelas entradas de NF-e; senao acompanha o preco de custo.
+  double _custoMedioInteligenteParaExibicao() {
+    final precoDigitado =
+        _parseValorMonetario(_precoCustoController.text) ?? 0.0;
+    final id = _produtoEmEdicaoId;
+    if (id != null && id > 0) {
+      final cm = widget.produtoRepository
+          .calcularCustoMedioPonderadoPorEntradasNfe(id);
+      if (cm != null) {
+        return cm;
+      }
+    }
+    return precoDigitado < 0 ? 0 : precoDigitado;
+  }
+
+  bool _custoMedioDerivadoDeHistoricoNfe() {
+    final id = _produtoEmEdicaoId;
+    if (id == null || id <= 0) return false;
+    return widget.produtoRepository.calcularCustoMedioPonderadoPorEntradasNfe(
+          id,
+        ) !=
+        null;
+  }
+
   double _margemCalculadaPorController(TextEditingController precoController) {
     final custo = _parseValorMonetario(_precoCustoController.text) ?? 0;
     final venda = _parseValorMonetario(precoController.text) ?? 0;
@@ -570,9 +1102,7 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     if (raw.isEmpty) {
       return null;
     }
-    final re = RegExp(
-      r'\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}',
-    );
+    final re = RegExp(r'\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}');
     for (final m in re.allMatches(raw)) {
       final s = m.group(0);
       if (s == null) {
@@ -653,7 +1183,10 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     if (k.contains('peso')) {
       return false;
     }
-    if (k.contains('icms') || k.contains('ipi') || k.contains('iva') || k.contains('cst')) {
+    if (k.contains('icms') ||
+        k.contains('ipi') ||
+        k.contains('iva') ||
+        k.contains('cst')) {
       return false;
     }
     if (k.contains('basecalculo') || k.contains('ean') || k.startsWith('lk')) {
@@ -668,7 +1201,11 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
         k.startsWith('vr');
   }
 
-  int _contarPrecoValidoAmostra(List<List<String>> linhas, int col, int maxLinhas) {
+  int _contarPrecoValidoAmostra(
+    List<List<String>> linhas,
+    int col,
+    int maxLinhas,
+  ) {
     var n = 0;
     final lim = math.min(linhas.length - 1, maxLinhas);
     for (var r = 1; r <= lim; r++) {
@@ -717,7 +1254,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       if (excluir.contains(j)) {
         continue;
       }
-      if (j != indiceSugerido && !_cabecalhoPermiteHeuristicaPrecoVenda(headers[j])) {
+      if (j != indiceSugerido &&
+          !_cabecalhoPermiteHeuristicaPrecoVenda(headers[j])) {
         continue;
       }
       final h = _contarPrecoValidoAmostra(linhas, j, 500);
@@ -757,7 +1295,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       if (k == 'precovenda' || k == 'valorvenda') {
         return i;
       }
-      if (k.contains('venda') && (k.contains('preco') || k.contains('valor') || k.startsWith('vr'))) {
+      if (k.contains('venda') &&
+          (k.contains('preco') || k.contains('valor') || k.startsWith('vr'))) {
         return i;
       }
     }
@@ -816,7 +1355,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   }
 
   String? _validarCategoria(String? value) {
-    if (_categoriaSelecionada == null || _categoriaSelecionada!.trim().isEmpty) {
+    if (_categoriaSelecionada == null ||
+        _categoriaSelecionada!.trim().isEmpty) {
       return 'Categoria e obrigatoria.';
     }
     return null;
@@ -832,10 +1372,12 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       }
       return null;
     }
-    if (_subcategoriaSelecionada == null || _subcategoriaSelecionada!.trim().isEmpty) {
+    if (_subcategoriaSelecionada == null ||
+        _subcategoriaSelecionada!.trim().isEmpty) {
       return 'Subcategoria obrigatoria.';
     }
-    final subcategorias = _categoriasMateriaisConstrucao[_categoriaSelecionada] ?? [];
+    final subcategorias =
+        _categoriasMateriaisConstrucao[_categoriaSelecionada] ?? [];
     if (!subcategorias.contains(_subcategoriaSelecionada)) {
       return 'Subcategoria invalida para a categoria.';
     }
@@ -854,21 +1396,6 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     return null;
   }
 
-  String? _validarCustoMedio(String? value) {
-    final texto = (value ?? '').trim();
-    if (texto.isEmpty) {
-      return null;
-    }
-    final v = _parseValorMonetario(texto);
-    if (v == null) {
-      return 'Custo medio invalido.';
-    }
-    if (v < 0) {
-      return 'Custo medio nao pode ser negativo.';
-    }
-    return null;
-  }
-
   String? _validarPrecoTabela(String? value) {
     final texto = (value ?? '').trim();
     final preco = _parseValorMonetario(texto);
@@ -876,6 +1403,46 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       return 'Preco deve ser maior que zero.';
     }
     return null;
+  }
+
+  Future<void> _imprimirEtiquetaProduto() async {
+    final tc = DefaultTabController.maybeOf(context);
+    if (tc != null && tc.index != 0) {
+      return;
+    }
+    final nome = _nomeController.text.trim();
+    if (nome.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Informe o nome do produto para imprimir a etiqueta de teste.',
+          ),
+        ),
+      );
+      return;
+    }
+    final codigoBarras = _codigoBarrasController.text.trim();
+    final sku = _codigoInternoController.text.trim();
+    final codigo = codigoBarras.isNotEmpty ? codigoBarras : sku;
+    final preco2 = _parseValorMonetario(_preco2Controller.text) ?? 0;
+    final precoFmt = NumberFormat('#,##0.00', 'pt_BR').format(preco2);
+    try {
+      await widget.printService.imprimirEtiquetaProdutoTeste(
+        nomeProduto: nome,
+        codigoBarrasOuSku: codigo,
+        precoAVistaFormatado: 'R\$ $precoFmt',
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel imprimir a etiqueta: $e')),
+      );
+    }
   }
 
   Future<void> _salvarProduto() async {
@@ -902,39 +1469,50 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     final ncm = _ncmController.text.trim();
     final localizacao = _localizacaoController.text.trim();
     final precoCusto = _parseValorMonetario(_precoCustoController.text);
-    final custoMedioVal = _custoMedioController.text.trim().isEmpty
-        ? 0.0
-        : (_parseValorMonetario(_custoMedioController.text) ?? 0.0);
+    final produtoExistente = _produtoEmEdicaoId == null
+        ? null
+        : widget.produtoRepository.obterPorId(_produtoEmEdicaoId!);
+    final pc = precoCusto!;
+    final double custoMedioPersistido = produtoExistente != null
+        ? (widget.produtoRepository.calcularCustoMedioPonderadoPorEntradasNfe(
+                produtoExistente.id,
+              ) ??
+              (pc < 0 ? 0.0 : pc))
+        : (pc < 0 ? 0.0 : pc);
     final preco1 = _parseValorMonetario(_preco1Controller.text);
     final preco2 = _parseValorMonetario(_preco2Controller.text);
     final preco3 = _parseValorMonetario(_preco3Controller.text);
     final estoque = int.tryParse(_estoqueController.text) ?? 0;
-    final quantidadeMinima = int.tryParse(_quantidadeMinimaController.text) ?? 0;
+    final quantidadeMinima =
+        int.tryParse(_quantidadeMinimaController.text) ?? 0;
     final codigoInternoFinal = _gerarSkuAutomatico
         ? _gerarSkuAutomaticamente()
         : codigoInternoDigitado;
 
     _nomeController.text = nomePadrao;
 
-    final produtoExistente = _produtoEmEdicaoId == null
-        ? null
-        : widget.produtoRepository.obterPorId(_produtoEmEdicaoId!);
     final fotoPathExistente = produtoExistente?.fotoPath ?? '';
     final identificadorFoto = codigoInternoFinal.isNotEmpty
         ? codigoInternoFinal
         : 'produto_${DateTime.now().millisecondsSinceEpoch}';
     var fotoPathFinal = fotoPathExistente;
 
-    if (_fotoOrigemLocalPath != null && _fotoOrigemLocalPath!.trim().isNotEmpty) {
-      final fotoProcessada = await _produtoImagemService.processarESalvarImagemProduto(
-        sourceImagePath: _fotoOrigemLocalPath!,
-        productIdentifier: identificadorFoto,
-      );
+    if (_fotoOrigemLocalPath != null &&
+        _fotoOrigemLocalPath!.trim().isNotEmpty) {
+      final fotoProcessada = await _produtoImagemService
+          .processarESalvarImagemProduto(
+            sourceImagePath: _fotoOrigemLocalPath!,
+            productIdentifier: identificadorFoto,
+          );
       if (fotoProcessada == null) {
-        _definirStatus('Nao foi possivel processar a foto selecionada.', erro: true);
+        _definirStatus(
+          'Nao foi possivel processar a foto selecionada.',
+          erro: true,
+        );
         return;
       }
-      if (fotoPathExistente.trim().isNotEmpty && fotoPathExistente != fotoProcessada) {
+      if (fotoPathExistente.trim().isNotEmpty &&
+          fotoPathExistente != fotoProcessada) {
         await _produtoImagemService.removerImagemProduto(fotoPathExistente);
       }
       fotoPathFinal = fotoProcessada;
@@ -961,8 +1539,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       estoque: estoque,
       quantidadeMinima: quantidadeMinima,
       ativo: _produtoAtivo,
-      precoCusto: precoCusto!,
-      custoMedio: custoMedioVal < 0 ? 0.0 : custoMedioVal,
+      precoCusto: pc,
+      custoMedio: custoMedioPersistido < 0 ? 0.0 : custoMedioPersistido,
       preco1: preco1!,
       preco2: preco2!,
       preco3: preco3!,
@@ -1004,8 +1582,10 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
           _subcategoriaLivreController.text = produto.subcategoria;
         } else {
           _subcategoriaLivreController.clear();
-          final subcategorias = _categoriasMateriaisConstrucao[produto.categoria] ?? [];
-          _subcategoriaSelecionada = subcategorias.contains(produto.subcategoria)
+          final subcategorias =
+              _categoriasMateriaisConstrucao[produto.categoria] ?? [];
+          _subcategoriaSelecionada =
+              subcategorias.contains(produto.subcategoria)
               ? produto.subcategoria
               : null;
         }
@@ -1024,9 +1604,6 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _ncmController.text = produto.ncm;
       _localizacaoController.text = produto.localizacao;
       _precoCustoController.text = _formatarValorMonetario(produto.precoCusto);
-      _custoMedioController.text = produto.custoMedio > 0
-          ? _formatarValorMonetario(produto.custoMedio)
-          : '';
       _preco1Controller.text = _formatarValorMonetario(
         produto.preco1 > 0 ? produto.preco1 : produto.precoVenda,
       );
@@ -1135,22 +1712,37 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   }
 
   List<String> _dividirLinhaCsv(String linha, String sep) {
-    return linha
-        .split(sep)
-        .map((c) => c.trim().replaceAll('"', ''))
-        .toList();
+    return linha.split(sep).map((c) => c.trim().replaceAll('"', '')).toList();
   }
 
   /// Normaliza cabecalho para casar CSV do Paradox (TabEst1) e exportacoes genericas.
   String _chaveCabecalhoCsv(String raw) {
     var s = raw.toLowerCase().trim().replaceAll('\ufeff', '');
     const acentos = <String, String>{
-      'á': 'a', 'à': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a',
-      'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
-      'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
-      'ó': 'o', 'ò': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
-      'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
-      'ç': 'c', 'ñ': 'n',
+      'á': 'a',
+      'à': 'a',
+      'â': 'a',
+      'ã': 'a',
+      'ä': 'a',
+      'é': 'e',
+      'è': 'e',
+      'ê': 'e',
+      'ë': 'e',
+      'í': 'i',
+      'ì': 'i',
+      'î': 'i',
+      'ï': 'i',
+      'ó': 'o',
+      'ò': 'o',
+      'ô': 'o',
+      'õ': 'o',
+      'ö': 'o',
+      'ú': 'u',
+      'ù': 'u',
+      'û': 'u',
+      'ü': 'u',
+      'ç': 'c',
+      'ñ': 'n',
     };
     for (final e in acentos.entries) {
       s = s.replaceAll(e.key, e.value);
@@ -1251,7 +1843,10 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
           .where((l) => l.isNotEmpty)
           .toList();
       if (linhasBrutas.length < 2) {
-        _definirStatus('CSV precisa ter cabecalho e ao menos uma linha de dados.', erro: true);
+        _definirStatus(
+          'CSV precisa ter cabecalho e ao menos uma linha de dados.',
+          erro: true,
+        );
         return;
       }
       final sep = _detectarSeparadorCsv(linhasBrutas.first);
@@ -1259,7 +1854,10 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     }
 
     if (linhas.length < 2) {
-      _definirStatus('CSV precisa ter cabecalho e ao menos uma linha de dados.', erro: true);
+      _definirStatus(
+        'CSV precisa ter cabecalho e ao menos uma linha de dados.',
+        erro: true,
+      );
       return;
     }
     final headers = linhas.first;
@@ -1313,7 +1911,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       'descrição',
       'desc',
     ]);
-    var idxPreco = _indiceColunaPrecoVenda(headers) ??
+    var idxPreco =
+        _indiceColunaPrecoVenda(headers) ??
         _indiceColunaPorAliases(headers, [
           'precovenda',
           'preco venda',
@@ -1431,7 +2030,9 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                     const SizedBox(height: 12),
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Atualizar produto se o codigo ja existir'),
+                      title: const Text(
+                        'Atualizar produto se o codigo ja existir',
+                      ),
                       value: atualizarExistentes,
                       onChanged: (v) {
                         setSt(() => atualizarExistentes = v ?? true);
@@ -1632,7 +2233,11 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
         criadoEm: existente?.criadoEm,
         ativo: existente?.ativo ?? true,
       );
-      widget.produtoRepository.salvar(produto);
+      final idSalvo = widget.produtoRepository.salvar(produto);
+      widget.produtoRepository.sincronizarCustoMedioInteligenteParaProduto(
+        idSalvo,
+        legadoImportacao: custoMedioVal > 0 ? custoMedioVal : null,
+      );
       if (existente != null) {
         atualizados++;
       } else {
@@ -1739,14 +2344,16 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
             }
 
             void rolarParaIndiceSelecionado() {
-              if (!resultadosScrollController.hasClients || indiceSelecionado < 0) {
+              if (!resultadosScrollController.hasClients ||
+                  indiceSelecionado < 0) {
                 return;
               }
               const alturaEstimadaLinha = 64.0;
-              final posicaoDesejada = (indiceSelecionado * alturaEstimadaLinha).clamp(
-                0.0,
-                resultadosScrollController.position.maxScrollExtent,
-              );
+              final posicaoDesejada = (indiceSelecionado * alturaEstimadaLinha)
+                  .clamp(
+                    0.0,
+                    resultadosScrollController.position.maxScrollExtent,
+                  );
               resultadosScrollController.animateTo(
                 posicaoDesejada,
                 duration: const Duration(milliseconds: 120),
@@ -1817,18 +2424,20 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                   if (v == null) return;
                                   setDialogState(() {
                                     somenteInativosLista = v;
-                                    resultados =
-                                        widget.produtoRepository.pesquisar(
-                                      pesquisaController.text,
-                                      limite: 80,
-                                      somenteAtivos: !somenteInativosLista,
-                                      somenteInativos: somenteInativosLista,
-                                    );
-                                    indiceSelecionado =
-                                        resultados.isEmpty ? -1 : 0;
+                                    resultados = widget.produtoRepository
+                                        .pesquisar(
+                                          pesquisaController.text,
+                                          limite: 80,
+                                          somenteAtivos: !somenteInativosLista,
+                                          somenteInativos: somenteInativosLista,
+                                        );
+                                    indiceSelecionado = resultados.isEmpty
+                                        ? -1
+                                        : 0;
                                   });
-                                  WidgetsBinding.instance
-                                      .addPostFrameCallback((_) {
+                                  WidgetsBinding.instance.addPostFrameCallback((
+                                    _,
+                                  ) {
                                     if (resultadosScrollController.hasClients) {
                                       resultadosScrollController.jumpTo(0);
                                     }
@@ -1877,7 +2486,9 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                           if (resultados.isEmpty) {
                             return;
                           }
-                          final indice = indiceSelecionado >= 0 ? indiceSelecionado : 0;
+                          final indice = indiceSelecionado >= 0
+                              ? indiceSelecionado
+                              : 0;
                           Navigator.pop(context, resultados[indice]);
                         },
                       ),
@@ -1888,23 +2499,31 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                           maxHeight: MediaQuery.of(context).size.height * 0.58,
                         ),
                         child: resultados.isEmpty
-                            ? const Center(child: Text('Nenhum produto encontrado.'))
+                            ? const Center(
+                                child: Text('Nenhum produto encontrado.'),
+                              )
                             : ListView.builder(
                                 controller: resultadosScrollController,
                                 shrinkWrap: true,
                                 itemCount: resultados.length,
                                 itemBuilder: (context, index) {
                                   final produto = resultados[index];
-                                  final consulta = pesquisaController.text.trim();
-                                  final estiloTitulo = Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(fontWeight: FontWeight.w600) ??
-                                      const TextStyle(fontWeight: FontWeight.w600);
+                                  final consulta = pesquisaController.text
+                                      .trim();
+                                  final estiloTitulo =
+                                      Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      ) ??
+                                      const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      );
                                   final estiloSubtitulo =
                                       Theme.of(context).textTheme.bodyMedium ??
-                                          const TextStyle();
-                                  final selecionado = index == indiceSelecionado;
+                                      const TextStyle();
+                                  final selecionado =
+                                      index == indiceSelecionado;
 
                                   return MouseRegion(
                                     onEnter: (_) {
@@ -1916,15 +2535,16 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                       });
                                     },
                                     child: ListTile(
-                                      contentPadding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 4,
-                                      ),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 4,
+                                          ),
                                       selected: selecionado,
                                       selectedTileColor: Theme.of(context)
                                           .colorScheme
                                           .primary
-                                          .withOpacity(0.08),
+                                          .withValues(alpha: 0.08),
                                       title: RichText(
                                         text: spanComDestaque(
                                           produto.nome,
@@ -1940,7 +2560,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                           estiloSubtitulo,
                                         ),
                                       ),
-                                      onTap: () => Navigator.pop(context, produto),
+                                      onTap: () =>
+                                          Navigator.pop(context, produto),
                                     ),
                                   );
                                 },
@@ -1994,625 +2615,1389 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       ),
       body: DefaultTabController(
         length: 2,
-        child: Column(
-          children: [
-            Material(
-              color: theme.colorScheme.surface,
-              child: TabBar(
-                labelColor: theme.colorScheme.primary,
-                tabs: const [
-                  Tab(text: 'Dados do produto'),
-                  Tab(text: 'Historico de compras'),
-                ],
-              ),
-            ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  Form(
-                    key: _formKey,
-                    autovalidateMode: _tentouSalvar
-                        ? AutovalidateMode.always
-                        : AutovalidateMode.disabled,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                      child: RawScrollbar(
-            controller: _scrollController,
-            thumbVisibility: true,
-            trackVisibility: true,
-            thickness: 10,
-            radius: const Radius.circular(8),
-            crossAxisMargin: 2,
-            mainAxisMargin: 4,
-            child: ListView(
-              controller: _scrollController,
-              padding: const EdgeInsets.only(right: 10),
-              children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    theme.colorScheme.primaryContainer,
-                    theme.colorScheme.surfaceContainerHighest,
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.inventory_2_outlined,
-                    size: 24,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Cadastro de Produtos',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          _produtoEmEdicaoId == null
-                              ? 'Cadastre os dados do item com foto e precos.'
-                              : 'Modo edicao ativo: revise e salve as alteracoes.',
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                style: _estiloBotaoContornoCompacto,
-                onPressed: _abrirPesquisaProduto,
-                icon: const Icon(Icons.search, size: 18),
-                label: const Text('Pesquisar produto'),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _irParaPrimeiroProduto,
-                    child: const Text('|< Primeiro'),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: OutlinedButton(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _irParaProdutoAnterior,
-                    child: const Text('< Anterior'),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: OutlinedButton(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _irParaProximoProduto,
-                    child: const Text('Proximo >'),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: OutlinedButton(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _irParaUltimoProduto,
-                    child: const Text('Ultimo >|'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            _buildSectionTitle(context, 'Identificacao', Icons.qr_code_2_outlined),
-            const SizedBox(height: 4),
-            TextFormField(
-              controller: _codigoInternoController,
-              enabled: !_gerarSkuAutomatico,
-              validator: _validarSku,
-              decoration: const InputDecoration(
-                labelText: 'Codigo interno (SKU)',
-                helperText: 'Use manual ou geracao automatica',
-              ),
-            ),
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              value: _gerarSkuAutomatico,
-              onChanged: (value) {
-                setState(() {
-                  _gerarSkuAutomatico = value ?? true;
-                  if (_gerarSkuAutomatico) {
-                    _codigoInternoController.clear();
-                  }
-                });
+        child: Builder(
+          builder: (tabCtx) {
+            return Shortcuts(
+              shortcuts: const <ShortcutActivator, Intent>{
+                SingleActivator(LogicalKeyboardKey.f10):
+                    _CadastroProdutoSalvarIntent(),
+                SingleActivator(LogicalKeyboardKey.escape):
+                    _CadastroProdutoCancelarIntent(),
               },
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Gerar SKU automaticamente'),
-              controlAffinity: ListTileControlAffinity.leading,
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _importarFotoProduto,
-                    icon: const Icon(Icons.add_a_photo_outlined, size: 18),
-                    label: Text(_fotoPreviewPath() == null ? 'Importar foto' : 'Trocar foto'),
-                  ),
-                ),
-                if (_fotoPreviewPath() != null) ...[
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _removerFotoProduto,
-                    icon: const Icon(Icons.delete_outline, size: 18),
-                    label: const Text('Remover'),
-                  ),
-                ],
-              ],
-            ),
-            if (_fotoPreviewPath() != null) ...[
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  height: 140,
-                  width: double.infinity,
-                  color: Colors.grey.shade100,
-                  child: Image.file(
-                    File(_fotoPreviewPath()!),
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        height: 120,
-                        alignment: Alignment.center,
-                        color: Colors.grey.shade100,
-                        child: const Text('Nao foi possivel carregar a imagem.'),
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 6),
-            TextFormField(
-              controller: _nomeController,
-              validator: _validarNome,
-              decoration: const InputDecoration(
-                labelText: 'Nome do produto',
-                helperText: 'Padrao sugerido: Nome + Marca + Volume (ex: Tinta Coral 18L)',
-              ),
-            ),
-            const SizedBox(height: 6),
-            _buildSectionTitle(context, 'Classificacao e dados tecnicos', Icons.category_outlined),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _categoriaSelecionada,
-                    validator: _validarCategoria,
-                    decoration: const InputDecoration(labelText: 'Categoria'),
-                    hint: const Text('Selecione'),
-                    items: _categoriasMateriaisConstrucao.keys
-                        .map(
-                          (categoria) => DropdownMenuItem<String>(
-                            value: categoria,
-                            child: Text(categoria),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      setState(() {
-                        _categoriaSelecionada = value;
-                        _subcategoriaSelecionada = null;
-                        _subcategoriaLivreController.clear();
-                      });
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey('subcategoria_${_categoriaSelecionada ?? 'vazio'}_${_subcategoriaSelecionada ?? 'vazio'}'),
-                    initialValue: _subcategoriaSelecionada,
-                    validator: _validarSubcategoria,
-                    decoration: const InputDecoration(labelText: 'Subcategoria'),
-                    hint: const Text('Selecione'),
-                    items: (_categoriasMateriaisConstrucao[_categoriaSelecionada] ?? [])
-                        .map(
-                          (subcategoria) => DropdownMenuItem<String>(
-                            value: subcategoria,
-                            child: Text(subcategoria),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: _categoriaSelecionada == null || _categoriaSelecionada == _categoriaOutros
-                        ? null
-                        : (value) {
-                            setState(() {
-                              _subcategoriaSelecionada = value;
-                            });
-                          },
-                  ),
-                ),
-              ],
-            ),
-            if (_categoriaSelecionada == _categoriaOutros) ...[
-              const SizedBox(height: 6),
-              TextFormField(
-                controller: _subcategoriaLivreController,
-                validator: _validarSubcategoria,
-                decoration: const InputDecoration(
-                  labelText: 'Subcategoria personalizada',
-                  helperText: 'Digite a subcategoria para itens fora do padrao',
-                ),
-              ),
-            ],
-            const SizedBox(height: 6),
-            _buildSectionTitle(context, 'Unidade e codigos', Icons.straighten_outlined),
-            const SizedBox(height: 4),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 120,
-                  child: DropdownButtonFormField<String>(
-                    isDense: true,
-                    isExpanded: true,
-                    initialValue: _unidadeSelecionada,
-                    decoration: const InputDecoration(
-                      labelText: 'Unidade',
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'UN', child: Text('UN - Unidade')),
-                      DropdownMenuItem(value: 'M', child: Text('M - Metro')),
-                      DropdownMenuItem(value: 'M2', child: Text('M2 - Metro quadrado')),
-                      DropdownMenuItem(value: 'M3', child: Text('M3 - Metro cubico')),
-                      DropdownMenuItem(value: 'KG', child: Text('KG - Quilograma')),
-                      DropdownMenuItem(value: 'SC', child: Text('SC - Saco')),
-                      DropdownMenuItem(value: 'CX', child: Text('CX - Caixa')),
-                      DropdownMenuItem(value: 'LT', child: Text('LT - Litro')),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() {
-                          _unidadeSelecionada = _normalizarUnidade(value);
-                        });
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _codigoBarrasController,
-                    decoration: const InputDecoration(
-                      labelText: 'Codigo de barras',
-                      isDense: true,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            _buildSectionTitle(context, 'Dados comerciais e tecnicos', Icons.storefront_outlined),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _marcaController,
-                    decoration: const InputDecoration(labelText: 'Marca'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _fabricanteController,
-                    decoration: const InputDecoration(labelText: 'Fabricante'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _fornecedorController,
-                    decoration: const InputDecoration(labelText: 'Fornecedor'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _localizacaoController,
-                    decoration: const InputDecoration(labelText: 'Localizacao no deposito'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: SizedBox(
-                width: _wNcm,
-                child: TextField(
-                  controller: _ncmController,
-                  decoration: const InputDecoration(
-                    labelText: 'NCM',
-                    isDense: true,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            TextField(
-              controller: _descricaoController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Descricao tecnica',
-                helperText: 'Use para orientar o vendedor: beneficios, aplicacao e diferenciais.',
-              ),
-            ),
-            const SizedBox(height: 6),
-            _buildSectionTitle(context, 'Precos e margem', Icons.price_change_outlined),
-            const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.end,
-                children: [
-                  SizedBox(
-                    width: _wMoeda,
-                    child: TextFormField(
-                      controller: _precoCustoController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [RealInputFormatter()],
-                      validator: _validarPrecoCusto,
-                      decoration: const InputDecoration(
-                        labelText: 'Preco de custo',
-                        helperText: 'Nao pode ser negativo',
-                        isDense: true,
+              child: Actions(
+                actions: <Type, Action<Intent>>{
+                  _CadastroProdutoSalvarIntent:
+                      CallbackAction<_CadastroProdutoSalvarIntent>(
+                        onInvoke: (_) {
+                          final tc = DefaultTabController.maybeOf(tabCtx);
+                          if (tc != null && tc.index != 0) return null;
+                          _salvarProduto();
+                          return null;
+                        },
                       ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                  SizedBox(
-                    width: _wMoeda,
-                    child: TextFormField(
-                      controller: _custoMedioController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [RealInputFormatter()],
-                      validator: _validarCustoMedio,
-                      decoration: const InputDecoration(
-                        labelText: 'Custo medio',
-                        helperText: 'Opcional',
-                        isDense: true,
+                  _CadastroProdutoCancelarIntent:
+                      CallbackAction<_CadastroProdutoCancelarIntent>(
+                        onInvoke: (_) {
+                          final tc = DefaultTabController.maybeOf(tabCtx);
+                          if (tc != null && tc.index != 0) return null;
+                          _limparFormularioComConfirmacao();
+                          return null;
+                        },
                       ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                  SizedBox(
-                    width: _wMoeda,
-                    child: TextFormField(
-                      controller: _preco1Controller,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [RealInputFormatter()],
-                      validator: _validarPrecoTabela,
-                      decoration: const InputDecoration(
-                        labelText: 'A Prazo',
-                        isDense: true,
+                },
+                child: KeyboardListener(
+                  focusNode: _cadastroKeyboardFocusNode,
+                  onKeyEvent: (KeyEvent event) {
+                    if (event is! KeyDownEvent) {
+                      return;
+                    }
+                    if (event.logicalKey != LogicalKeyboardKey.f11) {
+                      return;
+                    }
+                    final tc = DefaultTabController.maybeOf(tabCtx);
+                    if (tc != null && tc.index != 0) {
+                      return;
+                    }
+                    _imprimirEtiquetaProduto();
+                  },
+                  child: Column(
+                    children: [
+                      Material(
+                        color: theme.colorScheme.surface,
+                        child: TabBar(
+                          labelColor: theme.colorScheme.primary,
+                          tabs: const [
+                            Tab(text: 'Dados do produto'),
+                            Tab(text: 'Historico de compras'),
+                          ],
+                        ),
                       ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                  SizedBox(
-                    width: _wMoeda,
-                    child: TextFormField(
-                      controller: _preco2Controller,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [RealInputFormatter()],
-                      validator: _validarPrecoTabela,
-                      decoration: const InputDecoration(
-                        labelText: 'À Vista',
-                        isDense: true,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                  SizedBox(
-                    width: _wMoeda,
-                    child: TextFormField(
-                      controller: _preco3Controller,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [RealInputFormatter()],
-                      validator: _validarPrecoTabela,
-                      decoration: const InputDecoration(
-                        labelText: 'Atacado',
-                        isDense: true,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'A Prazo -> Markup: ${markup1.toStringAsFixed(2)}% | Margem: ${margem1.toStringAsFixed(2)}%\n'
-                'À Vista -> Markup: ${markup2.toStringAsFixed(2)}% | Margem: ${margem2.toStringAsFixed(2)}%\n'
-                'Atacado -> Markup: ${markup3.toStringAsFixed(2)}% | Margem: ${margem3.toStringAsFixed(2)}%',
-              ),
-            ),
-            const SizedBox(height: 6),
-            _buildSectionTitle(context, 'Estoque', Icons.warehouse_outlined),
-            const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: _wQtdInteira,
-                    child: TextField(
-                      controller: _estoqueController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Qtd. estoque',
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  SizedBox(
-                    width: _wQtdInteira,
-                    child: TextField(
-                      controller: _quantidadeMinimaController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Qtd. minima',
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SwitchListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Produto ativo na venda'),
-              subtitle: const Text(
-                'Inativo permanece no cadastro e no historico, mas nao aparece no PDV.',
-              ),
-              value: _produtoAtivo,
-              onChanged: (v) => setState(() => _produtoAtivo = v),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    style: _estiloBotaoElevadoCompacto,
-                    onPressed: _salvarProduto,
-                    child: Text(_produtoEmEdicaoId == null ? 'Incluir' : 'Salvar edicao'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _limparFormularioComConfirmacao,
-                    child: Text(_produtoEmEdicaoId == null ? 'Limpar' : 'Cancelar edicao'),
-                  ),
-                ),
-              ],
-            ),
-            if (_produtoEmEdicaoId != null) ...[
-              const SizedBox(height: 6),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.error,
-                    side: BorderSide(
-                      color: Theme.of(context).colorScheme.error.withValues(
-                        alpha: 0.5,
-                      ),
-                    ),
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: _excluirProdutoEmEdicao,
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  label: const Text('Excluir produto'),
-                ),
-              ),
-            ],
-            const SizedBox(height: 6),
-            if (_status.isNotEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: _statusEhErro
-                      ? semantic?.errorBg ?? const Color(0xFFFDECEC)
-                      : semantic?.successBg ?? const Color(0xFFEAF8EF),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: _statusEhErro
-                        ? semantic?.errorBorder ?? const Color(0xFFF1A3A3)
-                        : semantic?.successBorder ?? const Color(0xFF8FD1A8),
-                  ),
-                ),
-                child: Text(
-                  _status,
-                  style: TextStyle(
-                    color: _statusEhErro
-                        ? semantic?.errorFg ?? const Color(0xFF9B1C1C)
-                        : semantic?.successFg ?? const Color(0xFF166534),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-                  AbasHistoricoProdutoWidget(
-                    key: ValueKey(_historicoVersao),
-                    produtoRepository: widget.produtoRepository,
-                    produtoId: _produtoEmEdicaoId,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            Form(
+                              key: _formKey,
+                              autovalidateMode: _tentouSalvar
+                                  ? AutovalidateMode.always
+                                  : AutovalidateMode.disabled,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        _erpGap24,
+                                        _erpGap16,
+                                        _erpGap24,
+                                        0,
+                                      ),
+                                      child: RawScrollbar(
+                                        controller: _scrollController,
+                                        thumbVisibility: true,
+                                        trackVisibility: true,
+                                        thickness: 8,
+                                        radius: const Radius.circular(8),
+                                        crossAxisMargin: 2,
+                                        mainAxisMargin: 4,
+                                        child: SingleChildScrollView(
+                                          controller: _scrollController,
+                                          padding: const EdgeInsets.only(
+                                            bottom: _erpGap24,
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              Material(
+                                                color: Colors.transparent,
+                                                child: Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.center,
+                                                  children: [
+                                                    Expanded(
+                                                      child: OutlinedButton.icon(
+                                                        style: OutlinedButton.styleFrom(
+                                                          padding:
+                                                              const EdgeInsets.symmetric(
+                                                                horizontal:
+                                                                    _erpGap16,
+                                                                vertical: 12,
+                                                              ),
+                                                        ),
+                                                        onPressed:
+                                                            _abrirPesquisaProduto,
+                                                        icon: const Icon(
+                                                          Icons.search,
+                                                          size: 20,
+                                                        ),
+                                                        label: const Text(
+                                                          'Pesquisar produto',
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      tooltip: 'Primeiro',
+                                                      onPressed:
+                                                          _irParaPrimeiroProduto,
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .first_page_outlined,
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      tooltip: 'Anterior',
+                                                      onPressed:
+                                                          _irParaProdutoAnterior,
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .navigate_before_outlined,
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      tooltip: 'Proximo',
+                                                      onPressed:
+                                                          _irParaProximoProduto,
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .navigate_next_outlined,
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      tooltip: 'Ultimo',
+                                                      onPressed:
+                                                          _irParaUltimoProduto,
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .last_page_outlined,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              const SizedBox(height: _erpGap16),
+                                              Text(
+                                                _produtoEmEdicaoId == null
+                                                    ? 'Novo cadastro — preencha os blocos abaixo e inclua o produto.'
+                                                    : 'Edicao — SKU ${_codigoInternoController.text.trim().isEmpty ? "..." : _codigoInternoController.text.trim()}: revise e salve.',
+                                                style: theme.textTheme.bodySmall
+                                                    ?.copyWith(
+                                                      color: theme
+                                                          .colorScheme
+                                                          .onSurface
+                                                          .withValues(
+                                                            alpha: 0.65,
+                                                          ),
+                                                    ),
+                                              ),
+                                              const SizedBox(height: _erpGap16),
+                                              _erpSurfaceCard(
+                                                context: context,
+                                                title: 'Informacoes basicas',
+                                                icon:
+                                                    Icons.inventory_2_outlined,
+                                                children: [
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .stretch,
+                                                    children: [
+                                                      _erpFieldLabel(
+                                                        'Nome do produto',
+                                                        context,
+                                                      ),
+                                                      TextFormField(
+                                                        controller:
+                                                            _nomeController,
+                                                        validator: _validarNome,
+                                                        decoration:
+                                                            _erpInputDecoration(
+                                                              context,
+                                                              helper:
+                                                                  'Nome + Marca + Volume (ex.: Tinta Coral 18L)',
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(
+                                                    height: _erpGap16,
+                                                  ),
+                                                  LayoutBuilder(
+                                                    builder: (context, constraints) {
+                                                      final sideBySide =
+                                                          constraints
+                                                              .maxWidth >=
+                                                          _erpFotoPreviewSideBySideBreakpoint;
+                                                      final preview =
+                                                          _erpProdutoFotoPreviewSquare(
+                                                            context,
+                                                          );
 
-  Widget _buildSectionTitle(BuildContext context, String title, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(width: 5),
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            fontSize: 13,
-          ),
+                                                      final camposEBotoesFoto = Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .stretch,
+                                                        children: [
+                                                          _erpResponsiveGrid(context, [
+                                                            Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                _erpFieldLabel(
+                                                                  'Codigo interno (SKU)',
+                                                                  context,
+                                                                ),
+                                                                TextFormField(
+                                                                  controller:
+                                                                      _codigoInternoController,
+                                                                  enabled:
+                                                                      !_gerarSkuAutomatico,
+                                                                  validator:
+                                                                      _validarSku,
+                                                                  decoration:
+                                                                      _erpInputDecoration(
+                                                                        context,
+                                                                        helper:
+                                                                            'Manual ou geracao automatica ao salvar',
+                                                                      ),
+                                                                ),
+                                                                CheckboxListTile(
+                                                                  dense: true,
+                                                                  visualDensity: const VisualDensity(
+                                                                    horizontal:
+                                                                        VisualDensity
+                                                                            .minimumDensity,
+                                                                    vertical:
+                                                                        VisualDensity
+                                                                            .minimumDensity,
+                                                                  ),
+                                                                  value:
+                                                                      _gerarSkuAutomatico,
+                                                                  onChanged: (value) {
+                                                                    setState(() {
+                                                                      _gerarSkuAutomatico =
+                                                                          value ??
+                                                                          true;
+                                                                      if (_gerarSkuAutomatico) {
+                                                                        _codigoInternoController
+                                                                            .clear();
+                                                                      }
+                                                                    });
+                                                                  },
+                                                                  contentPadding:
+                                                                      EdgeInsets
+                                                                          .zero,
+                                                                  title: Text(
+                                                                    'Gerar SKU automaticamente',
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w400,
+                                                                      height:
+                                                                          1.2,
+                                                                      color: Theme.of(context)
+                                                                          .colorScheme
+                                                                          .onSurface
+                                                                          .withValues(
+                                                                            alpha:
+                                                                                0.62,
+                                                                          ),
+                                                                    ),
+                                                                  ),
+                                                                  controlAffinity:
+                                                                      ListTileControlAffinity
+                                                                          .leading,
+                                                                ),
+                                                              ],
+                                                            ),
+                                                            Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                _erpFieldLabel(
+                                                                  'Marca',
+                                                                  context,
+                                                                ),
+                                                                TextField(
+                                                                  controller:
+                                                                      _marcaController,
+                                                                  decoration:
+                                                                      _erpInputDecoration(
+                                                                        context,
+                                                                      ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                            Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                _erpFieldLabel(
+                                                                  'Fabricante',
+                                                                  context,
+                                                                ),
+                                                                TextField(
+                                                                  controller:
+                                                                      _fabricanteController,
+                                                                  decoration:
+                                                                      _erpInputDecoration(
+                                                                        context,
+                                                                      ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                            Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                _erpFieldLabel(
+                                                                  'Fornecedor',
+                                                                  context,
+                                                                ),
+                                                                TextField(
+                                                                  controller:
+                                                                      _fornecedorController,
+                                                                  decoration:
+                                                                      _erpInputDecoration(
+                                                                        context,
+                                                                      ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ]),
+                                                          const SizedBox(
+                                                            height: _erpGap16,
+                                                          ),
+                                                          Row(
+                                                            children: [
+                                                              Expanded(
+                                                                child: OutlinedButton.icon(
+                                                                  style:
+                                                                      _estiloBotaoContornoCompacto,
+                                                                  onPressed:
+                                                                      _importarFotoProduto,
+                                                                  icon: const Icon(
+                                                                    Icons
+                                                                        .add_a_photo_outlined,
+                                                                    size: 18,
+                                                                  ),
+                                                                  label: Text(
+                                                                    _fotoPreviewPath() ==
+                                                                            null
+                                                                        ? 'Importar foto'
+                                                                        : 'Trocar foto',
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                              if (_fotoPreviewPath() !=
+                                                                  null) ...[
+                                                                const SizedBox(
+                                                                  width:
+                                                                      _erpGap16,
+                                                                ),
+                                                                OutlinedButton.icon(
+                                                                  style:
+                                                                      _estiloBotaoContornoCompacto,
+                                                                  onPressed:
+                                                                      _removerFotoProduto,
+                                                                  icon: const Icon(
+                                                                    Icons
+                                                                        .delete_outline,
+                                                                    size: 18,
+                                                                  ),
+                                                                  label:
+                                                                      const Text(
+                                                                        'Remover',
+                                                                      ),
+                                                                ),
+                                                              ],
+                                                            ],
+                                                          ),
+                                                        ],
+                                                      );
+
+                                                      if (sideBySide) {
+                                                        return Row(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Expanded(
+                                                              child:
+                                                                  camposEBotoesFoto,
+                                                            ),
+                                                            const SizedBox(
+                                                              width: _erpGap16,
+                                                            ),
+                                                            preview,
+                                                          ],
+                                                        );
+                                                      }
+
+                                                      return Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .stretch,
+                                                        children: [
+                                                          camposEBotoesFoto,
+                                                          const SizedBox(
+                                                            height: _erpGap16,
+                                                          ),
+                                                          Center(
+                                                            child: preview,
+                                                          ),
+                                                        ],
+                                                      );
+                                                    },
+                                                  ),
+                                                ],
+                                              ),
+                                              _erpSurfaceCard(
+                                                context: context,
+                                                title:
+                                                    'Classificacao e codigos',
+                                                icon: Icons.category_outlined,
+                                                children: [
+                                                  _erpResponsiveGrid(context, [
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Categoria',
+                                                          context,
+                                                        ),
+                                                        DropdownButtonFormField<
+                                                          String
+                                                        >(
+                                                          initialValue:
+                                                              _categoriaSelecionada,
+                                                          validator:
+                                                              _validarCategoria,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                hint:
+                                                                    'Selecione',
+                                                              ),
+                                                          items: _categoriasMateriaisConstrucao
+                                                              .keys
+                                                              .map(
+                                                                (categoria) =>
+                                                                    DropdownMenuItem<
+                                                                      String
+                                                                    >(
+                                                                      value:
+                                                                          categoria,
+                                                                      child: Text(
+                                                                        categoria,
+                                                                      ),
+                                                                    ),
+                                                              )
+                                                              .toList(),
+                                                          onChanged: (value) {
+                                                            setState(() {
+                                                              _categoriaSelecionada =
+                                                                  value;
+                                                              _subcategoriaSelecionada =
+                                                                  null;
+                                                              _subcategoriaLivreController
+                                                                  .clear();
+                                                            });
+                                                          },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Subcategoria',
+                                                          context,
+                                                        ),
+                                                        DropdownButtonFormField<
+                                                          String
+                                                        >(
+                                                          key: ValueKey(
+                                                            'subcategoria_${_categoriaSelecionada ?? 'vazio'}_${_subcategoriaSelecionada ?? 'vazio'}',
+                                                          ),
+                                                          initialValue:
+                                                              _subcategoriaSelecionada,
+                                                          validator:
+                                                              _validarSubcategoria,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                hint:
+                                                                    'Selecione',
+                                                              ),
+                                                          items:
+                                                              (_categoriasMateriaisConstrucao[_categoriaSelecionada] ??
+                                                                      [])
+                                                                  .map(
+                                                                    (
+                                                                      subcategoria,
+                                                                    ) => DropdownMenuItem<String>(
+                                                                      value:
+                                                                          subcategoria,
+                                                                      child: Text(
+                                                                        subcategoria,
+                                                                      ),
+                                                                    ),
+                                                                  )
+                                                                  .toList(),
+                                                          onChanged:
+                                                              _categoriaSelecionada ==
+                                                                      null ||
+                                                                  _categoriaSelecionada ==
+                                                                      _categoriaOutros
+                                                              ? null
+                                                              : (value) {
+                                                                  setState(() {
+                                                                    _subcategoriaSelecionada =
+                                                                        value;
+                                                                  });
+                                                                },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ]),
+                                                  if (_categoriaSelecionada ==
+                                                      _categoriaOutros) ...[
+                                                    const SizedBox(
+                                                      height: _erpGap16,
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Subcategoria personalizada',
+                                                          context,
+                                                        ),
+                                                        TextFormField(
+                                                          controller:
+                                                              _subcategoriaLivreController,
+                                                          validator:
+                                                              _validarSubcategoria,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                helper:
+                                                                    'Para itens fora do padrao',
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                  const SizedBox(
+                                                    height: _erpGap16,
+                                                  ),
+                                                  _erpResponsiveGrid(context, [
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Unidade',
+                                                          context,
+                                                        ),
+                                                        DropdownButtonFormField<
+                                                          String
+                                                        >(
+                                                          isDense: true,
+                                                          isExpanded: true,
+                                                          initialValue:
+                                                              _unidadeSelecionada,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                              ),
+                                                          items: const [
+                                                            DropdownMenuItem(
+                                                              value: 'UN',
+                                                              child: Text(
+                                                                'UN - Unidade',
+                                                              ),
+                                                            ),
+                                                            DropdownMenuItem(
+                                                              value: 'M',
+                                                              child: Text(
+                                                                'M - Metro',
+                                                              ),
+                                                            ),
+                                                            DropdownMenuItem(
+                                                              value: 'M2',
+                                                              child: Text(
+                                                                'M2 - Metro quadrado',
+                                                              ),
+                                                            ),
+                                                            DropdownMenuItem(
+                                                              value: 'M3',
+                                                              child: Text(
+                                                                'M3 - Metro cubico',
+                                                              ),
+                                                            ),
+                                                            DropdownMenuItem(
+                                                              value: 'KG',
+                                                              child: Text(
+                                                                'KG - Quilograma',
+                                                              ),
+                                                            ),
+                                                            DropdownMenuItem(
+                                                              value: 'SC',
+                                                              child: Text(
+                                                                'SC - Saco',
+                                                              ),
+                                                            ),
+                                                            DropdownMenuItem(
+                                                              value: 'CX',
+                                                              child: Text(
+                                                                'CX - Caixa',
+                                                              ),
+                                                            ),
+                                                            DropdownMenuItem(
+                                                              value: 'LT',
+                                                              child: Text(
+                                                                'LT - Litro',
+                                                              ),
+                                                            ),
+                                                          ],
+                                                          onChanged: (value) {
+                                                            if (value != null) {
+                                                              setState(() {
+                                                                _unidadeSelecionada =
+                                                                    _normalizarUnidade(
+                                                                      value,
+                                                                    );
+                                                              });
+                                                            }
+                                                          },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Codigo de barras',
+                                                          context,
+                                                        ),
+                                                        TextField(
+                                                          controller:
+                                                              _codigoBarrasController,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'NCM',
+                                                          context,
+                                                        ),
+                                                        SizedBox(
+                                                          width: _wNcm,
+                                                          child: TextField(
+                                                            controller:
+                                                                _ncmController,
+                                                            decoration:
+                                                                _erpInputDecoration(
+                                                                  context,
+                                                                ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ]),
+                                                ],
+                                              ),
+                                              _erpSurfaceCard(
+                                                context: context,
+                                                title: 'Logistica e descricao',
+                                                icon: Icons
+                                                    .local_shipping_outlined,
+                                                children: [
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      _erpFieldLabel(
+                                                        'Localizacao no deposito',
+                                                        context,
+                                                      ),
+                                                      TextField(
+                                                        controller:
+                                                            _localizacaoController,
+                                                        decoration:
+                                                            _erpInputDecoration(
+                                                              context,
+                                                              hint:
+                                                                  'Corredor, prateleira, nivel',
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(
+                                                    height: _erpGap16,
+                                                  ),
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      _erpFieldLabel(
+                                                        'Descricao tecnica',
+                                                        context,
+                                                      ),
+                                                      TextField(
+                                                        controller:
+                                                            _descricaoController,
+                                                        maxLines: 4,
+                                                        decoration:
+                                                            _erpInputDecoration(
+                                                              context,
+                                                              helper:
+                                                                  'Beneficios, aplicacao e diferenciais para o vendedor',
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                              _erpSurfaceCard(
+                                                context: context,
+                                                title:
+                                                    'Precos, custos e margem de lucro',
+                                                icon: Icons.payments_outlined,
+                                                children: [
+                                                  LayoutBuilder(
+                                                    builder: (context, constraints) {
+                                                      final wideKpi =
+                                                          constraints
+                                                              .maxWidth >=
+                                                          _erpPrecosKpiBreakpoint;
+
+                                                      final painelKpi =
+                                                          _erpPainelResumoFinanceiroKpis(
+                                                            context,
+                                                            margem1: margem1,
+                                                            markup1: markup1,
+                                                            margem2: margem2,
+                                                            markup2: markup2,
+                                                            margem3: margem3,
+                                                            markup3: markup3,
+                                                          );
+
+                                                      final colunaInputs = LayoutBuilder(
+                                                        builder: (context, cIn) {
+                                                          final wIn =
+                                                              cIn.maxWidth;
+                                                          final custosLadoALado =
+                                                              wIn >= 440;
+                                                          final precosLadoALado =
+                                                              wIn >= 600;
+
+                                                          final campoPrecoCusto = Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .stretch,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Preco de custo',
+                                                                context,
+                                                              ),
+                                                              TextFormField(
+                                                                controller:
+                                                                    _precoCustoController,
+                                                                keyboardType:
+                                                                    const TextInputType.numberWithOptions(
+                                                                      decimal:
+                                                                          true,
+                                                                    ),
+                                                                inputFormatters: [
+                                                                  RealInputFormatter(),
+                                                                ],
+                                                                validator:
+                                                                    _validarPrecoCusto,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                      helper:
+                                                                          'Nao pode ser negativo',
+                                                                    ),
+                                                                onChanged: (_) =>
+                                                                    setState(
+                                                                      () {},
+                                                                    ),
+                                                              ),
+                                                            ],
+                                                          );
+
+                                                          final campoCustoMedio = Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .stretch,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Custo medio',
+                                                                context,
+                                                              ),
+                                                              Builder(
+                                                                builder: (ctx) {
+                                                                  final cs =
+                                                                      Theme.of(
+                                                                        ctx,
+                                                                      ).colorScheme;
+                                                                  final valor =
+                                                                      _custoMedioInteligenteParaExibicao();
+                                                                  final deNfe =
+                                                                      _custoMedioDerivadoDeHistoricoNfe();
+                                                                  return Container(
+                                                                    width: double
+                                                                        .infinity,
+                                                                    padding: const EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          14,
+                                                                      vertical:
+                                                                          14,
+                                                                    ),
+                                                                    decoration: BoxDecoration(
+                                                                      color: cs
+                                                                          .surfaceContainerHighest
+                                                                          .withValues(
+                                                                            alpha:
+                                                                                0.4,
+                                                                          ),
+                                                                      borderRadius:
+                                                                          BorderRadius.circular(
+                                                                            8,
+                                                                          ),
+                                                                      border: Border.all(
+                                                                        color: cs
+                                                                            .outline
+                                                                            .withValues(
+                                                                              alpha: 0.45,
+                                                                            ),
+                                                                      ),
+                                                                    ),
+                                                                    child: Column(
+                                                                      crossAxisAlignment:
+                                                                          CrossAxisAlignment
+                                                                              .start,
+                                                                      children: [
+                                                                        Text(
+                                                                          _formatarValorMonetario(
+                                                                            valor,
+                                                                          ),
+                                                                          style: Theme.of(ctx)
+                                                                              .textTheme
+                                                                              .titleMedium
+                                                                              ?.copyWith(
+                                                                                fontWeight: FontWeight.w700,
+                                                                              ),
+                                                                        ),
+                                                                        const SizedBox(
+                                                                          height:
+                                                                              _erpGap8,
+                                                                        ),
+                                                                        Text(
+                                                                          deNfe
+                                                                              ? 'Calculado automaticamente pela media ponderada das entradas de NF-e.'
+                                                                              : 'Sem entradas de NF-e: acompanha o preco de custo acima.',
+                                                                          style: TextStyle(
+                                                                            fontSize:
+                                                                                11.5,
+                                                                            height:
+                                                                                1.35,
+                                                                            color: cs.onSurface.withValues(
+                                                                              alpha: 0.62,
+                                                                            ),
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  );
+                                                                },
+                                                              ),
+                                                            ],
+                                                          );
+
+                                                          final blocoCustos =
+                                                              custosLadoALado
+                                                              ? Row(
+                                                                  crossAxisAlignment:
+                                                                      CrossAxisAlignment
+                                                                          .start,
+                                                                  children: [
+                                                                    Expanded(
+                                                                      child:
+                                                                          campoPrecoCusto,
+                                                                    ),
+                                                                    const SizedBox(
+                                                                      width:
+                                                                          _erpGap16,
+                                                                    ),
+                                                                    Expanded(
+                                                                      child:
+                                                                          campoCustoMedio,
+                                                                    ),
+                                                                  ],
+                                                                )
+                                                              : Column(
+                                                                  crossAxisAlignment:
+                                                                      CrossAxisAlignment
+                                                                          .stretch,
+                                                                  children: [
+                                                                    campoPrecoCusto,
+                                                                    const SizedBox(
+                                                                      height:
+                                                                          _erpGap16,
+                                                                    ),
+                                                                    campoCustoMedio,
+                                                                  ],
+                                                                );
+
+                                                          Widget colPrecoVenda(
+                                                            String label,
+                                                            TextEditingController
+                                                            ctrl,
+                                                          ) {
+                                                            return Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .stretch,
+                                                              children: [
+                                                                _erpFieldLabel(
+                                                                  label,
+                                                                  context,
+                                                                ),
+                                                                TextFormField(
+                                                                  controller:
+                                                                      ctrl,
+                                                                  keyboardType:
+                                                                      const TextInputType.numberWithOptions(
+                                                                        decimal:
+                                                                            true,
+                                                                      ),
+                                                                  inputFormatters: [
+                                                                    RealInputFormatter(),
+                                                                  ],
+                                                                  validator:
+                                                                      _validarPrecoTabela,
+                                                                  decoration:
+                                                                      _erpInputDecoration(
+                                                                        context,
+                                                                      ),
+                                                                  onChanged: (_) =>
+                                                                      setState(
+                                                                        () {},
+                                                                      ),
+                                                                ),
+                                                              ],
+                                                            );
+                                                          }
+
+                                                          final blocoPrecosVenda =
+                                                              precosLadoALado
+                                                              ? Row(
+                                                                  crossAxisAlignment:
+                                                                      CrossAxisAlignment
+                                                                          .start,
+                                                                  children: [
+                                                                    Expanded(
+                                                                      child: colPrecoVenda(
+                                                                        'A prazo (Preco 1)',
+                                                                        _preco1Controller,
+                                                                      ),
+                                                                    ),
+                                                                    const SizedBox(
+                                                                      width:
+                                                                          _erpGap16,
+                                                                    ),
+                                                                    Expanded(
+                                                                      child: colPrecoVenda(
+                                                                        'A vista (Preco 2)',
+                                                                        _preco2Controller,
+                                                                      ),
+                                                                    ),
+                                                                    const SizedBox(
+                                                                      width:
+                                                                          _erpGap16,
+                                                                    ),
+                                                                    Expanded(
+                                                                      child: colPrecoVenda(
+                                                                        'Atacado (Preco 3)',
+                                                                        _preco3Controller,
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                )
+                                                              : Column(
+                                                                  crossAxisAlignment:
+                                                                      CrossAxisAlignment
+                                                                          .stretch,
+                                                                  children: [
+                                                                    colPrecoVenda(
+                                                                      'A prazo (Preco 1)',
+                                                                      _preco1Controller,
+                                                                    ),
+                                                                    const SizedBox(
+                                                                      height:
+                                                                          _erpGap16,
+                                                                    ),
+                                                                    colPrecoVenda(
+                                                                      'A vista (Preco 2)',
+                                                                      _preco2Controller,
+                                                                    ),
+                                                                    const SizedBox(
+                                                                      height:
+                                                                          _erpGap16,
+                                                                    ),
+                                                                    colPrecoVenda(
+                                                                      'Atacado (Preco 3)',
+                                                                      _preco3Controller,
+                                                                    ),
+                                                                  ],
+                                                                );
+
+                                                          return Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .stretch,
+                                                            children: [
+                                                              Container(
+                                                                padding:
+                                                                    const EdgeInsets.all(
+                                                                      _erpGap16,
+                                                                    ),
+                                                                decoration: BoxDecoration(
+                                                                  color: theme
+                                                                      .colorScheme
+                                                                      .surfaceContainerHighest
+                                                                      .withValues(
+                                                                        alpha:
+                                                                            0.38,
+                                                                      ),
+                                                                  borderRadius:
+                                                                      BorderRadius.circular(
+                                                                        8,
+                                                                      ),
+                                                                  border: Border.all(
+                                                                    color: theme
+                                                                        .colorScheme
+                                                                        .outlineVariant
+                                                                        .withValues(
+                                                                          alpha:
+                                                                              0.55,
+                                                                        ),
+                                                                  ),
+                                                                ),
+                                                                child:
+                                                                    blocoCustos,
+                                                              ),
+                                                              const SizedBox(
+                                                                height:
+                                                                    _erpGap16,
+                                                              ),
+                                                              blocoPrecosVenda,
+                                                            ],
+                                                          );
+                                                        },
+                                                      );
+
+                                                      if (wideKpi) {
+                                                        return Row(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Expanded(
+                                                              flex: 5,
+                                                              child:
+                                                                  colunaInputs,
+                                                            ),
+                                                            const SizedBox(
+                                                              width: _erpGap16,
+                                                            ),
+                                                            Expanded(
+                                                              flex: 3,
+                                                              child: painelKpi,
+                                                            ),
+                                                          ],
+                                                        );
+                                                      }
+
+                                                      return Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .stretch,
+                                                        children: [
+                                                          colunaInputs,
+                                                          const SizedBox(
+                                                            height: _erpGap16,
+                                                          ),
+                                                          painelKpi,
+                                                        ],
+                                                      );
+                                                    },
+                                                  ),
+                                                ],
+                                              ),
+                                              _erpSurfaceCard(
+                                                context: context,
+                                                title:
+                                                    'Estoque e disponibilidade',
+                                                icon: Icons.warehouse_outlined,
+                                                children: [
+                                                  Wrap(
+                                                    spacing: _erpGap16,
+                                                    runSpacing: _erpGap16,
+                                                    crossAxisAlignment:
+                                                        WrapCrossAlignment
+                                                            .start,
+                                                    children: [
+                                                      SizedBox(
+                                                        width: _wQtdInteira,
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            _erpFieldLabel(
+                                                              'Quantidade em estoque',
+                                                              context,
+                                                            ),
+                                                            TextField(
+                                                              controller:
+                                                                  _estoqueController,
+                                                              keyboardType:
+                                                                  TextInputType
+                                                                      .number,
+                                                              decoration:
+                                                                  _erpInputDecoration(
+                                                                    context,
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      SizedBox(
+                                                        width: _wQtdInteira,
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            _erpFieldLabel(
+                                                              'Quantidade minima',
+                                                              context,
+                                                            ),
+                                                            TextField(
+                                                              controller:
+                                                                  _quantidadeMinimaController,
+                                                              keyboardType:
+                                                                  TextInputType
+                                                                      .number,
+                                                              decoration:
+                                                                  _erpInputDecoration(
+                                                                    context,
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(
+                                                    height: _erpGap16,
+                                                  ),
+                                                  SwitchListTile(
+                                                    dense: true,
+                                                    contentPadding:
+                                                        EdgeInsets.zero,
+                                                    title: const Text(
+                                                      'Produto ativo na venda',
+                                                    ),
+                                                    subtitle: const Text(
+                                                      'Inativo permanece no cadastro e no historico, mas nao aparece no PDV.',
+                                                    ),
+                                                    value: _produtoAtivo,
+                                                    onChanged: (v) => setState(
+                                                      () => _produtoAtivo = v,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              if (_produtoEmEdicaoId !=
+                                                  null) ...[
+                                                const SizedBox(
+                                                  height: _erpGap16,
+                                                ),
+                                                SizedBox(
+                                                  width: double.infinity,
+                                                  child: OutlinedButton.icon(
+                                                    style: OutlinedButton.styleFrom(
+                                                      foregroundColor: Theme.of(
+                                                        context,
+                                                      ).colorScheme.error,
+                                                      side: BorderSide(
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .error
+                                                            .withValues(
+                                                              alpha: 0.5,
+                                                            ),
+                                                      ),
+                                                      visualDensity:
+                                                          VisualDensity.compact,
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 12,
+                                                            vertical: 8,
+                                                          ),
+                                                      minimumSize: Size.zero,
+                                                      tapTargetSize:
+                                                          MaterialTapTargetSize
+                                                              .shrinkWrap,
+                                                    ),
+                                                    onPressed:
+                                                        _excluirProdutoEmEdicao,
+                                                    icon: const Icon(
+                                                      Icons.delete_outline,
+                                                      size: 18,
+                                                    ),
+                                                    label: const Text(
+                                                      'Excluir produto',
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  if (_status.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        _erpGap24,
+                                        _erpGap8,
+                                        _erpGap24,
+                                        _erpGap8,
+                                      ),
+                                      child: Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: _erpGap16,
+                                          vertical: _erpGap16,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: _statusEhErro
+                                              ? semantic?.errorBg ??
+                                                    const Color(0xFFFDECEC)
+                                              : semantic?.successBg ??
+                                                    const Color(0xFFEAF8EF),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          border: Border.all(
+                                            color: _statusEhErro
+                                                ? semantic?.errorBorder ??
+                                                      const Color(0xFFF1A3A3)
+                                                : semantic?.successBorder ??
+                                                      const Color(0xFF8FD1A8),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _status,
+                                          style: TextStyle(
+                                            color: _statusEhErro
+                                                ? semantic?.errorFg ??
+                                                      const Color(0xFF9B1C1C)
+                                                : semantic?.successFg ??
+                                                      const Color(0xFF166534),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  Container(
+                                    width: double.infinity,
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.surface,
+                                      border: Border(
+                                        top: BorderSide(
+                                          color: theme
+                                              .colorScheme
+                                              .outlineVariant
+                                              .withValues(alpha: 0.42),
+                                          width: 1,
+                                        ),
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.07,
+                                          ),
+                                          offset: const Offset(0, -3),
+                                          blurRadius: 10,
+                                        ),
+                                      ],
+                                    ),
+                                    padding: const EdgeInsets.fromLTRB(
+                                      _erpGap24,
+                                      _erpGap16,
+                                      _erpGap24,
+                                      _erpGap16,
+                                    ),
+                                    child: SafeArea(
+                                      top: false,
+                                      maintainBottomViewPadding: true,
+                                      child: _erpRodapeAcaoCadastroProduto(
+                                        context,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            AbasHistoricoProdutoWidget(
+                              key: ValueKey(_historicoVersao),
+                              produtoRepository: widget.produtoRepository,
+                              produtoId: _produtoEmEdicaoId,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         ),
-      ],
+      ),
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:intl/intl.dart';
 
+import '../data/models/conta_pagar.dart';
 import '../model/fornecedor_nfe.dart';
 import '../model/historico_entrada.dart';
 import '../model/item_nota_temporario.dart';
@@ -8,7 +9,20 @@ import '../model/produto.dart';
 import '../model/vinculo_fornecedor_produto.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'produto_repository.dart' show calcularCustoMedioPonderadoEntradasNfe;
 import 'sync/sync_write_trigger.dart';
+
+/// Origem do casamento produto/nota na conferencia de XML.
+enum ConferenciaNfeMatchTipo {
+  /// Produto encontrado pelo EAN (`cEAN` / `cEANTrib`) do XML.
+  vinculadoPorEan,
+
+  /// Produto encontrado pela tabela fornecedor + codigo do item (`cProd`).
+  vinculoFornecedor,
+
+  /// Sem cadastro automatico; na confirmacao sera criado produto novo (ou vinculo manual).
+  produtoNovo,
+}
 
 /// Dados de uma linha prontos para montar a UI de conferencia.
 class SugestaoLinhaConferencia {
@@ -18,6 +32,7 @@ class SugestaoLinhaConferencia {
     this.produtoExistenteId,
     required this.fatorInicial,
     required this.unidadeInternaInicial,
+    required this.tipoMatch,
   });
 
   final ItemNotaTemporario item;
@@ -25,6 +40,9 @@ class SugestaoLinhaConferencia {
   final int? produtoExistenteId;
   final double fatorInicial;
   final String unidadeInternaInicial;
+
+  /// Como o sistema casou o item do XML ao cadastro (para cores na UI).
+  final ConferenciaNfeMatchTipo tipoMatch;
 }
 
 /// Linha da previa de estorno (o que sera revertido no estoque).
@@ -90,8 +108,9 @@ class NfeEntradaRepository {
   ) {
     final cnpj = nfe.emitente.cnpj;
     FornecedorNfe? fornDb;
-    final qForn =
-        _db.fornecedorNfeBox.query(FornecedorNfe_.cnpj.equals(cnpj)).build();
+    final qForn = _db.fornecedorNfeBox
+        .query(FornecedorNfe_.cnpj.equals(cnpj))
+        .build();
     try {
       final list = qForn.find();
       if (list.isNotEmpty) fornDb = list.first;
@@ -104,8 +123,12 @@ class NfeEntradaRepository {
 
     for (final item in nfe.itens) {
       Produto? produtoResolvido;
+      var resolvidoPorEan = false;
       if (item.codigoBarras.isNotEmpty) {
         produtoResolvido = _buscarProdutoPorCodigoBarras(item.codigoBarras);
+        if (produtoResolvido != null) {
+          resolvidoPorEan = true;
+        }
       }
 
       VinculoFornecedorProduto? vinculo;
@@ -120,12 +143,14 @@ class NfeEntradaRepository {
         if (t != null) produtoResolvido = t;
       }
 
-      final fatorVinculo =
-          (vinculo != null && vinculo.fatorConversao > 0)
-              ? vinculo.fatorConversao
-              : 1.0;
+      final fatorVinculo = (vinculo != null && vinculo.fatorConversao > 0)
+          ? vinculo.fatorConversao
+          : 1.0;
 
       if (produtoResolvido != null) {
+        final tipo = resolvidoPorEan
+            ? ConferenciaNfeMatchTipo.vinculadoPorEan
+            : ConferenciaNfeMatchTipo.vinculoFornecedor;
         sugestoes.add(
           SugestaoLinhaConferencia(
             item: item,
@@ -135,6 +160,7 @@ class NfeEntradaRepository {
             unidadeInternaInicial: produtoResolvido.unidade.trim().isEmpty
                 ? 'UN'
                 : produtoResolvido.unidade.trim(),
+            tipoMatch: tipo,
           ),
         );
       } else {
@@ -145,6 +171,7 @@ class NfeEntradaRepository {
             produtoExistenteId: null,
             fatorInicial: fatorVinculo,
             unidadeInternaInicial: 'UN',
+            tipoMatch: ConferenciaNfeMatchTipo.produtoNovo,
           ),
         );
       }
@@ -258,6 +285,11 @@ class NfeEntradaRepository {
     }
     final chaveNorm = registro.chaveAcesso.replaceAll(RegExp(r'\D'), '');
     final historico = listarHistoricoPorChaveNfe(chaveNorm);
+    final idsProdutosParaRecalcularCusto = <int>{};
+    for (final h in historico) {
+      final pid = h.produto.targetId;
+      if (pid != 0) idsProdutosParaRecalcularCusto.add(pid);
+    }
 
     _db.store.runInTransaction(TxMode.write, () {
       final produtosParaRemover = <int>{};
@@ -283,6 +315,19 @@ class NfeEntradaRepository {
       }
 
       _db.nfeImportadaRegistroBox.remove(registro.id);
+
+      for (final pid in idsProdutosParaRecalcularCusto) {
+        if (produtosParaRemover.contains(pid)) continue;
+        final p = _db.produtoBox.get(pid);
+        if (p == null) continue;
+        final cm = calcularCustoMedioPonderadoEntradasNfe(_db, pid);
+        if (cm != null) {
+          p.custoMedio = cm;
+        } else {
+          p.custoMedio = p.precoCusto < 0 ? 0 : p.precoCusto;
+        }
+        _db.produtoBox.put(p);
+      }
     });
 
     notificarAlteracaoParaRede();
@@ -318,8 +363,7 @@ class NfeEntradaRepository {
   }
 
   Produto? _buscarProdutoPorCodigoBarras(String ean) {
-    final q =
-        _db.produtoBox.query(Produto_.codigoBarras.equals(ean)).build();
+    final q = _db.produtoBox.query(Produto_.codigoBarras.equals(ean)).build();
     try {
       final list = q.find();
       return list.isEmpty ? null : list.first;
@@ -334,9 +378,7 @@ class NfeEntradaRepository {
         .query(
           VinculoFornecedorProduto_.codigoProdutoFornecedor
               .equals(codigo)
-              .and(
-                VinculoFornecedorProduto_.fornecedor.equals(fornecedorId),
-              ),
+              .and(VinculoFornecedorProduto_.fornecedor.equals(fornecedorId)),
         )
         .build();
     try {
@@ -355,12 +397,16 @@ class NfeEntradaRepository {
     _db.store.runInTransaction(TxMode.write, () {
       final chaveNorm = nfe.chaveAcesso.replaceAll(RegExp(r'\D'), '');
       if (chaveNorm.length != 44) {
-        throw StateError('Chave de acesso invalida para registro de importacao.');
+        throw StateError(
+          'Chave de acesso invalida para registro de importacao.',
+        );
       }
       final duplicada = _buscarImportacaoPorChave(chaveNorm);
       if (duplicada != null) {
-        final quando = DateFormat('dd/MM/yyyy HH:mm', 'pt_BR')
-            .format(duplicada.dataHoraImportacao.toLocal());
+        final quando = DateFormat(
+          'dd/MM/yyyy HH:mm',
+          'pt_BR',
+        ).format(duplicada.dataHoraImportacao.toLocal());
         throw StateError(
           'Esta NF-e ja foi importada em $quando. A mesma nota nao pode dar entrada duas vezes.',
         );
@@ -380,6 +426,8 @@ class NfeEntradaRepository {
       final fornecedorId = _db.fornecedorNfeBox.put(fornecedor);
       fornecedor.id = fornecedorId;
 
+      final produtosAfetadosCustoMedio = <int>{};
+
       for (final linha in linhas) {
         final fator = linha.fatorConversao;
         if (fator <= 0) {
@@ -392,26 +440,25 @@ class NfeEntradaRepository {
           throw StateError('Unidade interna invalida: $unidade');
         }
 
-        final qtdInterna =
-            (linha.item.quantidadeComercial * fator).round();
+        final qtdInterna = (linha.item.quantidadeComercial * fator).round();
         if (qtdInterna < 0) {
-          throw StateError('Quantidade interna negativa (${linha.item.codigo}).');
+          throw StateError(
+            'Quantidade interna negativa (${linha.item.codigo}).',
+          );
         }
 
         final custoUnitInterno =
             linha.item.valorUnitarioComercial > 0 && fator > 0
-                ? linha.item.valorUnitarioComercial / fator
-                : 0.0;
+            ? linha.item.valorUnitarioComercial / fator
+            : 0.0;
 
-        final nomeFantasiaOuRazao =
-            fornecedor.nomeFantasia.trim().isNotEmpty
-                ? fornecedor.nomeFantasia
-                : fornecedor.razaoSocial;
+        final nomeFantasiaOuRazao = fornecedor.nomeFantasia.trim().isNotEmpty
+            ? fornecedor.nomeFantasia
+            : fornecedor.razaoSocial;
 
         Produto produto;
         if (linha.produtoExistenteId != null) {
-          final existente =
-              _db.produtoBox.get(linha.produtoExistenteId!);
+          final existente = _db.produtoBox.get(linha.produtoExistenteId!);
           if (existente == null) {
             throw StateError(
               'Produto id ${linha.produtoExistenteId} nao encontrado.',
@@ -450,9 +497,10 @@ class NfeEntradaRepository {
           _db.produtoBox.put(produto);
         }
 
-        final vExistente =
-            _buscarVinculo(fornecedor.id, linha.item.codigo);
-        final v = vExistente ?? VinculoFornecedorProduto(
+        final vExistente = _buscarVinculo(fornecedor.id, linha.item.codigo);
+        final v =
+            vExistente ??
+            VinculoFornecedorProduto(
               codigoProdutoFornecedor: linha.item.codigo,
               fatorConversao: fator,
             );
@@ -475,7 +523,26 @@ class NfeEntradaRepository {
         );
         hist.produto.target = produto;
         _db.historicoEntradaBox.put(hist);
+        produtosAfetadosCustoMedio.add(produto.id);
       }
+
+      for (final pid in produtosAfetadosCustoMedio) {
+        final p = _db.produtoBox.get(pid);
+        if (p == null) continue;
+        final cm = calcularCustoMedioPonderadoEntradasNfe(_db, pid);
+        if (cm != null) {
+          p.custoMedio = cm;
+        } else {
+          p.custoMedio = p.precoCusto < 0 ? 0 : p.precoCusto;
+        }
+        _db.produtoBox.put(p);
+      }
+
+      _persistirContasPagarNfeImportada(
+        fornecedorPersistido: fornecedor,
+        chave44: chaveNorm,
+        nfe: nfe,
+      );
 
       final nomeReg = fornecedor.nomeFantasia.trim().isNotEmpty
           ? fornecedor.nomeFantasia.trim()
@@ -495,8 +562,63 @@ class NfeEntradaRepository {
     notificarAlteracaoParaRede();
   }
 
+  /// Lança [ContaPagar] para a NF-e: parcelas do XML ou uma linha à vista (paga).
+  void _persistirContasPagarNfeImportada({
+    required FornecedorNfe fornecedorPersistido,
+    required String chave44,
+    required NfeXmlParseResult nfe,
+  }) {
+    final numeroNotaStr =
+        nfe.numeroNota > 0 ? nfe.numeroNota.toString() : null;
+    final dups = nfe.duplicatas;
+
+    if (dups.isEmpty) {
+      final total = nfe.valorTotalNota;
+      if (total < 0) {
+        throw StateError(
+          'Valor total da NF-e invalido para lancamento financeiro a vista.',
+        );
+      }
+      final conta = ContaPagar(
+        nfeChave: chave44,
+        numeroNota: numeroNotaStr,
+        numeroParcela: '001/001',
+        dataEmissao: nfe.dataEmissao,
+        dataVencimento: nfe.dataEmissao,
+        valorParcela: total,
+        status: ContaPagarStatus.pago,
+        dataPagamento: nfe.dataEmissao,
+        valorPago: total,
+      );
+      conta.fornecedor.target = fornecedorPersistido;
+      _db.contaPagarBox.put(conta);
+      return;
+    }
+
+    for (final d in dups) {
+      if (d.valorParcela <= 0) {
+        throw StateError(
+          'Valor da parcela "${d.numeroParcela}" invalido (esperado > 0).',
+        );
+      }
+      final conta = ContaPagar(
+        nfeChave: chave44,
+        numeroNota: numeroNotaStr,
+        numeroParcela: d.numeroParcela,
+        dataEmissao: nfe.dataEmissao,
+        dataVencimento: d.dataVencimento,
+        valorParcela: d.valorParcela,
+        status: ContaPagarStatus.pendente,
+      );
+      conta.fornecedor.target = fornecedorPersistido;
+      _db.contaPagarBox.put(conta);
+    }
+  }
+
   FornecedorNfe? _buscarFornecedorPorCnpj(String cnpj) {
-    final q = _db.fornecedorNfeBox.query(FornecedorNfe_.cnpj.equals(cnpj)).build();
+    final q = _db.fornecedorNfeBox
+        .query(FornecedorNfe_.cnpj.equals(cnpj))
+        .build();
     try {
       final list = q.find();
       return list.isEmpty ? null : list.first;
@@ -507,7 +629,9 @@ class NfeEntradaRepository {
 
   String _gerarCodigoInterno(NfeXmlParseResult nfe, ItemNotaTemporario item) {
     final chave = nfe.chaveAcesso.replaceAll(RegExp(r'\D'), '');
-    final sufixo = chave.length >= 8 ? chave.substring(chave.length - 8) : chave;
+    final sufixo = chave.length >= 8
+        ? chave.substring(chave.length - 8)
+        : chave;
     final base = 'NFE-$sufixo-${item.numeroItem}';
     if (_codigoInternoLivre(base)) return base;
     var i = 0;
@@ -520,8 +644,9 @@ class NfeEntradaRepository {
   }
 
   bool _codigoInternoLivre(String codigo) {
-    final q =
-        _db.produtoBox.query(Produto_.codigoInterno.equals(codigo)).build();
+    final q = _db.produtoBox
+        .query(Produto_.codigoInterno.equals(codigo))
+        .build();
     try {
       return q.find().isEmpty;
     } finally {
@@ -551,8 +676,9 @@ class NfeEntradaRepository {
   }
 
   bool _produtoTemReferenciasVenda(int produtoId) {
-    final q =
-        _db.itemVendaBox.query(ItemVenda_.produto.equals(produtoId)).build();
+    final q = _db.itemVendaBox
+        .query(ItemVenda_.produto.equals(produtoId))
+        .build();
     try {
       return q.count() > 0;
     } finally {

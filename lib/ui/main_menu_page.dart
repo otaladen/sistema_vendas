@@ -7,14 +7,17 @@ import '../data/cliente_repository.dart';
 import '../data/funcionario_repository.dart';
 import '../data/motorista_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
+import '../data/objectbox.dart';
 import '../data/produto_repository.dart';
 import '../services/lan_sync_server_manager.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/usuario_sistema.dart';
+import '../services/print_service.dart';
 import 'cadastros_page.dart';
 import 'configuracoes_page.dart';
 import 'estoque_page.dart';
+import 'financeiro/contas_pagar_page.dart';
 import 'notas_fiscais_page.dart';
 import 'vendas_page.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
@@ -23,6 +26,7 @@ import 'widgets/hub_nav_button.dart';
 class MainMenuPage extends StatefulWidget {
   const MainMenuPage({
     super.key,
+    required this.objectBox,
     required this.produtoRepository,
     required this.clienteRepository,
     required this.vendaRepository,
@@ -32,8 +36,11 @@ class MainMenuPage extends StatefulWidget {
     required this.usuarioLogado,
     required this.onLogout,
     required this.lanSyncScheduler,
+    required this.appConfigRepository,
+    required this.printService,
   });
 
+  final ObjectBox objectBox;
   final ProdutoRepository produtoRepository;
   final ClienteRepository clienteRepository;
   final VendaRepository vendaRepository;
@@ -43,6 +50,8 @@ class MainMenuPage extends StatefulWidget {
   final UsuarioSistema usuarioLogado;
   final VoidCallback onLogout;
   final LanSyncScheduler lanSyncScheduler;
+  final AppConfigRepository appConfigRepository;
+  final PrintService printService;
 
   @override
   State<MainMenuPage> createState() => _MainMenuPageState();
@@ -53,7 +62,7 @@ class _MainMenuPageState extends State<MainMenuPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final config = await AppConfigRepository().carregarEmpresaConfig();
+      final config = await widget.appConfigRepository.carregarEmpresaConfig();
       if (Platform.isWindows &&
           config.redeModoServidor &&
           config.redeSincronizacaoAtiva) {
@@ -101,6 +110,7 @@ class _MainMenuPageState extends State<MainMenuPage> {
                       funcionarioRepository: widget.funcionarioRepository,
                       motoristaRepository: widget.motoristaRepository,
                       usuarioLogado: widget.usuarioLogado,
+                      printService: widget.printService,
                     ),
                   ),
                 );
@@ -160,6 +170,8 @@ class _MainMenuPageState extends State<MainMenuPage> {
                       clienteRepository: widget.clienteRepository,
                       vendaRepository: widget.vendaRepository,
                       vendedorRepository: widget.vendedorRepository,
+                      appConfigRepository: widget.appConfigRepository,
+                      printService: widget.printService,
                       usuarioAtual: widget.usuarioLogado.login,
                       onLogout: widget.onLogout,
                       podeLeituraParcialCaixa:
@@ -183,6 +195,25 @@ class _MainMenuPageState extends State<MainMenuPage> {
             ),
             const SizedBox(height: 12),
             HubNavButton(
+              icon: Icons.payments_outlined,
+              corDestaque: HubNavColors.menuFinanceiro,
+              titulo: 'Financeiro',
+              habilitado:
+                  widget.usuarioLogado.admin ||
+                  widget.usuarioLogado.podeFinanceiro,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ContasPagarPage(
+                      objectBox: widget.objectBox,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            HubNavButton(
               icon: Icons.settings_outlined,
               corDestaque: HubNavColors.menuConfig,
               titulo: 'Configurações',
@@ -197,6 +228,8 @@ class _MainMenuPageState extends State<MainMenuPage> {
                       vendaRepository: widget.vendaRepository,
                       objectBox: widget.produtoRepository.objectBox,
                       lanSyncScheduler: widget.lanSyncScheduler,
+                      appConfigRepository: widget.appConfigRepository,
+                      printService: widget.printService,
                     ),
                   ),
                 );

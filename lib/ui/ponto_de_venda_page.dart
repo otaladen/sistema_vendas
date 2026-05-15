@@ -23,6 +23,7 @@ import '../model/kit_orcamento.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'produto_detalhe_venda_page.dart';
 
@@ -47,12 +48,16 @@ class PontoDeVendaPage extends StatefulWidget {
     required this.clienteRepository,
     required this.vendaRepository,
     required this.vendedorRepository,
+    required this.appConfigRepository,
+    required this.printService,
   });
 
   final ProdutoRepository produtoRepository;
   final ClienteRepository clienteRepository;
   final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
+  final AppConfigRepository appConfigRepository;
+  final PrintService printService;
 
   @override
   State<PontoDeVendaPage> createState() => _PontoDeVendaPageState();
@@ -66,6 +71,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   /// Altura base por linha; em modo pesquisa em destaque fica mais compacta.
   static const double _alturaLinhaProduto = 56;
   static const double _alturaLinhaProdutoCompacta = 48;
+  static const double _pdvBreakpointLargo = 960;
   final _pesquisaController = TextEditingController();
   final _pesquisaFocus = FocusNode(debugLabel: 'pesquisaPdV');
   final _listaProdutosFocus = FocusNode(debugLabel: 'listaProdutosPdV');
@@ -88,7 +94,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   final _valorFreteController = TextEditingController();
   final _enderecoEntregaController = TextEditingController();
   final _observacaoEntregaController = TextEditingController();
-  final _configRepository = AppConfigRepository();
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   late final KitOrcamentoRepository _kitOrcamentoRepo =
       KitOrcamentoRepository(widget.produtoRepository.objectBox);
@@ -209,7 +214,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   Future<void> _carregarConfiguracaoVendaSemEstoque() async {
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) {
       return;
     }
@@ -2743,7 +2748,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   Future<Uint8List> _gerarOrcamentoPdfBytes(Venda venda) async {
     final cliente = _clienteDaVenda(venda);
-    final empresa = await _configRepository.carregarEmpresaConfig();
+    final empresa = await widget.appConfigRepository.carregarEmpresaConfig();
     final logoBytes = empresa.logoPath.trim().isNotEmpty
         ? await File(
             empresa.logoPath,
@@ -2930,17 +2935,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     return file.path;
   }
 
-  Future<Printer?> _obterImpressoraPadrao(String printerName) async {
-    if (printerName.trim().isEmpty) return null;
-    final printers = await Printing.listPrinters();
-    for (final printer in printers) {
-      if (printer.name == printerName) return printer;
-    }
-    return null;
-  }
-
   Future<void> _mostrarAcoesPdfOrcamento(Venda venda) async {
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     final acao = await showDialog<String>(
       context: context,
@@ -3015,7 +3011,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         return;
       }
       if (acao == 'direto') {
-        final printer = await _obterImpressoraPadrao(config.impressoraPadrao);
+        final printer =
+            await widget.printService.resolverImpressoraPorNome(config.impressoraPadrao);
         if (printer == null) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -3170,6 +3167,270 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     });
   }
 
+  Widget _buildColunaCatalogoPdV(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      decoration: _modoFocoPesquisa
+          ? BoxDecoration(
+              border: Border.all(
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.65),
+                width: 2,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              color: Theme.of(context).colorScheme.surface,
+            )
+          : null,
+      padding: _modoFocoPesquisa
+          ? const EdgeInsets.all(10)
+          : EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _PdvHeaderPesquisa(
+            modoFocoPesquisa: _modoFocoPesquisa,
+            pesquisaFocus: _pesquisaFocus,
+            pesquisaController: _pesquisaController,
+            pesquisaAguardandoDebounce: _pesquisaAguardandoDebounce,
+            mostrarAjudaAtalhos: _mostrarAjudaAtalhos,
+            precoListaRotulo: _rotuloPreco(_precoListaAtivo),
+            quantidadeProdutosLista: _produtos.length,
+            onLimparBusca: () {
+              _pesquisaController.clear();
+              _debouncePesquisa?.cancel();
+              setState(() {
+                _pesquisaAguardandoDebounce = false;
+              });
+              _pesquisar();
+            },
+            onPesquisarIcon: () {
+              _debouncePesquisa?.cancel();
+              setState(() {
+                _pesquisaAguardandoDebounce = false;
+              });
+              _pesquisar(executarAtalhoRapido: true);
+            },
+            onRecarregarProdutos: () {
+              _debouncePesquisa?.cancel();
+              setState(() {
+                _pesquisaAguardandoDebounce = false;
+              });
+              _carregarDadosIniciais();
+            },
+            onChangedCampo: (_) => _agendarPesquisaDebounce(),
+            onSubmittedCampo: (_) =>
+                _pesquisar(executarAtalhoRapido: true),
+            onToggleAjudaAtalhos: () {
+              setState(() {
+                _mostrarAjudaAtalhos = !_mostrarAjudaAtalhos;
+              });
+            },
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: _produtos.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Nenhum produto encontrado.'),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _carregarDadosIniciais,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text(
+                            'Recarregar produtos',
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : Builder(
+                    builder: (context) {
+                      final termoBuscaDestaque =
+                          _PesquisaComando.parse(
+                            _pesquisaController.text,
+                          ).termoBusca;
+                      return Focus(
+                        focusNode: _listaProdutosFocus,
+                        onKeyEvent: _onKeyListaProdutos,
+                        child: ListView.builder(
+                          controller:
+                              _listaProdutosScrollController,
+                          itemExtent: _alturaLinhaListaPdV,
+                          itemCount: _produtos.length,
+                          itemBuilder: (context, index) {
+                            final item = _produtos[index];
+                            final selecionado =
+                                _indiceListaProduto == index;
+                            final precoLinha = _precoPorTipo(
+                              item,
+                              _precoListaAtivo,
+                            );
+                            final scheme = Theme.of(
+                              context,
+                            ).colorScheme;
+                            final critico = _estoqueCritico(item);
+                            final corFundoLista = selecionado
+                                ? scheme.primaryContainer
+                                      .withValues(alpha: 0.55)
+                                : (index.isOdd
+                                      ? scheme.surfaceContainerLow
+                                      : scheme.surface);
+                            return Material(
+                              color: corFundoLista,
+                              child: InkWell(
+                                onTap: () =>
+                                    _mostrarSkuEDescricao(item),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      bottom: BorderSide(
+                                        color: scheme
+                                            .outlineVariant
+                                            .withValues(
+                                              alpha: 0.55,
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: _modoFocoPesquisa
+                                          ? 4
+                                          : 6,
+                                    ),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment
+                                              .center,
+                                      children: [
+                                        Expanded(
+                                          child: RichText(
+                                            maxLines:
+                                                _modoFocoPesquisa
+                                                ? 1
+                                                : 2,
+                                            overflow: TextOverflow
+                                                .ellipsis,
+                                            text: _textoComDestaqueBusca(
+                                              context: context,
+                                              texto: item.nome,
+                                              termoBusca:
+                                                  termoBuscaDestaque,
+                                              estiloBase:
+                                                  Theme.of(
+                                                        context,
+                                                      )
+                                                      .textTheme
+                                                      .bodyMedium ??
+                                                  const TextStyle(),
+                                            ),
+                                          ),
+                                        ),
+                                        Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment
+                                                  .center,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment
+                                                  .end,
+                                          children: [
+                                            Text(
+                                              _formatarMoeda(
+                                                precoLinha,
+                                              ),
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleSmall
+                                                  ?.copyWith(
+                                                    fontWeight:
+                                                        FontWeight
+                                                            .bold,
+                                                  ),
+                                            ),
+                                            Text(
+                                              'Livre: ${item.estoqueLivreParaVenda} · Fis: ${item.estoqueReal} · Res: ${item.estoqueReservado}',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelMedium
+                                                  ?.copyWith(
+                                                    color: critico
+                                                        ? scheme
+                                                              .error
+                                                        : scheme
+                                                              .tertiary,
+                                                    fontWeight:
+                                                        FontWeight
+                                                            .w700,
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
+                                        IconButton(
+                                          tooltip:
+                                              'À Vista ou Atacado, quantidade…',
+                                          visualDensity:
+                                              VisualDensity
+                                                  .compact,
+                                          padding:
+                                              EdgeInsets.zero,
+                                          constraints:
+                                              const BoxConstraints(
+                                                minWidth: 32,
+                                                minHeight: 36,
+                                              ),
+                                          icon: const Icon(
+                                            Icons.tune,
+                                            size: 20,
+                                          ),
+                                          onPressed: () =>
+                                              _adicionarAoOrcamento(
+                                                item,
+                                              ),
+                                        ),
+                                        IconButton(
+                                          tooltip:
+                                              'Adicionar (${_rotuloPreco(_precoListaAtivo)})',
+                                          visualDensity:
+                                              VisualDensity
+                                                  .compact,
+                                          padding:
+                                              EdgeInsets.zero,
+                                          constraints:
+                                              const BoxConstraints(
+                                                minWidth: 36,
+                                                minHeight: 36,
+                                              ),
+                                          icon: const Icon(
+                                            Icons
+                                                .add_shopping_cart_outlined,
+                                          ),
+                                          onPressed: () =>
+                                              _adicionarRapido(
+                                                item,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _rotuloParcela(int parcelas) {
     if (parcelas <= 0) {
       return '1x';
@@ -3294,827 +3555,886 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           ),
           body: Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                    decoration: _modoFocoPesquisa
-                        ? BoxDecoration(
-                            border: Border.all(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.primary.withValues(alpha: 0.65),
-                              width: 2,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                            color: Theme.of(context).colorScheme.surface,
-                          )
-                        : null,
-                    padding: _modoFocoPesquisa
-                        ? const EdgeInsets.all(10)
-                        : EdgeInsets.zero,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final leiauteLargo =
+                    constraints.maxWidth >= _pdvBreakpointLargo;
+                final alturaCorpo = constraints.hasBoundedHeight &&
+                        constraints.maxHeight.isFinite
+                    ? constraints.maxHeight
+                    : MediaQuery.sizeOf(context).height * 0.86;
+                final hCatalogoEmpilhado =
+                    (alturaCorpo * 0.52).clamp(260.0, 540.0);
+                final hCheckoutEmpilhado =
+                    (alturaCorpo * 0.44).clamp(300.0, 620.0);
+
+                Widget checkoutPainel({required bool leiauteEmpilhado}) {
+                  return Opacity(
+                    opacity: _modoFocoPesquisa ? 0.38 : 1,
+                    child: IgnorePointer(
+                      ignoring: _modoFocoPesquisa,
+                      child: _PdvPainelCheckout(
+                        leiauteEmpilhado: leiauteEmpilhado,
+                        keyPainel: _keyPainelCheckoutPdV,
+                        painelCheckoutRecolhido: _painelCheckoutRecolhido,
+                        carrinhoCount: _carrinho.length,
+                        totalResumoColapsado:
+                            _formatarMoeda(_totalGeralComFrete),
+                        onExpandirPainel: () {
+                          setState(() {
+                            if (_modoFocoPesquisa) {
+                              _modoFocoPesquisa = false;
+                              _checkoutExpandidoAntesModoPesquisa = null;
+                            }
+                            _painelCheckoutRecolhido = false;
+                          });
+                        },
+                        orcamentoEmEdicao: _orcamentoEmEdicaoId != null,
+                        orcamentoEmEdicaoNumero:
+                            _orcamentoEmEdicaoNumero?.toString(),
+                        onCancelarEdicaoOrcamento: () {
+                          setState(() {
+                            _orcamentoEmEdicaoId = null;
+                            _orcamentoEmEdicaoNumero = null;
+                          });
+                        },
+                        mostrarDicaAtalhosCarrinho: _carrinho.isNotEmpty,
+                        carrinhoBody: _PdvCarrinhoProdutos(
+                          carrinhoFocus: _carrinhoFocus,
+                          onKeyCarrinho: _onKeyCarrinho,
+                          itens: _carrinho,
+                          indiceLinhaSelecionada: _indiceLinhaCarrinho,
+                          onSelecionarLinha: (index) {
+                            setState(() => _indiceLinhaCarrinho = index);
+                            _carrinhoFocus.requestFocus();
+                          },
+                          rotuloPreco: _rotuloPreco,
+                          formatarMoeda: _formatarMoeda,
+                          onAlterarQuantidade: _alterarQuantidadeCarrinho,
+                          onRemoverItem: _removerItemCarrinho,
+                          onIrPesquisaQuandoVazio: _irParaPesquisaProdutos,
+                        ),
+                        subtotalProdutos: _totalOrcamento,
+                        valorFrete: _valorFreteAtual,
+                        valorDesconto: _valorDescontoReaisPdV(),
+                        descontoConfigAtivo:
+                            _maxDescontoPercentualPdv > 0.004,
+                        totalDestaqueValor:
+                            _maxDescontoPercentualPdv > 0.004
+                                ? _totalLiquidoPagamentoPdV()
+                                : _totalGeralComFrete,
+                        formatarMoeda: _formatarMoeda,
+                        onIrPesquisaProdutos: _irParaPesquisaProdutos,
+                        onRecolherCheckout: () {
+                          setState(() => _painelCheckoutRecolhido = true);
+                        },
+                        focusSalvarOrcamento: _focusSalvarOrcamentoPdV,
+                        onContinuarFechamento: () {
+                          unawaited(_abrirPassoFechamentoVenda());
+                        },
+                        labelBotaoContinuar:
+                            _orcamentoEmEdicaoId != null
+                                ? 'Continuar para atualizar (F10)'
+                                : 'Continuar para salvar (F10)',
+                      ),
+                    ),
+                  );
+                }
+
+                if (leiauteLargo) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: _buildColunaCatalogoPdV(context),
+                      ),
+                      const SizedBox(width: 10),
+                      checkoutPainel(leiauteEmpilhado: false),
+                    ],
+                  );
+                }
+
+                return SingleChildScrollView(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minWidth: constraints.maxWidth,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (_modoFocoPesquisa)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Material(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .primaryContainer
-                                  .withValues(alpha: 0.45),
-                              borderRadius: BorderRadius.circular(8),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.info_outline,
-                                      size: 18,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.primary,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        'Checkout ao fundo. F4 sai deste modo · F6 carrinho · F7 cliente/pagamento.',
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodySmall,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        TextField(
-                          autofocus: true,
-                          focusNode: _pesquisaFocus,
-                          controller: _pesquisaController,
-                          textInputAction: TextInputAction.search,
-                          decoration: InputDecoration(
-                            labelText: _modoFocoPesquisa
-                                ? 'Pesquisar produto (F4 para modo normal)'
-                                : 'Pesquisar produto para venda',
-                            suffixIcon: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: 'Limpar busca',
-                                  onPressed: () {
-                                    _pesquisaController.clear();
-                                    _debouncePesquisa?.cancel();
-                                    setState(() {
-                                      _pesquisaAguardandoDebounce = false;
-                                    });
-                                    _pesquisar();
-                                  },
-                                  icon: const Icon(Icons.clear),
-                                ),
-                                IconButton(
-                                  tooltip: 'Pesquisar',
-                                  onPressed: () {
-                                    _debouncePesquisa?.cancel();
-                                    setState(() {
-                                      _pesquisaAguardandoDebounce = false;
-                                    });
-                                    _pesquisar(executarAtalhoRapido: true);
-                                  },
-                                  icon: const Icon(Icons.search),
-                                ),
-                                IconButton(
-                                  tooltip: 'Recarregar produtos',
-                                  onPressed: () {
-                                    _debouncePesquisa?.cancel();
-                                    setState(() {
-                                      _pesquisaAguardandoDebounce = false;
-                                    });
-                                    _carregarDadosIniciais();
-                                  },
-                                  icon: const Icon(Icons.refresh),
-                                ),
-                                if (_pesquisaAguardandoDebounce)
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: Text(
-                                      'buscando...',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          onChanged: (_) => _agendarPesquisaDebounce(),
-                          onSubmitted: (_) =>
-                              _pesquisar(executarAtalhoRapido: true),
+                        SizedBox(
+                          height: hCatalogoEmpilhado,
+                          child: _buildColunaCatalogoPdV(context),
                         ),
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Preco: ${_rotuloPreco(_precoListaAtivo)} · ${_produtos.length} produtos',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                            TextButton.icon(
-                              onPressed: () {
-                                setState(() {
-                                  _mostrarAjudaAtalhos = !_mostrarAjudaAtalhos;
-                                });
-                              },
-                              icon: Icon(
-                                _mostrarAjudaAtalhos
-                                    ? Icons.keyboard_arrow_up
-                                    : Icons.keyboard_arrow_down,
-                              ),
-                              label: Text(
-                                _mostrarAjudaAtalhos
-                                    ? 'Ocultar atalhos'
-                                    : 'Ajuda de atalhos',
-                              ),
-                            ),
-                          ],
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: hCheckoutEmpilhado,
+                          width: double.infinity,
+                          child: checkoutPainel(leiauteEmpilhado: true),
                         ),
-                        AnimatedCrossFade(
-                          crossFadeState: _mostrarAjudaAtalhos
-                              ? CrossFadeState.showFirst
-                              : CrossFadeState.showSecond,
-                          duration: const Duration(milliseconds: 180),
-                          firstChild: Container(
-                            width: double.infinity,
-                            margin: const EdgeInsets.only(top: 4, bottom: 8),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              'F1–F3 preco · F4 pesquisa em destaque · F5 recarrega · F8 foco na pesquisa · Ctrl+K limpa busca · Enter -> lista · '
-                              'Numpad+ adiciona 1 · F6 carrinho · F7 painel (carrinho e continuar) · Ctrl+O ler venda pendente · '
-                              'F10/Ctrl+S abrir passo de salvar.',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                          secondChild: const SizedBox.shrink(),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Barra superior de pesquisa do PDV (debounce 160 ms permanece no [onChangedCampo] da página).
+class _PdvHeaderPesquisa extends StatelessWidget {
+  const _PdvHeaderPesquisa({
+    required this.modoFocoPesquisa,
+    required this.pesquisaFocus,
+    required this.pesquisaController,
+    required this.pesquisaAguardandoDebounce,
+    required this.mostrarAjudaAtalhos,
+    required this.precoListaRotulo,
+    required this.quantidadeProdutosLista,
+    required this.onLimparBusca,
+    required this.onPesquisarIcon,
+    required this.onRecarregarProdutos,
+    required this.onChangedCampo,
+    required this.onSubmittedCampo,
+    required this.onToggleAjudaAtalhos,
+  });
+
+  final bool modoFocoPesquisa;
+  final FocusNode pesquisaFocus;
+  final TextEditingController pesquisaController;
+  final bool pesquisaAguardandoDebounce;
+  final bool mostrarAjudaAtalhos;
+  final String precoListaRotulo;
+  final int quantidadeProdutosLista;
+  final VoidCallback onLimparBusca;
+  final VoidCallback onPesquisarIcon;
+  final VoidCallback onRecarregarProdutos;
+  final ValueChanged<String> onChangedCampo;
+  final ValueChanged<String> onSubmittedCampo;
+  final VoidCallback onToggleAjudaAtalhos;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (modoFocoPesquisa)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: scheme.primary.withValues(alpha: 0.22),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 18,
+                          color: scheme.primary,
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(width: 8),
                         Expanded(
-                          child: _produtos.isEmpty
-                              ? Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Text('Nenhum produto encontrado.'),
-                                      const SizedBox(height: 8),
-                                      OutlinedButton.icon(
-                                        onPressed: _carregarDadosIniciais,
-                                        icon: const Icon(Icons.refresh),
-                                        label: const Text(
-                                          'Recarregar produtos',
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                              : Builder(
-                                  builder: (context) {
-                                    final termoBuscaDestaque =
-                                        _PesquisaComando.parse(
-                                          _pesquisaController.text,
-                                        ).termoBusca;
-                                    return Focus(
-                                      focusNode: _listaProdutosFocus,
-                                      onKeyEvent: _onKeyListaProdutos,
-                                      child: ListView.builder(
-                                        controller:
-                                            _listaProdutosScrollController,
-                                        itemExtent: _alturaLinhaListaPdV,
-                                        itemCount: _produtos.length,
-                                        itemBuilder: (context, index) {
-                                          final item = _produtos[index];
-                                          final selecionado =
-                                              _indiceListaProduto == index;
-                                          final precoLinha = _precoPorTipo(
-                                            item,
-                                            _precoListaAtivo,
-                                          );
-                                          final scheme = Theme.of(
-                                            context,
-                                          ).colorScheme;
-                                          final critico = _estoqueCritico(item);
-                                          final corFundoLista = selecionado
-                                              ? scheme.primaryContainer
-                                                    .withValues(alpha: 0.55)
-                                              : (index.isOdd
-                                                    ? scheme.surfaceContainerLow
-                                                    : scheme.surface);
-                                          return Material(
-                                            color: corFundoLista,
-                                            child: InkWell(
-                                              onTap: () =>
-                                                  _mostrarSkuEDescricao(item),
-                                              child: DecoratedBox(
-                                                decoration: BoxDecoration(
-                                                  border: Border(
-                                                    bottom: BorderSide(
-                                                      color: scheme
-                                                          .outlineVariant
-                                                          .withValues(
-                                                            alpha: 0.55,
-                                                          ),
-                                                    ),
-                                                  ),
-                                                ),
-                                                child: Padding(
-                                                  padding: EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: _modoFocoPesquisa
-                                                        ? 4
-                                                        : 6,
-                                                  ),
-                                                  child: Row(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .center,
-                                                    children: [
-                                                      Expanded(
-                                                        child: RichText(
-                                                          maxLines:
-                                                              _modoFocoPesquisa
-                                                              ? 1
-                                                              : 2,
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
-                                                          text: _textoComDestaqueBusca(
-                                                            context: context,
-                                                            texto: item.nome,
-                                                            termoBusca:
-                                                                termoBuscaDestaque,
-                                                            estiloBase:
-                                                                Theme.of(
-                                                                      context,
-                                                                    )
-                                                                    .textTheme
-                                                                    .bodyMedium ??
-                                                                const TextStyle(),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      Column(
-                                                        mainAxisAlignment:
-                                                            MainAxisAlignment
-                                                                .center,
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .end,
-                                                        children: [
-                                                          Text(
-                                                            _formatarMoeda(
-                                                              precoLinha,
-                                                            ),
-                                                            style: Theme.of(context)
-                                                                .textTheme
-                                                                .titleSmall
-                                                                ?.copyWith(
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                ),
-                                                          ),
-                                                          Text(
-                                                            'Livre: ${item.estoqueLivreParaVenda} · Fis: ${item.estoqueReal} · Res: ${item.estoqueReservado}',
-                                                            style: Theme.of(context)
-                                                                .textTheme
-                                                                .labelMedium
-                                                                ?.copyWith(
-                                                                  color: critico
-                                                                      ? scheme
-                                                                            .error
-                                                                      : scheme
-                                                                            .tertiary,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w700,
-                                                                ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                      IconButton(
-                                                        tooltip:
-                                                            'À Vista ou Atacado, quantidade…',
-                                                        visualDensity:
-                                                            VisualDensity
-                                                                .compact,
-                                                        padding:
-                                                            EdgeInsets.zero,
-                                                        constraints:
-                                                            const BoxConstraints(
-                                                              minWidth: 32,
-                                                              minHeight: 36,
-                                                            ),
-                                                        icon: const Icon(
-                                                          Icons.tune,
-                                                          size: 20,
-                                                        ),
-                                                        onPressed: () =>
-                                                            _adicionarAoOrcamento(
-                                                              item,
-                                                            ),
-                                                      ),
-                                                      IconButton(
-                                                        tooltip:
-                                                            'Adicionar (${_rotuloPreco(_precoListaAtivo)})',
-                                                        visualDensity:
-                                                            VisualDensity
-                                                                .compact,
-                                                        padding:
-                                                            EdgeInsets.zero,
-                                                        constraints:
-                                                            const BoxConstraints(
-                                                              minWidth: 36,
-                                                              minHeight: 36,
-                                                            ),
-                                                        icon: const Icon(
-                                                          Icons
-                                                              .add_shopping_cart_outlined,
-                                                        ),
-                                                        onPressed: () =>
-                                                            _adicionarRapido(
-                                                              item,
-                                                            ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    );
-                                  },
-                                ),
+                          child: Text(
+                            'Checkout ao fundo. F4 sai deste modo · F6 carrinho · F7 cliente/pagamento.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Opacity(
-                  opacity: _modoFocoPesquisa ? 0.38 : 1,
-                  child: IgnorePointer(
-                    ignoring: _modoFocoPesquisa,
-                    child: AnimatedContainer(
-                      key: _keyPainelCheckoutPdV,
-                      duration: const Duration(milliseconds: 180),
-                      curve: Curves.easeOut,
-                      width: _painelCheckoutRecolhido ? 64 : 470,
-                      child: _painelCheckoutRecolhido
-                          ? Card(
-                              child: Column(
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Expandir checkout',
-                                    onPressed: () {
-                                      setState(() {
-                                        if (_modoFocoPesquisa) {
-                                          _modoFocoPesquisa = false;
-                                          _checkoutExpandidoAntesModoPesquisa =
-                                              null;
-                                        }
-                                        _painelCheckoutRecolhido = false;
-                                      });
-                                    },
-                                    icon: const Icon(Icons.chevron_left),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    '${_carrinho.length}',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleMedium,
-                                  ),
-                                  Text(
-                                    'itens',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
-                                  ),
-                                  const Divider(height: 20),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                    ),
-                                    child: Text(
-                                      _formatarMoeda(_totalGeralComFrete),
-                                      textAlign: TextAlign.center,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : Card(
-                              child: Theme(
-                                data: Theme.of(context).copyWith(
-                                  visualDensity: VisualDensity.compact,
-                                  inputDecorationTheme: Theme.of(context)
-                                      .inputDecorationTheme
-                                      .copyWith(
-                                        isDense: true,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 10,
-                                            ),
-                                      ),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(10),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              'Venda em atendimento',
-                                              style: Theme.of(
-                                                context,
-                                              ).textTheme.titleMedium,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            tooltip:
-                                                'Pesquisar produto — foco no campo à esquerda',
-                                            onPressed: _irParaPesquisaProdutos,
-                                            icon: const Icon(Icons.search),
-                                          ),
-                                          IconButton(
-                                            tooltip: 'Recolher checkout',
-                                            onPressed: () {
-                                              setState(() {
-                                                _painelCheckoutRecolhido = true;
-                                              });
-                                            },
-                                            icon: const Icon(
-                                              Icons.chevron_right,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      if (_orcamentoEmEdicaoId != null)
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: 8,
-                                          ),
-                                          child: Row(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  'Editando venda ${_orcamentoEmEdicaoNumero ?? '-'}',
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .labelLarge
-                                                      ?.copyWith(
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        color: Theme.of(
-                                                          context,
-                                                        ).colorScheme.primary,
-                                                      ),
-                                                ),
-                                              ),
-                                              TextButton(
-                                                onPressed: () {
-                                                  setState(() {
-                                                    _orcamentoEmEdicaoId = null;
-                                                    _orcamentoEmEdicaoNumero =
-                                                        null;
-                                                  });
-                                                },
-                                                child: const Text(
-                                                  'Cancelar edicao',
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      if (_carrinho.isNotEmpty)
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: 4,
-                                          ),
-                                          child: Text(
-                                            'F6 foca aqui · F8 pesquisa · ↑↓ quantidade · Ctrl+↑↓ linha · Del remove · Numpad ± quantidade',
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.bodySmall,
-                                          ),
-                                        ),
-                                      const SizedBox(height: 6),
-                                      Expanded(
-                                        child: _carrinho.isEmpty
-                                            ? Center(
-                                                child: Padding(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 16,
-                                                      ),
-                                                  child: Column(
-                                                    mainAxisAlignment:
-                                                        MainAxisAlignment
-                                                            .center,
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: [
-                                                      Icon(
-                                                        Icons
-                                                            .shopping_cart_outlined,
-                                                        size: 44,
-                                                        color: Theme.of(
-                                                          context,
-                                                        ).colorScheme.outline,
-                                                      ),
-                                                      const SizedBox(
-                                                        height: 12,
-                                                      ),
-                                                      Text(
-                                                        'Nenhum item na venda.',
-                                                        textAlign:
-                                                            TextAlign.center,
-                                                        style: Theme.of(
-                                                          context,
-                                                        ).textTheme.titleSmall,
-                                                      ),
-                                                      const SizedBox(
-                                                        height: 16,
-                                                      ),
-                                                      FilledButton.icon(
-                                                        onPressed:
-                                                            _irParaPesquisaProdutos,
-                                                        icon: const Icon(
-                                                          Icons.search,
-                                                        ),
-                                                        label: const Text(
-                                                          'Pesquisar produto para venda',
-                                                        ),
-                                                      ),
-                                                      const SizedBox(
-                                                        height: 10,
-                                                      ),
-                                                      Text(
-                                                        'Atalho: F8',
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .labelSmall
-                                                            ?.copyWith(
-                                                              color:
-                                                                  Theme.of(
-                                                                        context,
-                                                                      )
-                                                                      .colorScheme
-                                                                      .outline,
-                                                            ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              )
-                                            : Focus(
-                                                focusNode: _carrinhoFocus,
-                                                onKeyEvent: _onKeyCarrinho,
-                                                child: ListView.separated(
-                                                  itemCount: _carrinho.length,
-                                                  separatorBuilder: (_, _) =>
-                                                      const Divider(
-                                                        height: 1,
-                                                        thickness: 1,
-                                                      ),
-                                                  itemBuilder: (context, index) {
-                                                    final item =
-                                                        _carrinho[index];
-                                                    final theme = Theme.of(
-                                                      context,
-                                                    );
-                                                    return Semantics(
-                                                      container: true,
-                                                      label:
-                                                          '${item.produto.nome}, ${_rotuloPreco(item.precoTipo)}, quantidade ${item.quantidade}',
-                                                      child: ListTile(
-                                                        selected:
-                                                            _indiceLinhaCarrinho ==
-                                                            index,
-                                                        selectedTileColor: theme
-                                                            .colorScheme
-                                                            .primaryContainer
-                                                            .withValues(
-                                                              alpha: 0.35,
-                                                            ),
-                                                        onTap: () {
-                                                          setState(
-                                                            () =>
-                                                                _indiceLinhaCarrinho =
-                                                                    index,
-                                                          );
-                                                          _carrinhoFocus
-                                                              .requestFocus();
-                                                        },
-                                                        contentPadding:
-                                                            const EdgeInsets.symmetric(
-                                                              horizontal: 8,
-                                                              vertical: 2,
-                                                            ),
-                                                        dense: true,
-                                                        visualDensity:
-                                                            VisualDensity
-                                                                .compact,
-                                                        title: Text(
-                                                          item.produto.nome,
-                                                          maxLines: 2,
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
-                                                          style: theme
-                                                              .textTheme
-                                                              .bodyLarge,
-                                                        ),
-                                                        subtitle: Text(
-                                                          '${_rotuloPreco(item.precoTipo)} · ${_formatarMoeda(item.precoUnitario)} / un · subtotal ${_formatarMoeda(item.subtotal)}',
-                                                          maxLines: 2,
-                                                        ),
-                                                        trailing: Row(
-                                                          mainAxisSize:
-                                                              MainAxisSize.min,
-                                                          children: [
-                                                            IconButton(
-                                                              tooltip:
-                                                                  'Diminuir',
-                                                              visualDensity:
-                                                                  VisualDensity
-                                                                      .compact,
-                                                              style: IconButton.styleFrom(
-                                                                backgroundColor: theme
-                                                                    .colorScheme
-                                                                    .surfaceContainerHighest,
-                                                                tapTargetSize:
-                                                                    MaterialTapTargetSize
-                                                                        .shrinkWrap,
-                                                                padding:
-                                                                    const EdgeInsets.all(
-                                                                      6,
-                                                                    ),
-                                                              ),
-                                                              icon: const Icon(
-                                                                Icons.remove,
-                                                                size: 20,
-                                                              ),
-                                                              onPressed: () =>
-                                                                  _alterarQuantidadeCarrinho(
-                                                                    index,
-                                                                    -1,
-                                                                  ),
-                                                            ),
-                                                            Padding(
-                                                              padding:
-                                                                  const EdgeInsets.symmetric(
-                                                                    horizontal:
-                                                                        6,
-                                                                  ),
-                                                              child: Text(
-                                                                '${item.quantidade}',
-                                                                style: theme
-                                                                    .textTheme
-                                                                    .titleMedium
-                                                                    ?.copyWith(
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w600,
-                                                                    ),
-                                                              ),
-                                                            ),
-                                                            IconButton(
-                                                              tooltip:
-                                                                  'Aumentar',
-                                                              visualDensity:
-                                                                  VisualDensity
-                                                                      .compact,
-                                                              style: IconButton.styleFrom(
-                                                                backgroundColor: theme
-                                                                    .colorScheme
-                                                                    .surfaceContainerHighest,
-                                                                tapTargetSize:
-                                                                    MaterialTapTargetSize
-                                                                        .shrinkWrap,
-                                                                padding:
-                                                                    const EdgeInsets.all(
-                                                                      6,
-                                                                    ),
-                                                              ),
-                                                              icon: const Icon(
-                                                                Icons.add,
-                                                                size: 20,
-                                                              ),
-                                                              onPressed: () =>
-                                                                  _alterarQuantidadeCarrinho(
-                                                                    index,
-                                                                    1,
-                                                                  ),
-                                                            ),
-                                                            IconButton(
-                                                              tooltip:
-                                                                  'Remover item',
-                                                              visualDensity:
-                                                                  VisualDensity
-                                                                      .compact,
-                                                              style: IconButton.styleFrom(
-                                                                foregroundColor:
-                                                                    theme
-                                                                        .colorScheme
-                                                                        .error,
-                                                                tapTargetSize:
-                                                                    MaterialTapTargetSize
-                                                                        .shrinkWrap,
-                                                                padding:
-                                                                    const EdgeInsets.all(
-                                                                      6,
-                                                                    ),
-                                                              ),
-                                                              icon: const Icon(
-                                                                Icons
-                                                                    .delete_outline,
-                                                                size: 22,
-                                                              ),
-                                                              onPressed: () =>
-                                                                  _removerItemCarrinho(
-                                                                    index,
-                                                                  ),
-                                                            ),
-                                                          ],
-                                                        ),
-                                                      ),
-                                                    );
-                                                  },
-                                                ),
-                                              ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      SizedBox(
-                                        width: double.infinity,
-                                        child: Focus(
-                                          focusNode: _focusSalvarOrcamentoPdV,
-                                          child: FilledButton.icon(
-                                            onPressed:
-                                                _abrirPassoFechamentoVenda,
-                                            icon: const Icon(
-                                              Icons.arrow_forward,
-                                            ),
-                                            label: Text(
-                                              _orcamentoEmEdicaoId != null
-                                                  ? 'Continuar para atualizar (F10)'
-                                                  : 'Continuar para salvar (F10)',
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
+              ),
+            TextField(
+              autofocus: true,
+              focusNode: pesquisaFocus,
+              controller: pesquisaController,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: scheme.surface.withValues(alpha: 0.92),
+                labelText: modoFocoPesquisa
+                    ? 'Pesquisar produto (F4 para modo normal)'
+                    : 'Pesquisar produto para venda',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Limpar busca',
+                      onPressed: onLimparBusca,
+                      icon: const Icon(Icons.clear),
                     ),
+                    IconButton(
+                      tooltip: 'Pesquisar',
+                      onPressed: onPesquisarIcon,
+                      icon: const Icon(Icons.search),
+                    ),
+                    IconButton(
+                      tooltip: 'Recarregar produtos',
+                      onPressed: onRecarregarProdutos,
+                      icon: const Icon(Icons.refresh),
+                    ),
+                    if (pesquisaAguardandoDebounce)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Text(
+                          'buscando...',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              onChanged: onChangedCampo,
+              onSubmitted: onSubmittedCampo,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Preco: $precoListaRotulo · $quantidadeProdutosLista produtos',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: onToggleAjudaAtalhos,
+                  icon: Icon(
+                    mostrarAjudaAtalhos
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                  ),
+                  label: Text(
+                    mostrarAjudaAtalhos
+                        ? 'Ocultar atalhos'
+                        : 'Ajuda de atalhos',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            AnimatedCrossFade(
+              crossFadeState: mostrarAjudaAtalhos
+                  ? CrossFadeState.showFirst
+                  : CrossFadeState.showSecond,
+              duration: const Duration(milliseconds: 180),
+              firstChild: Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 4),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest.withValues(
+                      alpha: 0.75,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: scheme.outlineVariant.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    child: Text(
+                      'F1–F3 preco · F4 pesquisa em destaque · F5 recarrega · F8 foco na pesquisa · Ctrl+K limpa busca · Enter -> lista · '
+                      'Numpad+ adiciona 1 · F6 carrinho · F7 painel (carrinho e continuar) · Ctrl+O ler venda pendente · '
+                      'F10/Ctrl+S abrir passo de salvar.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ),
+              ),
+              secondChild: const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Lista do carrinho do PDV (foco F6, setas, exclusão — lógica nos callbacks da página).
+class _PdvCarrinhoProdutos extends StatelessWidget {
+  const _PdvCarrinhoProdutos({
+    required this.carrinhoFocus,
+    required this.onKeyCarrinho,
+    required this.itens,
+    required this.indiceLinhaSelecionada,
+    required this.onSelecionarLinha,
+    required this.rotuloPreco,
+    required this.formatarMoeda,
+    required this.onAlterarQuantidade,
+    required this.onRemoverItem,
+    required this.onIrPesquisaQuandoVazio,
+  });
+
+  final FocusNode carrinhoFocus;
+  final KeyEventResult Function(FocusNode, KeyEvent) onKeyCarrinho;
+  final List<_OrcamentoItemDraft> itens;
+  final int? indiceLinhaSelecionada;
+  final void Function(int index) onSelecionarLinha;
+  final String Function(String) rotuloPreco;
+  final String Function(double) formatarMoeda;
+  final void Function(int index, int delta) onAlterarQuantidade;
+  final void Function(int index) onRemoverItem;
+  final VoidCallback onIrPesquisaQuandoVazio;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    if (itens.isEmpty) {
+      return Center(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.3),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.shopping_cart_outlined,
+                  size: 44,
+                  color: scheme.outline,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Nenhum item na venda.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleSmall,
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: onIrPesquisaQuandoVazio,
+                  icon: const Icon(Icons.search),
+                  label: const Text('Pesquisar produto para venda'),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Atalho: F8',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.outline,
                   ),
                 ),
               ],
             ),
           ),
         ),
+      );
+    }
+
+    return Focus(
+      focusNode: carrinhoFocus,
+      onKeyEvent: onKeyCarrinho,
+      child: ListView.builder(
+        padding: const EdgeInsets.only(bottom: 4),
+        itemCount: itens.length,
+        itemBuilder: (context, index) {
+          final item = itens[index];
+          final selecionado = indiceLinhaSelecionada == index;
+          final bg = selecionado
+              ? scheme.primaryContainer.withValues(alpha: 0.42)
+              : scheme.surfaceContainerHighest.withValues(alpha: 0.28);
+          final borda = selecionado
+              ? scheme.primary.withValues(alpha: 0.35)
+              : scheme.outlineVariant.withValues(alpha: 0.22);
+
+          return Padding(
+            padding: EdgeInsets.only(bottom: index < itens.length - 1 ? 6 : 0),
+            child: Semantics(
+              container: true,
+              label:
+                  '${item.produto.nome}, ${rotuloPreco(item.precoTipo)}, quantidade ${item.quantidade}',
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => onSelecionarLinha(index),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: bg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: borda),
+                      boxShadow: selecionado
+                          ? [
+                              BoxShadow(
+                                color: scheme.primary.withValues(alpha: 0.12),
+                                blurRadius: 6,
+                                offset: const Offset(0, 1),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.produto.nome,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${rotuloPreco(item.precoTipo)} · ${formatarMoeda(item.precoUnitario)} / un · subtotal ${formatarMoeda(item.subtotal)}',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              IconButton(
+                                tooltip: 'Diminuir',
+                                visualDensity: VisualDensity.compact,
+                                style: IconButton.styleFrom(
+                                  backgroundColor: scheme.surface
+                                      .withValues(alpha: 0.9),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  padding: const EdgeInsets.all(6),
+                                ),
+                                icon: const Icon(Icons.remove, size: 20),
+                                onPressed: () =>
+                                    onAlterarQuantidade(index, -1),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                                child: Text(
+                                  '${item.quantidade}',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Aumentar',
+                                visualDensity: VisualDensity.compact,
+                                style: IconButton.styleFrom(
+                                  backgroundColor: scheme.surface
+                                      .withValues(alpha: 0.9),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  padding: const EdgeInsets.all(6),
+                                ),
+                                icon: const Icon(Icons.add, size: 20),
+                                onPressed: () =>
+                                    onAlterarQuantidade(index, 1),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                tooltip: 'Remover item',
+                                visualDensity: VisualDensity.compact,
+                                style: IconButton.styleFrom(
+                                  foregroundColor: scheme.error,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  padding: const EdgeInsets.all(6),
+                                ),
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 22,
+                                ),
+                                onPressed: () => onRemoverItem(index),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
+    );
+  }
+}
+
+/// Painel lateral de checkout (colapsável, carrinho, totais na base, continuar).
+class _PdvPainelCheckout extends StatelessWidget {
+  const _PdvPainelCheckout({
+    required this.leiauteEmpilhado,
+    required this.keyPainel,
+    required this.painelCheckoutRecolhido,
+    required this.carrinhoCount,
+    required this.totalResumoColapsado,
+    required this.onExpandirPainel,
+    required this.orcamentoEmEdicao,
+    required this.orcamentoEmEdicaoNumero,
+    required this.onCancelarEdicaoOrcamento,
+    required this.mostrarDicaAtalhosCarrinho,
+    required this.carrinhoBody,
+    required this.subtotalProdutos,
+    required this.valorFrete,
+    required this.valorDesconto,
+    required this.descontoConfigAtivo,
+    required this.totalDestaqueValor,
+    required this.formatarMoeda,
+    required this.onIrPesquisaProdutos,
+    required this.onRecolherCheckout,
+    required this.focusSalvarOrcamento,
+    required this.onContinuarFechamento,
+    required this.labelBotaoContinuar,
+  });
+
+  /// Em coluna (telas estreitas), o painel ignora recolhimento e usa largura total.
+  final bool leiauteEmpilhado;
+  final GlobalKey keyPainel;
+  final bool painelCheckoutRecolhido;
+  final int carrinhoCount;
+  final String totalResumoColapsado;
+  final VoidCallback onExpandirPainel;
+  final bool orcamentoEmEdicao;
+  final String? orcamentoEmEdicaoNumero;
+  final VoidCallback onCancelarEdicaoOrcamento;
+  final bool mostrarDicaAtalhosCarrinho;
+  final Widget carrinhoBody;
+  final double subtotalProdutos;
+  final double valorFrete;
+  final double valorDesconto;
+  final bool descontoConfigAtivo;
+  final double totalDestaqueValor;
+  final String Function(double) formatarMoeda;
+  final VoidCallback onIrPesquisaProdutos;
+  final VoidCallback onRecolherCheckout;
+  final FocusNode focusSalvarOrcamento;
+  final VoidCallback onContinuarFechamento;
+  final String labelBotaoContinuar;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final efetivamenteRecolhido =
+        painelCheckoutRecolhido && !leiauteEmpilhado;
+    return AnimatedContainer(
+      key: keyPainel,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      width: leiauteEmpilhado
+          ? double.infinity
+          : (efetivamenteRecolhido ? 64 : 470),
+      child: efetivamenteRecolhido
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.35),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  IconButton(
+                    tooltip: 'Expandir checkout',
+                    onPressed: onExpandirPainel,
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$carrinhoCount',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  Text(
+                    'itens',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  Divider(
+                    height: 20,
+                    color: scheme.outlineVariant.withValues(alpha: 0.45),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text(
+                      totalResumoColapsado,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.35),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.045),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Theme(
+                data: Theme.of(context).copyWith(
+                  visualDensity: VisualDensity.compact,
+                  inputDecorationTheme: Theme.of(context).inputDecorationTheme
+                      .copyWith(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                      ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Venda em atendimento',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip:
+                                'Pesquisar produto — foco no campo à esquerda',
+                            onPressed: onIrPesquisaProdutos,
+                            icon: const Icon(Icons.search),
+                          ),
+                          if (!leiauteEmpilhado)
+                            IconButton(
+                              tooltip: 'Recolher checkout',
+                              onPressed: onRecolherCheckout,
+                              icon: const Icon(Icons.chevron_right),
+                            ),
+                        ],
+                      ),
+                      if (orcamentoEmEdicao)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Editando venda ${orcamentoEmEdicaoNumero ?? '-'}',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelLarge
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: scheme.primary,
+                                      ),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: onCancelarEdicaoOrcamento,
+                                child: const Text('Cancelar edicao'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (mostrarDicaAtalhosCarrinho)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            'F6 foca aqui · F8 pesquisa · ↑↓ quantidade · Ctrl+↑↓ linha · Del remove · Numpad ± quantidade',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      const SizedBox(height: 6),
+                      Expanded(child: carrinhoBody),
+                      const SizedBox(height: 10),
+                      _PdvCheckoutTotaisBase(
+                        scheme: scheme,
+                        subtotal: subtotalProdutos,
+                        frete: valorFrete,
+                        desconto: valorDesconto,
+                        descontoConfigAtivo: descontoConfigAtivo,
+                        totalDestaque: totalDestaqueValor,
+                        formatarMoeda: formatarMoeda,
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: Focus(
+                          focusNode: focusSalvarOrcamento,
+                          child: FilledButton.icon(
+                            onPressed: onContinuarFechamento,
+                            icon: const Icon(Icons.arrow_forward),
+                            label: Text(labelBotaoContinuar),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+class _PdvCheckoutTotaisBase extends StatelessWidget {
+  const _PdvCheckoutTotaisBase({
+    required this.scheme,
+    required this.subtotal,
+    required this.frete,
+    required this.desconto,
+    required this.descontoConfigAtivo,
+    required this.totalDestaque,
+    required this.formatarMoeda,
+  });
+
+  final ColorScheme scheme;
+  final double subtotal;
+  final double frete;
+  final double desconto;
+  final bool descontoConfigAtivo;
+  final double totalDestaque;
+  final String Function(double) formatarMoeda;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mostrarDesconto = descontoConfigAtivo && desconto > 0.004;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _linha(theme, 'Subtotal', formatarMoeda(subtotal)),
+            const SizedBox(height: 4),
+            _linha(theme, 'Frete', formatarMoeda(frete)),
+            if (mostrarDesconto) ...[
+              const SizedBox(height: 4),
+              _linha(
+                theme,
+                'Desconto',
+                '- ${formatarMoeda(desconto)}',
+                valorCor: scheme.primary,
+              ),
+            ],
+            const SizedBox(height: 12),
+            Text(
+              descontoConfigAtivo ? 'Total a pagar (caixa)' : 'Total geral',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              formatarMoeda(totalDestaque),
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                fontSize: 28,
+                height: 1.1,
+                color: scheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _linha(
+    ThemeData theme,
+    String rotulo,
+    String valor, {
+    Color? valorCor,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          rotulo,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        Text(
+          valor,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: valorCor,
+          ),
+        ),
+      ],
     );
   }
 }

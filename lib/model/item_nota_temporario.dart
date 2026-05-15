@@ -36,6 +36,24 @@ class EmitenteNfeTemporario {
   final String nomeFantasia;
 }
 
+/// Duplicata extraída de `<cobr><dup>` no XML da NF-e.
+class NfeDuplicataXml {
+  const NfeDuplicataXml({
+    required this.numeroParcela,
+    required this.dataVencimento,
+    required this.valorParcela,
+  });
+
+  /// Conteúdo de `nDup` (ex.: `001/003` ou `001`).
+  final String numeroParcela;
+
+  /// Conteúdo de `dVenc` (apenas calendário, armazenado em UTC meia-noite).
+  final DateTime dataVencimento;
+
+  /// Conteúdo de `vDup`.
+  final double valorParcela;
+}
+
 /// Resultado do parse da NF-e (antes da conferencia / persistencia).
 class NfeXmlParseResult {
   const NfeXmlParseResult({
@@ -44,6 +62,8 @@ class NfeXmlParseResult {
     required this.dataEmissao,
     required this.emitente,
     required this.itens,
+    required this.duplicatas,
+    required this.valorTotalNota,
   });
 
   final String chaveAcesso;
@@ -51,4 +71,10 @@ class NfeXmlParseResult {
   final DateTime dataEmissao;
   final EmitenteNfeTemporario emitente;
   final List<ItemNotaTemporario> itens;
+
+  /// Parcelas de `<cobr><dup>`. Vazia se não houver `cobr` ou nenhuma `dup` válida.
+  final List<NfeDuplicataXml> duplicatas;
+
+  /// Valor total da nota (`total/ICMSTot/vNF` ou soma dos itens como fallback).
+  final double valorTotalNota;
 }

@@ -20,6 +20,7 @@ import '../model/cliente.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../services/cupom_nao_fiscal_venda_pdf.dart';
+import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
@@ -33,6 +34,8 @@ class ListagemVendasPage extends StatefulWidget {
     required this.clienteRepository,
     required this.vendedorRepository,
     required this.produtoRepository,
+    required this.appConfigRepository,
+    required this.printService,
     required this.usuarioAtual,
     required this.podeCancelarVendas,
   });
@@ -41,6 +44,8 @@ class ListagemVendasPage extends StatefulWidget {
   final ClienteRepository clienteRepository;
   final VendedorRepository vendedorRepository;
   final ProdutoRepository produtoRepository;
+  final AppConfigRepository appConfigRepository;
+  final PrintService printService;
   final String usuarioAtual;
   final bool podeCancelarVendas;
 
@@ -56,7 +61,6 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   final DateFormat _dataDia = DateFormat('dd/MM/yyyy');
   final _buscaController = TextEditingController();
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
-  final AppConfigRepository _configRepository = AppConfigRepository();
 
   String _periodoPreset = 'ultimos_30';
   DateTime? _dataPersonalizadaInicio;
@@ -529,13 +533,14 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       _usuarioRepository,
     );
     if (!mounted || !autorizado) return;
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     final infer = CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(v);
     final nomeArquivo =
         'venda_${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}_2via.pdf';
     await mostrarFluxoImpressaoCupomVenda(
       context,
+      printService: widget.printService,
       config: config,
       title: 'Segunda via do cupom',
       content: 'Deseja imprimir ou gerar PDF da segunda via?',

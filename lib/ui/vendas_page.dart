@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../data/app_config_repository.dart';
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../data/motorista_repository.dart';
+import '../services/print_service.dart';
 import 'caixa_page.dart';
 import 'entregas_page.dart';
 import 'listagem_vendas_page.dart';
@@ -27,6 +29,8 @@ class VendasPage extends StatelessWidget {
     required this.vendaRepository,
     required this.vendedorRepository,
     required this.motoristaRepository,
+    required this.appConfigRepository,
+    required this.printService,
     required this.usuarioAtual,
     required this.onLogout,
     required this.podeLeituraParcialCaixa,
@@ -40,6 +44,8 @@ class VendasPage extends StatelessWidget {
   final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
   final MotoristaRepository motoristaRepository;
+  final AppConfigRepository appConfigRepository;
+  final PrintService printService;
   final String usuarioAtual;
   final VoidCallback onLogout;
   final bool podeLeituraParcialCaixa;
@@ -74,6 +80,8 @@ class VendasPage extends StatelessWidget {
                       clienteRepository: clienteRepository,
                       vendaRepository: vendaRepository,
                       vendedorRepository: vendedorRepository,
+                      appConfigRepository: appConfigRepository,
+                      printService: printService,
                     ),
                   ),
                 );
@@ -93,6 +101,8 @@ class VendasPage extends StatelessWidget {
                       produtoRepository: produtoRepository,
                       vendaRepository: vendaRepository,
                       vendedorRepository: vendedorRepository,
+                      appConfigRepository: appConfigRepository,
+                      printService: printService,
                       usuarioAtual: usuarioAtual,
                       podeLeituraParcialCaixa: podeLeituraParcialCaixa,
                       podeManutencaoAuditoriaCaixa:
@@ -137,6 +147,8 @@ class VendasPage extends StatelessWidget {
                       clienteRepository: clienteRepository,
                       vendedorRepository: vendedorRepository,
                       produtoRepository: produtoRepository,
+                      appConfigRepository: appConfigRepository,
+                      printService: printService,
                       usuarioAtual: usuarioAtual,
                       podeCancelarVendas: podeCancelarVendas,
                     ),

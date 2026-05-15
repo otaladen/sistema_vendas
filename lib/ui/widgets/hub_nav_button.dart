@@ -6,6 +6,7 @@ abstract final class HubNavColors {
   static const menuEstoque = Color(0xFFE65100);
   static const menuNotasFiscais = Color(0xFF00838F);
   static const menuVendas = Color(0xFF2E7D32);
+  static const menuFinanceiro = Color(0xFF455A64);
   static const menuConfig = Color(0xFF6A1B9A);
 }
 

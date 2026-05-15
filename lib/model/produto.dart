@@ -31,8 +31,8 @@ class Produto {
     required this.precoVenda,
     DateTime? criadoEm,
     this.ativo = true,
-  })  : estoqueReal = estoqueReal ?? estoque ?? 0,
-        criadoEm = criadoEm ?? DateTime.now();
+  }) : estoqueReal = estoqueReal ?? estoque ?? 0,
+       criadoEm = criadoEm ?? DateTime.now();
 
   @Id()
   int id;
@@ -63,7 +63,9 @@ class Produto {
   int estoqueReservado;
   int quantidadeMinima;
   double precoCusto;
-  /// Custo medio de movimentacao (ex.: importacao Paradox TabEst1 / CustoMedio).
+
+  /// Custo medio ponderado pelas entradas de NF-e (importacao / sync).
+  /// Sem movimentacao de entrada, permanece alinhado ao [precoCusto] para exibicao em relatorios.
   double custoMedio;
   double preco1;
   double preco2;
@@ -76,6 +78,7 @@ class Produto {
     }
     return ((precoVenda - precoCusto) / precoCusto) * 100;
   }
+
   double get margemLucroPercentual {
     if (precoVenda <= 0) {
       return 0;

@@ -55,6 +55,25 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   bool _confirmando = false;
 
   static final NumberFormat _nfQtd = NumberFormat('#,##0.###', 'pt_BR');
+  static final NumberFormat _nfMoeda = NumberFormat('#,##0.00', 'pt_BR');
+
+  static const Color _custoAumentoFg = Color(0xFFB91C1C);
+  static const Color _custoQuedaFg = Color(0xFF15803D);
+  static const Color _chipEanBg = Color(0xFFE8F5E9);
+  static const Color _chipEanFg = Color(0xFF1B5E20);
+  static const Color _chipFornBg = Color(0xFFE3F2FD);
+  static const Color _chipFornFg = Color(0xFF0D47A1);
+  static const Color _chipNovoBg = Color(0xFFFFF3E0);
+  static const Color _chipNovoFg = Color(0xFFE65100);
+  static const Color _chipManualBg = Color(0xFFE8EAF6);
+  static const Color _chipManualFg = Color(0xFF283593);
+
+  /// Mesmos gaps usados em telas ERP (ex.: produtos_page).
+  static const double _erpGap8 = 8;
+  static const double _erpGap16 = 16;
+
+  /// Largura minima para dispor "Custo atual" e bloco XML em duas colunas.
+  static const double _custoPainelBreakpoint2Col = 640;
 
   @override
   void initState() {
@@ -110,6 +129,520 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     final prod = q * f;
     if (!prod.isFinite) return 0;
     return prod;
+  }
+
+  /// Custo unitario na [unidade interna] do cadastro (mesma formula de [NfeEntradaRepository.confirmarEntrada]).
+  double? _custoUnitarioXmlConvertidoInterno(_LinhaEdicao linha) {
+    final f = _lerFator(linha.fatorCtrl.text);
+    final vUn = linha.sugestao.item.valorUnitarioComercial;
+    if (f <= 0 || !vUn.isFinite || vUn < 0) {
+      return null;
+    }
+    final unit = vUn / f;
+    if (!unit.isFinite || unit < 0) {
+      return null;
+    }
+    return unit;
+  }
+
+  static String _formatarReais(double v) => 'R\$ ${_nfMoeda.format(v)}';
+
+  /// Painel custo cadastro vs XML; so quando ja existe produto destino.
+  Widget _buildComparativoCustoPainel(BuildContext context, _LinhaEdicao linha) {
+    final id = linha.produtoDestinoId();
+    if (id == null) {
+      return const SizedBox.shrink();
+    }
+    final p = widget.produtoRepository.obterPorId(id);
+    if (p == null) {
+      return const SizedBox.shrink();
+    }
+    final custoXml = _custoUnitarioXmlConvertidoInterno(linha);
+    final atual = p.precoCusto;
+    final uInt = linha.unidade.trim();
+
+    if (custoXml == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(
+          'Informe um fator valido para comparar o custo unitario do XML com o cadastro.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontStyle: FontStyle.italic,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+      );
+    }
+
+    final cs = Theme.of(context).colorScheme;
+    final textoCustoCadastro = Text(
+      'Custo cadastro (precoCusto): ${_formatarReais(atual)} / $uInt',
+      style: Theme.of(context).textTheme.bodySmall,
+      softWrap: true,
+    );
+
+    final bm = Theme.of(context).textTheme.bodyMedium;
+    final xmlPrecoRich = Text.rich(
+      TextSpan(
+        style: bm?.copyWith(fontWeight: FontWeight.w700),
+        children: [
+          const TextSpan(text: 'XML convertido: '),
+          TextSpan(
+            text: _formatarReais(custoXml),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          TextSpan(
+            text: ' / $uInt',
+            style: bm?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+
+    Widget? indicadorVariacao;
+    const eps = 1e-9;
+    if (atual > eps) {
+      final pct = (custoXml - atual) / atual * 100;
+      if (pct > 5 + 1e-9) {
+        final pctTxt =
+            pct >= 10 ? pct.round().toString() : pct.toStringAsFixed(1);
+        indicadorVariacao = Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              '⚠️',
+              style: TextStyle(
+                color: _custoAumentoFg,
+                fontSize: 18,
+                height: 1,
+              ),
+            ),
+            Text(
+              '+$pctTxt% de aumento',
+              style: const TextStyle(
+                color: _custoAumentoFg,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
+              softWrap: true,
+            ),
+          ],
+        );
+      } else if (custoXml < atual - eps) {
+        final pctAbs = ((atual - custoXml) / atual * 100).abs();
+        final pctTxt = pctAbs >= 10
+            ? pctAbs.round().toString()
+            : pctAbs.toStringAsFixed(1);
+        indicadorVariacao = Text(
+          '$pctTxt% menor que o cadastro',
+          style: const TextStyle(
+            color: _custoQuedaFg,
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+          ),
+          softWrap: true,
+        );
+      }
+    } else if (custoXml > eps) {
+      indicadorVariacao = Text(
+        'Custo cadastro era zero; apos confirmar sera ${_formatarReais(custoXml)} / $uInt',
+        style: TextStyle(
+          color: cs.tertiary,
+          fontWeight: FontWeight.w600,
+          fontSize: 12.5,
+        ),
+        softWrap: true,
+      );
+    }
+
+    Widget blocoXmlEIndicador(double larguraMaxBloco) {
+      return Wrap(
+        spacing: _erpGap8,
+        runSpacing: _erpGap8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        alignment: WrapAlignment.start,
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: larguraMaxBloco),
+            child: xmlPrecoRich,
+          ),
+          if (indicadorVariacao != null)
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: larguraMaxBloco),
+              child: indicadorVariacao,
+            ),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.65)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          child: LayoutBuilder(
+            builder: (context, c) {
+              final maxW = c.maxWidth;
+              final titulo = Text(
+                'Custo vs cadastro',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.2,
+                    ),
+              );
+
+              if (maxW >= _custoPainelBreakpoint2Col) {
+                final colW = (maxW - _erpGap16) / 2;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    titulo,
+                    const SizedBox(height: _erpGap8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: colW,
+                          child: textoCustoCadastro,
+                        ),
+                        const SizedBox(width: _erpGap16),
+                        SizedBox(
+                          width: colW,
+                          child: blocoXmlEIndicador(colW),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  titulo,
+                  const SizedBox(height: _erpGap8),
+                  textoCustoCadastro,
+                  const SizedBox(height: _erpGap8),
+                  blocoXmlEIndicador(maxW),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _mensagemFatorConversao(_LinhaEdicao linha) {
+    final item = linha.sugestao.item;
+    final uCom = item.unidadeComercial.trim();
+    final uInt = linha.unidade.trim();
+    final q = item.quantidadeComercial;
+    final f = _lerFator(linha.fatorCtrl.text);
+    final uComLabel = uCom.isEmpty ? '(unid. na nota)' : uCom;
+    final uIntLabel = uInt.isEmpty ? '?' : uInt;
+    if (f <= 0) {
+      return 'Informe um fator maior que zero. Ex.: se a nota usa CX e voce controla '
+          'em UN, digite quantas UN existem em 1 CX.';
+    }
+    if (!q.isFinite || q < 0) {
+      return 'Quantidade da nota invalida; confira o XML.';
+    }
+    final qtd = (q * f).round();
+    final qFmt = _nfQtd.format(q);
+    return 'Na nota: $qFmt $uComLabel. Cada 1 $uComLabel da nota vale $f $uIntLabel '
+        'no cadastro - total previsto: $qtd $uIntLabel no estoque.';
+  }
+
+  ({Color bg, Color fg, String label}) _coresStatusChip(_LinhaEdicao linha) {
+    final manual = linha.vinculoManualProdutoId != null;
+    final tipo = linha.sugestao.tipoMatch;
+    if (manual && tipo == ConferenciaNfeMatchTipo.produtoNovo) {
+      return (
+        bg: _chipManualBg,
+        fg: _chipManualFg,
+        label: 'Vinculo manual - produto cadastrado',
+      );
+    }
+    switch (tipo) {
+      case ConferenciaNfeMatchTipo.vinculadoPorEan:
+        return (
+          bg: _chipEanBg,
+          fg: _chipEanFg,
+          label: 'Produto vinculado por EAN',
+        );
+      case ConferenciaNfeMatchTipo.vinculoFornecedor:
+        return (
+          bg: _chipFornBg,
+          fg: _chipFornFg,
+          label: 'Vinculo por fornecedor encontrado',
+        );
+      case ConferenciaNfeMatchTipo.produtoNovo:
+        return (
+          bg: _chipNovoBg,
+          fg: _chipNovoFg,
+          label: 'Novo produto (sera cadastrado)',
+        );
+    }
+  }
+
+  Widget _buildStatusChip(_LinhaEdicao linha) {
+    final s = _coresStatusChip(linha);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: s.bg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: s.fg.withValues(alpha: 0.38)),
+      ),
+      child: Text(
+        s.label,
+        style: TextStyle(
+          color: s.fg,
+          fontWeight: FontWeight.w700,
+          fontSize: 11.5,
+          height: 1.2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLinhaCard(BuildContext context, int index) {
+    final linha = _linhas[index];
+    final s = linha.sugestao;
+    final item = s.item;
+    final qCalc = _quantidadeCalculada(linha);
+    final destinoId = linha.produtoDestinoId();
+    final rotuloVinculo = _rotuloProdutoVinculado(linha);
+    final cs = Theme.of(context).colorScheme;
+    final avisoConversao = _mensagemFatorConversao(linha);
+
+    return Card(
+      elevation: 1,
+      margin: const EdgeInsets.only(bottom: 14),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Flexible(child: _buildStatusChip(linha)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    item.descricao,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (rotuloVinculo != null)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 300),
+                    child: Text(
+                      'Destino: $rotuloVinculo',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                OutlinedButton.icon(
+                  onPressed: () => _abrirDialogVincularProduto(linha),
+                  icon: const Icon(Icons.link, size: 18),
+                  label: Text(
+                    destinoId == null
+                        ? 'Vincular a produto existente'
+                        : 'Trocar vinculo',
+                  ),
+                ),
+                if (linha.vinculoManualProdutoId != null)
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        linha.vinculoManualProdutoId = null;
+                        linha.vinculoManualProdutoNome = null;
+                      });
+                    },
+                    child: const Text('Desfazer vinculo manual'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'XML: ${item.unidadeComercial} · Qtd na nota: ${_nfQtd.format(item.quantidadeComercial)} · cProd ${item.codigo}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            if (item.codigoBarras.isNotEmpty)
+              Text(
+                'EAN: ${item.codigoBarras}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            _buildComparativoCustoPainel(context, linha),
+            const SizedBox(height: 12),
+            Material(
+              color: cs.primaryContainer.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: cs.primary.withValues(alpha: 0.45),
+                    width: 1.4,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.straighten, size: 22, color: cs.primary),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Fator de conversao',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: cs.onSurface,
+                              ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Evite erro: a unidade da nota e a unidade do cadastro podem ser diferentes.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: cs.onSurface.withValues(alpha: 0.75),
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: DropdownButtonFormField<String>(
+                            key: ValueKey('${index}_${linha.unidade}'),
+                            decoration: InputDecoration(
+                              labelText: 'Unidade no cadastro',
+                              isDense: true,
+                              filled: true,
+                              fillColor: cs.surface,
+                            ),
+                            initialValue: linha.unidade,
+                            items: NfeEntradaRepository.unidadesInternasValidas
+                                .map(
+                                  (u) => DropdownMenuItem(
+                                    value: u,
+                                    child: Text(u),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) {
+                              if (v == null) return;
+                              setState(() => linha.unidade = v);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: TextFormField(
+                            controller: linha.fatorCtrl,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 18,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: 'Fator (destaque)',
+                              hintText: 'Ex.: 12',
+                              isDense: true,
+                              filled: true,
+                              fillColor: cs.surface,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: cs.primary,
+                                  width: 1.8,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: cs.primary.withValues(alpha: 0.55),
+                                  width: 1.4,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: cs.primary,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: cs.surface.withValues(alpha: 0.92),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                        child: Text(
+                          avisoConversao,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                height: 1.35,
+                              ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Total no estoque apos confirmar: ${_nfQtd.format(qCalc)} ${linha.unidade}',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: cs.primary,
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   String? _rotuloProdutoVinculado(_LinhaEdicao linha) {
@@ -394,143 +927,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       body: ListView.builder(
         padding: const EdgeInsets.all(12),
         itemCount: _linhas.length,
-        itemBuilder: (context, index) {
-          final linha = _linhas[index];
-          final s = linha.sugestao;
-          final item = s.item;
-          final qCalc = _quantidadeCalculada(linha);
-          final destinoId = linha.produtoDestinoId();
-          final rotuloVinculo = _rotuloProdutoVinculado(linha);
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          item.descricao,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                      if (destinoId == null)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8),
-                          child: Chip(
-                            label: const Text('Novo produto'),
-                            visualDensity: VisualDensity.compact,
-                            backgroundColor:
-                                Theme.of(context).colorScheme.tertiaryContainer,
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      if (rotuloVinculo != null)
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 280),
-                          child: Text(
-                            'Cadastrado: $rotuloVinculo',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                        ),
-                      OutlinedButton.icon(
-                        onPressed: () => _abrirDialogVincularProduto(linha),
-                        icon: const Icon(Icons.link, size: 18),
-                        label: Text(
-                          destinoId == null
-                              ? 'Vincular a produto existente'
-                              : 'Trocar vinculo',
-                        ),
-                      ),
-                      if (linha.vinculoManualProdutoId != null)
-                        TextButton(
-                          onPressed: () {
-                            setState(() {
-                              linha.vinculoManualProdutoId = null;
-                              linha.vinculoManualProdutoNome = null;
-                            });
-                          },
-                          child: const Text('Desfazer vinculo manual'),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Fornecedor: ${item.unidadeComercial} · Qtd original: ${_nfQtd.format(item.quantidadeComercial)} · Cod. ${item.codigo}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  if (item.codigoBarras.isNotEmpty)
-                    Text(
-                      'EAN: ${item.codigoBarras}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: DropdownButtonFormField<String>(
-                          key: ValueKey('${index}_${linha.unidade}'),
-                          decoration: const InputDecoration(
-                            labelText: 'Unidade interna',
-                            isDense: true,
-                          ),
-                          initialValue: linha.unidade,
-                          items: NfeEntradaRepository.unidadesInternasValidas
-                              .map(
-                                (u) => DropdownMenuItem(
-                                  value: u,
-                                  child: Text(u),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() => linha.unidade = v);
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: linha.fatorCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Fator conversao',
-                            hintText: 'Ex.: 12',
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Quantidade para o estoque: ${_nfQtd.format(qCalc)} ${linha.unidade}',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
+        itemBuilder: (context, index) => _buildLinhaCard(context, index),
       ),
     );
   }

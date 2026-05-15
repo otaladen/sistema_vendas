@@ -1269,10 +1269,77 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "18:1528420293365359871",
+      "lastPropertyId": "11:4478660968676820439",
+      "name": "ContaPagar",
+      "properties": [
+        {
+          "id": "1:1786356506869194131",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:1290947324146922611",
+          "name": "nfeChave",
+          "type": 9
+        },
+        {
+          "id": "3:6635622343668147817",
+          "name": "numeroNota",
+          "type": 9
+        },
+        {
+          "id": "4:1016918950355444038",
+          "name": "numeroParcela",
+          "type": 9
+        },
+        {
+          "id": "5:7488685262081738442",
+          "name": "dataEmissao",
+          "type": 10
+        },
+        {
+          "id": "6:6253934160820340215",
+          "name": "dataVencimento",
+          "type": 10
+        },
+        {
+          "id": "7:4550516051875451889",
+          "name": "valorParcela",
+          "type": 8
+        },
+        {
+          "id": "8:5193296218181631630",
+          "name": "status",
+          "type": 9
+        },
+        {
+          "id": "9:2397620794624258019",
+          "name": "dataPagamento",
+          "type": 10
+        },
+        {
+          "id": "10:8917406953562922484",
+          "name": "valorPago",
+          "type": 8
+        },
+        {
+          "id": "11:4478660968676820439",
+          "name": "fornecedorId",
+          "indexId": "33:2349180519764485688",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "FornecedorNfe"
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "17:1395296318023273307",
-  "lastIndexId": "32:5867922644726317008",
+  "lastEntityId": "18:1528420293365359871",
+  "lastIndexId": "33:2349180519764485688",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

@@ -17,20 +17,26 @@ import '../data/mensageria_repository.dart';
 import '../data/objectbox.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
+import '../services/print_service.dart';
 import 'widgets/rede_sincronizacao_card.dart';
 import '../model/mensagem_log.dart';
 import '../model/mensagem_template.dart';
+import 'config_impressora_page.dart';
 
 class ConfiguracoesPage extends StatefulWidget {
   const ConfiguracoesPage({
     super.key,
     required this.vendaRepository,
     required this.objectBox,
+    required this.appConfigRepository,
+    required this.printService,
     this.lanSyncScheduler,
   });
 
   final VendaRepository vendaRepository;
   final ObjectBox objectBox;
+  final AppConfigRepository appConfigRepository;
+  final PrintService printService;
   final LanSyncScheduler? lanSyncScheduler;
 
   @override
@@ -50,12 +56,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _whatsPhoneIdController = TextEditingController();
   final _whatsTokenController = TextEditingController();
   final _mensageriaBackendUrlController = TextEditingController();
-  final _configRepository = AppConfigRepository();
   final _mensageriaRepository = MensageriaRepository();
   String _modeloPdf = 'cupom';
   String _impressoraPadrao = '';
   String _logoPath = '';
-  List<Printer> _impressoras = [];
   bool _salvando = false;
   bool _prefsEmpresaAplicadas = false;
   DateTime _agoraSistema = DateTime.now();
@@ -129,7 +133,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   }
 
   Future<void> _carregarConfig() async {
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     setState(() {
       _nomeLojaController.text = config.nomeLoja;
@@ -146,8 +150,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _logoPath = config.logoPath;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       _mostrarCampoDescontoCaixa = config.mostrarCampoDescontoCaixa;
-      _maxDescontoPercentualPdvController.text =
-          config.maxDescontoPercentualPdv.toStringAsFixed(1).replaceAll('.', ',');
+      _maxDescontoPercentualPdvController.text = config.maxDescontoPercentualPdv
+          .toStringAsFixed(1)
+          .replaceAll('.', ',');
       _whatsApiVersionController.text = config.whatsappApiVersion;
       _whatsPhoneIdController.text = config.whatsappPhoneNumberId;
       _whatsTokenController.text = config.whatsappAccessToken;
@@ -162,18 +167,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _ultimoBackupAutomaticoMs = config.ultimoBackupAutomaticoMs;
       _prefsEmpresaAplicadas = true;
     });
-    try {
-      final impressoras = await Printing.listPrinters();
-      if (!mounted) return;
-      setState(() {
-        _impressoras = impressoras;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _impressoras = [];
-      });
-    }
   }
 
   Future<void> _carregarMensageria() async {
@@ -217,7 +210,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         }
       }
     }
-    final inconsistente = ultimaFinalizada != null &&
+    final inconsistente =
+        ultimaFinalizada != null &&
         agora.isBefore(ultimaFinalizada.subtract(const Duration(minutes: 2)));
     if (!mounted) return;
     setState(() {
@@ -269,11 +263,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     }
 
     try {
-      final resultado = await Process.run(
-        'w32tm',
-        ['/resync'],
-        runInShell: true,
-      );
+      final resultado = await Process.run('w32tm', [
+        '/resync',
+      ], runInShell: true);
       final codigo = resultado.exitCode;
       final saida = '${resultado.stdout}\n${resultado.stderr}'
           .trim()
@@ -284,7 +276,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           const SnackBar(content: Text('Relogio sincronizado com sucesso.')),
         );
       } else {
-        final precisaPermissao = saida.contains('acesso negado') ||
+        final precisaPermissao =
+            saida.contains('acesso negado') ||
             saida.contains('access is denied') ||
             saida.contains('0x80070005');
         ScaffoldMessenger.of(context).showSnackBar(
@@ -357,8 +350,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     if (!mounted) return;
     setState(() => _salvando = true);
     try {
-      final disco = await _configRepository.carregarEmpresaConfig();
-      await _configRepository.salvarEmpresaConfig(
+      final disco = await widget.appConfigRepository.carregarEmpresaConfig();
+      await widget.appConfigRepository.salvarEmpresaConfig(
         disco.copyWith(
           nomeLoja: _nomeLojaController.text,
           telefone: _telefoneController.text,
@@ -382,8 +375,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           mensageriaBackendUrl: _mensageriaBackendUrlController.text,
           backupAutomaticoAtivo: _backupAutomaticoAtivo,
           backupAutomaticoPasta: _backupAutomaticoPasta,
-          backupAutomaticoIntervaloMinutos:
-              _backupAutomaticoIntervaloMinutos,
+          backupAutomaticoIntervaloMinutos: _backupAutomaticoIntervaloMinutos,
           ultimoBackupAutomaticoMs: disco.ultimoBackupAutomaticoMs,
         ),
       );
@@ -392,9 +384,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         _ultimoBackupAutomaticoMs = disco.ultimoBackupAutomaticoMs;
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Configuracoes da empresa salvas.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Configuracoes da empresa salvas.')),
+      );
     } finally {
       if (mounted) {
         setState(() => _salvando = false);
@@ -407,7 +399,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     final metaTemplateController = TextEditingController(
       text: template?.metaTemplateName ?? '',
     );
-    final textoController = TextEditingController(text: template?.textoBase ?? '');
+    final textoController = TextEditingController(
+      text: template?.textoBase ?? '',
+    );
     String canal = template?.canal ?? 'whatsapp';
     String evento = template?.evento ?? 'manual';
     bool ativo = template?.ativo ?? true;
@@ -417,7 +411,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: Text(template == null ? 'Novo template' : 'Editar template'),
+              title: Text(
+                template == null ? 'Novo template' : 'Editar template',
+              ),
               content: SizedBox(
                 width: 560,
                 child: Column(
@@ -432,7 +428,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                       initialValue: canal,
                       decoration: const InputDecoration(labelText: 'Canal'),
                       items: const [
-                        DropdownMenuItem(value: 'whatsapp', child: Text('WhatsApp')),
+                        DropdownMenuItem(
+                          value: 'whatsapp',
+                          child: Text('WhatsApp'),
+                        ),
                         DropdownMenuItem(value: 'sms', child: Text('SMS')),
                       ],
                       onChanged: (v) {
@@ -445,7 +444,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                       initialValue: evento,
                       decoration: const InputDecoration(labelText: 'Evento'),
                       items: const [
-                        DropdownMenuItem(value: 'manual', child: Text('Manual')),
+                        DropdownMenuItem(
+                          value: 'manual',
+                          child: Text('Manual'),
+                        ),
                         DropdownMenuItem(
                           value: 'venda_finalizada',
                           child: Text('Venda finalizada'),
@@ -534,13 +536,14 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   Future<void> _processarWebhookWhatsapp() async {
     final payload = _webhookPayloadController.text.trim();
     if (payload.isEmpty) return;
-    final atualizados = await _mensageriaRepository.processarWebhookWhatsappPayload(
-      payload,
-    );
+    final atualizados = await _mensageriaRepository
+        .processarWebhookWhatsappPayload(payload);
     await _carregarMensageria();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Webhook processado: $atualizados log(s) atualizados.')),
+      SnackBar(
+        content: Text('Webhook processado: $atualizados log(s) atualizados.'),
+      ),
     );
   }
 
@@ -644,9 +647,13 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
 
   Future<void> _testarBackendMensageria() async {
     final url = _mensageriaBackendUrlController.text.trim();
-    final resultado = await _mensageriaRepository.testarBackend(backendUrl: url);
+    final resultado = await _mensageriaRepository.testarBackend(
+      backendUrl: url,
+    );
     if (!mounted) return;
-    final status = resultado.statusHttp == 0 ? '-' : resultado.statusHttp.toString();
+    final status = resultado.statusHttp == 0
+        ? '-'
+        : resultado.statusHttp.toString();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -678,15 +685,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     );
   }
 
-  Future<Printer?> _obterImpressoraPadrao() async {
-    if (_impressoraPadrao.trim().isEmpty) return null;
-    final printers = await Printing.listPrinters();
-    for (final printer in printers) {
-      if (printer.name == _impressoraPadrao) return printer;
-    }
-    return null;
-  }
-
   Future<Uint8List> _gerarPdfTeste() async {
     final doc = pw.Document();
     final agora = DateTime.now();
@@ -711,7 +709,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                   _nomeLojaController.text.trim().isEmpty
                       ? 'LOJA DE MATERIAIS'
                       : _nomeLojaController.text.trim(),
-                  style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                  style: pw.TextStyle(
+                    fontSize: 12,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
                   textAlign: pw.TextAlign.center,
                 ),
               ),
@@ -739,9 +740,15 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               ),
               pw.Text('Data/hora: $dataFmt'),
-              pw.Text('Modelo selecionado: ${_modeloPdf == 'a4' ? 'A4' : 'Cupom (80mm)'}'),
-              pw.Text('Impressora padrao: ${_impressoraPadrao.isEmpty ? 'Nao definida' : _impressoraPadrao}'),
-              pw.Text('Pasta padrao PDF: ${_pastaPadraoPdfController.text.trim().isEmpty ? 'Nao definida' : _pastaPadraoPdfController.text.trim()}'),
+              pw.Text(
+                'Modelo selecionado: ${_modeloPdf == 'a4' ? 'A4' : 'Cupom (80mm)'}',
+              ),
+              pw.Text(
+                'Impressora padrao: ${_impressoraPadrao.isEmpty ? 'Nao definida' : _impressoraPadrao}',
+              ),
+              pw.Text(
+                'Pasta padrao PDF: ${_pastaPadraoPdfController.text.trim().isEmpty ? 'Nao definida' : _pastaPadraoPdfController.text.trim()}',
+              ),
               pw.SizedBox(height: 8),
               pw.Divider(),
               pw.Text(
@@ -759,11 +766,14 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
 
   Future<void> _imprimirTeste() async {
     try {
-      final printer = await _obterImpressoraPadrao();
+      final printer =
+          await widget.printService.resolverImpressoraPorNome(_impressoraPadrao);
       if (printer == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Defina uma impressora padrao para o teste.')),
+          const SnackBar(
+            content: Text('Defina uma impressora padrao para o teste.'),
+          ),
         );
         return;
       }
@@ -777,9 +787,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             : PdfPageFormat(80 * PdfPageFormat.mm, double.infinity),
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Teste de impressao enviado.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Teste de impressao enviado.')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -827,10 +837,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             children: [
               const Text('Backup concluido com sucesso.'),
               const SizedBox(height: 6),
-              Text(
-                pastaBackup.path,
-                style: const TextStyle(fontSize: 13),
-              ),
+              Text(pastaBackup.path, style: const TextStyle(fontSize: 13)),
             ],
           ),
         ),
@@ -848,13 +855,13 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   }
 
   Future<void> _persistirPreferenciasBackupAutomatico() async {
-    final atual = await _configRepository.carregarEmpresaConfig();
-    await _configRepository.salvarEmpresaConfig(
+    final atual = await widget.appConfigRepository.carregarEmpresaConfig();
+    await widget.appConfigRepository.salvarEmpresaConfig(
       atual.copyWith(
         backupAutomaticoAtivo: _backupAutomaticoAtivo,
         backupAutomaticoPasta: _backupAutomaticoPasta,
-        backupAutomaticoIntervaloMinutos:
-            _backupAutomaticoIntervaloMinutos.clamp(15, 10080),
+        backupAutomaticoIntervaloMinutos: _backupAutomaticoIntervaloMinutos
+            .clamp(15, 10080),
       ),
     );
   }
@@ -878,9 +885,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         _backupAutomaticoPasta = pasta;
       });
       await _persistirPreferenciasBackupAutomatico();
-      await AutoBackupService.tentarExecutarSeDevido(_configRepository);
+      await AutoBackupService.tentarExecutarSeDevido(widget.appConfigRepository);
       if (!mounted) return;
-      final up = await _configRepository.carregarEmpresaConfig();
+      final up = await widget.appConfigRepository.carregarEmpresaConfig();
       setState(() => _ultimoBackupAutomaticoMs = up.ultimoBackupAutomaticoMs);
     } else {
       setState(() => _backupAutomaticoAtivo = false);
@@ -927,9 +934,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Nao foi possivel abrir a pasta de dados: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel abrir a pasta de dados: $e')),
+      );
     }
   }
 
@@ -971,9 +978,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                   TextField(
                     controller: confirmaController,
                     autofocus: true,
-                    decoration: const InputDecoration(
-                      hintText: 'RESTAURAR',
-                    ),
+                    decoration: const InputDecoration(hintText: 'RESTAURAR'),
                     onChanged: (_) => setDialogState(() {}),
                   ),
                 ],
@@ -984,7 +989,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                   child: const Text('Cancelar'),
                 ),
                 FilledButton(
-                  onPressed: textoValido ? () => Navigator.pop(context, true) : null,
+                  onPressed: textoValido
+                      ? () => Navigator.pop(context, true)
+                      : null,
                   child: const Text('Continuar'),
                 ),
               ],
@@ -1173,774 +1180,851 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         body: TabBarView(
           children: [
             _configTab([
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Empresa',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Empresa',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _nomeLojaController,
+                        decoration: const InputDecoration(
+                          labelText: 'Nome da loja',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _telefoneController,
+                        decoration: const InputDecoration(
+                          labelText: 'Telefone da loja',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _enderecoController,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: 'Endereco da loja',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _salvando ? null : _salvarConfig,
+                          icon: const Icon(Icons.save_outlined),
+                          label: Text(
+                            _salvando
+                                ? 'Salvando...'
+                                : 'Salvar dados da empresa',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _nomeLojaController,
-                    decoration: const InputDecoration(labelText: 'Nome da loja'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _telefoneController,
-                    decoration: const InputDecoration(labelText: 'Telefone da loja'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _enderecoController,
-                    maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Endereco da loja'),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _salvando ? null : _salvarConfig,
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(_salvando ? 'Salvando...' : 'Salvar dados da empresa'),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
             ]),
             _configTab([
-          const SizedBox(height: 10),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Impressao e PDF',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _pastaPadraoPdfController,
-                    decoration: InputDecoration(
-                      labelText: 'Pasta padrao de PDF (opcional)',
-                      suffixIcon: IconButton(
-                        tooltip: 'Escolher pasta',
-                        onPressed: _escolherPastaPadraoPdf,
-                        icon: const Icon(Icons.folder_open_outlined),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: _modeloPdf,
-                    decoration: const InputDecoration(labelText: 'Modelo de PDF'),
-                    items: const [
-                      DropdownMenuItem(value: 'cupom', child: Text('Cupom (80mm)')),
-                      DropdownMenuItem(value: 'a4', child: Text('A4')),
-                    ],
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => _modeloPdf = value);
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: _impressoras.any((p) => p.name == _impressoraPadrao)
-                        ? _impressoraPadrao
-                        : '',
-                    decoration: const InputDecoration(labelText: 'Impressora padrao (opcional)'),
-                    items: [
-                      const DropdownMenuItem(value: '', child: Text('Nenhuma')),
-                      ..._impressoras.map(
-                        (printer) => DropdownMenuItem(
-                          value: printer.name,
-                          child: Text(printer.name),
-                        ),
-                      ),
-                    ],
-                    onChanged: (value) => setState(() => _impressoraPadrao = value ?? ''),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _rodapeNotaController,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    minLines: 3,
-                    maxLines: 8,
-                    decoration: const InputDecoration(
-                      labelText: 'Rodape da nota/cupom nao fiscal',
-                      alignLabelWithHint: true,
-                      hintText: 'Use Enter para nova linha',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _rodapeOrcamentoController,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    minLines: 3,
-                    maxLines: 8,
-                    decoration: const InputDecoration(
-                      labelText: 'Rodape do orcamento',
-                      alignLabelWithHint: true,
-                      hintText: 'Use Enter para nova linha',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
+              const SizedBox(height: 10),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _escolherLogo,
-                          icon: const Icon(Icons.image_outlined),
-                          label: Text(_logoPath.isEmpty ? 'Selecionar logo' : 'Trocar logo'),
+                      Text(
+                        'Impressao e PDF',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _pastaPadraoPdfController,
+                        decoration: InputDecoration(
+                          labelText: 'Pasta padrao de PDF (opcional)',
+                          suffixIcon: IconButton(
+                            tooltip: 'Escolher pasta',
+                            onPressed: _escolherPastaPadraoPdf,
+                            icon: const Icon(Icons.folder_open_outlined),
+                          ),
                         ),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        initialValue: _modeloPdf,
+                        decoration: const InputDecoration(
+                          labelText: 'Modelo de PDF',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'cupom',
+                            child: Text('Cupom (80mm)'),
+                          ),
+                          DropdownMenuItem(value: 'a4', child: Text('A4')),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setState(() => _modeloPdf = value);
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Impressora padrao'),
+                        subtitle: Text(
+                          _impressoraPadrao.trim().isEmpty
+                              ? 'Nao configurada — toque para abrir a tela dedicada'
+                              : _impressoraPadrao,
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () async {
+                          await Navigator.push<void>(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => ConfigImpressoraPage(
+                                printService: widget.printService,
+                              ),
+                            ),
+                          );
+                          if (context.mounted) await _carregarConfig();
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _rodapeNotaController,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        minLines: 3,
+                        maxLines: 8,
+                        decoration: const InputDecoration(
+                          labelText: 'Rodape da nota/cupom nao fiscal',
+                          alignLabelWithHint: true,
+                          hintText: 'Use Enter para nova linha',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _rodapeOrcamentoController,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        minLines: 3,
+                        maxLines: 8,
+                        decoration: const InputDecoration(
+                          labelText: 'Rodape do orcamento',
+                          alignLabelWithHint: true,
+                          hintText: 'Use Enter para nova linha',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _escolherLogo,
+                              icon: const Icon(Icons.image_outlined),
+                              label: Text(
+                                _logoPath.isEmpty
+                                    ? 'Selecionar logo'
+                                    : 'Trocar logo',
+                              ),
+                            ),
+                          ),
+                          if (_logoPath.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            OutlinedButton.icon(
+                              onPressed: _removerLogo,
+                              icon: const Icon(Icons.delete_outline),
+                              label: const Text('Remover'),
+                            ),
+                          ],
+                        ],
                       ),
                       if (_logoPath.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: _removerLogo,
-                          icon: const Icon(Icons.delete_outline),
-                          label: const Text('Remover'),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (_logoPath.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Logo selecionada: ${p.basename(_logoPath)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _salvando ? null : _salvarConfig,
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(_salvando ? 'Salvando...' : 'Salvar configuracoes de impressao/PDF'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _imprimirTeste,
-                      icon: const Icon(Icons.print_outlined),
-                      label: const Text('Teste de impressao'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-            ]),
-            _configTab([
-          const SizedBox(height: 10),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Caixa',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _limiteDivergenciaCaixaController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Limite de divergencia sem supervisor (R\$)',
-                      hintText: 'Ex.: 20,00',
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Defina o limite de divergencia para exigir autorizacao '
-                    'de supervisor (admin/financeiro) no fechamento do caixa.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    value: _mostrarCampoDescontoCaixa,
-                    onChanged: (value) {
-                      setState(() {
-                        _mostrarCampoDescontoCaixa = value;
-                      });
-                    },
-                    title: const Text('Mostrar desconto rapido no Caixa'),
-                    subtitle: const Text(
-                      'Desligue para ocultar o campo de desconto na tela do Caixa. '
-                      'O total segue sem desconto adicional pelo operador.',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _maxDescontoPercentualPdvController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText:
-                          'Desconto maximo no Ponto de Venda (% sobre subtotal)',
-                      hintText: 'Ex.: 15',
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Limite percentual sobre o subtotal dos produtos (nao inclui frete). '
-                    'No PDV o vendedor pode informar % ou valor em reais, desde que o '
-                    'desconto em reais nao ultrapasse esse percentual do subtotal. '
-                    'Use 0 para nao permitir desconto no PDV — so no Caixa, se estiver '
-                    'habilitado acima.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    value: _permitirVendaSemEstoque,
-                    onChanged: (value) {
-                      setState(() {
-                        _permitirVendaSemEstoque = value;
-                      });
-                    },
-                    title: const Text('Permitir venda sem estoque'),
-                    subtitle: const Text(
-                      'Quando ativo, o sistema permite finalizar venda mesmo sem saldo e o estoque pode ficar negativo.',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _salvando ? null : _salvarConfig,
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(_salvando ? 'Salvando...' : 'Salvar regras do caixa'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-            ]),
-            _configTab([
-          const SizedBox(height: 10),
-          RedeSincronizacaoCard(
-            configRepository: _configRepository,
-            lanSyncScheduler: widget.lanSyncScheduler,
-          ),
-            ]),
-            _configTab([
-          const SizedBox(height: 10),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Backup e Dados',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Crie backup completo dos dados locais da aplicacao e acesse a pasta do banco.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 10),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Backup automatico'),
-                    subtitle: Text(
-                      'Copia periodica enquanto o app estiver aberto. Escolha uma pasta segura '
-                      '(outro disco, rede ou nuvem sincronizada) para nao perder dados se este PC falhar.',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    value: _backupAutomaticoAtivo,
-                    onChanged:
-                        _backupEmAndamento ? null : _alternarBackupAutomatico,
-                  ),
-                  if (_backupAutomaticoAtivo) ...[
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: _escolherPastaBackupAutomatico,
-                        icon: const Icon(Icons.folder_outlined, size: 20),
-                        label: const Text('Escolher pasta de destino'),
-                      ),
-                    ),
-                    if (_backupAutomaticoPasta.trim().isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: SelectableText(
-                          _backupAutomaticoPasta,
+                        const SizedBox(height: 8),
+                        Text(
+                          'Logo selecionada: ${p.basename(_logoPath)}',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
-                      ),
-                    DropdownButtonFormField<int>(
-                      key: ValueKey(_backupAutomaticoIntervaloMinutos),
-                      decoration: const InputDecoration(
-                        labelText: 'Frequencia',
-                      ),
-                      initialValue: _backupAutomaticoIntervaloMinutos,
-                      items: [
-                        DropdownMenuItem(
-                          value: 60,
-                          child: Text(
-                            _rotuloIntervaloBackupAutomatico(60),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 360,
-                          child: Text(
-                            _rotuloIntervaloBackupAutomatico(360),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 720,
-                          child: Text(
-                            _rotuloIntervaloBackupAutomatico(720),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 1440,
-                          child: Text(
-                            _rotuloIntervaloBackupAutomatico(1440),
-                          ),
-                        ),
                       ],
-                      onChanged: _backupEmAndamento
-                          ? null
-                          : _definirIntervaloBackupAutomatico,
-                    ),
-                    if (_ultimoBackupAutomaticoMs > 0) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _salvando ? null : _salvarConfig,
+                          icon: const Icon(Icons.save_outlined),
+                          label: Text(
+                            _salvando
+                                ? 'Salvando...'
+                                : 'Salvar configuracoes de impressao/PDF',
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _imprimirTeste,
+                          icon: const Icon(Icons.print_outlined),
+                          label: const Text('Teste de impressao'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ]),
+            _configTab([
+              const SizedBox(height: 10),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        'Ultimo backup automatico: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.fromMillisecondsSinceEpoch(_ultimoBackupAutomaticoMs))}',
+                        'Caixa',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _limiteDivergenciaCaixaController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText:
+                              'Limite de divergencia sem supervisor (R\$)',
+                          hintText: 'Ex.: 20,00',
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Defina o limite de divergencia para exigir autorizacao '
+                        'de supervisor (admin/financeiro) no fechamento do caixa.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
-                    ],
-                  ],
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _backupEmAndamento ? null : _criarBackupDados,
-                      icon: const Icon(Icons.backup_outlined),
-                      label: Text(
-                        _backupEmAndamento ? 'Criando backup...' : 'Criar backup agora',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _abrirPastaDados,
-                      icon: const Icon(Icons.folder_open_outlined),
-                      label: const Text('Abrir pasta de dados'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _restauracaoEmAndamento || _backupEmAndamento
-                          ? null
-                          : _restaurarBackupDados,
-                      icon: const Icon(Icons.restore_outlined),
-                      label: Text(
-                        _restauracaoEmAndamento
-                            ? 'Restaurando backup...'
-                            : 'Restaurar backup',
-                      ),
-                    ),
-                  ),
-                  if (_ultimoBackupPath.trim().isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Ultimo backup: $_ultimoBackupPath',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-            ]),
-            _configTab([
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Mensageria (WhatsApp/SMS)',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _mensageriaBackendUrlController,
-                    decoration: const InputDecoration(
-                      labelText: 'Backend URL de envio (opcional)',
-                      hintText: 'https://seu-backend/send-whatsapp',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _whatsApiVersionController,
-                    decoration: const InputDecoration(
-                      labelText: 'WhatsApp API Version',
-                      hintText: 'v20.0',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _whatsPhoneIdController,
-                    decoration: const InputDecoration(
-                      labelText: 'WhatsApp Phone Number ID',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _whatsTokenController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'WhatsApp Access Token',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _salvando ? null : _salvarConfig,
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(
-                        _salvando
-                            ? 'Salvando...'
-                            : 'Salvar credenciais de mensageria',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _mostrarContratoBackendMensageria,
-                          icon: const Icon(Icons.description_outlined),
-                          label: const Text('Ver contrato do backend'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _testarBackendMensageria,
-                          icon: const Icon(Icons.wifi_tethering_outlined),
-                          label: const Text('Testar backend'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(child: Text('Templates: ${_templatesMensagem.length}')),
-                      Expanded(child: Text('Fila pendente: $_filaPendente')),
-                      Expanded(child: Text('Logs: $_logsTotais')),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 6,
-                    children: [
-                      Text('Enviadas: $_logsEnviados'),
-                      Text('Entregues: $_logsEntregues'),
-                      Text('Lidas: $_logsLidos'),
-                      Text('Falhas: $_logsFalhas'),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _abrirCadastroTemplate,
-                          icon: const Icon(Icons.add),
-                          label: const Text('Novo template'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _processarFilaMensagens,
-                          icon: const Icon(Icons.send_outlined),
-                          label: const Text('Processar fila'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_templatesMensagem.isEmpty)
-                    const Text('Nenhum template cadastrado.')
-                  else
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 230),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _templatesMensagem.length,
-                        itemBuilder: (context, index) {
-                          final t = _templatesMensagem[index];
-                          return ListTile(
-                            dense: true,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                            title: Text(t.nome),
-                            subtitle: Text(
-                              '${t.canal} | evento: ${t.evento} | ${t.ativo ? 'ativo' : 'inativo'}',
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: 'Editar',
-                                  onPressed: () => _abrirCadastroTemplate(template: t),
-                                  icon: const Icon(Icons.edit_outlined),
-                                ),
-                                IconButton(
-                                  tooltip: 'Excluir',
-                                  onPressed: () => _removerTemplate(t),
-                                  icon: const Icon(Icons.delete_outline),
-                                ),
-                              ],
-                            ),
-                          );
+                      const SizedBox(height: 12),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _mostrarCampoDescontoCaixa,
+                        onChanged: (value) {
+                          setState(() {
+                            _mostrarCampoDescontoCaixa = value;
+                          });
                         },
-                      ),
-                    ),
-                  const SizedBox(height: 10),
-                  const Divider(),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Monitor de fila e logs',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      SizedBox(
-                        width: 190,
-                        child: DropdownButtonFormField<String>(
-                          initialValue: _filtroStatusLog,
-                          decoration: const InputDecoration(labelText: 'Status'),
-                          items: const [
-                            DropdownMenuItem(value: 'todos', child: Text('Todos')),
-                            DropdownMenuItem(
-                              value: 'aceito_api',
-                              child: Text('Aceito pela API'),
-                            ),
-                            DropdownMenuItem(value: 'enviado', child: Text('Enviado')),
-                            DropdownMenuItem(value: 'entregue', child: Text('Entregue')),
-                            DropdownMenuItem(value: 'lido', child: Text('Lido')),
-                            DropdownMenuItem(value: 'falhou', child: Text('Falhou')),
-                          ],
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() => _filtroStatusLog = v);
-                            _aplicarFiltroLogs();
-                          },
+                        title: const Text('Mostrar desconto rapido no Caixa'),
+                        subtitle: const Text(
+                          'Desligue para ocultar o campo de desconto na tela do Caixa. '
+                          'O total segue sem desconto adicional pelo operador.',
                         ),
                       ),
-                      SizedBox(
-                        width: 170,
-                        child: DropdownButtonFormField<String>(
-                          initialValue: _filtroCanalLog,
-                          decoration: const InputDecoration(labelText: 'Canal'),
-                          items: const [
-                            DropdownMenuItem(value: 'todos', child: Text('Todos')),
-                            DropdownMenuItem(value: 'whatsapp', child: Text('WhatsApp')),
-                            DropdownMenuItem(value: 'sms', child: Text('SMS')),
-                          ],
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() => _filtroCanalLog = v);
-                            _aplicarFiltroLogs();
-                          },
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _maxDescontoPercentualPdvController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText:
+                              'Desconto maximo no Ponto de Venda (% sobre subtotal)',
+                          hintText: 'Ex.: 15',
                         ),
                       ),
-                      SizedBox(
-                        width: 280,
-                        child: TextField(
-                          controller: _filtroTextoLogController,
-                          decoration: const InputDecoration(
-                            labelText: 'Buscar destino/template/erro',
-                          ),
-                          onSubmitted: (_) => _aplicarFiltroLogs(),
-                        ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Limite percentual sobre o subtotal dos produtos (nao inclui frete). '
+                        'No PDV o vendedor pode informar % ou valor em reais, desde que o '
+                        'desconto em reais nao ultrapasse esse percentual do subtotal. '
+                        'Use 0 para nao permitir desconto no PDV — so no Caixa, se estiver '
+                        'habilitado acima.',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                      OutlinedButton.icon(
-                        onPressed: _aplicarFiltroLogs,
-                        icon: const Icon(Icons.search),
-                        label: const Text('Filtrar'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_logsFiltrados.isEmpty)
-                    const Text('Nenhum log para os filtros atuais.')
-                  else
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 230),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _logsFiltrados.length,
-                        itemBuilder: (context, index) {
-                          final log = _logsFiltrados[index];
-                          return ListTile(
-                            dense: true,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                            title: Text(
-                              '${log.canal.toUpperCase()} | ${_rotuloStatusMensagem(log.statusEntrega)} | cliente ${log.clienteId}',
-                            ),
-                            subtitle: Text(log.destino),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(log.resultado),
-                                if (log.resultado == 'falhou')
-                                  IconButton(
-                                    tooltip: 'Reenfileirar',
-                                    onPressed: () => _reenfileirarFalhaDeLog(log),
-                                    icon: const Icon(Icons.refresh),
-                                  ),
-                                if (log.resultado == 'falhou')
-                                  IconButton(
-                                    tooltip: 'Ver erro detalhado',
-                                    onPressed: () => _verErroDetalhadoLog(log),
-                                    icon: const Icon(Icons.error_outline),
-                                  ),
-                              ],
-                            ),
-                          );
+                      const SizedBox(height: 8),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _permitirVendaSemEstoque,
+                        onChanged: (value) {
+                          setState(() {
+                            _permitirVendaSemEstoque = value;
+                          });
                         },
-                      ),
-                    ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _webhookPayloadController,
-                    minLines: 3,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      labelText: 'Payload webhook WhatsApp (JSON)',
-                      hintText: 'Cole aqui o payload de status do WhatsApp.',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: _processarWebhookWhatsapp,
-                    icon: const Icon(Icons.hub_outlined),
-                    label: const Text('Processar webhook de status'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-            ]),
-            _configTab([
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Data e hora do sistema',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text('Agora (sistema): $agoraFmt'),
-                  Text(
-                    'Fuso horario: ${_agoraSistema.timeZoneName} (UTC$sinal$h:$m)',
-                  ),
-                  Text('Ultima venda finalizada: $ultimaVendaFmt'),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: _horarioInconsistente
-                          ? Colors.red.withValues(alpha: 0.08)
-                          : Colors.green.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _horarioInconsistente
-                            ? Colors.red.withValues(alpha: 0.45)
-                            : Colors.green.withValues(alpha: 0.45),
-                      ),
-                    ),
-                    child: Text(_diagnosticoHorario),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _carregarDiagnosticoHorario,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Atualizar diagnostico'),
+                        title: const Text('Permitir venda sem estoque'),
+                        subtitle: const Text(
+                          'Quando ativo, o sistema permite finalizar venda mesmo sem saldo e o estoque pode ficar negativo.',
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
                         child: ElevatedButton.icon(
-                          onPressed: _abrirAjusteDataHoraSO,
-                          icon: const Icon(Icons.schedule),
-                          label: const Text('Ajustar no sistema'),
+                          onPressed: _salvando ? null : _salvarConfig,
+                          icon: const Icon(Icons.save_outlined),
+                          label: Text(
+                            _salvando
+                                ? 'Salvando...'
+                                : 'Salvar regras do caixa',
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _sincronizarHorarioWindows,
-                      icon: const Icon(Icons.sync),
-                      label: const Text('Sincronizar horario agora (Windows)'),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
+            ]),
+            _configTab([
+              const SizedBox(height: 10),
+              RedeSincronizacaoCard(
+                configRepository: widget.appConfigRepository,
+                lanSyncScheduler: widget.lanSyncScheduler,
+              ),
+            ]),
+            _configTab([
+              const SizedBox(height: 10),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Backup e Dados',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Crie backup completo dos dados locais da aplicacao e acesse a pasta do banco.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 10),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Backup automatico'),
+                        subtitle: Text(
+                          'Copia periodica enquanto o app estiver aberto. Escolha uma pasta segura '
+                          '(outro disco, rede ou nuvem sincronizada) para nao perder dados se este PC falhar.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        value: _backupAutomaticoAtivo,
+                        onChanged: _backupEmAndamento
+                            ? null
+                            : _alternarBackupAutomatico,
+                      ),
+                      if (_backupAutomaticoAtivo) ...[
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: _escolherPastaBackupAutomatico,
+                            icon: const Icon(Icons.folder_outlined, size: 20),
+                            label: const Text('Escolher pasta de destino'),
+                          ),
+                        ),
+                        if (_backupAutomaticoPasta.trim().isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: SelectableText(
+                              _backupAutomaticoPasta,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        DropdownButtonFormField<int>(
+                          key: ValueKey(_backupAutomaticoIntervaloMinutos),
+                          decoration: const InputDecoration(
+                            labelText: 'Frequencia',
+                          ),
+                          initialValue: _backupAutomaticoIntervaloMinutos,
+                          items: [
+                            DropdownMenuItem(
+                              value: 60,
+                              child: Text(_rotuloIntervaloBackupAutomatico(60)),
+                            ),
+                            DropdownMenuItem(
+                              value: 360,
+                              child: Text(
+                                _rotuloIntervaloBackupAutomatico(360),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 720,
+                              child: Text(
+                                _rotuloIntervaloBackupAutomatico(720),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 1440,
+                              child: Text(
+                                _rotuloIntervaloBackupAutomatico(1440),
+                              ),
+                            ),
+                          ],
+                          onChanged: _backupEmAndamento
+                              ? null
+                              : _definirIntervaloBackupAutomatico,
+                        ),
+                        if (_ultimoBackupAutomaticoMs > 0) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Ultimo backup automatico: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.fromMillisecondsSinceEpoch(_ultimoBackupAutomaticoMs))}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ],
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _backupEmAndamento
+                              ? null
+                              : _criarBackupDados,
+                          icon: const Icon(Icons.backup_outlined),
+                          label: Text(
+                            _backupEmAndamento
+                                ? 'Criando backup...'
+                                : 'Criar backup agora',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _abrirPastaDados,
+                          icon: const Icon(Icons.folder_open_outlined),
+                          label: const Text('Abrir pasta de dados'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed:
+                              _restauracaoEmAndamento || _backupEmAndamento
+                              ? null
+                              : _restaurarBackupDados,
+                          icon: const Icon(Icons.restore_outlined),
+                          label: Text(
+                            _restauracaoEmAndamento
+                                ? 'Restaurando backup...'
+                                : 'Restaurar backup',
+                          ),
+                        ),
+                      ),
+                      if (_ultimoBackupPath.trim().isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Ultimo backup: $_ultimoBackupPath',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ]),
+            _configTab([
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Mensageria (WhatsApp/SMS)',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _mensageriaBackendUrlController,
+                        decoration: const InputDecoration(
+                          labelText: 'Backend URL de envio (opcional)',
+                          hintText: 'https://seu-backend/send-whatsapp',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _whatsApiVersionController,
+                        decoration: const InputDecoration(
+                          labelText: 'WhatsApp API Version',
+                          hintText: 'v20.0',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _whatsPhoneIdController,
+                        decoration: const InputDecoration(
+                          labelText: 'WhatsApp Phone Number ID',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _whatsTokenController,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'WhatsApp Access Token',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _salvando ? null : _salvarConfig,
+                          icon: const Icon(Icons.save_outlined),
+                          label: Text(
+                            _salvando
+                                ? 'Salvando...'
+                                : 'Salvar credenciais de mensageria',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _mostrarContratoBackendMensageria,
+                              icon: const Icon(Icons.description_outlined),
+                              label: const Text('Ver contrato do backend'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _testarBackendMensageria,
+                              icon: const Icon(Icons.wifi_tethering_outlined),
+                              label: const Text('Testar backend'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Templates: ${_templatesMensagem.length}',
+                            ),
+                          ),
+                          Expanded(
+                            child: Text('Fila pendente: $_filaPendente'),
+                          ),
+                          Expanded(child: Text('Logs: $_logsTotais')),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 6,
+                        children: [
+                          Text('Enviadas: $_logsEnviados'),
+                          Text('Entregues: $_logsEntregues'),
+                          Text('Lidas: $_logsLidos'),
+                          Text('Falhas: $_logsFalhas'),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _abrirCadastroTemplate,
+                              icon: const Icon(Icons.add),
+                              label: const Text('Novo template'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _processarFilaMensagens,
+                              icon: const Icon(Icons.send_outlined),
+                              label: const Text('Processar fila'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (_templatesMensagem.isEmpty)
+                        const Text('Nenhum template cadastrado.')
+                      else
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 230),
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _templatesMensagem.length,
+                            itemBuilder: (context, index) {
+                              final t = _templatesMensagem[index];
+                              return ListTile(
+                                dense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                title: Text(t.nome),
+                                subtitle: Text(
+                                  '${t.canal} | evento: ${t.evento} | ${t.ativo ? 'ativo' : 'inativo'}',
+                                ),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Editar',
+                                      onPressed: () =>
+                                          _abrirCadastroTemplate(template: t),
+                                      icon: const Icon(Icons.edit_outlined),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Excluir',
+                                      onPressed: () => _removerTemplate(t),
+                                      icon: const Icon(Icons.delete_outline),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      const SizedBox(height: 10),
+                      const Divider(),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Monitor de fila e logs',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          SizedBox(
+                            width: 190,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _filtroStatusLog,
+                              decoration: const InputDecoration(
+                                labelText: 'Status',
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'todos',
+                                  child: Text('Todos'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'aceito_api',
+                                  child: Text('Aceito pela API'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'enviado',
+                                  child: Text('Enviado'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'entregue',
+                                  child: Text('Entregue'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'lido',
+                                  child: Text('Lido'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'falhou',
+                                  child: Text('Falhou'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                setState(() => _filtroStatusLog = v);
+                                _aplicarFiltroLogs();
+                              },
+                            ),
+                          ),
+                          SizedBox(
+                            width: 170,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _filtroCanalLog,
+                              decoration: const InputDecoration(
+                                labelText: 'Canal',
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'todos',
+                                  child: Text('Todos'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'whatsapp',
+                                  child: Text('WhatsApp'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'sms',
+                                  child: Text('SMS'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                setState(() => _filtroCanalLog = v);
+                                _aplicarFiltroLogs();
+                              },
+                            ),
+                          ),
+                          SizedBox(
+                            width: 280,
+                            child: TextField(
+                              controller: _filtroTextoLogController,
+                              decoration: const InputDecoration(
+                                labelText: 'Buscar destino/template/erro',
+                              ),
+                              onSubmitted: (_) => _aplicarFiltroLogs(),
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _aplicarFiltroLogs,
+                            icon: const Icon(Icons.search),
+                            label: const Text('Filtrar'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (_logsFiltrados.isEmpty)
+                        const Text('Nenhum log para os filtros atuais.')
+                      else
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 230),
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _logsFiltrados.length,
+                            itemBuilder: (context, index) {
+                              final log = _logsFiltrados[index];
+                              return ListTile(
+                                dense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                title: Text(
+                                  '${log.canal.toUpperCase()} | ${_rotuloStatusMensagem(log.statusEntrega)} | cliente ${log.clienteId}',
+                                ),
+                                subtitle: Text(log.destino),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(log.resultado),
+                                    if (log.resultado == 'falhou')
+                                      IconButton(
+                                        tooltip: 'Reenfileirar',
+                                        onPressed: () =>
+                                            _reenfileirarFalhaDeLog(log),
+                                        icon: const Icon(Icons.refresh),
+                                      ),
+                                    if (log.resultado == 'falhou')
+                                      IconButton(
+                                        tooltip: 'Ver erro detalhado',
+                                        onPressed: () =>
+                                            _verErroDetalhadoLog(log),
+                                        icon: const Icon(Icons.error_outline),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _webhookPayloadController,
+                        minLines: 3,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          labelText: 'Payload webhook WhatsApp (JSON)',
+                          hintText:
+                              'Cole aqui o payload de status do WhatsApp.',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: _processarWebhookWhatsapp,
+                        icon: const Icon(Icons.hub_outlined),
+                        label: const Text('Processar webhook de status'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ]),
+            _configTab([
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Data e hora do sistema',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+                      Text('Agora (sistema): $agoraFmt'),
+                      Text(
+                        'Fuso horario: ${_agoraSistema.timeZoneName} (UTC$sinal$h:$m)',
+                      ),
+                      Text('Ultima venda finalizada: $ultimaVendaFmt'),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: _horarioInconsistente
+                              ? Colors.red.withValues(alpha: 0.08)
+                              : Colors.green.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: _horarioInconsistente
+                                ? Colors.red.withValues(alpha: 0.45)
+                                : Colors.green.withValues(alpha: 0.45),
+                          ),
+                        ),
+                        child: Text(_diagnosticoHorario),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _carregarDiagnosticoHorario,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Atualizar diagnostico'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: _abrirAjusteDataHoraSO,
+                              icon: const Icon(Icons.schedule),
+                              label: const Text('Ajustar no sistema'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _sincronizarHorarioWindows,
+                          icon: const Icon(Icons.sync),
+                          label: const Text(
+                            'Sincronizar horario agora (Windows)',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ]),
           ],
         ),

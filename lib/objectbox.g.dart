@@ -14,6 +14,7 @@ import 'package:objectbox/internal.dart'
 import 'package:objectbox/objectbox.dart' as obx;
 import 'package:objectbox_flutter_libs/objectbox_flutter_libs.dart';
 
+import 'data/models/conta_pagar.dart';
 import 'model/cliente.dart';
 import 'model/fornecedor_nfe.dart';
 import 'model/funcionario.dart';
@@ -1542,6 +1543,85 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(18, 1528420293365359871),
+    name: 'ContaPagar',
+    lastPropertyId: const obx_int.IdUid(11, 4478660968676820439),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 1786356506869194131),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 1290947324146922611),
+        name: 'nfeChave',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 6635622343668147817),
+        name: 'numeroNota',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 1016918950355444038),
+        name: 'numeroParcela',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 7488685262081738442),
+        name: 'dataEmissao',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 6253934160820340215),
+        name: 'dataVencimento',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 4550516051875451889),
+        name: 'valorParcela',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 5193296218181631630),
+        name: 'status',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 2397620794624258019),
+        name: 'dataPagamento',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 8917406953562922484),
+        name: 'valorPago',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 4478660968676820439),
+        name: 'fornecedorId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(33, 2349180519764485688),
+        relationField: 'fornecedor',
+        relationTarget: 'FornecedorNfe',
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -1587,8 +1667,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(17, 1395296318023273307),
-    lastIndexId: const obx_int.IdUid(32, 5867922644726317008),
+    lastEntityId: const obx_int.IdUid(18, 1528420293365359871),
+    lastIndexId: const obx_int.IdUid(33, 2349180519764485688),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -3522,6 +3602,111 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    ContaPagar: obx_int.EntityDefinition<ContaPagar>(
+      model: _entities[17],
+      toOneRelations: (ContaPagar object) => [object.fornecedor],
+      toManyRelations: (ContaPagar object) => {},
+      getId: (ContaPagar object) => object.id,
+      setId: (ContaPagar object, int id) {
+        object.id = id;
+      },
+      objectToFB: (ContaPagar object, fb.Builder fbb) {
+        final nfeChaveOffset = object.nfeChave == null
+            ? null
+            : fbb.writeString(object.nfeChave!);
+        final numeroNotaOffset = object.numeroNota == null
+            ? null
+            : fbb.writeString(object.numeroNota!);
+        final numeroParcelaOffset = fbb.writeString(object.numeroParcela);
+        final statusOffset = fbb.writeString(object.status);
+        fbb.startTable(12);
+        fbb.addInt64(0, object.id);
+        fbb.addOffset(1, nfeChaveOffset);
+        fbb.addOffset(2, numeroNotaOffset);
+        fbb.addOffset(3, numeroParcelaOffset);
+        fbb.addInt64(4, object.dataEmissao.millisecondsSinceEpoch);
+        fbb.addInt64(5, object.dataVencimento.millisecondsSinceEpoch);
+        fbb.addFloat64(6, object.valorParcela);
+        fbb.addOffset(7, statusOffset);
+        fbb.addInt64(8, object.dataPagamento?.millisecondsSinceEpoch);
+        fbb.addFloat64(9, object.valorPago);
+        fbb.addInt64(10, object.fornecedor.targetId);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final dataPagamentoValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          20,
+        );
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final nfeChaveParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGetNullable(buffer, rootOffset, 6);
+        final numeroNotaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGetNullable(buffer, rootOffset, 8);
+        final numeroParcelaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final dataEmissaoParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 12, 0),
+          isUtc: true,
+        );
+        final dataVencimentoParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 14, 0),
+          isUtc: true,
+        );
+        final valorParcelaParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        final statusParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 18, '');
+        final dataPagamentoParam = dataPagamentoValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                dataPagamentoValue,
+                isUtc: true,
+              );
+        final valorPagoParam = const fb.Float64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          22,
+        );
+        final object = ContaPagar(
+          id: idParam,
+          nfeChave: nfeChaveParam,
+          numeroNota: numeroNotaParam,
+          numeroParcela: numeroParcelaParam,
+          dataEmissao: dataEmissaoParam,
+          dataVencimento: dataVencimentoParam,
+          valorParcela: valorParcelaParam,
+          status: statusParam,
+          dataPagamento: dataPagamentoParam,
+          valorPago: valorPagoParam,
+        );
+        object.fornecedor.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          24,
+          0,
+        );
+        object.fornecedor.attach(store);
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -4642,5 +4827,63 @@ class KitOrcamentoItem_ {
   /// See [KitOrcamentoItem.produto].
   static final produto = obx.QueryRelationToOne<KitOrcamentoItem, Produto>(
     _entities[16].properties[4],
+  );
+}
+
+/// [ContaPagar] entity fields to define ObjectBox queries.
+class ContaPagar_ {
+  /// See [ContaPagar.id].
+  static final id = obx.QueryIntegerProperty<ContaPagar>(
+    _entities[17].properties[0],
+  );
+
+  /// See [ContaPagar.nfeChave].
+  static final nfeChave = obx.QueryStringProperty<ContaPagar>(
+    _entities[17].properties[1],
+  );
+
+  /// See [ContaPagar.numeroNota].
+  static final numeroNota = obx.QueryStringProperty<ContaPagar>(
+    _entities[17].properties[2],
+  );
+
+  /// See [ContaPagar.numeroParcela].
+  static final numeroParcela = obx.QueryStringProperty<ContaPagar>(
+    _entities[17].properties[3],
+  );
+
+  /// See [ContaPagar.dataEmissao].
+  static final dataEmissao = obx.QueryDateProperty<ContaPagar>(
+    _entities[17].properties[4],
+  );
+
+  /// See [ContaPagar.dataVencimento].
+  static final dataVencimento = obx.QueryDateProperty<ContaPagar>(
+    _entities[17].properties[5],
+  );
+
+  /// See [ContaPagar.valorParcela].
+  static final valorParcela = obx.QueryDoubleProperty<ContaPagar>(
+    _entities[17].properties[6],
+  );
+
+  /// See [ContaPagar.status].
+  static final status = obx.QueryStringProperty<ContaPagar>(
+    _entities[17].properties[7],
+  );
+
+  /// See [ContaPagar.dataPagamento].
+  static final dataPagamento = obx.QueryDateProperty<ContaPagar>(
+    _entities[17].properties[8],
+  );
+
+  /// See [ContaPagar.valorPago].
+  static final valorPago = obx.QueryDoubleProperty<ContaPagar>(
+    _entities[17].properties[9],
+  );
+
+  /// See [ContaPagar.fornecedor].
+  static final fornecedor = obx.QueryRelationToOne<ContaPagar, FornecedorNfe>(
+    _entities[17].properties[10],
   );
 }
