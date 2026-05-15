@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../model/historico_entrada.dart';
 import '../model/produto.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
@@ -13,6 +14,9 @@ class ProdutoRepository extends ChangeNotifier {
   ProdutoRepository(this._db);
 
   final ObjectBox _db;
+
+  ObjectBox get objectBox => _db;
+
   static const List<String> _unidadesValidas = [
     'UN',
     'M',
@@ -73,11 +77,13 @@ class ProdutoRepository extends ChangeNotifier {
         _migracaoAtivoLegadoOk = true;
         return;
       }
-      final todos = _db.produtoBox.getAll();
-      for (final prod in todos) {
-        prod.ativo = true;
-        _db.produtoBox.put(prod);
-      }
+      _db.store.runInTransaction(TxMode.write, () {
+        final todos = _db.produtoBox.getAll();
+        for (final prod in todos) {
+          prod.ativo = true;
+          _db.produtoBox.put(prod);
+        }
+      });
       flag.writeAsStringSync('ok');
       _invalidarCacheBusca();
       notificarAlteracaoParaRede();
@@ -88,11 +94,11 @@ class ProdutoRepository extends ChangeNotifier {
   }
 
   void _normalizarDadosLegados(List<Produto> produtos) {
-    var gravou = false;
+    final alterados = <Produto>[];
     for (final produto in produtos) {
       final unidade = produto.unidade.trim();
       final unidadeValida = _unidadesValidas.contains(unidade);
-      bool houveAjuste = false;
+      var houveAjuste = false;
       if (!unidadeValida) {
         produto.unidade = 'UN';
         houveAjuste = true;
@@ -111,13 +117,18 @@ class ProdutoRepository extends ChangeNotifier {
         houveAjuste = true;
       }
       if (houveAjuste) {
-        _db.produtoBox.put(produto);
-        gravou = true;
+        alterados.add(produto);
       }
     }
-    if (gravou) {
-      notificarAlteracaoParaRede();
+    if (alterados.isEmpty) {
+      return;
     }
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final p in alterados) {
+        _db.produtoBox.put(p);
+      }
+    });
+    notificarAlteracaoParaRede();
   }
 
   /// - [somenteAtivos] padrao true (PDV): ignora inativos.
@@ -319,12 +330,18 @@ class ProdutoRepository extends ChangeNotifier {
 
     double score = 0;
 
-    if (consultaNormalizada == codigoBarras && codigoBarras.isNotEmpty)
+    if (consultaNormalizada == codigoBarras && codigoBarras.isNotEmpty) {
       score += 1200;
-    if (consultaNormalizada == codigoInterno && codigoInterno.isNotEmpty)
+    }
+    if (consultaNormalizada == codigoInterno && codigoInterno.isNotEmpty) {
       score += 1000;
-    if (nome.startsWith(consultaNormalizada)) score += 700;
-    if (nome.contains(consultaNormalizada)) score += 450;
+    }
+    if (nome.startsWith(consultaNormalizada)) {
+      score += 700;
+    }
+    if (nome.contains(consultaNormalizada)) {
+      score += 450;
+    }
     if (doc.categoriaNormalizada.contains(consultaNormalizada) ||
         doc.marcaNormalizada.contains(consultaNormalizada)) {
       score += 200;
@@ -496,6 +513,19 @@ class ProdutoRepository extends ChangeNotifier {
   }
 
   Produto? obterPorId(int id) => _db.produtoBox.get(id);
+
+  /// Entradas por importacao de NF-e, mais recentes primeiro.
+  List<HistoricoEntrada> listarHistoricoEntradaPorProduto(int produtoId) {
+    final q = _db.historicoEntradaBox
+        .query(HistoricoEntrada_.produto.equals(produtoId))
+        .order(HistoricoEntrada_.dataEmissao, flags: Order.descending)
+        .build();
+    try {
+      return q.find();
+    } finally {
+      q.close();
+    }
+  }
 
   void _invalidarCacheBusca() {
     _cacheDocs = const [];

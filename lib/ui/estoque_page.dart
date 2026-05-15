@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../data/produto_repository.dart';
 import '../model/produto.dart';
 import '../services/pdf_tabela_produtos_texto.dart';
+import 'sugestao_compra_page.dart';
 
 final NumberFormat _moedaBRL = NumberFormat('#,##0.00', 'pt_BR');
 
@@ -206,6 +207,19 @@ class _EstoquePageState extends State<EstoquePage> {
       appBar: AppBar(
         title: const Text('Estoque'),
         actions: [
+          IconButton(
+            tooltip: 'Sugestao de compra',
+            icon: const Icon(Icons.shopping_cart_outlined),
+            onPressed: () {
+              Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => SugestaoCompraPage(
+                    produtoRepository: widget.produtoRepository,
+                  ),
+                ),
+              );
+            },
+          ),
           PopupMenuButton<String>(
             tooltip: 'Exportar tabelas',
             icon: const Icon(Icons.file_download_outlined),

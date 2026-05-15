@@ -10,8 +10,12 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
+import '../data/auto_backup_service.dart';
+import '../data/local_app_data_paths.dart';
+import '../data/local_backup_copy.dart';
 import '../data/mensageria_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
+import '../data/sync/sync_api_client.dart';
 import '../data/venda_repository.dart';
 import '../model/mensagem_log.dart';
 import '../model/mensagem_template.dart';
@@ -58,6 +62,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _backupEmAndamento = false;
   bool _restauracaoEmAndamento = false;
   String _ultimoBackupPath = '';
+  bool _backupAutomaticoAtivo = false;
+  String _backupAutomaticoPasta = '';
+  int _backupAutomaticoIntervaloMinutos = 1440;
+  int _ultimoBackupAutomaticoMs = 0;
   bool _permitirVendaSemEstoque = true;
   bool _mostrarCampoDescontoCaixa = true;
   List<MensagemTemplate> _templatesMensagem = [];
@@ -76,6 +84,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _redeSincronizacaoAtiva = false;
   bool _testandoRede = false;
   bool _sincronizandoManual = false;
+  int? _estacoesAtivas;
+  List<Map<String, dynamic>> _estacoesLista = [];
+  String _presencaErro = '';
+  bool _carregandoPresenca = false;
 
   String _rotuloStatusMensagem(String status) {
     switch (status) {
@@ -148,6 +160,14 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _mensageriaBackendUrlController.text = config.mensageriaBackendUrl;
       _redeSincronizacaoAtiva = config.redeSincronizacaoAtiva;
       _redeServidorUrlController.text = config.redeServidorUrl;
+      _backupAutomaticoAtivo = config.backupAutomaticoAtivo;
+      _backupAutomaticoPasta = config.backupAutomaticoPasta;
+      _backupAutomaticoIntervaloMinutos = () {
+        const opcoes = [60, 360, 720, 1440];
+        final raw = config.backupAutomaticoIntervaloMinutos.clamp(15, 10080);
+        return opcoes.contains(raw) ? raw : 1440;
+      }();
+      _ultimoBackupAutomaticoMs = config.ultimoBackupAutomaticoMs;
       _prefsEmpresaAplicadas = true;
     });
     try {
@@ -345,6 +365,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     if (!mounted) return;
     setState(() => _salvando = true);
     try {
+      final disco = await _configRepository.carregarEmpresaConfig();
       await _configRepository.salvarEmpresaConfig(
         EmpresaConfig(
           nomeLoja: _nomeLojaController.text,
@@ -369,8 +390,17 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           mensageriaBackendUrl: _mensageriaBackendUrlController.text,
           redeSincronizacaoAtiva: _redeSincronizacaoAtiva,
           redeServidorUrl: _redeServidorUrlController.text,
+          backupAutomaticoAtivo: _backupAutomaticoAtivo,
+          backupAutomaticoPasta: _backupAutomaticoPasta,
+          backupAutomaticoIntervaloMinutos:
+              _backupAutomaticoIntervaloMinutos,
+          ultimoBackupAutomaticoMs: disco.ultimoBackupAutomaticoMs,
         ),
       );
+      if (!mounted) return;
+      setState(() {
+        _ultimoBackupAutomaticoMs = disco.ultimoBackupAutomaticoMs;
+      });
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -497,6 +527,71 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       }
     } finally {
       if (mounted) setState(() => _sincronizandoManual = false);
+    }
+  }
+
+  Future<void> _atualizarPresencaRede() async {
+    final uri = _redeServidorUrlController.text.trim();
+    if (uri.isEmpty) {
+      setState(() {
+        _estacoesAtivas = null;
+        _estacoesLista = [];
+        _presencaErro = 'Informe o endereco do servidor acima.';
+      });
+      return;
+    }
+    setState(() {
+      _carregandoPresenca = true;
+      _presencaErro = '';
+    });
+    final client = SyncApiClient(baseUrl: uri);
+    try {
+      final map = await client.obterPresenca();
+      if (!mounted) return;
+      if (map == null) {
+        setState(() {
+          _carregandoPresenca = false;
+          _estacoesAtivas = null;
+          _estacoesLista = [];
+          _presencaErro =
+              'Servidor nao respondeu ou versao antiga (atualize o sync_server).';
+        });
+        return;
+      }
+      final n = (map['activeCount'] as num?)?.toInt();
+      final raw = map['stations'];
+      final lista = <Map<String, dynamic>>[];
+      if (raw is List) {
+        for (final e in raw) {
+          if (e is Map<String, dynamic>) {
+            lista.add(e);
+          } else if (e is Map) {
+            lista.add(Map<String, dynamic>.from(e));
+          }
+        }
+      }
+      setState(() {
+        _carregandoPresenca = false;
+        _estacoesAtivas = n;
+        _estacoesLista = lista;
+        _presencaErro = '';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _carregandoPresenca = false;
+        _presencaErro = '$e';
+      });
+    }
+  }
+
+  String _fmtLastSeenPresenca(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
+    try {
+      final d = DateTime.parse(iso).toLocal();
+      return DateFormat('dd/MM HH:mm').format(d);
+    } catch (_) {
+      return iso;
     }
   }
 
@@ -886,12 +981,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     }
   }
 
-  Future<Directory> _obterDiretorioBaseDados() async {
-    return Platform.isWindows
-        ? getApplicationSupportDirectory()
-        : getApplicationDocumentsDirectory();
-  }
-
   Future<void> _criarBackupDados() async {
     if (_backupEmAndamento) return;
     final destinoRaiz = await FilePicker.platform.getDirectoryPath(
@@ -903,7 +992,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
 
     setState(() => _backupEmAndamento = true);
     try {
-      final baseDadosDir = await _obterDiretorioBaseDados();
+      final baseDadosDir = await obterDiretorioBaseDadosApp();
       if (!baseDadosDir.existsSync()) {
         throw Exception('Pasta de dados local nao encontrada.');
       }
@@ -913,7 +1002,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         p.join(destinoRaiz, 'backup_sistema_vendas_$timestamp'),
       );
       pastaBackup.createSync(recursive: true);
-      await _copiarDiretorioRecursivo(
+      await copiarDiretorioRecursivo(
         origem: baseDadosDir,
         destino: Directory(p.join(pastaBackup.path, 'dados_aplicacao')),
       );
@@ -937,29 +1026,74 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     }
   }
 
-  Future<void> _copiarDiretorioRecursivo({
-    required Directory origem,
-    required Directory destino,
-  }) async {
-    if (!origem.existsSync()) return;
-    destino.createSync(recursive: true);
-    await for (final entidade in origem.list(recursive: false)) {
-      final nome = p.basename(entidade.path);
-      final destinoPath = p.join(destino.path, nome);
-      if (entidade is Directory) {
-        await _copiarDiretorioRecursivo(
-          origem: entidade,
-          destino: Directory(destinoPath),
+  Future<void> _persistirPreferenciasBackupAutomatico() async {
+    final atual = await _configRepository.carregarEmpresaConfig();
+    await _configRepository.salvarEmpresaConfig(
+      atual.copyWith(
+        backupAutomaticoAtivo: _backupAutomaticoAtivo,
+        backupAutomaticoPasta: _backupAutomaticoPasta,
+        backupAutomaticoIntervaloMinutos:
+            _backupAutomaticoIntervaloMinutos.clamp(15, 10080),
+      ),
+    );
+  }
+
+  Future<void> _alternarBackupAutomatico(bool value) async {
+    if (value) {
+      var pasta = _backupAutomaticoPasta.trim();
+      if (pasta.isEmpty) {
+        final escolhida = await FilePicker.platform.getDirectoryPath(
+          dialogTitle:
+              'Pasta para backups automaticos (serao criadas subpastas com data e hora)',
         );
-      } else if (entidade is File) {
-        await entidade.copy(destinoPath);
+        if (escolhida == null || escolhida.trim().isEmpty || !mounted) {
+          return;
+        }
+        pasta = escolhida.trim();
       }
+      if (!mounted) return;
+      setState(() {
+        _backupAutomaticoAtivo = true;
+        _backupAutomaticoPasta = pasta;
+      });
+      await _persistirPreferenciasBackupAutomatico();
+      await AutoBackupService.tentarExecutarSeDevido(_configRepository);
+      if (!mounted) return;
+      final up = await _configRepository.carregarEmpresaConfig();
+      setState(() => _ultimoBackupAutomaticoMs = up.ultimoBackupAutomaticoMs);
+    } else {
+      setState(() => _backupAutomaticoAtivo = false);
+      await _persistirPreferenciasBackupAutomatico();
     }
+  }
+
+  Future<void> _escolherPastaBackupAutomatico() async {
+    final escolhida = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Pasta para backups automaticos',
+    );
+    if (escolhida == null || escolhida.trim().isEmpty || !mounted) return;
+    setState(() => _backupAutomaticoPasta = escolhida.trim());
+    await _persistirPreferenciasBackupAutomatico();
+  }
+
+  Future<void> _definirIntervaloBackupAutomatico(int? minutos) async {
+    if (minutos == null) return;
+    setState(() => _backupAutomaticoIntervaloMinutos = minutos);
+    await _persistirPreferenciasBackupAutomatico();
+  }
+
+  String _rotuloIntervaloBackupAutomatico(int minutos) {
+    final m = minutos.clamp(15, 10080);
+    if (m == 60) return 'A cada 1 hora';
+    if (m == 360) return 'A cada 6 horas';
+    if (m == 720) return 'A cada 12 horas';
+    if (m == 1440) return 'Diariamente (24 horas)';
+    return 'A cada $m minutos';
   }
 
   Future<void> _abrirPastaDados() async {
     try {
-      final baseDir = await _obterDiretorioBaseDados();
+      final baseDir = await obterDiretorioBaseDadosApp();
       if (!baseDir.existsSync()) {
         throw Exception('Pasta de dados local nao encontrada.');
       }
@@ -1054,7 +1188,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       final origemRestore = origemDadosAplicacao.existsSync()
           ? origemDadosAplicacao
           : origemSelecionada;
-      final baseDir = await _obterDiretorioBaseDados();
+      final baseDir = await obterDiretorioBaseDadosApp();
 
       if (!origemRestore.existsSync()) {
         throw Exception('Pasta de backup invalida.');
@@ -1064,7 +1198,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       }
 
       await _limparDiretorio(baseDir);
-      await _copiarDiretorioRecursivo(origem: origemRestore, destino: baseDir);
+      await copiarDiretorioRecursivo(origem: origemRestore, destino: baseDir);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1840,6 +1974,77 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                       fontStyle: FontStyle.italic,
                     ),
                   ),
+                  const Divider(height: 22),
+                  Text(
+                    'Estacoes com app na rede',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Cada PC com sincronizacao ativa envia sinal ao servidor a cada 45 s. '
+                    'Estacoes sem sinal por cerca de 90 s saem da lista (atualize o sync_server neste PC servidor).',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          _carregandoPresenca ? null : _atualizarPresencaRede,
+                      icon: _carregandoPresenca
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.devices_outlined),
+                      label: Text(
+                        _carregandoPresenca
+                            ? 'Consultando...'
+                            : 'Ver estacoes online agora',
+                      ),
+                    ),
+                  ),
+                  if (_presencaErro.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _presencaErro,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                  if (_estacoesAtivas != null && _presencaErro.isEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Total ativo agora: $_estacoesAtivas',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    if (_estacoesLista.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      ..._estacoesLista.map((s) {
+                        final id = (s['stationId'] ?? '').toString();
+                        final lab = (s['label'] ?? '').toString();
+                        final seen =
+                            _fmtLastSeenPresenca(s['lastSeen']?.toString());
+                        final idCurto =
+                            id.length > 14 ? '${id.substring(0, 14)}…' : id;
+                        final linha = lab.isEmpty
+                            ? '• $idCurto · ping $seen'
+                            : '• $lab · ping $seen';
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 3),
+                          child: Text(
+                            linha,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        );
+                      }),
+                    ],
+                  ],
                 ],
               ),
             ),
@@ -1862,6 +2067,80 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                     'Crie backup completo dos dados locais da aplicacao e acesse a pasta do banco.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Backup automatico'),
+                    subtitle: Text(
+                      'Copia periodica enquanto o app estiver aberto. Escolha uma pasta segura '
+                      '(outro disco, rede ou nuvem sincronizada) para nao perder dados se este PC falhar.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    value: _backupAutomaticoAtivo,
+                    onChanged:
+                        _backupEmAndamento ? null : _alternarBackupAutomatico,
+                  ),
+                  if (_backupAutomaticoAtivo) ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _escolherPastaBackupAutomatico,
+                        icon: const Icon(Icons.folder_outlined, size: 20),
+                        label: const Text('Escolher pasta de destino'),
+                      ),
+                    ),
+                    if (_backupAutomaticoPasta.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: SelectableText(
+                          _backupAutomaticoPasta,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    DropdownButtonFormField<int>(
+                      key: ValueKey(_backupAutomaticoIntervaloMinutos),
+                      decoration: const InputDecoration(
+                        labelText: 'Frequencia',
+                      ),
+                      initialValue: _backupAutomaticoIntervaloMinutos,
+                      items: [
+                        DropdownMenuItem(
+                          value: 60,
+                          child: Text(
+                            _rotuloIntervaloBackupAutomatico(60),
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: 360,
+                          child: Text(
+                            _rotuloIntervaloBackupAutomatico(360),
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: 720,
+                          child: Text(
+                            _rotuloIntervaloBackupAutomatico(720),
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: 1440,
+                          child: Text(
+                            _rotuloIntervaloBackupAutomatico(1440),
+                          ),
+                        ),
+                      ],
+                      onChanged: _backupEmAndamento
+                          ? null
+                          : _definirIntervaloBackupAutomatico,
+                    ),
+                    if (_ultimoBackupAutomaticoMs > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Ultimo backup automatico: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.fromMillisecondsSinceEpoch(_ultimoBackupAutomaticoMs))}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ],
                   const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,

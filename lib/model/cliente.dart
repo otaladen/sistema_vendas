@@ -111,28 +111,49 @@ class Cliente {
   int id;
 
   String tipoPessoa; // fisica | juridica
+
+  /// Listagem e busca (cadastro, PDV, vendas).
+  @Index()
   String nomeRazao;
+
+  @Index()
   String nomeFantasia;
+
+  /// CPF/CNPJ — busca frequente e filtro em vendas.
+  @Index()
   String documento; // CPF/CNPJ
+
+  @Index()
   String rg;
   @Property(type: PropertyType.dateUtc)
   DateTime? dataNascimento;
   String sexo; // M | F | O | '' (nao informado)
   String inscricaoEstadual;
+  @Index()
   String telefone;
+
+  @Index()
   String whatsapp;
+
+  @Index()
   String email;
   String cep;
   String endereco;
   String numero;
   String bairro;
+
+  @Index()
   String cidade;
+
   String uf;
   String referencia;
   String enderecosJson;
   double limiteCredito;
   String observacoes;
+
+  @Index()
   String ocupacao;
+
   bool ativo;
 
   @Property(type: PropertyType.dateUtc)

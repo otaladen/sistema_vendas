@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 import 'data/app_config_repository.dart';
+import 'data/auto_backup_service.dart';
 import 'data/cliente_repository.dart';
 import 'data/funcionario_repository.dart';
 import 'data/motorista_repository.dart';
@@ -19,6 +22,7 @@ import 'ui/main_menu_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('pt_BR');
   await _tentarSincronizarHorarioSistemaNoInicio();
   final objectBox = await ObjectBox.create();
   final appConfigRepository = AppConfigRepository();
@@ -35,6 +39,7 @@ Future<void> main() async {
     MyApp(
       objectBox: objectBox,
       lanSyncScheduler: lanSyncScheduler,
+      appConfigRepository: appConfigRepository,
     ),
   );
 }
@@ -70,10 +75,12 @@ class MyApp extends StatefulWidget {
     super.key,
     required this.objectBox,
     required this.lanSyncScheduler,
+    required this.appConfigRepository,
   });
 
   final ObjectBox objectBox;
   final LanSyncScheduler lanSyncScheduler;
+  final AppConfigRepository appConfigRepository;
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -82,6 +89,27 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   UsuarioSistema? _usuarioLogado;
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
+  Timer? _timerBackupAutomatico;
+
+  @override
+  void initState() {
+    super.initState();
+    _timerBackupAutomatico = Timer.periodic(
+      const Duration(minutes: 5),
+      (_) => AutoBackupService.tentarExecutarSeDevido(
+        widget.appConfigRepository,
+      ),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AutoBackupService.tentarExecutarSeDevido(widget.appConfigRepository);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timerBackupAutomatico?.cancel();
+    super.dispose();
+  }
 
   void _entrar(UsuarioSistema usuario) {
     setState(() {

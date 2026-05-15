@@ -87,7 +87,9 @@
         {
           "id": "2:8766242792253639911",
           "name": "nome",
-          "type": 9
+          "indexId": "17:673544041099822411",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "3:3014136920685238834",
@@ -117,7 +119,9 @@
         {
           "id": "8:4671123828913692338",
           "name": "codigoInterno",
-          "type": 9
+          "indexId": "16:6516894237683837592",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "9:7692428431208033005",
@@ -157,7 +161,9 @@
         {
           "id": "16:2717273193349575761",
           "name": "codigoBarras",
-          "type": 9
+          "indexId": "18:8253104142220020065",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "17:3697983639399962673",
@@ -207,7 +213,9 @@
         {
           "id": "27:6227758820947378730",
           "name": "ativo",
-          "type": 1
+          "indexId": "19:518194309583411298",
+          "type": 1,
+          "flags": 8
         }
       ],
       "relations": []
@@ -416,17 +424,23 @@
         {
           "id": "3:5724585618422995633",
           "name": "nomeRazao",
-          "type": 9
+          "indexId": "20:9122979686386606727",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "4:6143058838078556321",
           "name": "nomeFantasia",
-          "type": 9
+          "indexId": "21:3088807594348686109",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "5:1179106941222261668",
           "name": "documento",
-          "type": 9
+          "indexId": "22:7143879984497135608",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "6:8725588667688515569",
@@ -436,17 +450,23 @@
         {
           "id": "7:3449271875040642616",
           "name": "telefone",
-          "type": 9
+          "indexId": "23:3042474473289142369",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "8:4873452929797137508",
           "name": "whatsapp",
-          "type": 9
+          "indexId": "28:5606015385221509710",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "9:8018106346336043925",
           "name": "email",
-          "type": 9
+          "indexId": "24:8711167512132771126",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "10:8902294221741944013",
@@ -471,7 +491,9 @@
         {
           "id": "14:3517125582596044450",
           "name": "cidade",
-          "type": 9
+          "indexId": "25:2398291035436844085",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "15:8648437437100286039",
@@ -511,7 +533,9 @@
         {
           "id": "22:1704717448417316736",
           "name": "rg",
-          "type": 9
+          "indexId": "27:1165768109705113730",
+          "type": 9,
+          "flags": 2048
         },
         {
           "id": "23:3190892869132455483",
@@ -526,7 +550,9 @@
         {
           "id": "25:2510086867183108992",
           "name": "ocupacao",
-          "type": 9
+          "indexId": "29:995946862125229322",
+          "type": 9,
+          "flags": 2048
         }
       ],
       "relations": []
@@ -971,10 +997,282 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "12:6223739968660994756",
+      "lastPropertyId": "4:3451572505916393876",
+      "name": "FornecedorNfe",
+      "properties": [
+        {
+          "id": "1:1134374851525712080",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:5370081357738054084",
+          "name": "cnpj",
+          "indexId": "11:9043408657189730032",
+          "type": 9,
+          "flags": 2080
+        },
+        {
+          "id": "3:3363321868157243080",
+          "name": "razaoSocial",
+          "type": 9
+        },
+        {
+          "id": "4:3451572505916393876",
+          "name": "nomeFantasia",
+          "type": 9
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "13:5991042514915088307",
+      "lastPropertyId": "5:503631303594011253",
+      "name": "VinculoFornecedorProduto",
+      "properties": [
+        {
+          "id": "1:3108530581055948697",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:4681869373384331077",
+          "name": "codigoProdutoFornecedor",
+          "indexId": "26:8115461743013931185",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "3:4856567302787513447",
+          "name": "fatorConversao",
+          "type": 8
+        },
+        {
+          "id": "4:3522691294605028295",
+          "name": "fornecedorId",
+          "indexId": "12:4284786775435947047",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "FornecedorNfe"
+        },
+        {
+          "id": "5:503631303594011253",
+          "name": "produtoId",
+          "indexId": "13:3280230778078615331",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Produto"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "14:3896307370637439106",
+      "lastPropertyId": "12:7279250604541526704",
+      "name": "HistoricoEntrada",
+      "properties": [
+        {
+          "id": "1:4265842071031702314",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:4901670479881182684",
+          "name": "numeroNota",
+          "type": 6
+        },
+        {
+          "id": "3:6356250174234336792",
+          "name": "chaveAcesso",
+          "type": 9
+        },
+        {
+          "id": "4:1679461900419267543",
+          "name": "dataEmissao",
+          "type": 10
+        },
+        {
+          "id": "5:4392565453608919279",
+          "name": "nomeFornecedor",
+          "type": 9
+        },
+        {
+          "id": "6:3394240046159555109",
+          "name": "cnpjFornecedor",
+          "type": 9
+        },
+        {
+          "id": "7:2496582002444620142",
+          "name": "unidadeFornecedor",
+          "type": 9
+        },
+        {
+          "id": "8:326915685620344957",
+          "name": "quantidadeFornecedor",
+          "type": 8
+        },
+        {
+          "id": "9:5451569833483875954",
+          "name": "fatorConversaoUtilizado",
+          "type": 8
+        },
+        {
+          "id": "10:7452687209193226286",
+          "name": "quantidadeEntradaEstoque",
+          "type": 6
+        },
+        {
+          "id": "11:7840933834103469173",
+          "name": "precoCustoUnitarioNota",
+          "type": 8
+        },
+        {
+          "id": "12:7279250604541526704",
+          "name": "produtoId",
+          "indexId": "14:3433302524578766695",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Produto"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "15:72376679603234085",
+      "lastPropertyId": "8:8069647315449194845",
+      "name": "NfeImportadaRegistro",
+      "properties": [
+        {
+          "id": "1:8488433745786611591",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:3900012154129650384",
+          "name": "chaveAcesso",
+          "indexId": "15:8502234367181220618",
+          "type": 9,
+          "flags": 2080
+        },
+        {
+          "id": "3:6987048711864822053",
+          "name": "numeroNota",
+          "type": 6
+        },
+        {
+          "id": "4:892312579129903794",
+          "name": "dataEmissao",
+          "type": 10
+        },
+        {
+          "id": "5:2178424528360253167",
+          "name": "nomeFornecedor",
+          "type": 9
+        },
+        {
+          "id": "6:2889362452251831773",
+          "name": "cnpjFornecedor",
+          "type": 9
+        },
+        {
+          "id": "7:2288215335637521840",
+          "name": "dataHoraImportacao",
+          "type": 10
+        },
+        {
+          "id": "8:8069647315449194845",
+          "name": "quantidadeItens",
+          "type": 6
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "16:3042033206530418999",
+      "lastPropertyId": "5:9041951845984258649",
+      "name": "KitOrcamento",
+      "properties": [
+        {
+          "id": "1:5276412564478228526",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:5445766289043013544",
+          "name": "nome",
+          "indexId": "30:8345419273336568957",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "3:4620424121152390617",
+          "name": "descricao",
+          "type": 9
+        },
+        {
+          "id": "4:2574680350330967293",
+          "name": "ativo",
+          "type": 1
+        },
+        {
+          "id": "5:9041951845984258649",
+          "name": "criadoEm",
+          "type": 10
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "17:1395296318023273307",
+      "lastPropertyId": "5:320014149802628837",
+      "name": "KitOrcamentoItem",
+      "properties": [
+        {
+          "id": "1:8887029425978519169",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:1062784189422608548",
+          "name": "quantidade",
+          "type": 6
+        },
+        {
+          "id": "3:7465087895719142385",
+          "name": "ordem",
+          "type": 6
+        },
+        {
+          "id": "4:7985824853318033352",
+          "name": "kitId",
+          "indexId": "31:61772430505694911",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "KitOrcamento"
+        },
+        {
+          "id": "5:320014149802628837",
+          "name": "produtoId",
+          "indexId": "32:5867922644726317008",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Produto"
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "11:9083307328797630834",
-  "lastIndexId": "10:3798372306845118182",
+  "lastEntityId": "17:1395296318023273307",
+  "lastIndexId": "32:5867922644726317008",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

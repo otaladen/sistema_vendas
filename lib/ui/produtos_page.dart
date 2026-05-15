@@ -12,6 +12,7 @@ import '../main.dart';
 import '../data/produto_repository.dart';
 import '../model/produto.dart';
 import '../services/produto_imagem_service.dart';
+import 'widgets/abas_historico_produto_widget.dart';
 
 class ProdutosPage extends StatefulWidget {
   const ProdutosPage({super.key, required this.produtoRepository});
@@ -164,6 +165,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
   String? _fotoOrigemLocalPath;
   bool _fotoFoiRemovida = false;
   final ScrollController _scrollController = ScrollController();
+  int _historicoVersao = 0;
 
   String _status = '';
   bool _statusEhErro = false;
@@ -942,8 +944,18 @@ class _ProdutosPageState extends State<ProdutosPage> {
       criadoEm: produtoExistente?.criadoEm,
     );
     final estavaEditando = _produtoEmEdicaoId != null;
-    widget.produtoRepository.salvar(produto);
-    _resetarFormulario();
+    final idSalvo = widget.produtoRepository.salvar(produto);
+    if (!estavaEditando) {
+      final salvo = widget.produtoRepository.obterPorId(idSalvo);
+      if (salvo != null) {
+        _editarProdutoNoCabecalho(salvo);
+      } else {
+        _resetarFormulario();
+      }
+    } else {
+      _resetarFormulario();
+      setState(() => _historicoVersao++);
+    }
     _definirStatus(
       !estavaEditando
           ? 'Produto incluido com sucesso.'
@@ -954,6 +966,7 @@ class _ProdutosPageState extends State<ProdutosPage> {
 
   void _editarProdutoNoCabecalho(Produto produto) {
     setState(() {
+      _historicoVersao++;
       _produtoEmEdicaoId = produto.id;
       _codigoInternoController.text = produto.codigoInterno;
       _nomeController.text = produto.nome;
@@ -1953,14 +1966,31 @@ class _ProdutosPageState extends State<ProdutosPage> {
           ),
         ],
       ),
-      body: Form(
-        key: _formKey,
-        autovalidateMode: _tentouSalvar
-            ? AutovalidateMode.always
-            : AutovalidateMode.disabled,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-          child: RawScrollbar(
+      body: DefaultTabController(
+        length: 2,
+        child: Column(
+          children: [
+            Material(
+              color: theme.colorScheme.surface,
+              child: TabBar(
+                labelColor: theme.colorScheme.primary,
+                tabs: const [
+                  Tab(text: 'Dados do produto'),
+                  Tab(text: 'Historico de compras'),
+                ],
+              ),
+            ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  Form(
+                    key: _formKey,
+                    autovalidateMode: _tentouSalvar
+                        ? AutovalidateMode.always
+                        : AutovalidateMode.disabled,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                      child: RawScrollbar(
             controller: _scrollController,
             thumbVisibility: true,
             trackVisibility: true,
@@ -2530,6 +2560,17 @@ class _ProdutosPageState extends State<ProdutosPage> {
         ),
       ),
     ),
+                  AbasHistoricoProdutoWidget(
+                    key: ValueKey(_historicoVersao),
+                    produtoRepository: widget.produtoRepository,
+                    produtoId: _produtoEmEdicaoId,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

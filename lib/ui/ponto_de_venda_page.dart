@@ -11,12 +11,14 @@ import 'package:printing/printing.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../data/app_config_repository.dart';
 import '../data/cliente_repository.dart';
+import '../data/kit_orcamento_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
+import '../model/kit_orcamento.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
@@ -87,6 +89,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
   final _observacaoEntregaController = TextEditingController();
   final _configRepository = AppConfigRepository();
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
+  late final KitOrcamentoRepository _kitOrcamentoRepo =
+      KitOrcamentoRepository(widget.produtoRepository.objectBox);
   Timer? _debouncePesquisa;
   bool _pesquisaAguardandoDebounce = false;
   List<Produto> _produtos = [];
@@ -689,6 +693,134 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
       }
     });
     _voltarFocoParaPesquisa();
+  }
+
+  Future<void> _inserirKitNoOrcamento() async {
+    final kits = _kitOrcamentoRepo.listarPorNome(somenteAtivos: true);
+    if (kits.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Nenhum kit ativo. Cadastre em Menu > Cadastros > Kits de orcamento.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final qtdCtrl = TextEditingController(text: '1');
+    KitOrcamento escolhido = kits.first;
+
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDlg) {
+            return AlertDialog(
+              title: const Text('Inserir kit no orcamento'),
+              content: SizedBox(
+                width: 380,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Cada produto do kit entra no carrinho com o preco ativo (${_rotuloPreco(_precoListaAtivo)}), '
+                        'multiplicado pela quantidade de kits.',
+                        style: Theme.of(ctx).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Kit selecionado: ${escolhido.nome}',
+                        style: Theme.of(ctx).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 220,
+                        child: ListView(
+                          children: [
+                            for (final k in kits)
+                              ListTile(
+                                dense: true,
+                                title: Text(k.nome),
+                                selected: escolhido.id == k.id,
+                                onTap: () => setDlg(() => escolhido = k),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: qtdCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Quantidade de kits',
+                          hintText: '1',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Inserir'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    final mult = int.tryParse(qtdCtrl.text.trim()) ?? 0;
+    qtdCtrl.dispose();
+
+    if (confirmou != true || mult <= 0) {
+      if (confirmou == true && mult <= 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Quantidade de kits invalida.')),
+        );
+      }
+      return;
+    }
+
+    final completo = _kitOrcamentoRepo.obterPorId(escolhido.id);
+    if (completo == null || !mounted) {
+      return;
+    }
+    final itens = completo.itens.toList()
+      ..sort((a, b) => a.ordem.compareTo(b.ordem));
+
+    var ignorados = 0;
+    for (final it in itens) {
+      final pid = it.produto.targetId;
+      final p = pid != 0 ? widget.produtoRepository.obterPorId(pid) : null;
+      if (p == null || !p.ativo) {
+        ignorados++;
+        continue;
+      }
+      final q = it.quantidade * mult;
+      _adicionarComQuantidade(p, q);
+    }
+
+    if (!mounted) return;
+    if (ignorados > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$ignorados item(ns) do kit ignorados (produto inativo ou removido).',
+          ),
+        ),
+      );
+    }
   }
 
   KeyEventResult _onKeyListaProdutos(FocusNode node, KeyEvent event) {
@@ -3125,6 +3257,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
                 tooltip: 'Ler orcamento para editar',
                 onPressed: _abrirLeitorOrcamento,
                 icon: const Icon(Icons.description_outlined),
+              ),
+              IconButton(
+                tooltip: 'Inserir kit de orcamento',
+                onPressed: _inserirKitNoOrcamento,
+                icon: const Icon(Icons.widgets_outlined),
               ),
             ],
           ),

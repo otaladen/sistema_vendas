@@ -37,6 +37,44 @@ class SyncApiClient {
     }
   }
 
+  /// Heartbeat para o servidor contar estacoes com o app aberto (LAN).
+  Future<bool> heartbeat({
+    required String stationId,
+    required String label,
+  }) async {
+    if (!configurado) return false;
+    try {
+      final r = await http
+          .post(
+            _uri('/sync/heartbeat'),
+            headers: {'content-type': 'application/json'},
+            body: jsonEncode({
+              'stationId': stationId,
+              'label': label,
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      return r.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Estacoes que enviaram heartbeat nos ultimos [ttlSeconds] do servidor.
+  Future<Map<String, dynamic>?> obterPresenca() async {
+    if (!configurado) return null;
+    try {
+      final r =
+          await http.get(_uri('/sync/presence')).timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return null;
+      final decoded = jsonDecode(r.body);
+      if (decoded is! Map<String, dynamic>) return null;
+      return decoded;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>> pull({
     required int since,
     required String deviceId,

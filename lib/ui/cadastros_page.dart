@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/kit_orcamento_repository.dart';
 import '../data/cliente_repository.dart';
 import '../data/funcionario_repository.dart';
 import '../data/motorista_repository.dart';
@@ -10,6 +11,7 @@ import '../data/vendedor_repository.dart';
 import '../model/usuario_sistema.dart';
 import 'clientes_page.dart';
 import 'funcionarios_page.dart';
+import 'kits_orcamento_page.dart';
 import 'motoristas_page.dart';
 import 'produtos_page.dart';
 import 'usuarios_page.dart';
@@ -22,6 +24,7 @@ const Color _corFuncionarios = Color(0xFF455A64);
 const Color _corClientes = Color(0xFF1565C0);
 const Color _corVendedores = Color(0xFF2E7D32);
 const Color _corUsuarios = Color(0xFF6A1B9A);
+const Color _corKitsOrcamento = Color(0xFF5D4037);
 
 class CadastrosPage extends StatelessWidget {
   const CadastrosPage({
@@ -66,6 +69,26 @@ class CadastrosPage extends StatelessWidget {
                   MaterialPageRoute(
                     builder: (_) =>
                         ProdutosPage(produtoRepository: produtoRepository),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            HubNavButton(
+              icon: Icons.widgets_outlined,
+              corDestaque: _corKitsOrcamento,
+              titulo: 'Kits de orcamento',
+              habilitado: _podeCadastros,
+              onTap: () {
+                final kitRepo =
+                    KitOrcamentoRepository(produtoRepository.objectBox);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => KitsOrcamentoPage(
+                      kitOrcamentoRepository: kitRepo,
+                      produtoRepository: produtoRepository,
+                    ),
                   ),
                 );
               },

@@ -11,6 +11,7 @@ import '../model/usuario_sistema.dart';
 import 'cadastros_page.dart';
 import 'configuracoes_page.dart';
 import 'estoque_page.dart';
+import 'notas_fiscais_page.dart';
 import 'vendas_page.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
@@ -106,6 +107,25 @@ class _MainMenuPageState extends State<MainMenuPage> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => EstoquePage(
+                      produtoRepository: widget.produtoRepository,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            HubNavButton(
+              icon: Icons.receipt_long_outlined,
+              corDestaque: HubNavColors.menuNotasFiscais,
+              titulo: 'Notas Fiscais',
+              habilitado:
+                  widget.usuarioLogado.admin ||
+                  widget.usuarioLogado.podeEstoque,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => NotasFiscaisPage(
                       produtoRepository: widget.produtoRepository,
                     ),
                   ),

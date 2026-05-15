@@ -1,5 +1,7 @@
 import 'package:objectbox/objectbox.dart';
 
+import 'historico_entrada.dart';
+
 @Entity()
 class Produto {
   Produto({
@@ -35,8 +37,14 @@ class Produto {
   @Id()
   int id;
 
+  /// Buscas por SKU / codigo interno (NF-e, cadastro).
+  @Index()
   String codigoInterno;
+
+  /// Ordenacao em listas e busca textual no cadastro.
+  @Index()
   String nome;
+
   String descricao;
   String unidade;
   String categoria;
@@ -44,6 +52,9 @@ class Produto {
   String marca;
   String fornecedor;
   String fabricante;
+
+  /// Resolucao por EAN na importacao de NF-e e no PDV.
+  @Index()
   String codigoBarras;
   String fotoPath;
   String localizacao;
@@ -76,6 +87,7 @@ class Produto {
   DateTime criadoEm;
 
   /// Quando `false`, o produto nao aparece no PDV/pesquisa de venda, mas permanece no cadastro e no historico.
+  @Index()
   bool ativo;
 
   // Mantem compatibilidade com o codigo legado enquanto a migracao
@@ -88,4 +100,7 @@ class Produto {
     final livre = estoqueReal - estoqueReservado;
     return livre < 0 ? 0 : livre;
   }
+
+  @Backlink('produto')
+  final historicoEntradas = ToMany<HistoricoEntrada>();
 }

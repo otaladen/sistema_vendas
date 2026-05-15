@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../app_config_repository.dart';
+import 'sync_api_client.dart';
+import 'sync_cursor_storage.dart';
 import 'sync_service.dart';
 
 /// Agenda sincronizacao periodica quando a rede esta habilitada nas configuracoes.
@@ -22,6 +26,8 @@ class LanSyncScheduler {
   final Duration intervalo;
 
   Timer? _timer;
+  Timer? _heartbeatTimer;
+  final SyncCursorStorage _cursorStorage = SyncCursorStorage();
 
   /// Garante que varias chamadas a [sincronizarAgora] (timer + WS + repositorios) rodem em serie.
   Future<void> _mutexSync = Future<void>.value();
@@ -48,6 +54,40 @@ class LanSyncScheduler {
     await sincronizarAgora();
     _timer = Timer.periodic(intervalo, (_) => sincronizarAgora());
     unawaited(_conectarTempoReal());
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer =
+        Timer.periodic(const Duration(seconds: 45), (_) => unawaited(_enviarHeartbeat()));
+    unawaited(_enviarHeartbeat());
+  }
+
+  String _rotuloEstacaoParaHeartbeat() {
+    if (kIsWeb) return 'web';
+    try {
+      if (Platform.isWindows) {
+        final n = Platform.environment['COMPUTERNAME'];
+        if (n != null && n.trim().isNotEmpty) return n.trim();
+      }
+      return Platform.localHostname.trim();
+    } catch (_) {
+      return 'app';
+    }
+  }
+
+  Future<void> _enviarHeartbeat() async {
+    if (_instanciaAtiva != this) return;
+    final config = await _configRepository.carregarEmpresaConfig();
+    if (!config.redeSincronizacaoAtiva || config.redeServidorUrl.trim().isEmpty) {
+      return;
+    }
+    final client = SyncApiClient(baseUrl: config.redeServidorUrl);
+    if (!client.configurado) return;
+    try {
+      final stationId = await _cursorStorage.obterOuCriarDeviceId();
+      await client.heartbeat(
+        stationId: stationId,
+        label: _rotuloEstacaoParaHeartbeat(),
+      );
+    } catch (_) {}
   }
 
   Future<void> parar() async {
@@ -56,6 +96,8 @@ class LanSyncScheduler {
     }
     _timer?.cancel();
     _timer = null;
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
     _reconnectRealtimeTimer?.cancel();
     _reconnectRealtimeTimer = null;
     _debounceSyncEvento?.cancel();

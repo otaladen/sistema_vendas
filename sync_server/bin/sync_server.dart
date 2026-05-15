@@ -24,6 +24,23 @@ late Database _db;
 /// Clientes WebSocket para aviso instantaneo de novas revisoes apos push.
 final List<StreamSink<Object?>> _wsClientes = [];
 
+/// Ultimo heartbeat por estacao ([stationId] = epoch ms UTC). TTL define "online".
+const int _presenceTtlMs = 90000;
+
+final Map<String, int> _heartbeatLastMs = {};
+final Map<String, String> _heartbeatLabels = {};
+
+void _pruneHeartbeats() {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  final stale = _heartbeatLastMs.keys
+      .where((k) => now - (_heartbeatLastMs[k] ?? 0) > _presenceTtlMs)
+      .toList();
+  for (final k in stale) {
+    _heartbeatLastMs.remove(k);
+    _heartbeatLabels.remove(k);
+  }
+}
+
 /// Pasta do .exe (AOT) ou pasta atual ao rodar com `dart run`.
 String _diretorioBaseInstalacao() {
   try {
@@ -49,6 +66,8 @@ void main(List<String> args) async {
 
   final router = Router()
     ..get('/health', _health)
+    ..get('/sync/presence', _presence)
+    ..post('/sync/heartbeat', _heartbeat)
     ..get('/sync/meta', _meta)
     ..get('/sync/pull', _pull)
     ..get(
@@ -166,8 +185,64 @@ int _alocarNumeroOrcamentoServidor(Database db) {
 }
 
 Response _health(Request request) {
+  _pruneHeartbeats();
   return Response.ok(
-    jsonEncode({'ok': true, 'service': 'sistema_vendas_sync'}),
+    jsonEncode({
+      'ok': true,
+      'service': 'sistema_vendas_sync',
+      'presenceStations': _heartbeatLastMs.length,
+      'presenceTtlSeconds': _presenceTtlMs ~/ 1000,
+    }),
+    headers: {'content-type': 'application/json'},
+  );
+}
+
+Response _presence(Request request) {
+  _pruneHeartbeats();
+  final stations = <Map<String, dynamic>>[];
+  for (final e in _heartbeatLastMs.entries) {
+    final id = e.key;
+    final ts = e.value;
+    stations.add({
+      'stationId': id,
+      'label': _heartbeatLabels[id] ?? '',
+      'lastSeen': DateTime.fromMillisecondsSinceEpoch(ts, isUtc: true)
+          .toIso8601String(),
+    });
+  }
+  return Response.ok(
+    jsonEncode({
+      'ok': true,
+      'ttlSeconds': _presenceTtlMs ~/ 1000,
+      'activeCount': stations.length,
+      'stations': stations,
+    }),
+    headers: {'content-type': 'application/json'},
+  );
+}
+
+Future<Response> _heartbeat(Request request) async {
+  final raw = await request.readAsString();
+  Map<String, dynamic> body;
+  try {
+    body = jsonDecode(raw) as Map<String, dynamic>;
+  } catch (_) {
+    return Response.badRequest(body: 'JSON invalido');
+  }
+  final stationId = (body['stationId'] ?? '').toString().trim();
+  if (stationId.isEmpty) {
+    return Response(400, body: 'stationId obrigatorio');
+  }
+  var label = (body['label'] ?? '').toString().trim();
+  if (label.length > 80) {
+    label = label.substring(0, 80);
+  }
+  final now = DateTime.now().millisecondsSinceEpoch;
+  _heartbeatLastMs[stationId] = now;
+  _heartbeatLabels[stationId] = label;
+  _pruneHeartbeats();
+  return Response.ok(
+    jsonEncode({'ok': true}),
     headers: {'content-type': 'application/json'},
   );
 }

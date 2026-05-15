@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 abstract final class HubNavColors {
   static const menuCadastros = Color(0xFF1565C0);
   static const menuEstoque = Color(0xFFE65100);
+  static const menuNotasFiscais = Color(0xFF00838F);
   static const menuVendas = Color(0xFF2E7D32);
   static const menuConfig = Color(0xFF6A1B9A);
 }
@@ -25,7 +26,7 @@ class HubNavButton extends StatelessWidget {
   final String titulo;
   final VoidCallback onTap;
   final bool habilitado;
-  /// Quando preenchido, o botao fica mais alto (titulo + descricao alinhados a esquerda).
+  /// Quando preenchido, o botao fica mais alto (titulo + descricao abaixo, alinhados ao centro).
   final String? subtitulo;
 
   @override
@@ -95,24 +96,28 @@ class HubNavButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: habilitado ? onTap : null,
         style: ElevatedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            iconeBadge,
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(titulo, style: estiloTitulo),
-                  const SizedBox(height: 4),
-                  Text(descricao, style: estiloSub),
-                ],
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                iconeBadge,
+                const SizedBox(width: 14),
+                Text(titulo, style: estiloTitulo),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              descricao,
+              style: estiloSub,
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),

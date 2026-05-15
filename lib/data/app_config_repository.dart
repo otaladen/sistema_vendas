@@ -25,6 +25,10 @@ class EmpresaConfig {
     this.mensageriaBackendUrl = '',
     this.redeSincronizacaoAtiva = false,
     this.redeServidorUrl = '',
+    this.backupAutomaticoAtivo = false,
+    this.backupAutomaticoPasta = '',
+    this.backupAutomaticoIntervaloMinutos = 1440,
+    this.ultimoBackupAutomaticoMs = 0,
   });
 
   final String nomeLoja;
@@ -55,6 +59,18 @@ class EmpresaConfig {
   /// Ex.: `http://192.168.0.15:8787` — servidor de sincronizacao na LAN.
   final String redeServidorUrl;
 
+  /// Copia periodica dos dados locais para [backupAutomaticoPasta] (quando ativo).
+  final bool backupAutomaticoAtivo;
+
+  /// Pasta pai onde serao criadas subpastas `backup_sistema_vendas_*`.
+  final String backupAutomaticoPasta;
+
+  /// Intervalo minimo entre backups automaticos (minutos, entre 15 e 10080).
+  final int backupAutomaticoIntervaloMinutos;
+
+  /// `DateTime.now().millisecondsSinceEpoch` do ultimo backup automatico bem-sucedido.
+  final int ultimoBackupAutomaticoMs;
+
   EmpresaConfig copyWith({
     String? nomeLoja,
     String? telefone,
@@ -75,6 +91,10 @@ class EmpresaConfig {
     String? mensageriaBackendUrl,
     bool? redeSincronizacaoAtiva,
     String? redeServidorUrl,
+    bool? backupAutomaticoAtivo,
+    String? backupAutomaticoPasta,
+    int? backupAutomaticoIntervaloMinutos,
+    int? ultimoBackupAutomaticoMs,
   }) {
     return EmpresaConfig(
       nomeLoja: nomeLoja ?? this.nomeLoja,
@@ -102,6 +122,15 @@ class EmpresaConfig {
       redeSincronizacaoAtiva:
           redeSincronizacaoAtiva ?? this.redeSincronizacaoAtiva,
       redeServidorUrl: redeServidorUrl ?? this.redeServidorUrl,
+      backupAutomaticoAtivo:
+          backupAutomaticoAtivo ?? this.backupAutomaticoAtivo,
+      backupAutomaticoPasta:
+          backupAutomaticoPasta ?? this.backupAutomaticoPasta,
+      backupAutomaticoIntervaloMinutos:
+          backupAutomaticoIntervaloMinutos ??
+              this.backupAutomaticoIntervaloMinutos,
+      ultimoBackupAutomaticoMs:
+          ultimoBackupAutomaticoMs ?? this.ultimoBackupAutomaticoMs,
     );
   }
 }
@@ -129,6 +158,12 @@ class AppConfigRepository {
   static const _kMensageriaBackendUrl = 'config_mensageria_backend_url';
   static const _kRedeSincronizacaoAtiva = 'config_rede_sincronizacao_ativa';
   static const _kRedeServidorUrl = 'config_rede_servidor_url';
+  static const _kBackupAutomaticoAtivo = 'config_backup_automatico_ativo';
+  static const _kBackupAutomaticoPasta = 'config_backup_automatico_pasta';
+  static const _kBackupAutomaticoIntervaloMinutos =
+      'config_backup_automatico_intervalo_minutos';
+  static const _kBackupAutomaticoUltimoMs =
+      'config_backup_automatico_ultimo_ms';
   static const _kMigracaoMotoristaEntregaConcluida =
       'config_migracao_motorista_entrega_concluida';
 
@@ -164,6 +199,14 @@ class AppConfigRepository {
       mensageriaBackendUrl: prefs.getString(_kMensageriaBackendUrl) ?? '',
       redeSincronizacaoAtiva: prefs.getBool(_kRedeSincronizacaoAtiva) ?? false,
       redeServidorUrl: prefs.getString(_kRedeServidorUrl) ?? '',
+      backupAutomaticoAtivo: prefs.getBool(_kBackupAutomaticoAtivo) ?? false,
+      backupAutomaticoPasta: prefs.getString(_kBackupAutomaticoPasta) ?? '',
+      backupAutomaticoIntervaloMinutos: () {
+        final m = prefs.getInt(_kBackupAutomaticoIntervaloMinutos);
+        if (m == null || m < 15) return 1440;
+        return m.clamp(15, 10080);
+      }(),
+      ultimoBackupAutomaticoMs: prefs.getInt(_kBackupAutomaticoUltimoMs) ?? 0,
     );
   }
 
@@ -232,7 +275,31 @@ class AppConfigRepository {
       config.redeSincronizacaoAtiva,
     );
     await prefs.setString(_kRedeServidorUrl, config.redeServidorUrl.trim());
+    await prefs.setBool(
+      _kBackupAutomaticoAtivo,
+      config.backupAutomaticoAtivo,
+    );
+    await prefs.setString(
+      _kBackupAutomaticoPasta,
+      config.backupAutomaticoPasta.trim(),
+    );
+    await prefs.setInt(
+      _kBackupAutomaticoIntervaloMinutos,
+      config.backupAutomaticoIntervaloMinutos.clamp(15, 10080),
+    );
+    await prefs.setInt(
+      _kBackupAutomaticoUltimoMs,
+      config.ultimoBackupAutomaticoMs < 0 ? 0 : config.ultimoBackupAutomaticoMs,
+    );
     notificarAlteracaoParaRede();
+  }
+
+  Future<void> atualizarUltimoBackupAutomaticoMs(int epochMs) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      _kBackupAutomaticoUltimoMs,
+      epochMs < 0 ? 0 : epochMs,
+    );
   }
 
   Future<bool> migracaoMotoristaEntregaConcluida() async {

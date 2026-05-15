@@ -15,25 +15,35 @@ class ClienteRepository {
     return clientes;
   }
 
+  /// Busca indexada no ObjectBox (evita carregar todos os clientes na RAM).
   List<Cliente> pesquisar(String termo) {
-    final t = termo.trim().toLowerCase();
+    final t = termo.trim();
     if (t.isEmpty) {
       return listarTodos();
     }
-    return listarTodos().where((cliente) {
-      final campos = [
-        cliente.nomeRazao,
-        cliente.nomeFantasia,
-        cliente.documento,
-        cliente.rg,
-        cliente.ocupacao,
-        cliente.telefone,
-        cliente.whatsapp,
-        cliente.email,
-        cliente.cidade,
-      ].map((e) => e.toLowerCase());
-      return campos.any((c) => c.contains(t));
-    }).toList();
+    final lower = t.toLowerCase();
+    final cond = _condicaoPesquisaCliente(lower);
+    final query =
+        _db.clienteBox.query(cond).order(Cliente_.nomeRazao).build();
+    try {
+      return query.find();
+    } finally {
+      query.close();
+    }
+  }
+
+  /// Termo ja normalizado em minusculas; usado por [pesquisar].
+  Condition<Cliente> _condicaoPesquisaCliente(String lower) {
+    return Cliente_.nomeRazao
+        .contains(lower, caseSensitive: false)
+        .or(Cliente_.nomeFantasia.contains(lower, caseSensitive: false))
+        .or(Cliente_.documento.contains(lower, caseSensitive: false))
+        .or(Cliente_.rg.contains(lower, caseSensitive: false))
+        .or(Cliente_.ocupacao.contains(lower, caseSensitive: false))
+        .or(Cliente_.telefone.contains(lower, caseSensitive: false))
+        .or(Cliente_.whatsapp.contains(lower, caseSensitive: false))
+        .or(Cliente_.email.contains(lower, caseSensitive: false))
+        .or(Cliente_.cidade.contains(lower, caseSensitive: false));
   }
 
   int salvar(Cliente cliente) {
