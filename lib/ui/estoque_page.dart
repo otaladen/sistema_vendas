@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../data/produto_repository.dart';
+import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../model/produto.dart';
 import '../services/pdf_tabela_produtos_texto.dart';
 import 'sugestao_compra_page.dart';
@@ -22,14 +23,43 @@ class EstoquePage extends StatefulWidget {
   State<EstoquePage> createState() => _EstoquePageState();
 }
 
-class _EstoquePageState extends State<EstoquePage> {
+class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   final TextEditingController _buscaController = TextEditingController();
   String _filtroBusca = '';
+  List<Produto> _produtos = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _recarregarProdutos();
+    initSafeSyncRefresh(
+      onReload: _recarregarProdutos,
+      aoConcluir: _snackbarDadosAtualizados,
+    );
+  }
 
   @override
   void dispose() {
+    disposeSafeSyncRefresh();
     _buscaController.dispose();
     super.dispose();
+  }
+
+  void _recarregarProdutos() {
+    if (!mounted) return;
+    setState(() {
+      _produtos = widget.produtoRepository.listarTodos();
+    });
+  }
+
+  void _snackbarDadosAtualizados({required bool daRede}) {
+    if (!daRede || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        duration: Duration(seconds: 2),
+        content: Text('Dados atualizados da rede'),
+      ),
+    );
   }
 
   String _formatarMoedaBRL(double valor) {
@@ -191,7 +221,7 @@ class _EstoquePageState extends State<EstoquePage> {
 
   @override
   Widget build(BuildContext context) {
-    final produtos = widget.produtoRepository.listarTodos();
+    final produtos = _produtos;
     final termo = _filtroBusca.trim().toLowerCase();
     final produtosFiltrados = termo.isEmpty
         ? produtos

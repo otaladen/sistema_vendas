@@ -14,9 +14,10 @@ import '../data/auto_backup_service.dart';
 import '../data/local_app_data_paths.dart';
 import '../data/local_backup_copy.dart';
 import '../data/mensageria_repository.dart';
+import '../data/objectbox.dart';
 import '../data/sync/lan_sync_scheduler.dart';
-import '../data/sync/sync_api_client.dart';
 import '../data/venda_repository.dart';
+import 'widgets/rede_sincronizacao_card.dart';
 import '../model/mensagem_log.dart';
 import '../model/mensagem_template.dart';
 
@@ -24,10 +25,12 @@ class ConfiguracoesPage extends StatefulWidget {
   const ConfiguracoesPage({
     super.key,
     required this.vendaRepository,
+    required this.objectBox,
     this.lanSyncScheduler,
   });
 
   final VendaRepository vendaRepository;
+  final ObjectBox objectBox;
   final LanSyncScheduler? lanSyncScheduler;
 
   @override
@@ -79,15 +82,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   String _filtroCanalLog = 'todos';
   final _filtroTextoLogController = TextEditingController();
   final _webhookPayloadController = TextEditingController();
-  final _redeServidorUrlController = TextEditingController();
   List<MensagemLog> _logsFiltrados = [];
-  bool _redeSincronizacaoAtiva = false;
-  bool _testandoRede = false;
-  bool _sincronizandoManual = false;
-  int? _estacoesAtivas;
-  List<Map<String, dynamic>> _estacoesLista = [];
-  String _presencaErro = '';
-  bool _carregandoPresenca = false;
 
   String _rotuloStatusMensagem(String status) {
     switch (status) {
@@ -130,7 +125,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _mensageriaBackendUrlController.dispose();
     _filtroTextoLogController.dispose();
     _webhookPayloadController.dispose();
-    _redeServidorUrlController.dispose();
     super.dispose();
   }
 
@@ -158,8 +152,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _whatsPhoneIdController.text = config.whatsappPhoneNumberId;
       _whatsTokenController.text = config.whatsappAccessToken;
       _mensageriaBackendUrlController.text = config.mensageriaBackendUrl;
-      _redeSincronizacaoAtiva = config.redeSincronizacaoAtiva;
-      _redeServidorUrlController.text = config.redeServidorUrl;
       _backupAutomaticoAtivo = config.backupAutomaticoAtivo;
       _backupAutomaticoPasta = config.backupAutomaticoPasta;
       _backupAutomaticoIntervaloMinutos = () {
@@ -367,7 +359,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     try {
       final disco = await _configRepository.carregarEmpresaConfig();
       await _configRepository.salvarEmpresaConfig(
-        EmpresaConfig(
+        disco.copyWith(
           nomeLoja: _nomeLojaController.text,
           telefone: _telefoneController.text,
           endereco: _enderecoController.text,
@@ -388,8 +380,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           whatsappPhoneNumberId: _whatsPhoneIdController.text,
           whatsappAccessToken: _whatsTokenController.text,
           mensageriaBackendUrl: _mensageriaBackendUrlController.text,
-          redeSincronizacaoAtiva: _redeSincronizacaoAtiva,
-          redeServidorUrl: _redeServidorUrlController.text,
           backupAutomaticoAtivo: _backupAutomaticoAtivo,
           backupAutomaticoPasta: _backupAutomaticoPasta,
           backupAutomaticoIntervaloMinutos:
@@ -409,189 +399,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       if (mounted) {
         setState(() => _salvando = false);
       }
-    }
-  }
-
-  Uri? _parseUriServidorRede(String raw) {
-    final s = raw.trim();
-    if (s.isEmpty) return null;
-    final comEsquema = s.contains('://') ? s : 'http://$s';
-    return Uri.tryParse(comEsquema);
-  }
-
-  Future<void> _testarConexaoServidorRede() async {
-    final uri = _parseUriServidorRede(_redeServidorUrlController.text);
-    if (uri == null || uri.host.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Informe o endereco do servidor (ex.: 192.168.1.10:8787 ou http://servidor:8787).',
-          ),
-        ),
-      );
-      return;
-    }
-    final porta = uri.hasPort
-        ? uri.port
-        : (uri.scheme == 'https' ? 443 : 80);
-    setState(() => _testandoRede = true);
-    try {
-      await Socket.connect(uri.host, porta, timeout: const Duration(seconds: 6));
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Conexao TCP OK com ${uri.host}:$porta. '
-            'Se o servico de sincronizacao ainda nao estiver rodando neste PC, '
-            'instale-o ou ajuste a porta.',
-          ),
-        ),
-      );
-    } on SocketException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Nao foi possivel alcancar ${uri.host}:$porta na rede. '
-            'Verifique IP, cabo/Wi-Fi, firewall do Windows e se o servidor esta ligado. '
-            '(${e.message})',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao testar: $e')),
-      );
-    } finally {
-      if (mounted) setState(() => _testandoRede = false);
-    }
-  }
-
-  Future<void> _salvarConfigRede() async {
-    setState(() => _salvando = true);
-    try {
-      final atual = await _configRepository.carregarEmpresaConfig();
-      await _configRepository.salvarEmpresaConfig(
-        atual.copyWith(
-          redeSincronizacaoAtiva: _redeSincronizacaoAtiva,
-          redeServidorUrl: _redeServidorUrlController.text.trim(),
-        ),
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Configuracoes de rede salvas.')),
-      );
-    } finally {
-      if (mounted) setState(() => _salvando = false);
-    }
-  }
-
-  Future<void> _sincronizacaoManualAgora() async {
-    final agendador = widget.lanSyncScheduler;
-    if (agendador == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Agendador de sync nao disponivel nesta tela.'),
-        ),
-      );
-      return;
-    }
-    final config = await _configRepository.carregarEmpresaConfig();
-    if (!config.redeSincronizacaoAtiva ||
-        config.redeServidorUrl.trim().isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Ative "Usar servidor na rede local", informe o endereco e salve antes.',
-          ),
-        ),
-      );
-      return;
-    }
-    setState(() => _sincronizandoManual = true);
-    try {
-      final erro = await agendador.sincronizarAgora();
-      if (!mounted) return;
-      if (erro != null && erro.trim().isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sync: $erro'), backgroundColor: Colors.red),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sincronizacao concluida.')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _sincronizandoManual = false);
-    }
-  }
-
-  Future<void> _atualizarPresencaRede() async {
-    final uri = _redeServidorUrlController.text.trim();
-    if (uri.isEmpty) {
-      setState(() {
-        _estacoesAtivas = null;
-        _estacoesLista = [];
-        _presencaErro = 'Informe o endereco do servidor acima.';
-      });
-      return;
-    }
-    setState(() {
-      _carregandoPresenca = true;
-      _presencaErro = '';
-    });
-    final client = SyncApiClient(baseUrl: uri);
-    try {
-      final map = await client.obterPresenca();
-      if (!mounted) return;
-      if (map == null) {
-        setState(() {
-          _carregandoPresenca = false;
-          _estacoesAtivas = null;
-          _estacoesLista = [];
-          _presencaErro =
-              'Servidor nao respondeu ou versao antiga (atualize o sync_server).';
-        });
-        return;
-      }
-      final n = (map['activeCount'] as num?)?.toInt();
-      final raw = map['stations'];
-      final lista = <Map<String, dynamic>>[];
-      if (raw is List) {
-        for (final e in raw) {
-          if (e is Map<String, dynamic>) {
-            lista.add(e);
-          } else if (e is Map) {
-            lista.add(Map<String, dynamic>.from(e));
-          }
-        }
-      }
-      setState(() {
-        _carregandoPresenca = false;
-        _estacoesAtivas = n;
-        _estacoesLista = lista;
-        _presencaErro = '';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _carregandoPresenca = false;
-        _presencaErro = '$e';
-      });
-    }
-  }
-
-  String _fmtLastSeenPresenca(String? iso) {
-    if (iso == null || iso.isEmpty) return '';
-    try {
-      final d = DateTime.parse(iso).toLocal();
-      return DateFormat('dd/MM HH:mm').format(d);
-    } catch (_) {
-      return iso;
     }
   }
 
@@ -1012,7 +819,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         _ultimoBackupPath = pastaBackup.path;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Backup concluido com sucesso.')),
+        SnackBar(
+          duration: const Duration(seconds: 10),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Backup concluido com sucesso.'),
+              const SizedBox(height: 6),
+              Text(
+                pastaBackup.path,
+                style: const TextStyle(fontSize: 13),
+              ),
+            ],
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -1136,7 +957,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 children: [
                   const Text(
                     'Essa acao vai sobrescrever os dados locais atuais.\n\n'
-                    'Recomendado: criar um backup antes de restaurar.',
+                    'Recomendado: criar um backup antes de restaurar.\n\n'
+                    'O banco de dados fica bloqueado enquanto o app esta aberto. '
+                    'Ao continuar, o programa fechara sozinho apos copiar o backup; '
+                    'abra-o novamente para carregar os dados restaurados.',
                   ),
                   const SizedBox(height: 12),
                   const Text(
@@ -1172,15 +996,17 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     confirmaController.dispose();
     if (confirmar != true || !mounted) return;
 
-    final pastaSelecionada = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Escolha a pasta do backup',
-    );
-    if (pastaSelecionada == null || pastaSelecionada.trim().isEmpty || !mounted) {
-      return;
-    }
-
     setState(() => _restauracaoEmAndamento = true);
     try {
+      final pastaSelecionada = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Escolha a pasta do backup',
+      );
+      if (pastaSelecionada == null ||
+          pastaSelecionada.trim().isEmpty ||
+          !mounted) {
+        return;
+      }
+
       final origemSelecionada = Directory(pastaSelecionada);
       final origemDadosAplicacao = Directory(
         p.join(origemSelecionada.path, 'dados_aplicacao'),
@@ -1194,25 +1020,95 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         throw Exception('Pasta de backup invalida.');
       }
       if (p.normalize(origemRestore.path) == p.normalize(baseDir.path)) {
-        throw Exception('A pasta de origem nao pode ser a mesma pasta de dados atual.');
+        throw Exception(
+          'A pasta de origem nao pode ser a mesma pasta de dados atual.',
+        );
       }
 
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              content: Row(
+                children: [
+                  const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      Platform.isWindows
+                          ? 'Restaurando backup… O aplicativo sera fechado ao terminar.'
+                          : 'Restaurando backup… Aguarde.',
+                      style: Theme.of(dialogContext).textTheme.bodyMedium,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+
+      await widget.lanSyncScheduler?.parar();
+      widget.objectBox.store.close();
       await _limparDiretorio(baseDir);
       await copiarDiretorioRecursivo(origem: origemRestore, destino: baseDir);
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Backup restaurado com sucesso. Feche e abra o app para recarregar os dados.',
-          ),
-        ),
+      if (!mounted) {
+        exit(0);
+      }
+
+      Navigator.of(context, rootNavigator: true).pop();
+
+      final cores = Theme.of(context).colorScheme;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              icon: Icon(
+                Icons.check_circle_outline,
+                size: 48,
+                color: cores.primary,
+              ),
+              title: const Text('Backup restaurado'),
+              content: const Text(
+                'Os dados foram copiados com sucesso.\n\n'
+                'Toque em OK para fechar o aplicativo. '
+                'Abra-o novamente para usar os dados restaurados.',
+              ),
+              actions: [
+                FilledButton(
+                  onPressed: () {
+                    Navigator.of(ctx, rootNavigator: true).pop();
+                    exit(0);
+                  },
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        },
       );
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Falha ao restaurar backup: $e')));
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).maybePop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Falha ao restaurar backup: $e')),
+        );
+      }
+      if (widget.objectBox.store.isClosed()) {
+        exit(1);
+      }
     } finally {
       if (mounted) {
         setState(() => _restauracaoEmAndamento = false);
@@ -1234,6 +1130,16 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     }
   }
 
+  Widget _configTab(List<Widget> children) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dtFmt = DateFormat('dd/MM/yyyy HH:mm:ss');
@@ -1246,11 +1152,27 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     final h = offset.inHours.abs().toString().padLeft(2, '0');
     final m = (offset.inMinutes.abs() % 60).toString().padLeft(2, '0');
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('CONFIGURACOES')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
+    return DefaultTabController(
+      length: 7,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('CONFIGURACOES'),
+          bottom: TabBar(
+            isScrollable: true,
+            tabs: const [
+              Tab(text: 'Empresa'),
+              Tab(text: 'PDF'),
+              Tab(text: 'Caixa'),
+              Tab(text: 'Rede'),
+              Tab(text: 'Backup'),
+              Tab(text: 'Mensagens'),
+              Tab(text: 'Horario'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            _configTab([
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -1258,68 +1180,414 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Data e hora do sistema',
+                    'Empresa',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Text('Agora (sistema): $agoraFmt'),
-                  Text(
-                    'Fuso horario: ${_agoraSistema.timeZoneName} (UTC$sinal$h:$m)',
-                  ),
-                  Text('Ultima venda finalizada: $ultimaVendaFmt'),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: _horarioInconsistente
-                          ? Colors.red.withValues(alpha: 0.08)
-                          : Colors.green.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _horarioInconsistente
-                            ? Colors.red.withValues(alpha: 0.45)
-                            : Colors.green.withValues(alpha: 0.45),
-                      ),
-                    ),
-                    child: Text(_diagnosticoHorario),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _carregarDiagnosticoHorario,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Atualizar diagnostico'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _abrirAjusteDataHoraSO,
-                          icon: const Icon(Icons.schedule),
-                          label: const Text('Ajustar no sistema'),
-                        ),
-                      ),
-                    ],
+                  TextField(
+                    controller: _nomeLojaController,
+                    decoration: const InputDecoration(labelText: 'Nome da loja'),
                   ),
                   const SizedBox(height: 8),
+                  TextField(
+                    controller: _telefoneController,
+                    decoration: const InputDecoration(labelText: 'Telefone da loja'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _enderecoController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(labelText: 'Endereco da loja'),
+                  ),
+                  const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _sincronizarHorarioWindows,
-                      icon: const Icon(Icons.sync),
-                      label: const Text('Sincronizar horario agora (Windows)'),
+                    child: ElevatedButton.icon(
+                      onPressed: _salvando ? null : _salvarConfig,
+                      icon: const Icon(Icons.save_outlined),
+                      label: Text(_salvando ? 'Salvando...' : 'Salvar dados da empresa'),
                     ),
                   ),
                 ],
               ),
             ),
           ),
+            ]),
+            _configTab([
           const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Impressao e PDF',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _pastaPadraoPdfController,
+                    decoration: InputDecoration(
+                      labelText: 'Pasta padrao de PDF (opcional)',
+                      suffixIcon: IconButton(
+                        tooltip: 'Escolher pasta',
+                        onPressed: _escolherPastaPadraoPdf,
+                        icon: const Icon(Icons.folder_open_outlined),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    initialValue: _modeloPdf,
+                    decoration: const InputDecoration(labelText: 'Modelo de PDF'),
+                    items: const [
+                      DropdownMenuItem(value: 'cupom', child: Text('Cupom (80mm)')),
+                      DropdownMenuItem(value: 'a4', child: Text('A4')),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() => _modeloPdf = value);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    initialValue: _impressoras.any((p) => p.name == _impressoraPadrao)
+                        ? _impressoraPadrao
+                        : '',
+                    decoration: const InputDecoration(labelText: 'Impressora padrao (opcional)'),
+                    items: [
+                      const DropdownMenuItem(value: '', child: Text('Nenhuma')),
+                      ..._impressoras.map(
+                        (printer) => DropdownMenuItem(
+                          value: printer.name,
+                          child: Text(printer.name),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => setState(() => _impressoraPadrao = value ?? ''),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _rodapeNotaController,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    minLines: 3,
+                    maxLines: 8,
+                    decoration: const InputDecoration(
+                      labelText: 'Rodape da nota/cupom nao fiscal',
+                      alignLabelWithHint: true,
+                      hintText: 'Use Enter para nova linha',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _rodapeOrcamentoController,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    minLines: 3,
+                    maxLines: 8,
+                    decoration: const InputDecoration(
+                      labelText: 'Rodape do orcamento',
+                      alignLabelWithHint: true,
+                      hintText: 'Use Enter para nova linha',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _escolherLogo,
+                          icon: const Icon(Icons.image_outlined),
+                          label: Text(_logoPath.isEmpty ? 'Selecionar logo' : 'Trocar logo'),
+                        ),
+                      ),
+                      if (_logoPath.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: _removerLogo,
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Remover'),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (_logoPath.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Logo selecionada: ${p.basename(_logoPath)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _salvando ? null : _salvarConfig,
+                      icon: const Icon(Icons.save_outlined),
+                      label: Text(_salvando ? 'Salvando...' : 'Salvar configuracoes de impressao/PDF'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _imprimirTeste,
+                      icon: const Icon(Icons.print_outlined),
+                      label: const Text('Teste de impressao'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+            ]),
+            _configTab([
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Caixa',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _limiteDivergenciaCaixaController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Limite de divergencia sem supervisor (R\$)',
+                      hintText: 'Ex.: 20,00',
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Defina o limite de divergencia para exigir autorizacao '
+                    'de supervisor (admin/financeiro) no fechamento do caixa.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    value: _mostrarCampoDescontoCaixa,
+                    onChanged: (value) {
+                      setState(() {
+                        _mostrarCampoDescontoCaixa = value;
+                      });
+                    },
+                    title: const Text('Mostrar desconto rapido no Caixa'),
+                    subtitle: const Text(
+                      'Desligue para ocultar o campo de desconto na tela do Caixa. '
+                      'O total segue sem desconto adicional pelo operador.',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _maxDescontoPercentualPdvController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText:
+                          'Desconto maximo no Ponto de Venda (% sobre subtotal)',
+                      hintText: 'Ex.: 15',
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Limite percentual sobre o subtotal dos produtos (nao inclui frete). '
+                    'No PDV o vendedor pode informar % ou valor em reais, desde que o '
+                    'desconto em reais nao ultrapasse esse percentual do subtotal. '
+                    'Use 0 para nao permitir desconto no PDV — so no Caixa, se estiver '
+                    'habilitado acima.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    value: _permitirVendaSemEstoque,
+                    onChanged: (value) {
+                      setState(() {
+                        _permitirVendaSemEstoque = value;
+                      });
+                    },
+                    title: const Text('Permitir venda sem estoque'),
+                    subtitle: const Text(
+                      'Quando ativo, o sistema permite finalizar venda mesmo sem saldo e o estoque pode ficar negativo.',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _salvando ? null : _salvarConfig,
+                      icon: const Icon(Icons.save_outlined),
+                      label: Text(_salvando ? 'Salvando...' : 'Salvar regras do caixa'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+            ]),
+            _configTab([
+          const SizedBox(height: 10),
+          RedeSincronizacaoCard(
+            configRepository: _configRepository,
+            lanSyncScheduler: widget.lanSyncScheduler,
+          ),
+            ]),
+            _configTab([
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Backup e Dados',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Crie backup completo dos dados locais da aplicacao e acesse a pasta do banco.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Backup automatico'),
+                    subtitle: Text(
+                      'Copia periodica enquanto o app estiver aberto. Escolha uma pasta segura '
+                      '(outro disco, rede ou nuvem sincronizada) para nao perder dados se este PC falhar.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    value: _backupAutomaticoAtivo,
+                    onChanged:
+                        _backupEmAndamento ? null : _alternarBackupAutomatico,
+                  ),
+                  if (_backupAutomaticoAtivo) ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _escolherPastaBackupAutomatico,
+                        icon: const Icon(Icons.folder_outlined, size: 20),
+                        label: const Text('Escolher pasta de destino'),
+                      ),
+                    ),
+                    if (_backupAutomaticoPasta.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: SelectableText(
+                          _backupAutomaticoPasta,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    DropdownButtonFormField<int>(
+                      key: ValueKey(_backupAutomaticoIntervaloMinutos),
+                      decoration: const InputDecoration(
+                        labelText: 'Frequencia',
+                      ),
+                      initialValue: _backupAutomaticoIntervaloMinutos,
+                      items: [
+                        DropdownMenuItem(
+                          value: 60,
+                          child: Text(
+                            _rotuloIntervaloBackupAutomatico(60),
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: 360,
+                          child: Text(
+                            _rotuloIntervaloBackupAutomatico(360),
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: 720,
+                          child: Text(
+                            _rotuloIntervaloBackupAutomatico(720),
+                          ),
+                        ),
+                        DropdownMenuItem(
+                          value: 1440,
+                          child: Text(
+                            _rotuloIntervaloBackupAutomatico(1440),
+                          ),
+                        ),
+                      ],
+                      onChanged: _backupEmAndamento
+                          ? null
+                          : _definirIntervaloBackupAutomatico,
+                    ),
+                    if (_ultimoBackupAutomaticoMs > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Ultimo backup automatico: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.fromMillisecondsSinceEpoch(_ultimoBackupAutomaticoMs))}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ],
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _backupEmAndamento ? null : _criarBackupDados,
+                      icon: const Icon(Icons.backup_outlined),
+                      label: Text(
+                        _backupEmAndamento ? 'Criando backup...' : 'Criar backup agora',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _abrirPastaDados,
+                      icon: const Icon(Icons.folder_open_outlined),
+                      label: const Text('Abrir pasta de dados'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _restauracaoEmAndamento || _backupEmAndamento
+                          ? null
+                          : _restaurarBackupDados,
+                      icon: const Icon(Icons.restore_outlined),
+                      label: Text(
+                        _restauracaoEmAndamento
+                            ? 'Restaurando backup...'
+                            : 'Restaurar backup',
+                      ),
+                    ),
+                  ),
+                  if (_ultimoBackupPath.trim().isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Ultimo backup: $_ultimoBackupPath',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+            ]),
+            _configTab([
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -1603,7 +1871,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               ),
             ),
           ),
-          const SizedBox(height: 10),
+            ]),
+            _configTab([
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -1611,583 +1880,70 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Empresa',
+                    'Data e hora do sistema',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 10),
-                  TextField(
-                    controller: _nomeLojaController,
-                    decoration: const InputDecoration(labelText: 'Nome da loja'),
+                  Text('Agora (sistema): $agoraFmt'),
+                  Text(
+                    'Fuso horario: ${_agoraSistema.timeZoneName} (UTC$sinal$h:$m)',
                   ),
+                  Text('Ultima venda finalizada: $ultimaVendaFmt'),
                   const SizedBox(height: 8),
-                  TextField(
-                    controller: _telefoneController,
-                    decoration: const InputDecoration(labelText: 'Telefone da loja'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _enderecoController,
-                    maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Endereco da loja'),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
+                  Container(
                     width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _salvando ? null : _salvarConfig,
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(_salvando ? 'Salvando...' : 'Salvar dados da empresa'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Impressao e PDF',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _pastaPadraoPdfController,
-                    decoration: InputDecoration(
-                      labelText: 'Pasta padrao de PDF (opcional)',
-                      suffixIcon: IconButton(
-                        tooltip: 'Escolher pasta',
-                        onPressed: _escolherPastaPadraoPdf,
-                        icon: const Icon(Icons.folder_open_outlined),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: _horarioInconsistente
+                          ? Colors.red.withValues(alpha: 0.08)
+                          : Colors.green.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _horarioInconsistente
+                            ? Colors.red.withValues(alpha: 0.45)
+                            : Colors.green.withValues(alpha: 0.45),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: _modeloPdf,
-                    decoration: const InputDecoration(labelText: 'Modelo de PDF'),
-                    items: const [
-                      DropdownMenuItem(value: 'cupom', child: Text('Cupom (80mm)')),
-                      DropdownMenuItem(value: 'a4', child: Text('A4')),
-                    ],
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => _modeloPdf = value);
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: _impressoras.any((p) => p.name == _impressoraPadrao)
-                        ? _impressoraPadrao
-                        : '',
-                    decoration: const InputDecoration(labelText: 'Impressora padrao (opcional)'),
-                    items: [
-                      const DropdownMenuItem(value: '', child: Text('Nenhuma')),
-                      ..._impressoras.map(
-                        (printer) => DropdownMenuItem(
-                          value: printer.name,
-                          child: Text(printer.name),
-                        ),
-                      ),
-                    ],
-                    onChanged: (value) => setState(() => _impressoraPadrao = value ?? ''),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _rodapeNotaController,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    minLines: 3,
-                    maxLines: 8,
-                    decoration: const InputDecoration(
-                      labelText: 'Rodape da nota/cupom nao fiscal',
-                      alignLabelWithHint: true,
-                      hintText: 'Use Enter para nova linha',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _rodapeOrcamentoController,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    minLines: 3,
-                    maxLines: 8,
-                    decoration: const InputDecoration(
-                      labelText: 'Rodape do orcamento',
-                      alignLabelWithHint: true,
-                      hintText: 'Use Enter para nova linha',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _escolherLogo,
-                          icon: const Icon(Icons.image_outlined),
-                          label: Text(_logoPath.isEmpty ? 'Selecionar logo' : 'Trocar logo'),
-                        ),
-                      ),
-                      if (_logoPath.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: _removerLogo,
-                          icon: const Icon(Icons.delete_outline),
-                          label: const Text('Remover'),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (_logoPath.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Logo selecionada: ${p.basename(_logoPath)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _salvando ? null : _salvarConfig,
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(_salvando ? 'Salvando...' : 'Salvar configuracoes de impressao/PDF'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _imprimirTeste,
-                      icon: const Icon(Icons.print_outlined),
-                      label: const Text('Teste de impressao'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Caixa',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _limiteDivergenciaCaixaController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Limite de divergencia sem supervisor (R\$)',
-                      hintText: 'Ex.: 20,00',
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Defina o limite de divergencia para exigir autorizacao '
-                    'de supervisor (admin/financeiro) no fechamento do caixa.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    value: _mostrarCampoDescontoCaixa,
-                    onChanged: (value) {
-                      setState(() {
-                        _mostrarCampoDescontoCaixa = value;
-                      });
-                    },
-                    title: const Text('Mostrar desconto rapido no Caixa'),
-                    subtitle: const Text(
-                      'Desligue para ocultar o campo de desconto na tela do Caixa. '
-                      'O total segue sem desconto adicional pelo operador.',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _maxDescontoPercentualPdvController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText:
-                          'Desconto maximo no Ponto de Venda (% sobre subtotal)',
-                      hintText: 'Ex.: 15',
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Limite percentual sobre o subtotal dos produtos (nao inclui frete). '
-                    'No PDV o vendedor pode informar % ou valor em reais, desde que o '
-                    'desconto em reais nao ultrapasse esse percentual do subtotal. '
-                    'Use 0 para nao permitir desconto no PDV — so no Caixa, se estiver '
-                    'habilitado acima.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    value: _permitirVendaSemEstoque,
-                    onChanged: (value) {
-                      setState(() {
-                        _permitirVendaSemEstoque = value;
-                      });
-                    },
-                    title: const Text('Permitir venda sem estoque'),
-                    subtitle: const Text(
-                      'Quando ativo, o sistema permite finalizar venda mesmo sem saldo e o estoque pode ficar negativo.',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _salvando ? null : _salvarConfig,
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(_salvando ? 'Salvando...' : 'Salvar regras do caixa'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Rede e sincronizacao (LAN)',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Para varios PCs na mesma loja, o modelo usual e um computador '
-                    '(ou servidor) rodando um servico com banco/API na rede local; '
-                    'os demais apontam para o endereco IP e porta desse servico. '
-                    'Todos devem estar no mesmo roteador/rede (Ethernet ou Wi-Fi), '
-                    'com IPs na mesma faixa (ex.: 192.168.x.x). No PC servidor, '
-                    'libere a porta no Firewall do Windows para conexoes de entrada.\n\n'
-                    'SERVIDOR: na pasta sync_server, gere o .exe com build_windows_exe.bat e '
-                    'inicie com executar_servidor.bat (ou sistema_vendas_sync_server.exe). '
-                    'Para iniciar com o Windows: PowerShell admin → criar_tarefa_inicializacao.ps1. '
-                    'CLIENTES: mesmo endereco (ex.: 192.168.0.10:8787).',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 10),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    value: _redeSincronizacaoAtiva,
-                    onChanged: (v) => setState(() => _redeSincronizacaoAtiva = v),
-                    title: const Text('Usar servidor de dados na rede local'),
-                    subtitle: const Text(
-                      'Quando ativo, o sistema podera sincronizar com o endereco abaixo '
-                      '(requer servico de sincronizacao instalado no servidor).',
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: _redeServidorUrlController,
-                    decoration: const InputDecoration(
-                      labelText: 'Endereco do servidor na rede',
-                      hintText: 'Ex.: 192.168.0.15:8787 ou http://servidor-loja:9000',
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.url,
-                    autocorrect: false,
+                    child: Text(_diagnosticoHorario),
                   ),
                   const SizedBox(height: 10),
                   Row(
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: (_salvando || _testandoRede)
-                              ? null
-                              : _testarConexaoServidorRede,
-                          icon: _testandoRede
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.wifi_tethering_outlined),
-                          label: Text(
-                            _testandoRede ? 'Testando...' : 'Testar alcance na rede',
-                          ),
+                          onPressed: _carregarDiagnosticoHorario,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Atualizar diagnostico'),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: ElevatedButton.icon(
-                          onPressed: _salvando ? null : _salvarConfigRede,
-                          icon: const Icon(Icons.save_outlined),
-                          label: Text(_salvando ? 'Salvando...' : 'Salvar rede'),
+                          onPressed: _abrirAjusteDataHoraSO,
+                          icon: const Icon(Icons.schedule),
+                          label: const Text('Ajustar no sistema'),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: (_sincronizandoManual || _salvando)
-                          ? null
-                          : _sincronizacaoManualAgora,
-                      icon: _sincronizandoManual
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.cloud_sync_outlined),
-                      label: Text(
-                        _sincronizandoManual
-                            ? 'Sincronizando...'
-                            : 'Sincronizar dados agora (pull + push)',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'O teste apenas verifica se o PC alcanca IP e porta na rede (TCP). '
-                    'A sincronizacao completa dos dados depende do servico no servidor.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                  const Divider(height: 22),
-                  Text(
-                    'Estacoes com app na rede',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Cada PC com sincronizacao ativa envia sinal ao servidor a cada 45 s. '
-                    'Estacoes sem sinal por cerca de 90 s saem da lista (atualize o sync_server neste PC servidor).',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed:
-                          _carregandoPresenca ? null : _atualizarPresencaRede,
-                      icon: _carregandoPresenca
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.devices_outlined),
-                      label: Text(
-                        _carregandoPresenca
-                            ? 'Consultando...'
-                            : 'Ver estacoes online agora',
-                      ),
+                      onPressed: _sincronizarHorarioWindows,
+                      icon: const Icon(Icons.sync),
+                      label: const Text('Sincronizar horario agora (Windows)'),
                     ),
                   ),
-                  if (_presencaErro.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      _presencaErro,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                  if (_estacoesAtivas != null && _presencaErro.isEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Total ativo agora: $_estacoesAtivas',
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    if (_estacoesLista.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      ..._estacoesLista.map((s) {
-                        final id = (s['stationId'] ?? '').toString();
-                        final lab = (s['label'] ?? '').toString();
-                        final seen =
-                            _fmtLastSeenPresenca(s['lastSeen']?.toString());
-                        final idCurto =
-                            id.length > 14 ? '${id.substring(0, 14)}…' : id;
-                        final linha = lab.isEmpty
-                            ? '• $idCurto · ping $seen'
-                            : '• $lab · ping $seen';
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 3),
-                          child: Text(
-                            linha,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        );
-                      }),
-                    ],
-                  ],
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 10),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Backup e Dados',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Crie backup completo dos dados locais da aplicacao e acesse a pasta do banco.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 10),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Backup automatico'),
-                    subtitle: Text(
-                      'Copia periodica enquanto o app estiver aberto. Escolha uma pasta segura '
-                      '(outro disco, rede ou nuvem sincronizada) para nao perder dados se este PC falhar.',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    value: _backupAutomaticoAtivo,
-                    onChanged:
-                        _backupEmAndamento ? null : _alternarBackupAutomatico,
-                  ),
-                  if (_backupAutomaticoAtivo) ...[
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: _escolherPastaBackupAutomatico,
-                        icon: const Icon(Icons.folder_outlined, size: 20),
-                        label: const Text('Escolher pasta de destino'),
-                      ),
-                    ),
-                    if (_backupAutomaticoPasta.trim().isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: SelectableText(
-                          _backupAutomaticoPasta,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ),
-                    DropdownButtonFormField<int>(
-                      key: ValueKey(_backupAutomaticoIntervaloMinutos),
-                      decoration: const InputDecoration(
-                        labelText: 'Frequencia',
-                      ),
-                      initialValue: _backupAutomaticoIntervaloMinutos,
-                      items: [
-                        DropdownMenuItem(
-                          value: 60,
-                          child: Text(
-                            _rotuloIntervaloBackupAutomatico(60),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 360,
-                          child: Text(
-                            _rotuloIntervaloBackupAutomatico(360),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 720,
-                          child: Text(
-                            _rotuloIntervaloBackupAutomatico(720),
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 1440,
-                          child: Text(
-                            _rotuloIntervaloBackupAutomatico(1440),
-                          ),
-                        ),
-                      ],
-                      onChanged: _backupEmAndamento
-                          ? null
-                          : _definirIntervaloBackupAutomatico,
-                    ),
-                    if (_ultimoBackupAutomaticoMs > 0) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Ultimo backup automatico: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.fromMillisecondsSinceEpoch(_ultimoBackupAutomaticoMs))}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ],
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _backupEmAndamento ? null : _criarBackupDados,
-                      icon: const Icon(Icons.backup_outlined),
-                      label: Text(
-                        _backupEmAndamento ? 'Criando backup...' : 'Criar backup agora',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _abrirPastaDados,
-                      icon: const Icon(Icons.folder_open_outlined),
-                      label: const Text('Abrir pasta de dados'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _restauracaoEmAndamento || _backupEmAndamento
-                          ? null
-                          : _restaurarBackupDados,
-                      icon: const Icon(Icons.restore_outlined),
-                      label: Text(
-                        _restauracaoEmAndamento
-                            ? 'Restaurando backup...'
-                            : 'Restaurar backup',
-                      ),
-                    ),
-                  ),
-                  if (_ultimoBackupPath.trim().isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Ultimo backup: $_ultimoBackupPath',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
+            ]),
+          ],
+        ),
       ),
     );
   }

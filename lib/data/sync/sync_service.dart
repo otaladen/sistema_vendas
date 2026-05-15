@@ -9,7 +9,9 @@ import '../vendedor_repository.dart';
 import '../../model/item_venda.dart';
 import 'sync_api_client.dart';
 import 'sync_cursor_storage.dart';
-import 'sync_entity_codec.dart';
+import 'sync_full_sync.dart';
+import 'sync_refresh_hub.dart';
+import 'sync_write_trigger.dart';
 
 class SyncService {
   SyncService({
@@ -36,6 +38,15 @@ class SyncService {
   late final VendedorRepository _vendedorRepo;
   late final VendaRepository _vendaRepo;
 
+  late final SyncFullSync _fullSync = SyncFullSync(
+    db: _db,
+    configRepository: _configRepository,
+    produtoRepo: _produtoRepo,
+    clienteRepo: _clienteRepo,
+    vendedorRepo: _vendedorRepo,
+    vendaRepo: _vendaRepo,
+  );
+
   /// Retorna mensagem de erro ou null se OK.
   Future<String?> executarSync() async {
     final config = await _configRepository.carregarEmpresaConfig();
@@ -55,13 +66,20 @@ class SyncService {
 
       final pullData = await client.pull(since: since, deviceId: deviceId);
       final changes = pullData['changes'];
-      if (changes is List) {
-        for (final raw in changes) {
-          if (raw is Map<String, dynamic>) {
-            await _aplicarAlteracao(raw);
-          } else if (raw is Map) {
-            await _aplicarAlteracao(Map<String, dynamic>.from(raw));
+      var houveAlteracaoRemota = false;
+      if (changes is List && changes.isNotEmpty) {
+        enterSyncApplySilencioso();
+        try {
+          for (final raw in changes) {
+            if (raw is Map<String, dynamic>) {
+              await _fullSync.aplicarAlteracao(raw);
+            } else if (raw is Map) {
+              await _fullSync.aplicarAlteracao(Map<String, dynamic>.from(raw));
+            }
           }
+          houveAlteracaoRemota = true;
+        } finally {
+          leaveSyncApplySilencioso();
         }
       }
 
@@ -70,7 +88,12 @@ class SyncService {
         await _cursorStorage.salvarUltimaRevision(lastRev);
       }
 
-      final mutations = _montarMutacoesLocais();
+      if (houveAlteracaoRemota) {
+        _produtoRepo.invalidarCacheBusca();
+        SyncRefreshHub.instance.notificarDadosAtualizados();
+      }
+
+      final mutations = await _fullSync.montarMutacoes();
       if (mutations.isEmpty) {
         return null;
       }
@@ -104,151 +127,6 @@ class SyncService {
     } catch (e, st) {
       return '${e.toString()}\n${st.toString().split('\n').take(3).join('\n')}';
     }
-  }
-
-  List<Map<String, dynamic>> _montarMutacoesLocais() {
-    final mutations = <Map<String, dynamic>>[];
-
-    for (final p in _produtoRepo.listarTodos()) {
-      mutations.add({
-        'entity': 'produto',
-        'op': 'upsert',
-        'localId': p.id,
-        'payload': SyncEntityCodec.produtoParaMap(p),
-      });
-    }
-    for (final c in _clienteRepo.listarTodos()) {
-      mutations.add({
-        'entity': 'cliente',
-        'op': 'upsert',
-        'localId': c.id,
-        'payload': SyncEntityCodec.clienteParaMap(c),
-      });
-    }
-    for (final v in _vendedorRepo.listarTodos()) {
-      mutations.add({
-        'entity': 'vendedor',
-        'op': 'upsert',
-        'localId': v.id,
-        'payload': SyncEntityCodec.vendedorParaMap(v),
-      });
-    }
-    for (final vend in _vendaRepo.listarTodas()) {
-      mutations.add({
-        'entity': 'venda',
-        'op': 'upsert',
-        'localId': vend.id,
-        'payload': SyncEntityCodec.vendaParaMap(vend),
-      });
-    }
-
-    return mutations;
-  }
-
-  Future<void> _aplicarAlteracao(Map<String, dynamic> ch) async {
-    final entity = ch['entity'] as String?;
-    final op = ch['op'] as String?;
-    if (entity == null || op == null) return;
-
-    if (op == 'delete') {
-      final id = (ch['entityId'] as num?)?.toInt() ?? 0;
-      if (id <= 0) return;
-      switch (entity) {
-        case 'produto':
-          _produtoRepo.remover(id);
-          break;
-        case 'cliente':
-          _clienteRepo.remover(id);
-          break;
-        case 'vendedor':
-          _vendedorRepo.remover(id);
-          break;
-        case 'venda':
-          _removerVendaEmCascata(id);
-          break;
-      }
-      return;
-    }
-
-    final payloadRaw = ch['payload'];
-    if (payloadRaw is! Map) return;
-    final payload = Map<String, dynamic>.from(payloadRaw);
-
-    switch (entity) {
-      case 'produto':
-        _produtoRepo.salvar(SyncEntityCodec.produtoDeMap(payload));
-        break;
-      case 'cliente':
-        _clienteRepo.salvar(SyncEntityCodec.clienteDeMap(payload));
-        break;
-      case 'vendedor':
-        _vendedorRepo.salvar(SyncEntityCodec.vendedorDeMap(payload));
-        break;
-      case 'venda':
-        await _aplicarVendaPayload(payload);
-        break;
-    }
-  }
-
-  void _removerVendaEmCascata(int vendaId) {
-    _db.store.runInTransaction(TxMode.write, () {
-      final v = _db.vendaBox.get(vendaId);
-      if (v == null) return;
-      final idsItens = v.itens.map((i) => i.id).toList();
-      if (idsItens.isNotEmpty) {
-        _db.itemVendaBox.removeMany(idsItens);
-      }
-      v.itens.clear();
-      _db.vendaBox.remove(vendaId);
-    });
-  }
-
-  Future<void> _aplicarVendaPayload(Map<String, dynamic> payload) async {
-    _db.store.runInTransaction(TxMode.write, () {
-      final venda = SyncEntityCodec.vendaCabecaDeMap(payload);
-      final clienteId = (payload['clienteId'] as num?)?.toInt() ?? 0;
-      final vendedorId = (payload['vendedorId'] as num?)?.toInt() ?? 0;
-      final itensRaw = payload['itens'];
-      final idsAntigos = <int>[];
-      final existente = _db.vendaBox.get(venda.id);
-      if (existente != null) {
-        idsAntigos.addAll(existente.itens.map((i) => i.id));
-      }
-      if (idsAntigos.isNotEmpty) {
-        _db.itemVendaBox.removeMany(idsAntigos);
-      }
-      if (existente != null) {
-        existente.itens.clear();
-      }
-
-      if (clienteId > 0) {
-        final c = _db.clienteBox.get(clienteId);
-        if (c != null) venda.cliente.target = c;
-      }
-      if (vendedorId > 0) {
-        final w = _db.vendedorBox.get(vendedorId);
-        if (w != null) venda.vendedor.target = w;
-      }
-
-      _db.vendaBox.put(venda);
-      final salva = _db.vendaBox.get(venda.id);
-      if (salva == null) return;
-
-      if (itensRaw is List) {
-        for (final raw in itensRaw) {
-          if (raw is! Map) continue;
-          final im = Map<String, dynamic>.from(raw);
-          final item = SyncEntityCodec.itemDeMap(im);
-          item.venda.target = salva;
-          final pid = (im['produtoId'] as num?)?.toInt() ?? 0;
-          if (pid > 0) {
-            final pr = _db.produtoBox.get(pid);
-            if (pr != null) item.produto.target = pr;
-          }
-          _db.itemVendaBox.put(item);
-        }
-      }
-    });
   }
 
   Future<void> _aplicarCorrecaoNumeroOrcamento(Map<String, dynamic> m) async {

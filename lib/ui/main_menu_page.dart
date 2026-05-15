@@ -1,10 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../data/app_config_repository.dart';
 import '../data/cliente_repository.dart';
 import '../data/funcionario_repository.dart';
 import '../data/motorista_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/produto_repository.dart';
+import '../services/lan_sync_server_manager.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/usuario_sistema.dart';
@@ -48,8 +52,16 @@ class _MainMenuPageState extends State<MainMenuPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.lanSyncScheduler.iniciar();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final config = await AppConfigRepository().carregarEmpresaConfig();
+      if (Platform.isWindows &&
+          config.redeModoServidor &&
+          config.redeSincronizacaoAtiva) {
+        await LanSyncServerManager.iniciarServidor(
+          porta: config.redePortaServidor,
+        );
+      }
+      await widget.lanSyncScheduler.iniciar();
     });
   }
 
@@ -183,6 +195,7 @@ class _MainMenuPageState extends State<MainMenuPage> {
                   MaterialPageRoute(
                     builder: (_) => ConfiguracoesPage(
                       vendaRepository: widget.vendaRepository,
+                      objectBox: widget.produtoRepository.objectBox,
                       lanSyncScheduler: widget.lanSyncScheduler,
                     ),
                   ),

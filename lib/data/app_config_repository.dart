@@ -24,6 +24,8 @@ class EmpresaConfig {
     this.whatsappAccessToken = '',
     this.mensageriaBackendUrl = '',
     this.redeSincronizacaoAtiva = false,
+    this.redeModoServidor = false,
+    this.redePortaServidor = 8787,
     this.redeServidorUrl = '',
     this.backupAutomaticoAtivo = false,
     this.backupAutomaticoPasta = '',
@@ -53,8 +55,14 @@ class EmpresaConfig {
   final String whatsappAccessToken;
   final String mensageriaBackendUrl;
 
-  /// Quando verdadeiro, o cliente tentara usar [redeServidorUrl] para sync (quando implementado).
+  /// Quando verdadeiro, o app sincroniza com [redeServidorUrl] na LAN.
   final bool redeSincronizacaoAtiva;
+
+  /// Verdadeiro = este PC hospeda o servidor de sync; falso = conecta a outro PC.
+  final bool redeModoServidor;
+
+  /// Porta TCP do servidor de sync neste PC (padrao 8787).
+  final int redePortaServidor;
 
   /// Ex.: `http://192.168.0.15:8787` — servidor de sincronizacao na LAN.
   final String redeServidorUrl;
@@ -90,6 +98,8 @@ class EmpresaConfig {
     String? whatsappAccessToken,
     String? mensageriaBackendUrl,
     bool? redeSincronizacaoAtiva,
+    bool? redeModoServidor,
+    int? redePortaServidor,
     String? redeServidorUrl,
     bool? backupAutomaticoAtivo,
     String? backupAutomaticoPasta,
@@ -121,6 +131,8 @@ class EmpresaConfig {
       mensageriaBackendUrl: mensageriaBackendUrl ?? this.mensageriaBackendUrl,
       redeSincronizacaoAtiva:
           redeSincronizacaoAtiva ?? this.redeSincronizacaoAtiva,
+      redeModoServidor: redeModoServidor ?? this.redeModoServidor,
+      redePortaServidor: redePortaServidor ?? this.redePortaServidor,
       redeServidorUrl: redeServidorUrl ?? this.redeServidorUrl,
       backupAutomaticoAtivo:
           backupAutomaticoAtivo ?? this.backupAutomaticoAtivo,
@@ -157,6 +169,8 @@ class AppConfigRepository {
   static const _kWhatsappAccessToken = 'config_whatsapp_access_token';
   static const _kMensageriaBackendUrl = 'config_mensageria_backend_url';
   static const _kRedeSincronizacaoAtiva = 'config_rede_sincronizacao_ativa';
+  static const _kRedeModoServidor = 'config_rede_modo_servidor';
+  static const _kRedePortaServidor = 'config_rede_porta_servidor';
   static const _kRedeServidorUrl = 'config_rede_servidor_url';
   static const _kBackupAutomaticoAtivo = 'config_backup_automatico_ativo';
   static const _kBackupAutomaticoPasta = 'config_backup_automatico_pasta';
@@ -198,6 +212,12 @@ class AppConfigRepository {
       whatsappAccessToken: prefs.getString(_kWhatsappAccessToken) ?? '',
       mensageriaBackendUrl: prefs.getString(_kMensageriaBackendUrl) ?? '',
       redeSincronizacaoAtiva: prefs.getBool(_kRedeSincronizacaoAtiva) ?? false,
+      redeModoServidor: prefs.getBool(_kRedeModoServidor) ?? false,
+      redePortaServidor: () {
+        final p = prefs.getInt(_kRedePortaServidor);
+        if (p == null || p < 1024 || p > 65535) return 8787;
+        return p;
+      }(),
       redeServidorUrl: prefs.getString(_kRedeServidorUrl) ?? '',
       backupAutomaticoAtivo: prefs.getBool(_kBackupAutomaticoAtivo) ?? false,
       backupAutomaticoPasta: prefs.getString(_kBackupAutomaticoPasta) ?? '',
@@ -210,7 +230,10 @@ class AppConfigRepository {
     );
   }
 
-  Future<void> salvarEmpresaConfig(EmpresaConfig config) async {
+  Future<void> salvarEmpresaConfig(
+    EmpresaConfig config, {
+    bool propagarRede = true,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _kNomeLoja,
@@ -274,6 +297,11 @@ class AppConfigRepository {
       _kRedeSincronizacaoAtiva,
       config.redeSincronizacaoAtiva,
     );
+    await prefs.setBool(_kRedeModoServidor, config.redeModoServidor);
+    await prefs.setInt(
+      _kRedePortaServidor,
+      config.redePortaServidor.clamp(1024, 65535),
+    );
     await prefs.setString(_kRedeServidorUrl, config.redeServidorUrl.trim());
     await prefs.setBool(
       _kBackupAutomaticoAtivo,
@@ -291,7 +319,9 @@ class AppConfigRepository {
       _kBackupAutomaticoUltimoMs,
       config.ultimoBackupAutomaticoMs < 0 ? 0 : config.ultimoBackupAutomaticoMs,
     );
-    notificarAlteracaoParaRede();
+    if (propagarRede) {
+      notificarAlteracaoParaRede();
+    }
   }
 
   Future<void> atualizarUltimoBackupAutomaticoMs(int epochMs) async {

@@ -1,0 +1,410 @@
+import '../../model/fornecedor_nfe.dart';
+import '../../model/funcionario.dart';
+import '../../model/historico_entrada.dart';
+import '../../model/historico_entrega.dart';
+import '../../model/kit_orcamento.dart';
+import '../../model/linha_devolucao_entrada.dart';
+import '../../model/linha_troca_saida.dart';
+import '../../model/mensagem_template.dart';
+import '../../model/motorista.dart';
+import '../../model/nfe_importada_registro.dart';
+import '../../model/registro_devolucao.dart';
+import '../../model/usuario_sistema.dart';
+import '../../model/vinculo_fornecedor_produto.dart';
+import '../app_config_repository.dart';
+
+/// Codecs adicionais para sync LAN (entidades alem de produto/cliente/venda/vendedor).
+class SyncEntityCodecExtras {
+  static String? _dt(DateTime? d) => d?.toUtc().toIso8601String();
+  static DateTime? _parseDt(String? s) =>
+      s == null || s.isEmpty ? null : DateTime.tryParse(s)?.toUtc();
+
+  // --- Funcionario ---
+  static Map<String, dynamic> funcionarioParaMap(Funcionario f) => {
+        'id': f.id,
+        'codigoInterno': f.codigoInterno,
+        'nomeCompleto': f.nomeCompleto,
+        'cargo': f.cargo,
+        'cpf': f.cpf,
+        'rg': f.rg,
+        'pis': f.pis,
+        'telefone': f.telefone,
+        'whatsapp': f.whatsapp,
+        'email': f.email,
+        'endereco': f.endereco,
+        'numero': f.numero,
+        'bairro': f.bairro,
+        'cidade': f.cidade,
+        'uf': f.uf,
+        'cep': f.cep,
+        'observacoes': f.observacoes,
+        'salario': f.salario,
+        'descontoAtual': f.descontoAtual,
+        'adiantamentoAtual': f.adiantamentoAtual,
+        'historicoFinanceiro': f.historicoFinanceiro,
+        'valesJson': f.valesJson,
+        'diaPagamento': f.diaPagamento,
+        'ativo': f.ativo,
+        'dataNascimento': _dt(f.dataNascimento),
+        'dataAdmissao': _dt(f.dataAdmissao),
+        'criadoEm': _dt(f.criadoEm),
+      };
+
+  static Funcionario funcionarioDeMap(Map<String, dynamic> m) => Funcionario(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        codigoInterno: (m['codigoInterno'] ?? '').toString(),
+        nomeCompleto: (m['nomeCompleto'] ?? '').toString(),
+        cargo: (m['cargo'] ?? '').toString(),
+        cpf: (m['cpf'] ?? '').toString(),
+        rg: (m['rg'] ?? '').toString(),
+        pis: (m['pis'] ?? '').toString(),
+        telefone: (m['telefone'] ?? '').toString(),
+        whatsapp: (m['whatsapp'] ?? '').toString(),
+        email: (m['email'] ?? '').toString(),
+        endereco: (m['endereco'] ?? '').toString(),
+        numero: (m['numero'] ?? '').toString(),
+        bairro: (m['bairro'] ?? '').toString(),
+        cidade: (m['cidade'] ?? '').toString(),
+        uf: (m['uf'] ?? '').toString(),
+        cep: (m['cep'] ?? '').toString(),
+        observacoes: (m['observacoes'] ?? '').toString(),
+        salario: (m['salario'] as num?)?.toDouble() ?? 0,
+        descontoAtual: (m['descontoAtual'] as num?)?.toDouble() ?? 0,
+        adiantamentoAtual: (m['adiantamentoAtual'] as num?)?.toDouble() ?? 0,
+        historicoFinanceiro: (m['historicoFinanceiro'] ?? '').toString(),
+        valesJson: (m['valesJson'] ?? '[]').toString(),
+        diaPagamento: (m['diaPagamento'] as num?)?.toInt() ?? 5,
+        ativo: m['ativo'] != false,
+        dataNascimento: _parseDt((m['dataNascimento'] ?? '').toString()),
+        dataAdmissao: _parseDt((m['dataAdmissao'] ?? '').toString()),
+        criadoEm: _parseDt((m['criadoEm'] ?? '').toString()),
+      );
+
+  // --- Motorista ---
+  static Map<String, dynamic> motoristaParaMap(Motorista m) => {
+        'id': m.id,
+        'nome': m.nome,
+        'telefone': m.telefone,
+        'ativo': m.ativo,
+        'criadoEm': _dt(m.criadoEm),
+      };
+
+  static Motorista motoristaDeMap(Map<String, dynamic> m) => Motorista(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        nome: (m['nome'] ?? '').toString(),
+        telefone: (m['telefone'] ?? '').toString(),
+        ativo: m['ativo'] != false,
+        criadoEm: _parseDt((m['criadoEm'] ?? '').toString()),
+      );
+
+  // --- Fornecedor NF-e ---
+  static Map<String, dynamic> fornecedorNfeParaMap(FornecedorNfe f) => {
+        'id': f.id,
+        'cnpj': f.cnpj,
+        'razaoSocial': f.razaoSocial,
+        'nomeFantasia': f.nomeFantasia,
+      };
+
+  static FornecedorNfe fornecedorNfeDeMap(Map<String, dynamic> m) =>
+      FornecedorNfe(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        cnpj: (m['cnpj'] ?? '').toString(),
+        razaoSocial: (m['razaoSocial'] ?? '').toString(),
+        nomeFantasia: (m['nomeFantasia'] ?? '').toString(),
+      );
+
+  // --- Vinculo ---
+  static Map<String, dynamic> vinculoParaMap(VinculoFornecedorProduto v) => {
+        'id': v.id,
+        'codigoProdutoFornecedor': v.codigoProdutoFornecedor,
+        'fatorConversao': v.fatorConversao,
+        'fornecedorId': v.fornecedor.targetId,
+        'produtoId': v.produto.targetId,
+      };
+
+  static VinculoFornecedorProduto vinculoDeMap(Map<String, dynamic> m) =>
+      VinculoFornecedorProduto(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        codigoProdutoFornecedor: (m['codigoProdutoFornecedor'] ?? '').toString(),
+        fatorConversao: (m['fatorConversao'] as num?)?.toDouble() ?? 1,
+      );
+
+  // --- Historico entrada ---
+  static Map<String, dynamic> historicoEntradaParaMap(HistoricoEntrada h) => {
+        'id': h.id,
+        'numeroNota': h.numeroNota,
+        'chaveAcesso': h.chaveAcesso,
+        'dataEmissao': _dt(h.dataEmissao),
+        'nomeFornecedor': h.nomeFornecedor,
+        'cnpjFornecedor': h.cnpjFornecedor,
+        'unidadeFornecedor': h.unidadeFornecedor,
+        'quantidadeFornecedor': h.quantidadeFornecedor,
+        'fatorConversaoUtilizado': h.fatorConversaoUtilizado,
+        'quantidadeEntradaEstoque': h.quantidadeEntradaEstoque,
+        'precoCustoUnitarioNota': h.precoCustoUnitarioNota,
+        'produtoId': h.produto.targetId,
+      };
+
+  static HistoricoEntrada historicoEntradaDeMap(Map<String, dynamic> m) =>
+      HistoricoEntrada(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        numeroNota: (m['numeroNota'] as num?)?.toInt() ?? 0,
+        chaveAcesso: (m['chaveAcesso'] ?? '').toString(),
+        dataEmissao: _parseDt((m['dataEmissao'] ?? '').toString()) ??
+            DateTime.now().toUtc(),
+        nomeFornecedor: (m['nomeFornecedor'] ?? '').toString(),
+        cnpjFornecedor: (m['cnpjFornecedor'] ?? '').toString(),
+        unidadeFornecedor: (m['unidadeFornecedor'] ?? '').toString(),
+        quantidadeFornecedor:
+            (m['quantidadeFornecedor'] as num?)?.toDouble() ?? 0,
+        fatorConversaoUtilizado:
+            (m['fatorConversaoUtilizado'] as num?)?.toDouble() ?? 1,
+        quantidadeEntradaEstoque:
+            (m['quantidadeEntradaEstoque'] as num?)?.toInt() ?? 0,
+        precoCustoUnitarioNota:
+            (m['precoCustoUnitarioNota'] as num?)?.toDouble() ?? 0,
+      );
+
+  // --- NF-e importada ---
+  static Map<String, dynamic> nfeImportadaParaMap(NfeImportadaRegistro r) => {
+        'id': r.id,
+        'chaveAcesso': r.chaveAcesso,
+        'numeroNota': r.numeroNota,
+        'dataEmissao': _dt(r.dataEmissao),
+        'nomeFornecedor': r.nomeFornecedor,
+        'cnpjFornecedor': r.cnpjFornecedor,
+        'dataHoraImportacao': _dt(r.dataHoraImportacao),
+        'quantidadeItens': r.quantidadeItens,
+      };
+
+  static NfeImportadaRegistro nfeImportadaDeMap(Map<String, dynamic> m) =>
+      NfeImportadaRegistro(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        chaveAcesso: (m['chaveAcesso'] ?? '').toString(),
+        numeroNota: (m['numeroNota'] as num?)?.toInt() ?? 0,
+        dataEmissao: _parseDt((m['dataEmissao'] ?? '').toString()) ??
+            DateTime.now().toUtc(),
+        nomeFornecedor: (m['nomeFornecedor'] ?? '').toString(),
+        cnpjFornecedor: (m['cnpjFornecedor'] ?? '').toString(),
+        dataHoraImportacao: _parseDt((m['dataHoraImportacao'] ?? '').toString()) ??
+            DateTime.now().toUtc(),
+        quantidadeItens: (m['quantidadeItens'] as num?)?.toInt() ?? 0,
+      );
+
+  // --- Kit (com itens embutidos) ---
+  static Map<String, dynamic> kitParaMap(KitOrcamento k) {
+    final itens = <Map<String, dynamic>>[];
+    for (final it in k.itens) {
+      itens.add({
+        'id': it.id,
+        'quantidade': it.quantidade,
+        'ordem': it.ordem,
+        'produtoId': it.produto.targetId,
+      });
+    }
+    return {
+      'id': k.id,
+      'nome': k.nome,
+      'descricao': k.descricao,
+      'ativo': k.ativo,
+      'criadoEm': _dt(k.criadoEm),
+      'itens': itens,
+    };
+  }
+
+  // --- Historico entrega ---
+  static Map<String, dynamic> historicoEntregaParaMap(HistoricoEntrega h) => {
+        'id': h.id,
+        'statusAnterior': h.statusAnterior,
+        'statusNovo': h.statusNovo,
+        'usuario': h.usuario,
+        'dataHora': _dt(h.dataHora),
+        'vendaId': h.venda.targetId,
+      };
+
+  static HistoricoEntrega historicoEntregaDeMap(Map<String, dynamic> m) =>
+      HistoricoEntrega(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        statusAnterior: (m['statusAnterior'] ?? '').toString(),
+        statusNovo: (m['statusNovo'] ?? '').toString(),
+        usuario: (m['usuario'] ?? '').toString(),
+        dataHora: _parseDt((m['dataHora'] ?? '').toString()),
+      );
+
+  // --- Registro devolucao (linhas embutidas) ---
+  static Map<String, dynamic> registroDevolucaoParaMap(RegistroDevolucao r) {
+    final ent = <Map<String, dynamic>>[];
+    for (final l in r.linhasEntrada) {
+      ent.add({
+        'id': l.id,
+        'itemVendaId': l.itemVendaId,
+        'quantidade': l.quantidade,
+        'precoUnitarioReferencia': l.precoUnitarioReferencia,
+        'nomeProdutoSnapshot': l.nomeProdutoSnapshot,
+        'produtoId': l.produto.targetId,
+      });
+    }
+    final sai = <Map<String, dynamic>>[];
+    for (final l in r.linhasSaidaTroca) {
+      sai.add({
+        'id': l.id,
+        'quantidade': l.quantidade,
+        'precoUnitario': l.precoUnitario,
+        'precoCustoUnitario': l.precoCustoUnitario,
+        'precoTipo': l.precoTipo,
+        'nomeProdutoSnapshot': l.nomeProdutoSnapshot,
+        'produtoId': l.produto.targetId,
+      });
+    }
+    return {
+      'id': r.id,
+      'tipo': r.tipo,
+      'motivo': r.motivo,
+      'observacaoFinanceira': r.observacaoFinanceira,
+      'registradoPor': r.registradoPor,
+      'data': _dt(r.data),
+      'vendaOrigemId': r.vendaOrigem.targetId,
+      'linhasEntrada': ent,
+      'linhasSaidaTroca': sai,
+    };
+  }
+
+  static RegistroDevolucao registroDevolucaoDeMap(Map<String, dynamic> m) =>
+      RegistroDevolucao(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        tipo: (m['tipo'] ?? 'devolucao').toString(),
+        motivo: (m['motivo'] ?? '').toString(),
+        observacaoFinanceira: (m['observacaoFinanceira'] ?? '').toString(),
+        registradoPor: (m['registradoPor'] ?? '').toString(),
+        data: _parseDt((m['data'] ?? '').toString()),
+      );
+
+  static LinhaDevolucaoEntrada linhaDevolucaoDeMap(Map<String, dynamic> m) =>
+      LinhaDevolucaoEntrada(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        itemVendaId: (m['itemVendaId'] as num?)?.toInt() ?? 0,
+        quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
+        precoUnitarioReferencia:
+            (m['precoUnitarioReferencia'] as num?)?.toDouble() ?? 0,
+        nomeProdutoSnapshot: (m['nomeProdutoSnapshot'] ?? '').toString(),
+      );
+
+  static LinhaTrocaSaida linhaTrocaDeMap(Map<String, dynamic> m) =>
+      LinhaTrocaSaida(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
+        precoUnitario: (m['precoUnitario'] as num?)?.toDouble() ?? 0,
+        precoCustoUnitario: (m['precoCustoUnitario'] as num?)?.toDouble() ?? 0,
+        precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
+        nomeProdutoSnapshot: (m['nomeProdutoSnapshot'] ?? '').toString(),
+      );
+
+  // --- Config empresa (registro unico id=1) ---
+  static Map<String, dynamic> empresaConfigParaMap(EmpresaConfig c) => {
+        'nomeLoja': c.nomeLoja,
+        'telefone': c.telefone,
+        'endereco': c.endereco,
+        'pastaPadraoPdf': c.pastaPadraoPdf,
+        'impressoraPadrao': c.impressoraPadrao,
+        'modeloPdf': c.modeloPdf,
+        'rodapeNota': c.rodapeNota,
+        'rodapeOrcamento': c.rodapeOrcamento,
+        'logoPath': c.logoPath,
+        'limiteDivergenciaCaixa': c.limiteDivergenciaCaixa,
+        'mostrarCampoDescontoCaixa': c.mostrarCampoDescontoCaixa,
+        'maxDescontoPercentualPdv': c.maxDescontoPercentualPdv,
+        'permitirVendaSemEstoque': c.permitirVendaSemEstoque,
+        'whatsappApiVersion': c.whatsappApiVersion,
+        'whatsappPhoneNumberId': c.whatsappPhoneNumberId,
+        'whatsappAccessToken': c.whatsappAccessToken,
+        'mensageriaBackendUrl': c.mensageriaBackendUrl,
+        'redeSincronizacaoAtiva': c.redeSincronizacaoAtiva,
+        'redeModoServidor': c.redeModoServidor,
+        'redePortaServidor': c.redePortaServidor,
+        'redeServidorUrl': c.redeServidorUrl,
+        'backupAutomaticoAtivo': c.backupAutomaticoAtivo,
+        'backupAutomaticoPasta': c.backupAutomaticoPasta,
+        'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
+        'ultimoBackupAutomaticoMs': c.ultimoBackupAutomaticoMs,
+      };
+
+  static EmpresaConfig empresaConfigDeMap(
+    EmpresaConfig base,
+    Map<String, dynamic> m,
+  ) {
+    return base.copyWith(
+      nomeLoja: (m['nomeLoja'] ?? base.nomeLoja).toString(),
+      telefone: (m['telefone'] ?? base.telefone).toString(),
+      endereco: (m['endereco'] ?? base.endereco).toString(),
+      pastaPadraoPdf: (m['pastaPadraoPdf'] ?? base.pastaPadraoPdf).toString(),
+      impressoraPadrao:
+          (m['impressoraPadrao'] ?? base.impressoraPadrao).toString(),
+      modeloPdf: (m['modeloPdf'] ?? base.modeloPdf).toString(),
+      rodapeNota: (m['rodapeNota'] ?? base.rodapeNota).toString(),
+      rodapeOrcamento: (m['rodapeOrcamento'] ?? base.rodapeOrcamento).toString(),
+      logoPath: (m['logoPath'] ?? base.logoPath).toString(),
+      limiteDivergenciaCaixa:
+          (m['limiteDivergenciaCaixa'] as num?)?.toDouble() ??
+              base.limiteDivergenciaCaixa,
+      mostrarCampoDescontoCaixa:
+          m['mostrarCampoDescontoCaixa'] as bool? ?? base.mostrarCampoDescontoCaixa,
+      maxDescontoPercentualPdv:
+          (m['maxDescontoPercentualPdv'] as num?)?.toDouble() ??
+              base.maxDescontoPercentualPdv,
+      permitirVendaSemEstoque:
+          m['permitirVendaSemEstoque'] as bool? ?? base.permitirVendaSemEstoque,
+      whatsappApiVersion:
+          (m['whatsappApiVersion'] ?? base.whatsappApiVersion).toString(),
+      whatsappPhoneNumberId:
+          (m['whatsappPhoneNumberId'] ?? base.whatsappPhoneNumberId).toString(),
+      whatsappAccessToken:
+          (m['whatsappAccessToken'] ?? base.whatsappAccessToken).toString(),
+      mensageriaBackendUrl:
+          (m['mensageriaBackendUrl'] ?? base.mensageriaBackendUrl).toString(),
+      redeSincronizacaoAtiva:
+          m['redeSincronizacaoAtiva'] as bool? ?? base.redeSincronizacaoAtiva,
+      redeModoServidor: m['redeModoServidor'] as bool? ?? base.redeModoServidor,
+      redePortaServidor:
+          (m['redePortaServidor'] as num?)?.toInt() ?? base.redePortaServidor,
+      redeServidorUrl: (m['redeServidorUrl'] ?? base.redeServidorUrl).toString(),
+      backupAutomaticoAtivo:
+          m['backupAutomaticoAtivo'] as bool? ?? base.backupAutomaticoAtivo,
+      backupAutomaticoPasta:
+          (m['backupAutomaticoPasta'] ?? base.backupAutomaticoPasta).toString(),
+      backupAutomaticoIntervaloMinutos:
+          (m['backupAutomaticoIntervaloMinutos'] as num?)?.toInt() ??
+              base.backupAutomaticoIntervaloMinutos,
+      ultimoBackupAutomaticoMs:
+          (m['ultimoBackupAutomaticoMs'] as num?)?.toInt() ??
+              base.ultimoBackupAutomaticoMs,
+    );
+  }
+
+  static Map<String, dynamic> mensageriaTemplatesParaMap(
+    List<MensagemTemplate> lista,
+  ) =>
+      {'templates': lista.map((t) => t.toMap()).toList()};
+
+  static List<MensagemTemplate> mensageriaTemplatesDeMap(
+    Map<String, dynamic> m,
+  ) {
+    final raw = m['templates'];
+    if (raw is! List) return [];
+    return raw
+        .whereType<Map>()
+        .map((e) => MensagemTemplate.fromMap(e.cast<String, dynamic>()))
+        .toList();
+  }
+
+  static Map<String, dynamic> usuariosParaMap(List<UsuarioSistema> lista) =>
+      {'usuarios': lista.map((u) => u.toMap()).toList()};
+
+  static List<UsuarioSistema> usuariosDeMap(Map<String, dynamic> m) {
+    final raw = m['usuarios'];
+    if (raw is! List) return [];
+    return raw
+        .whereType<Map>()
+        .map((e) => UsuarioSistema.fromMap(e.cast<String, dynamic>()))
+        .toList();
+  }
+}

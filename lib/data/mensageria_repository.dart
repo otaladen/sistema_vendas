@@ -9,6 +9,7 @@ import '../model/mensagem_log.dart';
 import '../model/mensagem_template.dart';
 import '../model/venda.dart';
 import 'app_config_repository.dart';
+import 'sync/sync_write_trigger.dart';
 
 class MensageriaRepository {
   static const _kTemplates = 'mensageria_templates_v1';
@@ -42,12 +43,14 @@ class MensageriaRepository {
       lista.add(template);
     }
     await _persistirTemplates(lista);
+    notificarAlteracaoParaRede();
   }
 
   Future<void> removerTemplate(String templateId) async {
     final lista = await listarTemplates();
     lista.removeWhere((t) => t.id == templateId);
     await _persistirTemplates(lista);
+    notificarAlteracaoParaRede();
   }
 
   Future<List<MensagemFila>> listarFila() async {

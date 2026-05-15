@@ -264,6 +264,110 @@ class _NfeImportadasPageState extends State<NfeImportadasPage> {
     );
   }
 
+  Future<void> _confirmarEstornoImportacao(
+    BuildContext sheetContext,
+    NfeImportadaRegistro r,
+  ) async {
+    final repo = NfeEntradaRepository(widget.produtoRepository.objectBox);
+    final validacao = repo.validarEstornoImportacao(r.id);
+    final nfLabel = r.numeroNota > 0 ? 'NF #${r.numeroNota}' : 'esta NF-e';
+    final fornecedor = r.nomeFornecedor.trim().isEmpty
+        ? 'fornecedor nao informado'
+        : r.nomeFornecedor;
+
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final erro = Theme.of(ctx).colorScheme.error;
+        return AlertDialog(
+          title: const Text('Estornar importacao?'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$nfLabel ($fornecedor) sera desfeita.\n\n'
+                  'O estoque das entradas abaixo volta atras e a chave fica '
+                  'livre para importar o XML de novo.',
+                ),
+                if (!validacao.podeEstornar) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    validacao.motivoBloqueio ?? 'Estorno bloqueado.',
+                    style: TextStyle(color: erro, fontWeight: FontWeight.w600),
+                  ),
+                ] else if (validacao.linhas.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Reversao de estoque:',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 6),
+                  ...validacao.linhas.map(
+                    (l) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '• ${l.nomeProduto}: −${l.quantidadeEstorno} un. '
+                        '(fisico atual ${l.estoqueAtual})',
+                      ),
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Nao ha lancamentos de historico; apenas o registro da '
+                    'importacao sera removido.',
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: erro,
+                foregroundColor: Theme.of(ctx).colorScheme.onError,
+              ),
+              onPressed: validacao.podeEstornar
+                  ? () => Navigator.pop(ctx, true)
+                  : null,
+              child: const Text('Estornar entrada'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmou != true || !mounted) return;
+
+    try {
+      repo.estornarImportacaoNfe(r.id);
+      widget.produtoRepository.invalidarCacheBusca();
+      if (sheetContext.mounted) {
+        Navigator.pop(sheetContext);
+      }
+      _recarregarDados();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Importacao estornada. Estoque revertido; a nota pode ser importada de novo.',
+          ),
+        ),
+      );
+    } on StateError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    }
+  }
+
   void _abrirDetalhe(NfeImportadaRegistro r) {
     final repo = NfeEntradaRepository(widget.produtoRepository.objectBox);
     final historico = repo.listarHistoricoPorChaveNfe(r.chaveAcesso);
@@ -317,6 +421,18 @@ class _NfeImportadasPageState extends State<NfeImportadasPage> {
                       label: const Text('Copiar CNPJ'),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: () => _confirmarEstornoImportacao(ctx, r),
+                  icon: Icon(
+                    Icons.undo_outlined,
+                    color: Theme.of(ctx).colorScheme.error,
+                  ),
+                  label: Text(
+                    'Estornar importacao (desfazer entrada)',
+                    style: TextStyle(color: Theme.of(ctx).colorScheme.error),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(

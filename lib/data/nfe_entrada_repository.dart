@@ -27,6 +27,32 @@ class SugestaoLinhaConferencia {
   final String unidadeInternaInicial;
 }
 
+/// Linha da previa de estorno (o que sera revertido no estoque).
+class LinhaPreviaEstornoNfe {
+  const LinhaPreviaEstornoNfe({
+    required this.nomeProduto,
+    required this.quantidadeEstorno,
+    required this.estoqueAtual,
+  });
+
+  final String nomeProduto;
+  final int quantidadeEstorno;
+  final int estoqueAtual;
+}
+
+/// Resultado da validacao antes de estornar uma NF-e importada.
+class ValidacaoEstornoNfe {
+  const ValidacaoEstornoNfe({
+    required this.podeEstornar,
+    this.motivoBloqueio,
+    this.linhas = const [],
+  });
+
+  final bool podeEstornar;
+  final String? motivoBloqueio;
+  final List<LinhaPreviaEstornoNfe> linhas;
+}
+
 /// Linha confirmada pelo usuario na [ConferenciaXmlScreen].
 class ConferenciaNfeLinhaConfirmacao {
   const ConferenciaNfeLinhaConfirmacao({
@@ -150,6 +176,116 @@ class NfeEntradaRepository {
     } finally {
       q.close();
     }
+  }
+
+  NfeImportadaRegistro? obterImportacaoPorId(int id) =>
+      _db.nfeImportadaRegistroBox.get(id);
+
+  /// Verifica se o estorno e possivel (estoque suficiente, sem reserva comprometida).
+  ValidacaoEstornoNfe validarEstornoImportacao(int registroId) {
+    final registro = obterImportacaoPorId(registroId);
+    if (registro == null) {
+      return const ValidacaoEstornoNfe(
+        podeEstornar: false,
+        motivoBloqueio: 'Registro da importacao nao encontrado.',
+      );
+    }
+    final historico = listarHistoricoPorChaveNfe(registro.chaveAcesso);
+    if (historico.isEmpty) {
+      return const ValidacaoEstornoNfe(podeEstornar: true);
+    }
+
+    final linhas = <LinhaPreviaEstornoNfe>[];
+    for (final h in historico) {
+      final produto = h.produto.target;
+      if (produto == null) {
+        return const ValidacaoEstornoNfe(
+          podeEstornar: false,
+          motivoBloqueio:
+              'Historico sem produto vinculado. Nao e possivel estornar com seguranca.',
+        );
+      }
+      final qtd = h.quantidadeEntradaEstoque;
+      if (qtd <= 0) continue;
+
+      final nome = produto.nome.trim().isNotEmpty
+          ? produto.nome
+          : produto.codigoInterno;
+      linhas.add(
+        LinhaPreviaEstornoNfe(
+          nomeProduto: nome,
+          quantidadeEstorno: qtd,
+          estoqueAtual: produto.estoqueReal,
+        ),
+      );
+
+      if (produto.estoqueReal < qtd) {
+        return ValidacaoEstornoNfe(
+          podeEstornar: false,
+          motivoBloqueio:
+              'Estoque insuficiente em "$nome": fisico ${produto.estoqueReal}, '
+              'entrada da nota $qtd. Provavelmente houve venda ou outra saida.',
+          linhas: linhas,
+        );
+      }
+      final estoqueApos = produto.estoqueReal - qtd;
+      if (estoqueApos < produto.estoqueReservado) {
+        return ValidacaoEstornoNfe(
+          podeEstornar: false,
+          motivoBloqueio:
+              'Em "$nome" ha ${produto.estoqueReservado} un. reservadas; '
+              'apos o estorno restariam $estoqueApos no fisico.',
+          linhas: linhas,
+        );
+      }
+    }
+
+    return ValidacaoEstornoNfe(podeEstornar: true, linhas: linhas);
+  }
+
+  /// Estorna importacao: reverte estoque, remove historico e libera a chave para nova entrada.
+  void estornarImportacaoNfe(int registroId) {
+    final validacao = validarEstornoImportacao(registroId);
+    if (!validacao.podeEstornar) {
+      throw StateError(
+        validacao.motivoBloqueio ?? 'Nao foi possivel estornar esta NF-e.',
+      );
+    }
+
+    final registro = obterImportacaoPorId(registroId);
+    if (registro == null) {
+      throw StateError('Registro da importacao nao encontrado.');
+    }
+    final chaveNorm = registro.chaveAcesso.replaceAll(RegExp(r'\D'), '');
+    final historico = listarHistoricoPorChaveNfe(chaveNorm);
+
+    _db.store.runInTransaction(TxMode.write, () {
+      final produtosParaRemover = <int>{};
+
+      for (final h in historico) {
+        final produto = h.produto.target;
+        if (produto == null) continue;
+        final qtd = h.quantidadeEntradaEstoque;
+        if (qtd > 0) {
+          produto.estoqueReal -= qtd;
+          _db.produtoBox.put(produto);
+        }
+        _db.historicoEntradaBox.remove(h.id);
+
+        if (_podeRemoverProdutoCriadoNaNfe(produto)) {
+          produtosParaRemover.add(produto.id);
+        }
+      }
+
+      for (final produtoId in produtosParaRemover) {
+        _removerVinculosDoProduto(produtoId);
+        _db.produtoBox.remove(produtoId);
+      }
+
+      _db.nfeImportadaRegistroBox.remove(registro.id);
+    });
+
+    notificarAlteracaoParaRede();
   }
 
   /// Itens de estoque lançados nesta NF-e (mesma chave de 44 dígitos).
@@ -388,6 +524,61 @@ class NfeEntradaRepository {
         _db.produtoBox.query(Produto_.codigoInterno.equals(codigo)).build();
     try {
       return q.find().isEmpty;
+    } finally {
+      q.close();
+    }
+  }
+
+  bool _podeRemoverProdutoCriadoNaNfe(Produto produto) {
+    if (!produto.codigoInterno.startsWith('NFE-')) return false;
+    if (produto.estoqueReal != 0 || produto.estoqueReservado != 0) {
+      return false;
+    }
+    if (_produtoTemReferenciasVenda(produto.id)) return false;
+    if (_produtoEmKitOrcamento(produto.id)) return false;
+    return _contarHistoricoProduto(produto.id) == 0;
+  }
+
+  int _contarHistoricoProduto(int produtoId) {
+    final q = _db.historicoEntradaBox
+        .query(HistoricoEntrada_.produto.equals(produtoId))
+        .build();
+    try {
+      return q.count();
+    } finally {
+      q.close();
+    }
+  }
+
+  bool _produtoTemReferenciasVenda(int produtoId) {
+    final q =
+        _db.itemVendaBox.query(ItemVenda_.produto.equals(produtoId)).build();
+    try {
+      return q.count() > 0;
+    } finally {
+      q.close();
+    }
+  }
+
+  bool _produtoEmKitOrcamento(int produtoId) {
+    final q = _db.kitOrcamentoItemBox
+        .query(KitOrcamentoItem_.produto.equals(produtoId))
+        .build();
+    try {
+      return q.count() > 0;
+    } finally {
+      q.close();
+    }
+  }
+
+  void _removerVinculosDoProduto(int produtoId) {
+    final q = _db.vinculoFornecedorProdutoBox
+        .query(VinculoFornecedorProduto_.produto.equals(produtoId))
+        .build();
+    try {
+      for (final v in q.find()) {
+        _db.vinculoFornecedorProdutoBox.remove(v.id);
+      }
     } finally {
       q.close();
     }

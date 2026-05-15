@@ -14,6 +14,7 @@ import '../data/cliente_repository.dart';
 import '../data/kit_orcamento_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
+import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
@@ -57,7 +58,7 @@ class PontoDeVendaPage extends StatefulWidget {
   State<PontoDeVendaPage> createState() => _PontoDeVendaPageState();
 }
 
-class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
+class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefreshMixin {
   static const int _validadeOrcamentoDias = 7;
   static const int _selecaoSemClienteValor = -1;
   static const int _selecaoNovoClienteValor = -2;
@@ -155,6 +156,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handlerCheckoutF7PdV);
     widget.produtoRepository.addListener(_onProdutoRepositoryChanged);
+    initSafeSyncRefresh(
+      onReload: _recarregarDadosSync,
+      bloquearAtualizacao: _bloquearSyncPdv,
+      aoConcluir: _snackbarDadosAtualizados,
+    );
     _carregarDadosIniciais();
     _carregarConfiguracaoVendaSemEstoque();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -163,7 +169,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     });
   }
 
+  bool _bloquearSyncPdv() {
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return true;
+    return _focoPrimarioDentroDoPainelCheckout();
+  }
+
   void _onProdutoRepositoryChanged() {
+    agendarRecargaSegura();
+  }
+
+  void _recarregarDadosSync() {
     if (!mounted) return;
     final t = _pesquisaController.text.trim();
     if (t.isEmpty) {
@@ -171,6 +187,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
     } else {
       _pesquisar(focarListaAposPesquisar: false);
     }
+  }
+
+  void _snackbarDadosAtualizados({required bool daRede}) {
+    if (!daRede || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        duration: Duration(seconds: 2),
+        content: Text('Dados atualizados da rede'),
+      ),
+    );
   }
 
   @override
@@ -195,6 +221,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> {
 
   @override
   void dispose() {
+    disposeSafeSyncRefresh();
     widget.produtoRepository.removeListener(_onProdutoRepositoryChanged);
     HardwareKeyboard.instance.removeHandler(_handlerCheckoutF7PdV);
     _checkoutF7BurstId = 0;

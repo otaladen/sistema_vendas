@@ -1,6 +1,7 @@
 import '../model/kit_orcamento.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'sync/sync_write_trigger.dart';
 
 class KitOrcamentoRepository {
   KitOrcamentoRepository(this._db);
@@ -60,6 +61,7 @@ class KitOrcamentoRepository {
         _db.kitOrcamentoItemBox.put(it);
       }
     });
+    notificarAlteracaoParaRede();
   }
 
   void _removerItensDoKitTx(int kitId) {
@@ -82,6 +84,7 @@ class KitOrcamentoRepository {
       _removerItensDoKitTx(id);
       ok = _db.kitOrcamentoBox.remove(id);
     });
+    if (ok) notificarAlteracaoParaRede();
     return ok;
   }
 }

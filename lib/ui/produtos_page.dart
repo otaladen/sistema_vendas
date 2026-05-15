@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 
 import '../main.dart';
 import '../data/produto_repository.dart';
+import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../model/produto.dart';
 import '../services/produto_imagem_service.dart';
 import 'widgets/abas_historico_produto_widget.dart';
@@ -23,7 +24,7 @@ class ProdutosPage extends StatefulWidget {
   State<ProdutosPage> createState() => _ProdutosPageState();
 }
 
-class _ProdutosPageState extends State<ProdutosPage> {
+class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -177,10 +178,35 @@ class _ProdutosPageState extends State<ProdutosPage> {
     _produtoImagemService = ProdutoImagemService(
       imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
     );
+    initSafeSyncRefresh(
+      onReload: _atualizarAposSyncRede,
+      bloquearAtualizacao: _bloquearSyncProdutos,
+      aoConcluir: _snackbarDadosAtualizados,
+    );
+  }
+
+  bool _bloquearSyncProdutos() =>
+      _temDadosNoFormulario() ||
+      SafeSyncRefreshMixin.focoEmCampoDeTexto();
+
+  void _atualizarAposSyncRede() {
+    if (!mounted || _bloquearSyncProdutos()) return;
+    setState(() {});
+  }
+
+  void _snackbarDadosAtualizados({required bool daRede}) {
+    if (!daRede || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        duration: Duration(seconds: 2),
+        content: Text('Dados atualizados da rede'),
+      ),
+    );
   }
 
   @override
   void dispose() {
+    disposeSafeSyncRefresh();
     _codigoInternoController.dispose();
     _nomeController.dispose();
     _descricaoController.dispose();

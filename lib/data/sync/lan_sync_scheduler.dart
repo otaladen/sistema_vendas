@@ -17,7 +17,7 @@ class LanSyncScheduler {
   LanSyncScheduler({
     required SyncService syncService,
     AppConfigRepository? configRepository,
-    this.intervalo = const Duration(minutes: 2),
+    this.intervalo = const Duration(seconds: 30),
   })  : _syncService = syncService,
         _configRepository = configRepository ?? AppConfigRepository();
 
@@ -166,7 +166,7 @@ class LanSyncScheduler {
 
   void _aoReceberEventoTempoReal() {
     _debounceSyncEvento?.cancel();
-    _debounceSyncEvento = Timer(const Duration(milliseconds: 250), () {
+    _debounceSyncEvento = Timer(const Duration(milliseconds: 100), () {
       unawaited(sincronizarAgora());
     });
   }

@@ -61,6 +61,7 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   build_runner: ^2.14.1
   objectbox_generator: ^5.3.1
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -101,3 +102,15 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Icones do app (Android, iOS, Windows) a partir do logo da empresa.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/images/logo.jpg
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: assets/images/logo.jpg
+  windows:
+    generate: true
+    image_path: assets/images/logo.jpg
+    icon_size: 256

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../model/usuario_sistema.dart';
+import 'sync/sync_write_trigger.dart';
 
 class UsuarioRepository {
   static const _kUsuarios = 'usuarios_sistema_v1';
@@ -28,12 +29,14 @@ class UsuarioRepository {
       lista.add(usuario);
     }
     await _persistir(lista);
+    notificarAlteracaoParaRede();
   }
 
   Future<void> remover(String id) async {
     final lista = await listarTodos();
     lista.removeWhere((u) => u.id == id);
     await _persistir(lista);
+    notificarAlteracaoParaRede();
   }
 
   Future<bool> loginJaExiste(String login, {String? ignorarId}) async {
