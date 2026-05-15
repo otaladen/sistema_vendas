@@ -6,6 +6,7 @@ import '../../data/models/conta_pagar.dart';
 import '../../data/objectbox.dart';
 import '../../main.dart';
 import '../../objectbox.g.dart';
+import 'widgets/grafico_vencimentos.dart';
 
 final NumberFormat _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
 final DateFormat _dataFmt = DateFormat('dd/MM/yyyy');
@@ -14,9 +15,16 @@ enum _FiltroStatusConta { todos, pendentes, pagos, atrasados }
 
 /// Listagem de contas a pagar com KPIs, filtros por status e baixa rápida.
 class ContasPagarPage extends StatefulWidget {
-  const ContasPagarPage({super.key, required this.objectBox});
+  const ContasPagarPage({
+    super.key,
+    required this.objectBox,
+    this.saldoCaixaReferencia,
+  });
 
   final ObjectBox objectBox;
+
+  /// Saldo em caixa para linha de referência no gráfico (opcional).
+  final double? saldoCaixaReferencia;
 
   @override
   State<ContasPagarPage> createState() => _ContasPagarPageState();
@@ -25,6 +33,7 @@ class ContasPagarPage extends StatefulWidget {
 class _ContasPagarPageState extends State<ContasPagarPage> {
   _FiltroStatusConta _filtro = _FiltroStatusConta.todos;
   List<ContaPagar> _linhas = [];
+  ContasPagarVencimentosBuckets _buckets = ContasPagarVencimentosBuckets.zero;
 
   @override
   void initState() {
@@ -48,6 +57,9 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
 
   void _recarregar() {
     _sincronizarPendenteParaAtrasado();
+    final buckets = computeContasPagarVencimentosBuckets(
+      widget.objectBox.contaPagarBox,
+    );
 
     final box = widget.objectBox.contaPagarBox;
     final Query<ContaPagar> q;
@@ -75,8 +87,11 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
         break;
     }
     try {
+      final lista = q.find();
+      if (!mounted) return;
       setState(() {
-        _linhas = q.find();
+        _linhas = lista;
+        _buckets = buckets;
       });
     } finally {
       q.close();
@@ -259,11 +274,11 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
-
+  Widget _buildPainelTopoKpisEGrafico(
+    BuildContext context,
+    BoxConstraints constraints,
+  ) {
+    final semantic = Theme.of(context).extension<AppSemanticColors>();
     final infoBg = semantic?.infoBg ?? const Color(0xFFEAF2FF);
     final infoBorder = semantic?.infoBorder ?? const Color(0xFF9EC0FF);
     final infoFg = semantic?.infoFg ?? const Color(0xFF1E3A8A);
@@ -273,6 +288,102 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
     final errBg = semantic?.errorBg ?? const Color(0xFFFDECEC);
     final errBorder = semantic?.errorBorder ?? const Color(0xFFF1A3A3);
     final errFg = semantic?.errorFg ?? const Color(0xFF9B1C1C);
+
+    final narrowKpi = constraints.maxWidth < 720;
+    final largoComGrafico = constraints.maxWidth >= 1040;
+
+    final kpis = narrowKpi
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _kpiTile(
+                titulo: 'Total pendente',
+                valor: _moeda.format(_kpiPendente),
+                bg: infoBg,
+                border: infoBorder,
+                fg: infoFg,
+              ),
+              const SizedBox(height: 10),
+              _kpiTile(
+                titulo: 'Total pago',
+                valor: _moeda.format(_kpiPago),
+                bg: okBg,
+                border: okBorder,
+                fg: okFg,
+              ),
+              const SizedBox(height: 10),
+              _kpiTile(
+                titulo: 'Total em atraso',
+                valor: _moeda.format(_kpiAtrasado),
+                bg: errBg,
+                border: errBorder,
+                fg: errFg,
+              ),
+            ],
+          )
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _kpiTile(
+                  titulo: 'Total pendente',
+                  valor: _moeda.format(_kpiPendente),
+                  bg: infoBg,
+                  border: infoBorder,
+                  fg: infoFg,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _kpiTile(
+                  titulo: 'Total pago',
+                  valor: _moeda.format(_kpiPago),
+                  bg: okBg,
+                  border: okBorder,
+                  fg: okFg,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _kpiTile(
+                  titulo: 'Total em atraso',
+                  valor: _moeda.format(_kpiAtrasado),
+                  bg: errBg,
+                  border: errBorder,
+                  fg: errFg,
+                ),
+              ),
+            ],
+          );
+
+    final grafico = GraficoVencimentosContasPagar(
+      buckets: _buckets,
+      saldoCaixaAtual: widget.saldoCaixaReferencia,
+    );
+
+    if (largoComGrafico) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(flex: 5, child: kpis),
+          const SizedBox(width: 16),
+          Expanded(flex: 6, child: grafico),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        kpis,
+        const SizedBox(height: 14),
+        grafico,
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -287,7 +398,6 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final narrowKpi = constraints.maxWidth < 720;
           final tableMinWidth =
               (constraints.maxWidth - 32).clamp(600.0, 4000.0);
 
@@ -296,70 +406,7 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (narrowKpi)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _kpiTile(
-                        titulo: 'Total pendente',
-                        valor: _moeda.format(_kpiPendente),
-                        bg: infoBg,
-                        border: infoBorder,
-                        fg: infoFg,
-                      ),
-                      const SizedBox(height: 10),
-                      _kpiTile(
-                        titulo: 'Total pago',
-                        valor: _moeda.format(_kpiPago),
-                        bg: okBg,
-                        border: okBorder,
-                        fg: okFg,
-                      ),
-                      const SizedBox(height: 10),
-                      _kpiTile(
-                        titulo: 'Total em atraso',
-                        valor: _moeda.format(_kpiAtrasado),
-                        bg: errBg,
-                        border: errBorder,
-                        fg: errFg,
-                      ),
-                    ],
-                  )
-                else
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: _kpiTile(
-                          titulo: 'Total pendente',
-                          valor: _moeda.format(_kpiPendente),
-                          bg: infoBg,
-                          border: infoBorder,
-                          fg: infoFg,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _kpiTile(
-                          titulo: 'Total pago',
-                          valor: _moeda.format(_kpiPago),
-                          bg: okBg,
-                          border: okBorder,
-                          fg: okFg,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _kpiTile(
-                          titulo: 'Total em atraso',
-                          valor: _moeda.format(_kpiAtrasado),
-                          bg: errBg,
-                          border: errBorder,
-                          fg: errFg,
-                        ),
-                      ),
-                    ],
-                  ),
+                _buildPainelTopoKpisEGrafico(context, constraints),
                 const SizedBox(height: 18),
                 Text(
                   'Filtro por status',
