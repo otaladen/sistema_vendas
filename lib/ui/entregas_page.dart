@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../data/motorista_repository.dart';
 import '../data/produto_repository.dart';
@@ -14,11 +15,17 @@ import '../model/historico_entrega.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
 import 'entregas/logistica_entregas.dart';
+import 'entregas/planejamento_entrega_dia.dart';
+import 'entregas/romaneio_carga_consolidada.dart';
 import 'entregas/romaneio_pdf.dart';
+import 'entregas/romaneio_relatorios.dart';
 import 'registrar_devolucao_troca_page.dart';
 
 /// Filtro rapido pelos contadores de resumo (atrasadas / pendentes hoje).
 enum _FiltroResumoEntregas { nenhum, atrasadas, pendentesHoje }
+
+/// Lista detalhada vs quadro Kanban por status operacional.
+enum _ModoVisualizacaoEntregas { lista, kanban }
 
 const _kMenuMarcarDataEntrega = '__acao_marcar_data_entrega__';
 const _kMenuLimparDataEntrega = '__acao_limpar_data_entrega__';
@@ -79,26 +86,27 @@ class _EntregasPageState extends State<EntregasPage> {
   int _filtrosDropdownNonce = 0;
   _FiltroResumoEntregas _filtroResumoLista = _FiltroResumoEntregas.nenhum;
 
+  _ModoVisualizacaoEntregas _modoVisualizacao = _ModoVisualizacaoEntregas.lista;
+
   /// Chave igual a [resumoPorDia] (`dd/MM/yyyy` ou `Sem data marcada`); filtra so a lista.
   String? _chaveDiaPlanejamentoSelecionado;
 
-  final ScrollController _planejamentoDiaScrollController = ScrollController();
+  final ScrollController _kanbanHScrollController = ScrollController();
 
-  /// Chaves dos chips de planejamento para [Scrollable.ensureVisible].
-  final Map<String, GlobalKey> _planejamentoChipKeys = {};
+  void _selecionarDiaPlanejamento(String? chave) {
+    setState(() => _chaveDiaPlanejamentoSelecionado = chave);
+  }
 
-  void _scrollPlanejamentoDiaIntoView(String dia) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final ctx = _planejamentoChipKeys[dia]?.currentContext;
-      if (ctx == null || !ctx.mounted) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.5,
-        duration: const Duration(milliseconds: 240),
-        curve: Curves.easeOutCubic,
-      );
-    });
+  Future<void> _abrirSeletorPlanejamentoDia(
+    Map<String, int> resumoPorDia,
+  ) async {
+    final escolha = await showSeletorPlanejamentoEntregaDia(
+      context: context,
+      resumoPorDia: resumoPorDia,
+      chaveInicial: _chaveDiaPlanejamentoSelecionado,
+    );
+    if (!mounted || escolha == null) return;
+    _selecionarDiaPlanejamento(escolha.isEmpty ? null : escolha);
   }
 
   @override
@@ -111,7 +119,7 @@ class _EntregasPageState extends State<EntregasPage> {
 
   @override
   void dispose() {
-    _planejamentoDiaScrollController.dispose();
+    _kanbanHScrollController.dispose();
     _bairroController.dispose();
     _numeroNotaController.dispose();
     super.dispose();
@@ -441,9 +449,76 @@ class _EntregasPageState extends State<EntregasPage> {
       );
       return;
     }
+    final motoristas = widget.motoristaRepository.listarAtivos();
+    final selecionadas = _entregas
+        .where((v) => _idsEntregasSelecionadas.contains(v.id))
+        .toList();
+    final nomesNasSelecionadas = selecionadas
+        .map(nomeMotoristaEntrega)
+        .where((n) => n != 'Nao definido')
+        .toSet();
+    var motoristaEscolhido = nomesNasSelecionadas.length == 1
+        ? nomesNasSelecionadas.first
+        : (motoristas.isNotEmpty ? motoristas.first.nome : null);
+    if (!mounted) return;
+    final motorista = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setLocal) {
+          return AlertDialog(
+            title: const Text('Agrupar viagem (mesmo carro)'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Cada confirmacao = uma viagem (ex.: 1a saida do dia). '
+                  'Informe o motorista — na loja, cada motorista usa sempre o mesmo caminhao.',
+                ),
+                const SizedBox(height: 12),
+                if (motoristas.isEmpty)
+                  const Text(
+                    'Nenhum motorista ativo. Cadastre em Cadastros > Motoristas.',
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    initialValue: motoristaEscolhido,
+                    decoration: const InputDecoration(
+                      labelText: 'Motorista',
+                    ),
+                    items: motoristas
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m.nome,
+                            child: Text(m.nome),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setLocal(() => motoristaEscolhido = v),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: motoristas.isEmpty || motoristaEscolhido == null
+                    ? null
+                    : () => Navigator.pop(ctx, motoristaEscolhido),
+                child: const Text('Confirmar agrupamento'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (motorista == null || motorista.isEmpty || !mounted) return;
     try {
       widget.vendaRepository.definirGrupoEntregaLogistica(
         Set<int>.from(_idsEntregasSelecionadas),
+        motoristaEntrega: motorista,
       );
       await _carregarEntregasSyncState();
       if (!mounted) return;
@@ -648,31 +723,11 @@ class _EntregasPageState extends State<EntregasPage> {
     StateSetter setDialogState,
   ) {
     if (bloco.length >= 2 && bloco.first.grupoEntregaFreteId > 0) {
-      final scheme = Theme.of(context).colorScheme;
-      return Container(
-        decoration: BoxDecoration(
-          color: scheme.tertiaryContainer.withValues(alpha: 0.22),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: scheme.tertiary.withValues(alpha: 0.45)),
-        ),
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              rotuloGrupoLogistica(bloco),
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            Text('${bloco.length} pedidos no mesmo veiculo'),
-            const Divider(height: 16),
-            for (var i = 0; i < bloco.length; i++) ...[
-              _conteudoRomaneioUmaVenda(context, bloco[i], setDialogState),
-              if (i < bloco.length - 1) const Divider(height: 12),
-            ],
-          ],
-        ),
+      return _PainelRomaneioGrupoMesmoCarro(
+        bloco: bloco,
+        setDialogStateRomaneio: setDialogState,
+        quantidadeItemEntrega: _quantidadeExibicaoEntrega,
+        conteudoRomaneioUmaVenda: _conteudoRomaneioUmaVenda,
       );
     }
     return _conteudoRomaneioUmaVenda(context, bloco.single, setDialogState);
@@ -785,24 +840,6 @@ class _EntregasPageState extends State<EntregasPage> {
     return 'Nao ha entregas marcadas para esta data na lista atual.';
   }
 
-  String _nomeArquivoRomaneioPdf({bool bobina80 = false}) {
-    final chave = _chaveDiaPlanejamentoSelecionado;
-    final agora = DateTime.now();
-    final sufixoBobina = bobina80 ? '_bobina80' : '';
-    if (chave == 'Sem data marcada') {
-      return 'romaneio_sem_data_${DateFormat('yyyyMMdd').format(agora)}$sufixoBobina.pdf';
-    }
-    if (chave == null) {
-      return 'romaneio_${DateFormat('yyyyMMdd').format(agora)}$sufixoBobina.pdf';
-    }
-    try {
-      final d = DateFormat('dd/MM/yyyy').parse(chave);
-      return 'romaneio_${DateFormat('yyyyMMdd').format(d)}$sufixoBobina.pdf';
-    } catch (_) {
-      return 'romaneio_${DateFormat('yyyyMMdd').format(agora)}$sufixoBobina.pdf';
-    }
-  }
-
   List<String> _linhasItensEntrega(Venda venda) {
     if (venda.itens.isEmpty) return const ['Sem itens cadastrados'];
     final linhas = venda.itens
@@ -815,11 +852,25 @@ class _EntregasPageState extends State<EntregasPage> {
     return linhas.isEmpty ? const ['Sem itens para esta entrega'] : linhas;
   }
 
-  pw.Widget _pdfRomaneioUmaEntrega(Venda venda) {
+  pw.TextStyle _estiloPdfRomaneio({double fontSize = 10, bool negrito = false}) {
+    final f = pw.Font.courier();
+    return pw.TextStyle(
+      font: f,
+      fontSize: fontSize,
+      fontWeight: negrito ? pw.FontWeight.bold : pw.FontWeight.normal,
+    );
+  }
+
+  pw.Widget _pdfRomaneioUmaEntrega(Venda venda, {int? parada}) {
     final cliente = venda.cliente.target?.nomeRazao ?? 'Sem cliente';
     final dataMarcada = venda.dataEntregaMarcada == null
         ? 'Sem data'
         : DateFormat('dd/MM/yyyy').format(venda.dataEntregaMarcada!.toLocal());
+    final endereco = enderecoExibicaoRomaneio(venda);
+    final estilo = _estiloPdfRomaneio();
+    final tituloPedido = parada != null && parada > 0
+        ? 'Parada #$parada — ${venda.numeroOrcamento} - $cliente'
+        : '${venda.numeroOrcamento} - $cliente';
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 8),
       padding: const pw.EdgeInsets.only(bottom: 6),
@@ -830,33 +881,34 @@ class _EntregasPageState extends State<EntregasPage> {
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Text(
-            '${venda.numeroOrcamento} - $cliente',
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            tituloPedido,
+            style: _estiloPdfRomaneio(fontSize: 10, negrito: true),
           ),
           pw.Text(
             'Bairro: ${_extrairBairro(venda)} | Janela: ${_rotuloJanelaEntrega(venda.janelaEntrega)} | Prioridade: ${_rotuloPrioridade(venda.prioridadeEntrega)}',
+            style: estilo,
           ),
-          pw.Text('Motorista: ${_nomeMotorista(venda)}'),
-          pw.Text('Vendedor: ${_nomeVendedor(venda)}'),
-          pw.Text('Data marcada: $dataMarcada'),
-          pw.Text('Endereco: ${venda.enderecoEntrega}'),
+          pw.Text('Motorista: ${_nomeMotorista(venda)}', style: estilo),
+          pw.Text('Vendedor: ${_nomeVendedor(venda)}', style: estilo),
+          pw.Text('Data marcada: $dataMarcada', style: estilo),
+          pw.Text(
+            endereco.isEmpty ? 'Endereco: (nao informado)' : 'Endereco: $endereco',
+            style: estilo,
+          ),
           if (_observacaoSemMotorista(venda).trim().isNotEmpty)
-            pw.Text('Obs: ${_observacaoSemMotorista(venda)}'),
+            pw.Text('Obs: ${_observacaoSemMotorista(venda)}', style: estilo),
           if (_textoResumoComplementoNaVenda(venda) case final pend?)
             pw.Padding(
               padding: const pw.EdgeInsets.only(top: 2),
               child: pw.Text(
                 pend,
-                style: pw.TextStyle(
-                  fontSize: 10,
-                  fontWeight: pw.FontWeight.bold,
-                ),
+                style: _estiloPdfRomaneio(fontSize: 10, negrito: true),
               ),
             ),
           pw.SizedBox(height: 3),
           pw.Text(
             'Itens:',
-            style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+            style: _estiloPdfRomaneio(fontSize: 11, negrito: true),
           ),
           pw.SizedBox(height: 2),
           ..._linhasItensEntrega(venda).map(
@@ -864,10 +916,7 @@ class _EntregasPageState extends State<EntregasPage> {
               padding: const pw.EdgeInsets.only(bottom: 1),
               child: pw.Text(
                 '• $linha',
-                style: pw.TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: pw.FontWeight.bold,
-                ),
+                style: _estiloPdfRomaneio(fontSize: 10.5, negrito: true),
               ),
             ),
           ),
@@ -876,21 +925,26 @@ class _EntregasPageState extends State<EntregasPage> {
             '[${venda.cargaSeparada ? 'x' : ' '}] Separado    '
             '[${venda.cargaCarregada ? 'x' : ' '}] Carregado    '
             '[${venda.cargaSaiu ? 'x' : ' '}] Saiu',
-            style: const pw.TextStyle(fontSize: 10),
+            style: estilo.copyWith(fontSize: 10),
           ),
         ],
       ),
     );
   }
 
-  pw.Widget _pdfRomaneioUmaEntregaBobina(Venda venda) {
+  pw.Widget _pdfRomaneioUmaEntregaBobina(Venda venda, {int? parada}) {
     final cliente = venda.cliente.target?.nomeRazao ?? 'Sem cliente';
     final dataMarcada = venda.dataEntregaMarcada == null
         ? 'Sem data'
         : DateFormat('dd/MM/yyyy').format(venda.dataEntregaMarcada!.toLocal());
+    final endereco = enderecoExibicaoRomaneio(venda);
     const fsCorpo = 7.0;
     const fsTituloPedido = 8.0;
     const fsItens = 6.5;
+    final estiloCorpo = _estiloPdfRomaneio(fontSize: fsCorpo);
+    final tituloPedido = parada != null && parada > 0
+        ? 'P#$parada ${venda.numeroOrcamento} $cliente'
+        : '${venda.numeroOrcamento} $cliente';
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 5),
       padding: const pw.EdgeInsets.only(bottom: 4),
@@ -901,73 +955,70 @@ class _EntregasPageState extends State<EntregasPage> {
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Text(
-            '${venda.numeroOrcamento} $cliente',
-            style: pw.TextStyle(
-              fontSize: fsTituloPedido,
-              fontWeight: pw.FontWeight.bold,
-            ),
+            tituloPedido,
+            style: _estiloPdfRomaneio(fontSize: fsTituloPedido, negrito: true),
           ),
           pw.Text(
             '${_extrairBairro(venda)} · ${_rotuloJanelaEntrega(venda.janelaEntrega)} · ${_rotuloPrioridade(venda.prioridadeEntrega)}',
-            style: const pw.TextStyle(fontSize: fsCorpo),
+            style: estiloCorpo,
           ),
           pw.Text(
             'Mot: ${_nomeMotorista(venda)} · Vend: ${_nomeVendedor(venda)}',
-            style: const pw.TextStyle(fontSize: fsCorpo),
+            style: estiloCorpo,
           ),
           pw.Text(
             'Data: $dataMarcada',
-            style: const pw.TextStyle(fontSize: fsCorpo),
+            style: estiloCorpo,
           ),
           pw.Text(
-            'End: ${venda.enderecoEntrega}',
-            style: const pw.TextStyle(fontSize: fsCorpo),
+            endereco.isEmpty ? 'End: (nao informado)' : 'End: $endereco',
+            style: estiloCorpo,
           ),
           if (_observacaoSemMotorista(venda).trim().isNotEmpty)
             pw.Text(
               'Obs: ${_observacaoSemMotorista(venda)}',
-              style: const pw.TextStyle(fontSize: fsCorpo),
+              style: estiloCorpo,
             ),
           if (_textoResumoComplementoNaVenda(venda) case final pendBob?)
             pw.Text(
               pendBob,
-              style: pw.TextStyle(
-                fontSize: fsCorpo,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: _estiloPdfRomaneio(fontSize: fsCorpo, negrito: true),
             ),
           pw.SizedBox(height: 2),
           pw.Text(
             'Itens',
-            style: pw.TextStyle(
-              fontSize: fsCorpo + 0.5,
-              fontWeight: pw.FontWeight.bold,
-            ),
+            style: _estiloPdfRomaneio(fontSize: fsCorpo + 0.5, negrito: true),
           ),
           ..._linhasItensEntrega(venda).map(
             (linha) => pw.Padding(
               padding: const pw.EdgeInsets.only(bottom: 0.5),
               child: pw.Text(
                 '- $linha',
-                style: pw.TextStyle(
-                  fontSize: fsItens,
-                  fontWeight: pw.FontWeight.bold,
-                ),
+                style: _estiloPdfRomaneio(fontSize: fsItens, negrito: true),
               ),
             ),
           ),
           pw.SizedBox(height: 2),
           pw.Text(
             '[${venda.cargaSeparada ? 'x' : ' '}]Sep [${venda.cargaCarregada ? 'x' : ' '}]Carr [${venda.cargaSaiu ? 'x' : ' '}]Sai',
-            style: const pw.TextStyle(fontSize: 6.5),
+            style: estiloCorpo.copyWith(fontSize: 6.5),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _exportarOuImprimirRomaneio() async {
-    final entregasDia = _entregasParaRomaneio();
+  List<Venda> _entregasParaRomaneioComRelacoes() {
+    return _entregasParaRomaneio().map((v) {
+      final fresca = widget.vendaRepository.obterPorId(v.id) ?? v;
+      fresca.cliente.target;
+      fresca.itens.length;
+      return fresca;
+    }).toList();
+  }
+
+  Future<void> _abrirRelatoriosEntrega() async {
+    final entregasDia = _entregasParaRomaneioComRelacoes();
     if (entregasDia.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -976,54 +1027,134 @@ class _EntregasPageState extends State<EntregasPage> {
       return;
     }
     final titulo = _rotuloPeriodoRomaneio();
+    final motoristas = motoristasDistintosNasEntregas(entregasDia);
+    final viagens = viagensAgrupadasNoDia(entregasDia);
+
     if (!mounted) return;
-    var layoutEscolhido = RomaneioPdfLayout.bobina80mm;
-    final escolha = await showDialog<({RomaneioPdfLayout layout, String acao})?>(
+    var tipo = RelatorioEntregaTipo.romaneioMotoristaDia;
+    var layoutEscolhido = RomaneioPdfLayout.a4;
+    String? motoristaSel = motoristas.isNotEmpty ? motoristas.first : null;
+    List<Venda>? viagemSel = viagens.isNotEmpty ? viagens.first : null;
+
+    final escolha =
+        await showDialog<
+            ({
+              RelatorioEntregaTipo tipo,
+              RomaneioPdfLayout layout,
+              String acao,
+              String? motorista,
+              List<Venda>? viagem,
+            })?>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setLocal) {
           return AlertDialog(
-            title: Text('Romaneio — $titulo'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Formato do papel',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  SegmentedButton<RomaneioPdfLayout>(
-                    segments: const [
-                      ButtonSegment<RomaneioPdfLayout>(
-                        value: RomaneioPdfLayout.a4,
-                        label: Text('A4'),
-                        tooltip: 'Folha A4 ou PDF padrao',
+            title: Text('Relatorios — $titulo'),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tipo de relatorio',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 8),
+                    ...RelatorioEntregaTipo.values.map(
+                      (t) => RadioListTile<RelatorioEntregaTipo>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(t.rotulo),
+                        value: t,
+                        groupValue: tipo,
+                        onChanged: (v) {
+                          if (v == null) return;
+                          setLocal(() => tipo = v);
+                        },
                       ),
-                      ButtonSegment<RomaneioPdfLayout>(
-                        value: RomaneioPdfLayout.bobina80mm,
-                        label: Text('80 mm'),
-                        tooltip: 'Bobina termica 80 mm',
-                      ),
+                    ),
+                    if (tipo.exigeMotorista) ...[
+                      const SizedBox(height: 8),
+                      if (motoristas.isEmpty)
+                        Text(
+                          'Nenhum motorista nas entregas. Defina ao agrupar ou no botao Motorista.',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        )
+                      else
+                        DropdownButtonFormField<String>(
+                          initialValue: motoristaSel,
+                          decoration: const InputDecoration(
+                            labelText: 'Motorista',
+                          ),
+                          items: motoristas
+                              .map(
+                                (m) => DropdownMenuItem(
+                                  value: m,
+                                  child: Text(m),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) => setLocal(() => motoristaSel = v),
+                        ),
                     ],
-                    selected: {layoutEscolhido},
-                    onSelectionChanged: (next) {
-                      setLocal(() {
-                        layoutEscolhido = next.single;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    layoutEscolhido == RomaneioPdfLayout.a4
-                        ? 'Impressora comum ou arquivo PDF em folha.'
-                        : 'Bobina termica 80 mm (altura continua, texto estreito).',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const Divider(height: 20),
-                  const Text('Em seguida escolha imprimir ou salvar PDF.'),
-                ],
+                    if (tipo.exigeViagem) ...[
+                      const SizedBox(height: 8),
+                      if (viagens.isEmpty)
+                        const Text(
+                          'Nenhuma viagem agrupada no periodo. Use "Agrupar mesmo carro".',
+                        )
+                      else
+                        DropdownButtonFormField<int>(
+                          initialValue: viagemSel?.first.grupoEntregaFreteId,
+                          decoration: const InputDecoration(
+                            labelText: 'Viagem (mesmo carro)',
+                          ),
+                          items: viagens
+                              .map(
+                                (bloco) => DropdownMenuItem(
+                                  value: bloco.first.grupoEntregaFreteId,
+                                  child: Text(rotuloGrupoLogistica(bloco)),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (g) {
+                            if (g == null) return;
+                            setLocal(() {
+                              viagemSel = viagens.firstWhere(
+                                (b) => b.first.grupoEntregaFreteId == g,
+                              );
+                            });
+                          },
+                        ),
+                    ],
+                    const Divider(height: 20),
+                    Text(
+                      'Formato do papel',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 8),
+                    SegmentedButton<RomaneioPdfLayout>(
+                      segments: const [
+                        ButtonSegment(
+                          value: RomaneioPdfLayout.a4,
+                          label: Text('A4'),
+                        ),
+                        ButtonSegment(
+                          value: RomaneioPdfLayout.bobina80mm,
+                          label: Text('80 mm'),
+                        ),
+                      ],
+                      selected: {layoutEscolhido},
+                      onSelectionChanged: (next) {
+                        setLocal(() => layoutEscolhido = next.single);
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
             actions: [
@@ -1031,19 +1162,57 @@ class _EntregasPageState extends State<EntregasPage> {
                 onPressed: () => Navigator.pop(dialogContext, null),
                 child: const Text('Fechar'),
               ),
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _abrirRomaneioVisual();
+                },
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text('Visualizar na tela'),
+              ),
               OutlinedButton.icon(
-                onPressed: () => Navigator.pop(
-                  dialogContext,
-                  (layout: layoutEscolhido, acao: 'pdf'),
-                ),
+                onPressed: () {
+                  if (tipo.exigeMotorista &&
+                      (motoristaSel == null || motoristaSel!.isEmpty)) {
+                    return;
+                  }
+                  if (tipo.exigeViagem && viagemSel == null) {
+                    return;
+                  }
+                  Navigator.pop(
+                    dialogContext,
+                    (
+                      tipo: tipo,
+                      layout: layoutEscolhido,
+                      acao: 'pdf',
+                      motorista: motoristaSel,
+                      viagem: viagemSel,
+                    ),
+                  );
+                },
                 icon: const Icon(Icons.picture_as_pdf_outlined),
                 label: const Text('Exportar PDF'),
               ),
               ElevatedButton.icon(
-                onPressed: () => Navigator.pop(
-                  dialogContext,
-                  (layout: layoutEscolhido, acao: 'imprimir'),
-                ),
+                onPressed: () {
+                  if (tipo.exigeMotorista &&
+                      (motoristaSel == null || motoristaSel!.isEmpty)) {
+                    return;
+                  }
+                  if (tipo.exigeViagem && viagemSel == null) {
+                    return;
+                  }
+                  Navigator.pop(
+                    dialogContext,
+                    (
+                      tipo: tipo,
+                      layout: layoutEscolhido,
+                      acao: 'imprimir',
+                      motorista: motoristaSel,
+                      viagem: viagemSel,
+                    ),
+                  );
+                },
                 icon: const Icon(Icons.print_outlined),
                 label: const Text('Imprimir'),
               ),
@@ -1053,24 +1222,79 @@ class _EntregasPageState extends State<EntregasPage> {
       ),
     );
     if (!mounted || escolha == null) return;
+    if (escolha.tipo.exigeMotorista &&
+        (escolha.motorista == null || escolha.motorista!.isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Defina o motorista nas entregas ou selecione outro relatorio.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (escolha.tipo.exigeViagem && escolha.viagem == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nenhuma viagem agrupada para este relatorio.'),
+        ),
+      );
+      return;
+    }
+
+    await _emitirRelatorioEntrega(
+      tipo: escolha.tipo,
+      motorista: escolha.motorista,
+      viagem: escolha.viagem,
+      layout: escolha.layout,
+      salvarPdf: escolha.acao == 'pdf',
+    );
+  }
+
+  Future<void> _emitirRelatorioEntrega({
+    required RelatorioEntregaTipo tipo,
+    String? motorista,
+    List<Venda>? viagem,
+    RomaneioPdfLayout layout = RomaneioPdfLayout.a4,
+    required bool salvarPdf,
+  }) async {
+    final entregasDia = _entregasParaRomaneioComRelacoes();
+    if (entregasDia.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_mensagemRomaneioVazio())));
+      return;
+    }
+    final titulo = _rotuloPeriodoRomaneio();
     final emissao = DateTime.now();
-    final bobina = escolha.layout == RomaneioPdfLayout.bobina80mm;
-    final pdfBytes = await gerarEntregasRomaneioPdfBytes(
-      entregasDia: entregasDia,
+    final bobina = layout == RomaneioPdfLayout.bobina80mm;
+    final pdfBytes = await gerarRelatorioEntregaPdfBytes(
+      tipo: tipo,
+      entregasPeriodo: entregasDia,
       tituloPeriodo: titulo,
       emissao: emissao,
-      layout: escolha.layout,
-      pdfUmaEntrega:
-          bobina ? _pdfRomaneioUmaEntregaBobina : _pdfRomaneioUmaEntrega,
+      layout: layout,
+      motorista: motorista,
+      viagem: viagem,
+      pdfUmaEntrega: (v, {parada}) => bobina
+          ? _pdfRomaneioUmaEntregaBobina(v, parada: parada)
+          : _pdfRomaneioUmaEntrega(v, parada: parada),
+      quantidadeEntrega: _quantidadeExibicaoEntrega,
     );
     if (!mounted) return;
-    if (escolha.acao == 'imprimir') {
+    if (!salvarPdf) {
       await Printing.layoutPdf(onLayout: (_) async => pdfBytes);
       return;
     }
     final arquivo = await FilePicker.platform.saveFile(
-      dialogTitle: 'Salvar romaneio em PDF',
-      fileName: _nomeArquivoRomaneioPdf(bobina80: bobina),
+      dialogTitle: 'Salvar relatorio em PDF',
+      fileName: nomeArquivoRelatorioEntrega(
+        tipo: tipo,
+        tituloPeriodo: titulo,
+        motorista: motorista,
+        bobina80: bobina,
+      ),
       type: FileType.custom,
       allowedExtensions: const ['pdf'],
     );
@@ -1082,7 +1306,62 @@ class _EntregasPageState extends State<EntregasPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('Romaneio salvo em: $path')));
+    ).showSnackBar(SnackBar(content: Text('Relatorio salvo em: $path')));
+  }
+
+  Future<void> _editarMotoristaGrupo(int grupoId, String atual) async {
+    final motoristas = widget.motoristaRepository.listarAtivos();
+    var escolhido = atual == 'Nao definido' || atual.isEmpty
+        ? (motoristas.isNotEmpty ? motoristas.first.nome : null)
+        : atual;
+    if (!mounted) return;
+    final novo = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setLocal) {
+          return AlertDialog(
+            title: const Text('Motorista da viagem'),
+            content: motoristas.isEmpty
+                ? const Text(
+                    'Nenhum motorista ativo. Cadastre em Cadastros > Motoristas.',
+                  )
+                : DropdownButtonFormField<String>(
+                    initialValue: escolhido,
+                    decoration: const InputDecoration(labelText: 'Motorista'),
+                    items: motoristas
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m.nome,
+                            child: Text(m.nome),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setLocal(() => escolhido = v),
+                  ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: motoristas.isEmpty || escolhido == null
+                    ? null
+                    : () => Navigator.pop(ctx, escolhido),
+                child: const Text('Salvar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (novo == null || novo.isEmpty || !mounted) return;
+    try {
+      widget.vendaRepository.definirMotoristaEntregaNoGrupo(grupoId, novo);
+      await _carregarEntregasSyncState();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   int _pesoPrioridade(String prioridade) {
@@ -1139,21 +1418,7 @@ class _EntregasPageState extends State<EntregasPage> {
     return partesPipe.isNotEmpty ? partesPipe.first : 'Sem bairro';
   }
 
-  String _nomeMotorista(Venda venda) {
-    if (venda.motoristaEntrega.trim().isNotEmpty) {
-      return venda.motoristaEntrega.trim();
-    }
-    // Compatibilidade com dados legados salvos em observacao.
-    final linhas = venda.observacaoEntrega.split('\n');
-    for (final linha in linhas) {
-      final limpa = linha.trim();
-      if (limpa.startsWith('Motorista:')) {
-        final nome = limpa.substring('Motorista:'.length).trim();
-        if (nome.isNotEmpty) return nome;
-      }
-    }
-    return 'Nao definido';
-  }
+  String _nomeMotorista(Venda venda) => nomeMotoristaEntrega(venda);
 
   String _nomeVendedor(Venda venda) {
     final vendedor = venda.vendedor.target;
@@ -1162,6 +1427,89 @@ class _EntregasPageState extends State<EntregasPage> {
         : (vendedor?.nomeCompleto.trim() ?? '');
     if (nome.isNotEmpty) return nome;
     return 'Nao definido';
+  }
+
+  String _enderecoCompletoParaNavegacao(Venda venda) =>
+      enderecoExibicaoRomaneio(venda);
+
+  Future<void> _abrirNavegacaoParaEntrega(Venda venda) async {
+    final endereco = _enderecoCompletoParaNavegacao(venda);
+    if (endereco.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nao ha endereco de entrega para abrir no mapa.'),
+        ),
+      );
+      return;
+    }
+    final uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(endereco)}',
+    );
+    final url = uri.toString();
+
+    // No Windows, url_launcher_windows ainda pode lancar PlatformException
+    // em alguns builds. Abrir via rundll32 usa o navegador padrao sem o plugin.
+    if (Platform.isWindows) {
+      try {
+        final r = await Process.run(
+          'rundll32',
+          ['url.dll,FileProtocolHandler', url],
+        );
+        if (r.exitCode == 0) return;
+      } catch (_) {
+        // segue para launchUrl
+      }
+    }
+
+    try {
+      var ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
+      if (!ok) {
+        ok = await launchUrl(uri);
+      }
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Nao foi possivel abrir o mapa no navegador padrao.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao abrir mapa: $e')),
+      );
+    }
+  }
+
+  Future<void> _swapParadasMesmoCarro(
+    int grupoId,
+    List<Venda> ordenado,
+    int indiceA,
+    int indiceB,
+  ) async {
+    if (indiceA == indiceB) return;
+    if (indiceA < 0 ||
+        indiceB < 0 ||
+        indiceA >= ordenado.length ||
+        indiceB >= ordenado.length) {
+      return;
+    }
+    final nova = List<Venda>.from(ordenado);
+    final tmp = nova[indiceA];
+    nova[indiceA] = nova[indiceB];
+    nova[indiceB] = tmp;
+    try {
+      widget.vendaRepository.atualizarSequenciaEntregaNoGrupo(
+        grupoId,
+        nova.map((x) => x.id).toList(),
+      );
+      await _carregarEntregasSyncState();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   String _observacaoSemMotorista(Venda venda) {
@@ -1571,23 +1919,24 @@ class _EntregasPageState extends State<EntregasPage> {
     return 'Falta na ida: ${partes.join('; ')}';
   }
 
-  Future<void> _atualizarStatusEntrega(
+  Future<bool> _atualizarStatusEntrega(
     Venda venda,
     String novoStatus, {
     String? complementoEntregaJson,
     String? notaComplementoExtra,
+    bool mostrarSnackSucesso = true,
   }) async {
     try {
       if (!widget.podeGerenciarStatusEntrega) {
-        if (!mounted) return;
+        if (!mounted) return false;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(_mensagemSemPermissaoStatus())));
-        return;
+        return false;
       }
       final statusAnterior = venda.statusEntrega;
       if (!_transicaoStatusPermitida(statusAnterior, novoStatus)) {
-        if (!mounted) return;
+        if (!mounted) return false;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -1595,11 +1944,11 @@ class _EntregasPageState extends State<EntregasPage> {
             ),
           ),
         );
-        return;
+        return false;
       }
       if ((novoStatus == 'entregue' || novoStatus == 'entregue_complemento_pendente') &&
           _progressoCarga(venda) < 3) {
-        if (!mounted) return;
+        if (!mounted) return false;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -1607,12 +1956,12 @@ class _EntregasPageState extends State<EntregasPage> {
             ),
           ),
         );
-        return;
+        return false;
       }
       if (novoStatus == 'entregue_complemento_pendente') {
         final j = complementoEntregaJson?.trim() ?? '';
         if (j.isEmpty) {
-          if (!mounted) return;
+          if (!mounted) return false;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
@@ -1620,13 +1969,13 @@ class _EntregasPageState extends State<EntregasPage> {
               ),
             ),
           );
-          return;
+          return false;
         }
       }
       String? motivo;
       if (novoStatus == 'reagendada' || novoStatus == 'cancelada') {
         motivo = await _solicitarMotivoMudancaStatus(novoStatus);
-        if (motivo == null) return;
+        if (motivo == null) return false;
       }
       widget.vendaRepository.atualizarStatusEntrega(
         venda.id,
@@ -1670,15 +2019,19 @@ class _EntregasPageState extends State<EntregasPage> {
         }
       }
       _carregarEntregas();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Status de entrega atualizado.')),
-      );
+      if (!mounted) return false;
+      if (mostrarSnackSucesso) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Status de entrega atualizado.')),
+        );
+      }
+      return true;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Erro ao atualizar status: $e')));
+      return false;
     }
   }
 
@@ -2155,6 +2508,7 @@ class _EntregasPageState extends State<EntregasPage> {
     bool dentroDeGrupoCarreto = false,
     bool modoSelecao = false,
     bool selecionada = false,
+    int? paradaNoMesmoCarro,
   }) {
     final statusCor = _corStatus(
       Theme.of(context).colorScheme,
@@ -2187,6 +2541,29 @@ class _EntregasPageState extends State<EntregasPage> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (paradaNoMesmoCarro != null) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Material(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
+                    child: Text(
+                      'Parada #$paradaNoMesmoCarro',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onPrimary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 4),
             Text(
               'Cliente: ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}',
@@ -2322,6 +2699,16 @@ class _EntregasPageState extends State<EntregasPage> {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              ),
+              onPressed: () => _abrirNavegacaoParaEntrega(venda),
+              icon: const Icon(Icons.directions_rounded, size: 18),
+              label: const Text('Navegar'),
+            ),
+            const SizedBox(width: 4),
             OutlinedButton.icon(
               onPressed: () => _abrirDetalhesItensVenda(venda),
               icon: const Icon(Icons.receipt_long),
@@ -2495,6 +2882,9 @@ class _EntregasPageState extends State<EntregasPage> {
     DateFormat dataMarcadaFmt,
   ) {
     final scheme = Theme.of(context).colorScheme;
+    final ordenado = ordenarBlocoMesmoCarro(bloco);
+    final grupoId = ordenado.first.grupoEntregaFreteId;
+    final motorista = _nomeMotorista(ordenado.first);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       clipBehavior: Clip.antiAlias,
@@ -2508,15 +2898,51 @@ class _EntregasPageState extends State<EntregasPage> {
         children: [
           ListTile(
             dense: true,
+            isThreeLine: true,
             leading: Icon(
               Icons.local_shipping_outlined,
               color: scheme.tertiary,
             ),
             title: Text(
-              rotuloGrupoLogistica(bloco),
+              rotuloGrupoLogistica(ordenado),
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            subtitle: Text('${bloco.length} pedidos no mesmo veiculo'),
+            subtitle: Text(
+              '${ordenado.length} pedidos no mesmo veiculo · use as setas para '
+              'a ordem de paradas (salva no banco).',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            trailing: IconButton(
+              tooltip: 'Alterar motorista da viagem',
+              icon: const Icon(Icons.person_outline),
+              onPressed: () => _editarMotoristaGrupo(grupoId, motorista),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Row(
+              children: [
+                TextButton.icon(
+                  onPressed: () => _emitirRelatorioEntrega(
+                    tipo: RelatorioEntregaTipo.separacaoViagem,
+                    viagem: ordenado,
+                    salvarPdf: false,
+                  ),
+                  icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                  label: const Text('Separacao viagem'),
+                ),
+                if (motorista != 'Nao definido')
+                  TextButton.icon(
+                    onPressed: () => _emitirRelatorioEntrega(
+                      tipo: RelatorioEntregaTipo.romaneioMotoristaDia,
+                      motorista: motorista,
+                      salvarPdf: false,
+                    ),
+                    icon: const Icon(Icons.assignment_outlined, size: 18),
+                    label: const Text('Romaneio do motorista'),
+                  ),
+              ],
+            ),
           ),
           const Divider(height: 1),
           Padding(
@@ -2524,22 +2950,515 @@ class _EntregasPageState extends State<EntregasPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                for (var i = 0; i < bloco.length; i++) ...[
-                  _buildCardEntrega(
-                    bloco[i],
-                    dateFormat,
-                    dataMarcadaFmt,
-                    dentroDeGrupoCarreto: true,
-                    modoSelecao: _modoAgruparMesmoCarro,
-                    selecionada: _idsEntregasSelecionadas.contains(bloco[i].id),
+                for (var i = 0; i < ordenado.length; i++) ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, right: 2),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Subir na rota',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 30,
+                                minHeight: 26,
+                              ),
+                              onPressed: i == 0
+                                  ? null
+                                  : () => _swapParadasMesmoCarro(
+                                        grupoId,
+                                        ordenado,
+                                        i,
+                                        i - 1,
+                                      ),
+                              icon: Icon(
+                                Icons.arrow_upward_rounded,
+                                size: 20,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Descer na rota',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 30,
+                                minHeight: 26,
+                              ),
+                              onPressed: i == ordenado.length - 1
+                                  ? null
+                                  : () => _swapParadasMesmoCarro(
+                                        grupoId,
+                                        ordenado,
+                                        i,
+                                        i + 1,
+                                      ),
+                              icon: Icon(
+                                Icons.arrow_downward_rounded,
+                                size: 20,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: _buildCardEntrega(
+                          ordenado[i],
+                          dateFormat,
+                          dataMarcadaFmt,
+                          dentroDeGrupoCarreto: true,
+                          modoSelecao: _modoAgruparMesmoCarro,
+                          selecionada: _idsEntregasSelecionadas.contains(
+                            ordenado[i].id,
+                          ),
+                          paradaNoMesmoCarro: i + 1,
+                        ),
+                      ),
+                    ],
                   ),
-                  if (i < bloco.length - 1) const SizedBox(height: 10),
+                  if (i < ordenado.length - 1) const SizedBox(height: 10),
                 ],
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  void _alternarModoVisualizacao() {
+    setState(() {
+      if (_modoVisualizacao == _ModoVisualizacaoEntregas.lista) {
+        _modoVisualizacao = _ModoVisualizacaoEntregas.kanban;
+        _modoAgruparMesmoCarro = false;
+        _idsEntregasSelecionadas.clear();
+      } else {
+        _modoVisualizacao = _ModoVisualizacaoEntregas.lista;
+      }
+    });
+  }
+
+  List<Venda> _listaEntregasPlanejadasExibicao() {
+    final dataMarcadaFmt = DateFormat('dd/MM/yyyy');
+    if (_chaveDiaPlanejamentoSelecionado == null) {
+      return List<Venda>.from(_entregas);
+    }
+    return _entregas
+        .where(
+          (v) => _vendaNaChaveDiaPlanejamento(
+            v,
+            _chaveDiaPlanejamentoSelecionado!,
+            dataMarcadaFmt,
+          ),
+        )
+        .toList();
+  }
+
+  bool _vendaKanbanColunaPendentesHoje(Venda v) {
+    final s = v.statusEntrega;
+    return s == 'pendente' || s == 'reagendada';
+  }
+
+  int? _kanbanIndiceOrdenacaoStatus(String status) {
+    switch (status) {
+      case 'pendente':
+      case 'reagendada':
+        return 0;
+      case 'roteirizada':
+        return 1;
+      case 'saiu_entrega':
+      case 'entregue_complemento_pendente':
+        return 2;
+      case 'entregue':
+        return 3;
+      default:
+        return null;
+    }
+  }
+
+  /// Status alvo da coluna (0..3) no fluxo operacional principal.
+  String? _statusEntregaColunaKanban(int coluna) {
+    const statuses = ['pendente', 'roteirizada', 'saiu_entrega', 'entregue'];
+    if (coluna < 0 || coluna >= statuses.length) return null;
+    return statuses[coluna];
+  }
+
+  String? _proximoPassoKanbanEmDirecao(String atual, String destino) {
+    if (atual == destino) return null;
+    if (atual == 'reagendada' && destino == 'pendente') return 'pendente';
+    if (atual == 'entregue_complemento_pendente' && destino == 'entregue') {
+      return 'entregue';
+    }
+    final ia = _kanbanIndiceOrdenacaoStatus(atual);
+    final ib = _kanbanIndiceOrdenacaoStatus(destino);
+    if (ia == null || ib == null) return null;
+    const seq = ['pendente', 'roteirizada', 'saiu_entrega', 'entregue'];
+    if (ib > ia) return seq[ia + 1];
+    if (ib < ia) {
+      if (ia <= 0) return null;
+      return seq[ia - 1];
+    }
+    return null;
+  }
+
+  bool _kanbanCaminhoInteiroValido(Venda vRef, String destino) {
+    var s = vRef.statusEntrega;
+    final v = vRef;
+    var guard = 0;
+    while (s != destino && guard++ < 8) {
+      final next = _proximoPassoKanbanEmDirecao(s, destino);
+      if (next == null) return false;
+      if (!_transicaoStatusPermitida(s, next)) return false;
+      if ((next == 'entregue' || next == 'entregue_complemento_pendente') &&
+          _progressoCarga(v) < 3) {
+        return false;
+      }
+      s = next;
+    }
+    return s == destino;
+  }
+
+  List<Venda> _filtrarKanban(List<Venda> fonte) {
+    return fonte.where((v) => v.statusEntrega != 'cancelada').toList();
+  }
+
+  List<Venda> _entregasColunaKanban(List<Venda> visiveis, int col) {
+    final base = _filtrarKanban(visiveis);
+    switch (col) {
+      case 0:
+        return base.where(_vendaKanbanColunaPendentesHoje).toList();
+      case 1:
+        return base.where((v) => v.statusEntrega == 'roteirizada').toList();
+      case 2:
+        return base
+            .where(
+              (v) =>
+                  v.statusEntrega == 'saiu_entrega' ||
+                  v.statusEntrega == 'entregue_complemento_pendente',
+            )
+            .toList();
+      case 3:
+        return base.where((v) => v.statusEntrega == 'entregue').toList();
+      default:
+        return const [];
+    }
+  }
+
+  bool _kanbanPodeSoltarNaColuna(int vendaId, int colDestino) {
+    if (!widget.podeGerenciarStatusEntrega) return false;
+    final v = widget.vendaRepository.obterPorId(vendaId);
+    if (v == null || v.statusEntrega == 'cancelada') return false;
+    final destino = _statusEntregaColunaKanban(colDestino);
+    if (destino == null) return false;
+    if (v.statusEntrega == destino) return false;
+    if (destino == 'entregue' &&
+        v.statusEntrega == 'entregue_complemento_pendente') {
+      return true;
+    }
+    if (!_kanbanCaminhoInteiroValido(v, destino)) return false;
+    return true;
+  }
+
+  Future<void> _onKanbanAceitarSoltar(int vendaId, int colDestino) async {
+    if (!_kanbanPodeSoltarNaColuna(vendaId, colDestino)) return;
+
+    var v = widget.vendaRepository.obterPorId(vendaId);
+    if (v == null || !mounted) return;
+
+    final destino = _statusEntregaColunaKanban(colDestino)!;
+
+    if (destino == 'entregue' &&
+        v.statusEntrega == 'entregue_complemento_pendente') {
+      await _confirmarConcluirComplemento(v);
+      return;
+    }
+
+    if (v.statusEntrega == destino) return;
+
+    var passos = 0;
+    var algumPasso = false;
+    while (mounted && passos < 8) {
+      passos++;
+      v = widget.vendaRepository.obterPorId(vendaId);
+      if (v == null) return;
+      if (v.statusEntrega == destino) break;
+      final prox = _proximoPassoKanbanEmDirecao(v.statusEntrega, destino);
+      if (prox == null) break;
+      final ok = await _atualizarStatusEntrega(
+        v,
+        prox,
+        mostrarSnackSucesso: false,
+      );
+      if (!ok) break;
+      algumPasso = true;
+    }
+
+    v = widget.vendaRepository.obterPorId(vendaId);
+    if (!mounted) return;
+    if (algumPasso && v != null && v.statusEntrega == destino) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Status de entrega atualizado (Kanban).'),
+        ),
+      );
+    }
+  }
+
+  static const _titulosKanban = [
+    'Pendentes hoje (fila)',
+    'Roteirizadas',
+    'Saiu para entrega',
+    'Entregue',
+  ];
+
+  Widget _kanbanCardMosaico(Venda venda, DateFormat dataFmt) {
+    final scheme = Theme.of(context).colorScheme;
+    final statusCor = _corStatus(scheme, venda.statusEntrega);
+    final subtitulo = venda.cliente.target?.nomeRazao ?? 'Sem cliente';
+    return Card(
+      elevation: 1,
+      margin: const EdgeInsets.only(bottom: 8),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _abrirDetalhesItensVenda(venda),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Venda ${venda.numeroOrcamento}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  Icon(Icons.drag_indicator, size: 18, color: scheme.outline),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitulo,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(99),
+                      color: statusCor.withValues(alpha: 0.14),
+                      border: Border.all(
+                        color: statusCor.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Text(
+                      _rotuloStatusEntrega(venda.statusEntrega),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: statusCor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    venda.dataEntregaMarcada == null
+                        ? 'Sem data'
+                        : dataFmt.format(venda.dataEntregaMarcada!.toLocal()),
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () => _abrirNavegacaoParaEntrega(venda),
+                    icon: const Icon(Icons.directions_rounded, size: 18),
+                    label: const Text('Navegar'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildKanbanCompactCard(
+    Venda venda,
+    DateFormat dataFmt,
+  ) {
+    if (!widget.podeGerenciarStatusEntrega) {
+      return _kanbanCardMosaico(venda, dataFmt);
+    }
+    return Draggable<int>(
+      data: venda.id,
+      feedback: Material(
+        elevation: 6,
+        borderRadius: BorderRadius.circular(8),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 260),
+          child: Opacity(
+            opacity: 0.92,
+            child: _kanbanCardMosaico(venda, dataFmt),
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(
+        opacity: 0.35,
+        child: _kanbanCardMosaico(venda, dataFmt),
+      ),
+      child: _kanbanCardMosaico(venda, dataFmt),
+    );
+  }
+
+  Widget _colunaKanban(
+    BuildContext context, {
+    required int coluna,
+    required List<Venda> itens,
+    required DateFormat dataMarcadaFmt,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    const largura = 286.0;
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (details) =>
+          _kanbanPodeSoltarNaColuna(details.data, coluna),
+      onAcceptWithDetails: (details) =>
+          _onKanbanAceitarSoltar(details.data, coluna),
+      builder: (context, candidateData, rejectedData) {
+        final highlight = candidateData.isNotEmpty;
+        return SizedBox(
+          width: largura,
+          child: Card(
+            elevation: highlight ? 2 : 0,
+            margin: const EdgeInsets.only(right: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: highlight
+                    ? scheme.primary
+                    : scheme.outlineVariant.withValues(alpha: 0.7),
+                width: highlight ? 2 : 1,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Material(
+                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _titulosKanban[coluna],
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        Chip(
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          label: Text('${itens.length}'),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: itens.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              'Nenhum pedido',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: scheme.outline),
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(8, 10, 8, 12),
+                          itemCount: itens.length,
+                          itemBuilder: (context, i) => _buildKanbanCompactCard(
+                            itens[i],
+                            dataMarcadaFmt,
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _corpoQuadroKanban(
+    BuildContext context, {
+    required List<Venda> listaVisivel,
+    required DateFormat dataMarcadaFmt,
+    required double altura,
+  }) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        if (!widget.podeGerenciarStatusEntrega)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Text(
+              _mensagemSemPermissaoStatus(),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.error,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        SizedBox(
+          height: altura,
+          child: SingleChildScrollView(
+            controller: _kanbanHScrollController,
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var c = 0; c < 4; c++)
+                  _colunaKanban(
+                    context,
+                    coluna: c,
+                    itens: _entregasColunaKanban(listaVisivel, c),
+                    dataMarcadaFmt: dataMarcadaFmt,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2555,33 +3474,8 @@ class _EntregasPageState extends State<EntregasPage> {
         pendentesHoje > 0 ||
         _filtroResumoLista != _FiltroResumoEntregas.nenhum;
     final motoristasAtivos = widget.motoristaRepository.listarAtivos();
-    final resumoPorDia = <String, int>{};
-    for (final venda in _entregas) {
-      final dataKey = venda.dataEntregaMarcada == null
-          ? 'Sem data marcada'
-          : dataMarcadaFmt.format(venda.dataEntregaMarcada!.toLocal());
-      resumoPorDia.update(dataKey, (atual) => atual + 1, ifAbsent: () => 1);
-    }
-    final diasResumo = resumoPorDia.keys.toList()
-      ..sort((a, b) {
-        if (a == 'Sem data marcada') return 1;
-        if (b == 'Sem data marcada') return -1;
-        final da = dataMarcadaFmt.parse(a);
-        final db = dataMarcadaFmt.parse(b);
-        return da.compareTo(db);
-      });
-    _planejamentoChipKeys.removeWhere((k, _) => !resumoPorDia.containsKey(k));
-    final listaExibicao = _chaveDiaPlanejamentoSelecionado == null
-        ? _entregas
-        : _entregas
-              .where(
-                (v) => _vendaNaChaveDiaPlanejamento(
-                  v,
-                  _chaveDiaPlanejamentoSelecionado!,
-                  dataMarcadaFmt,
-                ),
-              )
-              .toList();
+    final resumoPorDia = PlanejamentoEntregaDia.resumoDeEntregas(_entregas);
+    final listaExibicao = _listaEntregasPlanejadasExibicao();
     final groupedLista = <String, List<Venda>>{};
     for (final venda in listaExibicao) {
       final chaveGrupo = _agrupamento == 'motorista'
@@ -2595,6 +3489,17 @@ class _EntregasPageState extends State<EntregasPage> {
       appBar: AppBar(
         title: const Text('Entregas'),
         actions: [
+          IconButton(
+            tooltip: _modoVisualizacao == _ModoVisualizacaoEntregas.lista
+                ? 'Quadro Kanban'
+                : 'Lista detalhada',
+            icon: Icon(
+              _modoVisualizacao == _ModoVisualizacaoEntregas.lista
+                  ? Icons.view_kanban_outlined
+                  : Icons.view_list_outlined,
+            ),
+            onPressed: _alternarModoVisualizacao,
+          ),
           IconButton(
             tooltip: 'Atualizar lista',
             icon: const Icon(Icons.refresh),
@@ -2867,47 +3772,50 @@ class _EntregasPageState extends State<EntregasPage> {
                           label: const Text('Periodo personalizado'),
                         ),
                         Chip(label: Text(_rotuloPeriodoSelecionado())),
-                        FilterChip(
-                          avatar: Icon(
-                            Icons.merge_type_outlined,
-                            color: _modoAgruparMesmoCarro
-                                ? Theme.of(context).colorScheme.primary
-                                : null,
-                          ),
-                          label: Text(
-                            _modoAgruparMesmoCarro
-                                ? 'Mesmo carro (${_idsEntregasSelecionadas.length} sel.)'
-                                : 'Agrupar mesmo carro',
-                          ),
-                          selected: _modoAgruparMesmoCarro,
-                          onSelected: (v) {
-                            setState(() {
-                              _modoAgruparMesmoCarro = v;
-                              if (!v) _idsEntregasSelecionadas.clear();
-                            });
-                          },
-                        ),
-                        if (_modoAgruparMesmoCarro) ...[
-                          Tooltip(
-                            message:
-                                'Somente carreto, mesmo cliente. Marque 2+ entregas.',
-                            child: FilledButton.icon(
-                              onPressed: _idsEntregasSelecionadas.length >= 2
-                                  ? _confirmarAgrupamentoMesmoCarro
+                        if (_modoVisualizacao ==
+                            _ModoVisualizacaoEntregas.lista) ...[
+                          FilterChip(
+                            avatar: Icon(
+                              Icons.merge_type_outlined,
+                              color: _modoAgruparMesmoCarro
+                                  ? Theme.of(context).colorScheme.primary
                                   : null,
-                              icon: const Icon(Icons.local_shipping_outlined),
-                              label: const Text('Confirmar agrupamento'),
                             ),
+                            label: Text(
+                              _modoAgruparMesmoCarro
+                                  ? 'Mesmo carro (${_idsEntregasSelecionadas.length} sel.)'
+                                  : 'Agrupar mesmo carro',
+                            ),
+                            selected: _modoAgruparMesmoCarro,
+                            onSelected: (v) {
+                              setState(() {
+                                _modoAgruparMesmoCarro = v;
+                                if (!v) _idsEntregasSelecionadas.clear();
+                              });
+                            },
                           ),
-                          OutlinedButton(
-                            onPressed: () =>
-                                setState(_idsEntregasSelecionadas.clear),
-                            child: const Text('Limpar selecao'),
-                          ),
-                          OutlinedButton(
-                            onPressed: _removerAgrupamentoSelecionadas,
-                            child: const Text('Tirar agrupamento'),
-                          ),
+                          if (_modoAgruparMesmoCarro) ...[
+                            Tooltip(
+                              message:
+                                  'Somente carreto, mesmo cliente. Marque 2+ entregas.',
+                              child: FilledButton.icon(
+                                onPressed: _idsEntregasSelecionadas.length >= 2
+                                    ? _confirmarAgrupamentoMesmoCarro
+                                    : null,
+                                icon: const Icon(Icons.local_shipping_outlined),
+                                label: const Text('Confirmar agrupamento'),
+                              ),
+                            ),
+                            OutlinedButton(
+                              onPressed: () =>
+                                  setState(_idsEntregasSelecionadas.clear),
+                              child: const Text('Limpar selecao'),
+                            ),
+                            OutlinedButton(
+                              onPressed: _removerAgrupamentoSelecionadas,
+                              child: const Text('Tirar agrupamento'),
+                            ),
+                          ],
                         ],
                       ],
                     ),
@@ -2928,78 +3836,18 @@ class _EntregasPageState extends State<EntregasPage> {
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                       const SizedBox(height: 8),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Expanded(
-                            child: Scrollbar(
-                              controller: _planejamentoDiaScrollController,
-                              thumbVisibility: true,
-                              trackVisibility: true,
-                              child: SingleChildScrollView(
-                                controller: _planejamentoDiaScrollController,
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  children: [
-                                    for (var i = 0; i < diasResumo.length; i++) ...[
-                                      if (i > 0) const SizedBox(width: 8),
-                                      FilterChip(
-                                        key: _planejamentoChipKeys.putIfAbsent(
-                                          diasResumo[i],
-                                          GlobalKey.new,
-                                        ),
-                                        label: Text(
-                                          '${diasResumo[i]}: ${resumoPorDia[diasResumo[i]]}',
-                                        ),
-                                        selected:
-                                            _chaveDiaPlanejamentoSelecionado ==
-                                                diasResumo[i],
-                                        onSelected: (ligar) {
-                                          final dia = diasResumo[i];
-                                          setState(() {
-                                            _chaveDiaPlanejamentoSelecionado =
-                                                ligar ? dia : null;
-                                          });
-                                          if (ligar) {
-                                            _scrollPlanejamentoDiaIntoView(dia);
-                                          }
-                                        },
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          PopupMenuButton<String?>(
-                            tooltip: 'Ir para data',
-                            onSelected: (valor) {
-                              setState(() {
-                                _chaveDiaPlanejamentoSelecionado = valor;
-                              });
-                              if (valor != null) {
-                                _scrollPlanejamentoDiaIntoView(valor);
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              const PopupMenuItem<String?>(
-                                value: null,
-                                child: Text('Todas as datas'),
-                              ),
-                              const PopupMenuDivider(),
-                              ...diasResumo.map(
-                                (d) => PopupMenuItem<String?>(
-                                  value: d,
-                                  child: Text('$d (${resumoPorDia[d]})'),
-                                ),
-                              ),
-                            ],
-                            child: Icon(
-                              Icons.calendar_month_outlined,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                        ],
+                      BarraPlanejamentoEntregaDia(
+                        resumoPorDia: resumoPorDia,
+                        chaveSelecionada: _chaveDiaPlanejamentoSelecionado,
+                        onSelecionar: _selecionarDiaPlanejamento,
+                        onAbrirSeletor: () =>
+                            _abrirSeletorPlanejamentoDia(resumoPorDia),
+                      ),
+                      const SizedBox(height: 10),
+                      ProximosDiasPlanejamentoEntrega(
+                        resumoPorDia: resumoPorDia,
+                        chaveSelecionada: _chaveDiaPlanejamentoSelecionado,
+                        onSelecionar: _selecionarDiaPlanejamento,
                       ),
                       const SizedBox(height: 8),
                       Align(
@@ -3008,15 +3856,10 @@ class _EntregasPageState extends State<EntregasPage> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            OutlinedButton.icon(
-                              onPressed: _abrirRomaneioVisual,
-                              icon: const Icon(Icons.assignment_outlined),
-                              label: const Text('Ver romaneio'),
-                            ),
                             ElevatedButton.icon(
-                              onPressed: _exportarOuImprimirRomaneio,
-                              icon: const Icon(Icons.picture_as_pdf_outlined),
-                              label: const Text('Imprimir/Exportar romaneio'),
+                              onPressed: _abrirRelatoriosEntrega,
+                              icon: const Icon(Icons.summarize_outlined),
+                              label: const Text('Relatorios'),
                             ),
                           ],
                         ),
@@ -3027,81 +3870,235 @@ class _EntregasPageState extends State<EntregasPage> {
               ),
             if (_entregas.isNotEmpty) const SizedBox(height: 10),
             Expanded(
-              child: RefreshIndicator(
-                onRefresh: _atualizarListaEntregas,
-                child: _entregas.isEmpty
-                    ? ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        children: const [
-                          SizedBox(height: 48),
-                          Center(
-                            child: Text(
-                              'Nenhuma entrega encontrada para os filtros.',
-                            ),
-                          ),
-                        ],
-                      )
-                    : listaExibicao.isEmpty
-                    ? ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        children: [
-                          const SizedBox(height: 48),
-                          Center(
-                            child: Text(
-                              _chaveDiaPlanejamentoSelecionado == null
-                                  ? 'Nenhuma entrega encontrada para os filtros.'
-                                  : 'Nenhuma entrega para o dia selecionado no planejamento.',
-                            ),
-                          ),
-                        ],
-                      )
-                    : ListView.builder(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        itemCount: gruposLista.length,
-                        itemBuilder: (context, bairroIndex) {
-                          final grupo = gruposLista[bairroIndex];
-                          final vendasBairro =
-                              groupedLista[grupo] ?? const <Venda>[];
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final alturaKanban =
+                      (constraints.maxHeight - 4).clamp(280.0, 4000.0);
+                  return RefreshIndicator(
+                    onRefresh: _atualizarListaEntregas,
+                    child: _entregas.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: const [
+                              SizedBox(height: 48),
+                              Center(
                                 child: Text(
-                                  '${_agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}: $grupo (${vendasBairro.length})',
-                                  style: Theme.of(context).textTheme.titleSmall,
+                                  'Nenhuma entrega encontrada para os filtros.',
                                 ),
                               ),
-                              for (final bloco
-                                  in blocosEntregaComCarretoAgrupado(
-                                    vendasBairro,
-                                  ))
-                                if (bloco.length >= 2 &&
-                                    bloco.first.grupoEntregaFreteId > 0)
-                                  _buildPainelGrupoCarretoLista(
-                                    bloco,
-                                    dateFormat,
-                                    dataMarcadaFmt,
-                                  )
-                                else
-                                  ...bloco.map(
-                                    (v) => _buildCardEntrega(
-                                      v,
-                                      dateFormat,
-                                      dataMarcadaFmt,
-                                      modoSelecao: _modoAgruparMesmoCarro,
-                                      selecionada: _idsEntregasSelecionadas
-                                          .contains(v.id),
-                                    ),
-                                  ),
                             ],
-                          );
-                        },
-                      ),
+                          )
+                        : listaExibicao.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              const SizedBox(height: 48),
+                              Center(
+                                child: Text(
+                                  _chaveDiaPlanejamentoSelecionado == null
+                                      ? 'Nenhuma entrega encontrada para os filtros.'
+                                      : 'Nenhuma entrega para o dia selecionado no planejamento.',
+                                ),
+                              ),
+                            ],
+                          )
+                        : _modoVisualizacao ==
+                              _ModoVisualizacaoEntregas.kanban
+                          ? _corpoQuadroKanban(
+                              context,
+                              listaVisivel: listaExibicao,
+                              dataMarcadaFmt: dataMarcadaFmt,
+                              altura: alturaKanban,
+                            )
+                          : ListView.builder(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              itemCount: gruposLista.length,
+                              itemBuilder: (context, bairroIndex) {
+                                final grupo = gruposLista[bairroIndex];
+                                final vendasBairro =
+                                    groupedLista[grupo] ?? const <Venda>[];
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        4,
+                                        10,
+                                        4,
+                                        6,
+                                      ),
+                                      child: Text(
+                                        '${_agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}: $grupo (${vendasBairro.length})',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall,
+                                      ),
+                                    ),
+                                    for (final bloco
+                                        in blocosEntregaComCarretoAgrupado(
+                                          vendasBairro,
+                                        ))
+                                      if (bloco.length >= 2 &&
+                                          bloco.first.grupoEntregaFreteId > 0)
+                                        _buildPainelGrupoCarretoLista(
+                                          bloco,
+                                          dateFormat,
+                                          dataMarcadaFmt,
+                                        )
+                                      else
+                                        ...bloco.map(
+                                          (v) => _buildCardEntrega(
+                                            v,
+                                            dateFormat,
+                                            dataMarcadaFmt,
+                                            modoSelecao:
+                                                _modoAgruparMesmoCarro,
+                                            selecionada:
+                                                _idsEntregasSelecionadas
+                                                    .contains(v.id),
+                                          ),
+                                        ),
+                                  ],
+                                );
+                              },
+                            ),
+                  );
+                },
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Romaneio (dialogo): bloco "mesmo carro" com [Por pedido] ou [Carga consolidada].
+class _PainelRomaneioGrupoMesmoCarro extends StatefulWidget {
+  const _PainelRomaneioGrupoMesmoCarro({
+    required this.bloco,
+    required this.setDialogStateRomaneio,
+    required this.quantidadeItemEntrega,
+    required this.conteudoRomaneioUmaVenda,
+  });
+
+  final List<Venda> bloco;
+  final StateSetter setDialogStateRomaneio;
+  final int Function(Venda venda, ItemVenda item) quantidadeItemEntrega;
+  final Widget Function(
+    BuildContext context,
+    Venda venda,
+    StateSetter setDialogStateRomaneio,
+  ) conteudoRomaneioUmaVenda;
+
+  @override
+  State<_PainelRomaneioGrupoMesmoCarro> createState() =>
+      _PainelRomaneioGrupoMesmoCarroState();
+}
+
+class _PainelRomaneioGrupoMesmoCarroState
+    extends State<_PainelRomaneioGrupoMesmoCarro> {
+  static const int _abaPorPedido = 0;
+  static const int _abaConsolidada = 1;
+
+  int _abaRomaneioGrupo = _abaPorPedido;
+  final Map<String, bool> _conferenciaCargaConsolidada = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final linhas = romaneioMergeCargaGrupo(
+      widget.bloco,
+      widget.quantidadeItemEntrega,
+    );
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.tertiaryContainer.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: scheme.tertiary.withValues(alpha: 0.45)),
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            rotuloGrupoLogistica(widget.bloco),
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          Text('${widget.bloco.length} pedidos no mesmo veiculo'),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              segments: const [
+                ButtonSegment<int>(
+                  value: _abaPorPedido,
+                  label: Text('Por pedido'),
+                  icon: Icon(Icons.list_alt_outlined),
+                ),
+                ButtonSegment<int>(
+                  value: _abaConsolidada,
+                  label: Text('Carga consolidada (total do carro)'),
+                  icon: Icon(Icons.inventory_2_outlined),
+                ),
+              ],
+              selected: {_abaRomaneioGrupo},
+              onSelectionChanged: (Set<int> s) {
+                setState(() => _abaRomaneioGrupo = s.first);
+              },
+            ),
+          ),
+          const Divider(height: 16),
+          if (_abaRomaneioGrupo == _abaPorPedido)
+            ...[
+              for (var i = 0; i < widget.bloco.length; i++) ...[
+                widget.conteudoRomaneioUmaVenda(
+                  context,
+                  widget.bloco[i],
+                  widget.setDialogStateRomaneio,
+                ),
+                if (i < widget.bloco.length - 1) const Divider(height: 12),
+              ],
+            ]
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Quantidades somadas de todos os pedidos deste veiculo. '
+                  'Marque ao conferir a separacao no patio.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 6),
+                if (linhas.isEmpty)
+                  const Text('Nenhum item com quantidade para este grupo.')
+                else
+                  ...linhas.map(
+                    (l) => CheckboxListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      value: _conferenciaCargaConsolidada[l.chaveMerge] ?? false,
+                      onChanged: (marcado) {
+                        setState(() {
+                          _conferenciaCargaConsolidada[l.chaveMerge] =
+                              marcado ?? false;
+                        });
+                      },
+                      title: Text(
+                        l.nomeProduto,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(
+                        'SKU ${l.codigoSku} · ${l.unidade} · Qtd total: ${l.quantidadeTotal}',
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+        ],
       ),
     );
   }

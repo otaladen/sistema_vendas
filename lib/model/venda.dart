@@ -39,6 +39,8 @@ class Venda {
     this.vendaOrigemFreteRetiradaId = 0,
     this.idOrcamentoFreteRetiradaAberto = 0,
     this.grupoEntregaFreteId = 0,
+    this.ordemEntrega = 0,
+    this.caminhaoEntrega = '',
     this.complementoEntregaJson = '',
   }) : data = data ?? DateTime.now();
 
@@ -90,6 +92,12 @@ class Venda {
   /// ID comum do grupo logistico na aba Entregas (mesmo valor = mesmo carro).
   /// Define-se manualmente ao agrupar notas; 0 = sem grupo.
   int grupoEntregaFreteId;
+
+  /// Sequencia de parada no mesmo carro (1 = primeira entrega). 0 fora de grupo.
+  int ordemEntrega;
+
+  /// Legado (nao usado na UI). Expedicao identifica o veiculo pelo [motoristaEntrega].
+  String caminhaoEntrega;
 
   /// JSON: lista de itens em falta na ida (`ComplementoEntregaCodec`).
   /// Usado com [statusEntrega] `entregue_complemento_pendente` ou pendencia em aberto.

@@ -296,7 +296,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(35, 5732368228333512180),
+    lastPropertyId: const obx_int.IdUid(37, 3752092449385205042),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -507,6 +507,18 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(35, 5732368228333512180),
         name: 'carretoReservaAteSaida',
         type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(36, 6526408797449903172),
+        name: 'ordemEntrega',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(37, 3752092449385205042),
+        name: 'caminhaoEntrega',
+        type: 9,
         flags: 0,
       ),
     ],
@@ -2043,7 +2055,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final complementoEntregaJsonOffset = fbb.writeString(
           object.complementoEntregaJson,
         );
-        fbb.startTable(36);
+        final caminhaoEntregaOffset = fbb.writeString(object.caminhaoEntrega);
+        fbb.startTable(38);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -2078,6 +2091,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addInt64(32, object.grupoEntregaFreteId);
         fbb.addOffset(33, complementoEntregaJsonOffset);
         fbb.addBool(34, object.carretoReservaAteSaida);
+        fbb.addInt64(35, object.ordemEntrega);
+        fbb.addOffset(36, caminhaoEntregaOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -2231,6 +2246,15 @@ obx_int.ModelDefinition getObjectBoxModel() {
           68,
           0,
         );
+        final ordemEntregaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          74,
+          0,
+        );
+        final caminhaoEntregaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 76, '');
         final complementoEntregaJsonParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 70, '');
@@ -2266,6 +2290,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
           vendaOrigemFreteRetiradaId: vendaOrigemFreteRetiradaIdParam,
           idOrcamentoFreteRetiradaAberto: idOrcamentoFreteRetiradaAbertoParam,
           grupoEntregaFreteId: grupoEntregaFreteIdParam,
+          ordemEntrega: ordemEntregaParam,
+          caminhaoEntrega: caminhaoEntregaParam,
           complementoEntregaJson: complementoEntregaJsonParam,
         );
         object.cliente.targetId = const fb.Int64Reader().vTableGet(
@@ -4075,6 +4101,16 @@ class Venda_ {
   /// See [Venda.carretoReservaAteSaida].
   static final carretoReservaAteSaida = obx.QueryBooleanProperty<Venda>(
     _entities[2].properties[33],
+  );
+
+  /// See [Venda.ordemEntrega].
+  static final ordemEntrega = obx.QueryIntegerProperty<Venda>(
+    _entities[2].properties[34],
+  );
+
+  /// See [Venda.caminhaoEntrega].
+  static final caminhaoEntrega = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[35],
   );
 
   /// see [Venda.itens]

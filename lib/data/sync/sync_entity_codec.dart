@@ -208,6 +208,8 @@ class SyncEntityCodec {
       'idOrcamentoFreteRetiradaAberto': v.idOrcamentoFreteRetiradaAberto,
       'vendaOrigemFreteRetiradaId': v.vendaOrigemFreteRetiradaId,
       'grupoEntregaFreteId': v.grupoEntregaFreteId,
+      'ordemEntrega': v.ordemEntrega,
+      'caminhaoEntrega': v.caminhaoEntrega,
       'complementoEntregaJson': v.complementoEntregaJson,
       'clienteId': v.cliente.targetId,
       'vendedorId': v.vendedor.targetId,
@@ -253,6 +255,8 @@ class SyncEntityCodec {
       vendaOrigemFreteRetiradaId:
           (m['vendaOrigemFreteRetiradaId'] as num?)?.toInt() ?? 0,
       grupoEntregaFreteId: (m['grupoEntregaFreteId'] as num?)?.toInt() ?? 0,
+      ordemEntrega: (m['ordemEntrega'] as num?)?.toInt() ?? 0,
+      caminhaoEntrega: (m['caminhaoEntrega'] ?? '').toString(),
       complementoEntregaJson: (m['complementoEntregaJson'] ?? '').toString(),
     );
   }

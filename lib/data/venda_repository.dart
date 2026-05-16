@@ -906,7 +906,10 @@ class VendaRepository {
   }
 
   /// Agrupa entregas de carreto (mesmo cliente) para a equipe ver como um unico carregamento.
-  void definirGrupoEntregaLogistica(Set<int> vendaIds) {
+  void definirGrupoEntregaLogistica(
+    Set<int> vendaIds, {
+    String motoristaEntrega = '',
+  }) {
     final ids = vendaIds.where((id) => id > 0).toList()..sort();
     if (ids.length < 2) {
       throw StateError('Selecione ao menos duas entregas para agrupar.');
@@ -943,9 +946,48 @@ class VendaRepository {
         }
       }
       final grupoId = ids.first;
-      for (final v in vendas) {
+      final motorista = motoristaEntrega.trim();
+      vendas.sort((a, b) => a.id.compareTo(b.id));
+      for (var i = 0; i < vendas.length; i++) {
+        final v = vendas[i];
         v.grupoEntregaFreteId = grupoId;
+        v.ordemEntrega = i + 1;
+        if (motorista.isNotEmpty) {
+          v.motoristaEntrega = motorista;
+        }
         _db.vendaBox.put(v);
+      }
+    });
+    _notificarRedeAposEscrita();
+  }
+
+  /// Atualiza o motorista em todas as vendas do mesmo [grupoEntregaFreteId].
+  void definirMotoristaEntregaNoGrupo(int grupoId, String motoristaEntrega) {
+    if (grupoId <= 0) {
+      throw StateError('Grupo de entrega invalido.');
+    }
+    final motorista = motoristaEntrega.trim();
+    if (motorista.isEmpty) {
+      throw StateError('Informe o motorista.');
+    }
+    _db.store.runInTransaction(TxMode.write, () {
+      final q = _db.vendaBox
+          .query(Venda_.grupoEntregaFreteId.equals(grupoId))
+          .build();
+      try {
+        final vendas = q.find();
+        if (vendas.isEmpty) {
+          throw StateError('Nenhuma entrega encontrada neste grupo.');
+        }
+        for (final v in vendas) {
+          if (v.tipoEntrega != 'entrega_loja') {
+            throw StateError('Somente entregas da loja possuem motorista.');
+          }
+          v.motoristaEntrega = motorista;
+          _db.vendaBox.put(v);
+        }
+      } finally {
+        q.close();
       }
     });
     _notificarRedeAposEscrita();
@@ -957,6 +999,32 @@ class VendaRepository {
         final v = _db.vendaBox.get(id);
         if (v == null) continue;
         v.grupoEntregaFreteId = 0;
+        v.ordemEntrega = 0;
+        _db.vendaBox.put(v);
+      }
+    });
+    _notificarRedeAposEscrita();
+  }
+
+  /// Define a sequencia de paradas (1..n) no mesmo [grupoEntregaFreteId].
+  void atualizarSequenciaEntregaNoGrupo(int grupoId, List<int> vendaIdsOrdenados) {
+    if (grupoId <= 0) {
+      throw StateError('Grupo de entrega invalido.');
+    }
+    final ids = List<int>.from(vendaIdsOrdenados);
+    if (ids.isEmpty) return;
+    _db.store.runInTransaction(TxMode.write, () {
+      for (var i = 0; i < ids.length; i++) {
+        final v = _db.vendaBox.get(ids[i]);
+        if (v == null) {
+          throw StateError('Venda ${ids[i]} nao encontrada.');
+        }
+        if (v.grupoEntregaFreteId != grupoId) {
+          throw StateError(
+            'Venda ${v.numeroOrcamento} nao pertence a este grupo (mesmo carro).',
+          );
+        }
+        v.ordemEntrega = i + 1;
         _db.vendaBox.put(v);
       }
     });

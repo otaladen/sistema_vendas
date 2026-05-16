@@ -222,7 +222,7 @@
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "35:5732368228333512180",
+      "lastPropertyId": "37:3752092449385205042",
       "name": "Venda",
       "properties": [
         {
@@ -401,6 +401,16 @@
           "id": "35:5732368228333512180",
           "name": "carretoReservaAteSaida",
           "type": 1
+        },
+        {
+          "id": "36:6526408797449903172",
+          "name": "ordemEntrega",
+          "type": 6
+        },
+        {
+          "id": "37:3752092449385205042",
+          "name": "caminhaoEntrega",
+          "type": 9
         }
       ],
       "relations": []
