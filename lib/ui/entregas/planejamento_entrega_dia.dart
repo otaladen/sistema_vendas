@@ -193,12 +193,14 @@ class ProximosDiasPlanejamentoEntrega extends StatelessWidget {
     required this.chaveSelecionada,
     required this.onSelecionar,
     this.maxItens = 7,
+    this.mostrarTitulo = true,
   });
 
   final Map<String, int> resumoPorDia;
   final String? chaveSelecionada;
   final ValueChanged<String?> onSelecionar;
   final int maxItens;
+  final bool mostrarTitulo;
 
   @override
   Widget build(BuildContext context) {
@@ -211,13 +213,15 @@ class ProximosDiasPlanejamentoEntrega extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Proximos dias com entrega',
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-        ),
-        const SizedBox(height: 6),
+        if (mostrarTitulo) ...[
+          Text(
+            'Proximos dias com entrega',
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 6),
+        ],
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(

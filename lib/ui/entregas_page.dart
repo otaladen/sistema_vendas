@@ -14,6 +14,8 @@ import '../domain/complemento_entrega_codec.dart';
 import '../model/historico_entrega.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
+import 'entregas/entregas_barra_compacta.dart';
+import 'entregas/filtros_entrega_sheet.dart';
 import 'entregas/logistica_entregas.dart';
 import 'entregas/planejamento_entrega_dia.dart';
 import 'entregas/romaneio_carga_consolidada.dart';
@@ -91,10 +93,97 @@ class _EntregasPageState extends State<EntregasPage> {
   /// Chave igual a [resumoPorDia] (`dd/MM/yyyy` ou `Sem data marcada`); filtra so a lista.
   String? _chaveDiaPlanejamentoSelecionado;
 
+  bool _proximosDiasPlanejamentoExpandido = false;
+
   final ScrollController _kanbanHScrollController = ScrollController();
 
   void _selecionarDiaPlanejamento(String? chave) {
     setState(() => _chaveDiaPlanejamentoSelecionado = chave);
+  }
+
+  int _contagemFiltrosAtivos() {
+    return contarFiltrosEntregaAtivos(
+      status: _statusSelecionado,
+      motorista: _filtroMotorista,
+      vendedor: _filtroVendedor,
+      agrupamento: _agrupamento,
+      dataMarcada: _filtroDataMarcada,
+      bairro: _bairroController.text,
+      numeroNota: _numeroNotaController.text,
+      inicio: _inicio,
+      fim: _fim,
+    );
+  }
+
+  String _nomeMotoristaFiltroExibicao() {
+    if (_filtroMotorista == 'todos') return 'Todos';
+    final m = widget.motoristaRepository.listarAtivos().where(
+          (x) => x.nome.trim().toLowerCase() == _filtroMotorista,
+        );
+    return m.isNotEmpty ? m.first.nome : _filtroMotorista;
+  }
+
+  String _nomeVendedorFiltroExibicao() {
+    if (_filtroVendedor == 'todos') return 'Todos';
+    final v = _vendedoresDisponiveis.where(
+      (n) => n.toLowerCase() == _filtroVendedor,
+    );
+    return v.isNotEmpty ? v.first : _filtroVendedor;
+  }
+
+  Future<void> _abrirFiltrosEntrega() async {
+    final resumos = resumosFiltrosEntregaAtivos(
+      status: _statusSelecionado,
+      rotuloStatus: _rotuloStatusFiltro,
+      motorista: _filtroMotorista,
+      nomeMotoristaExibicao: _nomeMotoristaFiltroExibicao(),
+      vendedor: _filtroVendedor,
+      nomeVendedorExibicao: _nomeVendedorFiltroExibicao(),
+      agrupamento: _agrupamento,
+      dataMarcada: _filtroDataMarcada,
+      bairro: _bairroController.text,
+      numeroNota: _numeroNotaController.text,
+      rotuloPeriodo: _rotuloPeriodoSelecionado(),
+    );
+    if (!mounted) return;
+    await showFiltrosEntregaSheet(
+      context: context,
+      filtrosDropdownNonce: _filtrosDropdownNonce,
+      statuses: _statuses,
+      rotuloStatus: _rotuloStatusFiltro,
+      statusSelecionado: _statusSelecionado,
+      onStatus: (v) {
+        setState(() => _statusSelecionado = v);
+        _carregarEntregas();
+      },
+      filtroMotorista: _filtroMotorista,
+      motoristasAtivos: widget.motoristaRepository.listarAtivos(),
+      onMotorista: (v) {
+        setState(() => _filtroMotorista = v);
+        _carregarEntregas();
+      },
+      filtroVendedor: _filtroVendedor,
+      vendedoresDisponiveis: _vendedoresDisponiveis,
+      onVendedor: (v) {
+        setState(() => _filtroVendedor = v);
+        _carregarEntregas();
+      },
+      agrupamento: _agrupamento,
+      onAgrupamento: (v) => setState(() => _agrupamento = v),
+      filtroDataMarcada: _filtroDataMarcada,
+      onDataMarcada: (v) {
+        setState(() => _filtroDataMarcada = v);
+        _carregarEntregas();
+      },
+      numeroNotaController: _numeroNotaController,
+      bairroController: _bairroController,
+      onAplicarTexto: _carregarEntregas,
+      onLimparTudo: _redefinirFiltrosPadrao,
+      onPeriodoHoje: _aplicarPeriodoMarcadasParaHoje,
+      onPeriodoPersonalizado: _selecionarPeriodoPersonalizado,
+      rotuloPeriodo: _rotuloPeriodoSelecionado(),
+      resumosAtivos: resumos,
+    );
   }
 
   Future<void> _abrirSeletorPlanejamentoDia(
@@ -2521,26 +2610,46 @@ class _EntregasPageState extends State<EntregasPage> {
     final ultimoEvento = historico.isEmpty ? null : historico.last;
     return Card(
       elevation: dentroDeGrupoCarreto ? 0 : null,
-      margin: dentroDeGrupoCarreto ? EdgeInsets.zero : null,
+      margin: dentroDeGrupoCarreto
+          ? EdgeInsets.zero
+          : const EdgeInsets.only(bottom: 8),
       color: dentroDeGrupoCarreto
           ? Theme.of(context).colorScheme.surface
           : null,
-      child: ListTile(
-        leading: modoSelecao
-            ? Checkbox(
-                value: selecionada,
-                onChanged: (_) => _alternarSelecaoEntrega(venda.id),
-              )
-            : null,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
         onTap: modoSelecao
             ? () => _alternarSelecaoEntrega(venda.id)
             : () => _abrirDetalhesItensVenda(venda),
-        title: Text(
-          'Venda ${venda.numeroOrcamento} - ${_formatarMoeda(venda.total)}',
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (modoSelecao)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4, top: 2),
+                      child: Checkbox(
+                        value: selecionada,
+                        onChanged: (_) => _alternarSelecaoEntrega(venda.id),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Venda ${venda.numeroOrcamento} - ${_formatarMoeda(venda.total)}',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        const SizedBox(height: 6),
             if (paradaNoMesmoCarro != null) ...[
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -2693,81 +2802,107 @@ class _EntregasPageState extends State<EntregasPage> {
                 ),
               ],
             ),
-          ],
-        ),
-        isThreeLine: true,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              onPressed: () => _abrirNavegacaoParaEntrega(venda),
-              icon: const Icon(Icons.directions_rounded, size: 18),
-              label: const Text('Navegar'),
-            ),
-            const SizedBox(width: 4),
-            OutlinedButton.icon(
-              onPressed: () => _abrirDetalhesItensVenda(venda),
-              icon: const Icon(Icons.receipt_long),
-              label: const Text('Ver itens'),
-            ),
-            const SizedBox(width: 6),
-            OutlinedButton.icon(
-              onPressed: () => _abrirHistoricoEntrega(venda),
-              icon: const Icon(Icons.history),
-              label: const Text('Historico'),
-            ),
-            if (_podeDevolucaoPosCarretoNaEntrega(venda)) ...[
-              const SizedBox(width: 6),
-              Tooltip(
-                message:
-                    'Cliente devolveu ou avaria: devolve estoque (carreto com carga ja saida). '
-                    'Se faltou item na ida, use "Faltou item".',
-                child: OutlinedButton.icon(
-                  onPressed: () => _abrirRegistrarDevolucaoPosCarreto(venda),
-                  icon: const Icon(Icons.assignment_return_outlined),
-                  label: const Text('Devolucao'),
-                ),
-              ),
-            ],
-            const SizedBox(width: 6),
-            OutlinedButton.icon(
-              onPressed: () => _editarMotoristaEntrega(venda),
-              icon: const Icon(Icons.person_outline),
-              label: const Text('Motorista'),
-            ),
-            const SizedBox(width: 6),
-            if (venda.statusEntrega == 'saiu_entrega') ...[
-              TextButton.icon(
-                onPressed: widget.podeGerenciarStatusEntrega
-                    ? () => _abrirDialogRegistrarComplemento(venda)
-                    : null,
-                icon: const Icon(Icons.inventory_2_outlined),
-                label: const Text('Faltou item'),
-              ),
-              const SizedBox(width: 6),
-              TextButton.icon(
-                onPressed: widget.podeGerenciarStatusEntrega
-                    ? () => _atualizarStatusEntrega(venda, 'entregue')
-                    : null,
-                icon: const Icon(Icons.check_circle_outline),
-                label: const Text('Marcar entregue'),
-              ),
-            ],
-            if (venda.statusEntrega == 'entregue_complemento_pendente')
-              TextButton.icon(
-                onPressed: widget.podeGerenciarStatusEntrega
-                    ? () => _confirmarConcluirComplemento(venda)
-                    : null,
-                icon: const Icon(Icons.task_alt_outlined),
-                label: const Text('Concluir complemento'),
-              ),
-            PopupMenuButton<String>(
-              tooltip: 'Mais acoes',
-              onSelected: (value) {
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                    ),
+                    onPressed: () => _abrirNavegacaoParaEntrega(venda),
+                    icon: const Icon(Icons.directions_rounded, size: 18),
+                    label: const Text('Navegar'),
+                  ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () => _abrirDetalhesItensVenda(venda),
+                    icon: const Icon(Icons.receipt_long, size: 18),
+                    label: const Text('Ver itens'),
+                  ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () => _abrirHistoricoEntrega(venda),
+                    icon: const Icon(Icons.history, size: 18),
+                    label: const Text('Historico'),
+                  ),
+                  if (_podeDevolucaoPosCarretoNaEntrega(venda))
+                    Tooltip(
+                      message:
+                          'Cliente devolveu ou avaria: devolve estoque (carreto com carga ja saida). '
+                          'Se faltou item na ida, use "Faltou item".',
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: () =>
+                            _abrirRegistrarDevolucaoPosCarreto(venda),
+                        icon: const Icon(
+                          Icons.assignment_return_outlined,
+                          size: 18,
+                        ),
+                        label: const Text('Devolucao'),
+                      ),
+                    ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () => _editarMotoristaEntrega(venda),
+                    icon: const Icon(Icons.person_outline, size: 18),
+                    label: const Text('Motorista'),
+                  ),
+                  if (venda.statusEntrega == 'saiu_entrega') ...[
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: widget.podeGerenciarStatusEntrega
+                          ? () => _abrirDialogRegistrarComplemento(venda)
+                          : null,
+                      icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                      label: const Text('Faltou item'),
+                    ),
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: widget.podeGerenciarStatusEntrega
+                          ? () => _atualizarStatusEntrega(venda, 'entregue')
+                          : null,
+                      icon: const Icon(Icons.check_circle_outline, size: 18),
+                      label: const Text('Marcar entregue'),
+                    ),
+                  ],
+                  if (venda.statusEntrega == 'entregue_complemento_pendente')
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: widget.podeGerenciarStatusEntrega
+                          ? () => _confirmarConcluirComplemento(venda)
+                          : null,
+                      icon: const Icon(Icons.task_alt_outlined, size: 18),
+                      label: const Text('Concluir complemento'),
+                    ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Mais acoes',
+                    onSelected: (value) {
                 if (value == _kMenuMarcarDataEntrega) {
                   _marcarOuAlterarDataEntrega(venda);
                   return;
@@ -2869,8 +3004,11 @@ class _EntregasPageState extends State<EntregasPage> {
                   child: Text('Prioridade: Agendada'),
                 ),
               ],
-            ),
-          ],
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -3468,13 +3606,9 @@ class _EntregasPageState extends State<EntregasPage> {
     final dataMarcadaFmt = DateFormat('dd/MM/yyyy');
     final atrasadas = _contagemAtrasadasProjetada();
     final pendentesHoje = _contagemPendentesHojeProjetada();
-    final mostrarChipsResumo =
-        _entregas.isNotEmpty ||
-        atrasadas > 0 ||
-        pendentesHoje > 0 ||
-        _filtroResumoLista != _FiltroResumoEntregas.nenhum;
-    final motoristasAtivos = widget.motoristaRepository.listarAtivos();
     final resumoPorDia = PlanejamentoEntregaDia.resumoDeEntregas(_entregas);
+    final temProximosDias =
+        PlanejamentoEntregaDia.proximosDiasComEntrega(resumoPorDia).isNotEmpty;
     final listaExibicao = _listaEntregasPlanejadasExibicao();
     final groupedLista = <String, List<Venda>>{};
     for (final venda in listaExibicao) {
@@ -3489,6 +3623,26 @@ class _EntregasPageState extends State<EntregasPage> {
       appBar: AppBar(
         title: const Text('Entregas'),
         actions: [
+          if (_modoVisualizacao == _ModoVisualizacaoEntregas.lista)
+            IconButton(
+              tooltip: _modoAgruparMesmoCarro
+                  ? 'Sair do modo agrupar mesmo carro'
+                  : 'Agrupar mesmo carro',
+              icon: Icon(
+                Icons.merge_type_outlined,
+                color: _modoAgruparMesmoCarro
+                    ? Theme.of(context).colorScheme.primary
+                    : null,
+              ),
+              onPressed: () {
+                setState(() {
+                  _modoAgruparMesmoCarro = !_modoAgruparMesmoCarro;
+                  if (!_modoAgruparMesmoCarro) {
+                    _idsEntregasSelecionadas.clear();
+                  }
+                });
+              },
+            ),
           IconButton(
             tooltip: _modoVisualizacao == _ModoVisualizacaoEntregas.lista
                 ? 'Quadro Kanban'
@@ -3510,365 +3664,64 @@ class _EntregasPageState extends State<EntregasPage> {
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
         child: Column(
           children: [
-            if (mostrarChipsResumo)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Wrap(
-                    spacing: 10,
-                    runSpacing: 8,
-                    children: [
-                      FilterChip(
-                        avatar: Icon(
-                          Icons.warning_amber_outlined,
-                          color: atrasadas > 0
-                              ? Colors.red.shade700
-                              : Colors.grey,
-                        ),
-                        label: Text('Atrasadas: $atrasadas'),
-                        selected:
-                            _filtroResumoLista ==
-                            _FiltroResumoEntregas.atrasadas,
-                        onSelected: (ligar) {
-                          setState(() {
-                            _filtroResumoLista = ligar
-                                ? _FiltroResumoEntregas.atrasadas
-                                : _FiltroResumoEntregas.nenhum;
-                          });
-                          _carregarEntregas();
-                        },
-                      ),
-                      FilterChip(
-                        avatar: Icon(
-                          Icons.today_outlined,
-                          color: pendentesHoje > 0
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.grey,
-                        ),
-                        label: Text('Pendentes hoje: $pendentesHoje'),
-                        selected:
-                            _filtroResumoLista ==
-                            _FiltroResumoEntregas.pendentesHoje,
-                        onSelected: (ligar) {
-                          setState(() {
-                            _filtroResumoLista = ligar
-                                ? _FiltroResumoEntregas.pendentesHoje
-                                : _FiltroResumoEntregas.nenhum;
-                          });
-                          _carregarEntregas();
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            if (mostrarChipsResumo) const SizedBox(height: 10),
-            ExpansionTile(
-              initiallyExpanded: false,
-              leading: const Icon(Icons.tune_outlined),
-              title: const Text('Filtros e periodo'),
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        SizedBox(
-                          key: ValueKey('f_status_$_filtrosDropdownNonce'),
-                          width: 220,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _statusSelecionado,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Status',
-                            ),
-                            selectedItemBuilder: (context) {
-                              return _statuses.map((s) {
-                                return Align(
-                                  alignment: AlignmentDirectional.centerStart,
-                                  child: Text(
-                                    _rotuloStatusFiltro(s),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                );
-                              }).toList();
-                            },
-                            items: _statuses
-                                .map(
-                                  (s) => DropdownMenuItem<String>(
-                                    value: s,
-                                    child: Text(
-                                      _rotuloStatusFiltro(s),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (value) {
-                              if (value == null) return;
-                              setState(() => _statusSelecionado = value);
-                              _carregarEntregas();
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          key: ValueKey('f_motorista_$_filtrosDropdownNonce'),
-                          width: 240,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _filtroMotorista,
-                            decoration: const InputDecoration(
-                              labelText: 'Motorista',
-                            ),
-                            items: [
-                              const DropdownMenuItem(
-                                value: 'todos',
-                                child: Text('Todos'),
-                              ),
-                              ...motoristasAtivos.map(
-                                (m) => DropdownMenuItem(
-                                  value: m.nome.trim().toLowerCase(),
-                                  child: Text(m.nome),
-                                ),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              if (value == null) return;
-                              setState(() => _filtroMotorista = value);
-                              _carregarEntregas();
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          key: ValueKey('f_vendedor_$_filtrosDropdownNonce'),
-                          width: 240,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _filtroVendedor,
-                            decoration: const InputDecoration(
-                              labelText: 'Vendedor',
-                            ),
-                            items: [
-                              const DropdownMenuItem(
-                                value: 'todos',
-                                child: Text('Todos'),
-                              ),
-                              ..._vendedoresDisponiveis.map(
-                                (nome) => DropdownMenuItem(
-                                  value: nome.toLowerCase(),
-                                  child: Text(nome),
-                                ),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              if (value == null) return;
-                              setState(() => _filtroVendedor = value);
-                              _carregarEntregas();
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          key: ValueKey('f_agrup_$_filtrosDropdownNonce'),
-                          width: 220,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _agrupamento,
-                            decoration: const InputDecoration(
-                              labelText: 'Agrupar por',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'bairro',
-                                child: Text('Bairro'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'motorista',
-                                child: Text('Motorista'),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              if (value == null) return;
-                              setState(() => _agrupamento = value);
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          key: ValueKey('f_dataMarc_$_filtrosDropdownNonce'),
-                          width: 220,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _filtroDataMarcada,
-                            decoration: const InputDecoration(
-                              labelText: 'Data marcada',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'todos',
-                                child: Text('Todas'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'hoje',
-                                child: Text('Hoje'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'amanha',
-                                child: Text('Amanha'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'sem_data',
-                                child: Text('Sem data marcada'),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              if (value == null) return;
-                              setState(() => _filtroDataMarcada = value);
-                              _carregarEntregas();
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          width: 160,
-                          child: TextField(
-                            controller: _numeroNotaController,
-                            decoration: const InputDecoration(
-                              labelText: 'N. da nota',
-                              hintText: 'ex: 1234 ou #1234',
-                              prefixIcon: Icon(Icons.tag_outlined),
-                            ),
-                            keyboardType: TextInputType.number,
-                            onSubmitted: (_) => _carregarEntregas(),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 280,
-                          child: TextField(
-                            controller: _bairroController,
-                            decoration: const InputDecoration(
-                              labelText: 'Filtrar por bairro/endereco',
-                              prefixIcon: Icon(Icons.location_on_outlined),
-                            ),
-                            onSubmitted: (_) => _carregarEntregas(),
-                          ),
-                        ),
-                        OutlinedButton(
-                          onPressed: _carregarEntregas,
-                          child: const Text('Aplicar filtro'),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: _redefinirFiltrosPadrao,
-                          icon: const Icon(Icons.filter_alt_off_outlined),
-                          label: const Text('Limpar tudo'),
-                        ),
-                        OutlinedButton(
-                          onPressed: _aplicarPeriodoMarcadasParaHoje,
-                          child: const Text('Hoje'),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: _selecionarPeriodoPersonalizado,
-                          icon: const Icon(Icons.date_range_outlined),
-                          label: const Text('Periodo personalizado'),
-                        ),
-                        Chip(label: Text(_rotuloPeriodoSelecionado())),
-                        if (_modoVisualizacao ==
-                            _ModoVisualizacaoEntregas.lista) ...[
-                          FilterChip(
-                            avatar: Icon(
-                              Icons.merge_type_outlined,
-                              color: _modoAgruparMesmoCarro
-                                  ? Theme.of(context).colorScheme.primary
-                                  : null,
-                            ),
-                            label: Text(
-                              _modoAgruparMesmoCarro
-                                  ? 'Mesmo carro (${_idsEntregasSelecionadas.length} sel.)'
-                                  : 'Agrupar mesmo carro',
-                            ),
-                            selected: _modoAgruparMesmoCarro,
-                            onSelected: (v) {
-                              setState(() {
-                                _modoAgruparMesmoCarro = v;
-                                if (!v) _idsEntregasSelecionadas.clear();
-                              });
-                            },
-                          ),
-                          if (_modoAgruparMesmoCarro) ...[
-                            Tooltip(
-                              message:
-                                  'Somente carreto, mesmo cliente. Marque 2+ entregas.',
-                              child: FilledButton.icon(
-                                onPressed: _idsEntregasSelecionadas.length >= 2
-                                    ? _confirmarAgrupamentoMesmoCarro
-                                    : null,
-                                icon: const Icon(Icons.local_shipping_outlined),
-                                label: const Text('Confirmar agrupamento'),
-                              ),
-                            ),
-                            OutlinedButton(
-                              onPressed: () =>
-                                  setState(_idsEntregasSelecionadas.clear),
-                              child: const Text('Limpar selecao'),
-                            ),
-                            OutlinedButton(
-                              onPressed: _removerAgrupamentoSelecionadas,
-                              child: const Text('Tirar agrupamento'),
-                            ),
-                          ],
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+            EntregasBarraCompacta(
+              atrasadas: atrasadas,
+              pendentesHoje: pendentesHoje,
+              filtroAtrasadasAtivo:
+                  _filtroResumoLista == _FiltroResumoEntregas.atrasadas,
+              filtroPendentesHojeAtivo:
+                  _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje,
+              onFiltroAtrasadas: (ligar) {
+                setState(() {
+                  _filtroResumoLista = ligar
+                      ? _FiltroResumoEntregas.atrasadas
+                      : _FiltroResumoEntregas.nenhum;
+                });
+                _carregarEntregas();
+              },
+              onFiltroPendentesHoje: (ligar) {
+                setState(() {
+                  _filtroResumoLista = ligar
+                      ? _FiltroResumoEntregas.pendentesHoje
+                      : _FiltroResumoEntregas.nenhum;
+                });
+                _carregarEntregas();
+              },
+              mostrarPlanejamento: _entregas.isNotEmpty,
+              resumoPorDia: resumoPorDia,
+              chaveDiaSelecionada: _chaveDiaPlanejamentoSelecionado,
+              onSelecionarDia: _selecionarDiaPlanejamento,
+              onAbrirSeletorDia: () => _abrirSeletorPlanejamentoDia(resumoPorDia),
+              filtrosAtivos: _contagemFiltrosAtivos(),
+              onAbrirFiltros: _abrirFiltrosEntrega,
+              mostrarRelatorios: _entregas.isNotEmpty,
+              onRelatorios: _abrirRelatoriosEntrega,
+              mostrarProximosDias: _entregas.isNotEmpty && temProximosDias,
+              proximosDiasExpandido: _proximosDiasPlanejamentoExpandido,
+              onAlternarProximosDias: () {
+                setState(() {
+                  _proximosDiasPlanejamentoExpandido =
+                      !_proximosDiasPlanejamentoExpandido;
+                });
+              },
             ),
-            const SizedBox(height: 10),
-            if (_entregas.isNotEmpty)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Planejamento por dia',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 8),
-                      BarraPlanejamentoEntregaDia(
-                        resumoPorDia: resumoPorDia,
-                        chaveSelecionada: _chaveDiaPlanejamentoSelecionado,
-                        onSelecionar: _selecionarDiaPlanejamento,
-                        onAbrirSeletor: () =>
-                            _abrirSeletorPlanejamentoDia(resumoPorDia),
-                      ),
-                      const SizedBox(height: 10),
-                      ProximosDiasPlanejamentoEntrega(
-                        resumoPorDia: resumoPorDia,
-                        chaveSelecionada: _chaveDiaPlanejamentoSelecionado,
-                        onSelecionar: _selecionarDiaPlanejamento,
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            ElevatedButton.icon(
-                              onPressed: _abrirRelatoriosEntrega,
-                              icon: const Icon(Icons.summarize_outlined),
-                              label: const Text('Relatorios'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+            if (_modoVisualizacao == _ModoVisualizacaoEntregas.lista &&
+                _modoAgruparMesmoCarro) ...[
+              const SizedBox(height: 6),
+              EntregasBarraAgrupamentoMesmoCarro(
+                selecionadas: _idsEntregasSelecionadas.length,
+                onConfirmar: _idsEntregasSelecionadas.length >= 2
+                    ? _confirmarAgrupamentoMesmoCarro
+                    : null,
+                onLimparSelecao: () =>
+                    setState(_idsEntregasSelecionadas.clear),
+                onRemoverAgrupamento: _removerAgrupamentoSelecionadas,
               ),
-            if (_entregas.isNotEmpty) const SizedBox(height: 10),
+            ],
+            const SizedBox(height: 6),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {

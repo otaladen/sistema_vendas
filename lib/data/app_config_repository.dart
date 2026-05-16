@@ -1,5 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../model/config_layout_impressao.dart';
 import 'sync/sync_write_trigger.dart';
 
 class EmpresaConfig {
@@ -31,6 +32,7 @@ class EmpresaConfig {
     this.backupAutomaticoPasta = '',
     this.backupAutomaticoIntervaloMinutos = 1440,
     this.ultimoBackupAutomaticoMs = 0,
+    this.layoutImpressaoJson = '',
   });
 
   final String nomeLoja;
@@ -79,6 +81,12 @@ class EmpresaConfig {
   /// `DateTime.now().millisecondsSinceEpoch` do ultimo backup automatico bem-sucedido.
   final int ultimoBackupAutomaticoMs;
 
+  /// JSON com layout de cupom e orcamento ([LayoutImpressaoEmpresa]).
+  final String layoutImpressaoJson;
+
+  LayoutImpressaoEmpresa get layoutImpressao =>
+      LayoutImpressaoEmpresa.fromJsonString(layoutImpressaoJson);
+
   EmpresaConfig copyWith({
     String? nomeLoja,
     String? telefone,
@@ -105,6 +113,8 @@ class EmpresaConfig {
     String? backupAutomaticoPasta,
     int? backupAutomaticoIntervaloMinutos,
     int? ultimoBackupAutomaticoMs,
+    String? layoutImpressaoJson,
+    LayoutImpressaoEmpresa? layoutImpressao,
   }) {
     return EmpresaConfig(
       nomeLoja: nomeLoja ?? this.nomeLoja,
@@ -143,6 +153,9 @@ class EmpresaConfig {
               this.backupAutomaticoIntervaloMinutos,
       ultimoBackupAutomaticoMs:
           ultimoBackupAutomaticoMs ?? this.ultimoBackupAutomaticoMs,
+      layoutImpressaoJson: layoutImpressao != null
+          ? layoutImpressao.toJsonString()
+          : (layoutImpressaoJson ?? this.layoutImpressaoJson),
     );
   }
 }
@@ -180,6 +193,7 @@ class AppConfigRepository {
       'config_backup_automatico_ultimo_ms';
   static const _kMigracaoMotoristaEntregaConcluida =
       'config_migracao_motorista_entrega_concluida';
+  static const _kLayoutImpressaoJson = 'config_layout_impressao_json';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -227,6 +241,7 @@ class AppConfigRepository {
         return m.clamp(15, 10080);
       }(),
       ultimoBackupAutomaticoMs: prefs.getInt(_kBackupAutomaticoUltimoMs) ?? 0,
+      layoutImpressaoJson: prefs.getString(_kLayoutImpressaoJson) ?? '',
     );
   }
 
@@ -319,6 +334,7 @@ class AppConfigRepository {
       _kBackupAutomaticoUltimoMs,
       config.ultimoBackupAutomaticoMs < 0 ? 0 : config.ultimoBackupAutomaticoMs,
     );
+    await prefs.setString(_kLayoutImpressaoJson, config.layoutImpressaoJson);
     if (propagarRede) {
       notificarAlteracaoParaRede();
     }

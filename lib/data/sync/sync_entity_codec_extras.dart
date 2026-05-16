@@ -326,6 +326,7 @@ class SyncEntityCodecExtras {
         'backupAutomaticoPasta': c.backupAutomaticoPasta,
         'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
         'ultimoBackupAutomaticoMs': c.ultimoBackupAutomaticoMs,
+        'layoutImpressaoJson': c.layoutImpressaoJson,
       };
 
   static EmpresaConfig empresaConfigDeMap(
@@ -377,6 +378,8 @@ class SyncEntityCodecExtras {
       ultimoBackupAutomaticoMs:
           (m['ultimoBackupAutomaticoMs'] as num?)?.toInt() ??
               base.ultimoBackupAutomaticoMs,
+      layoutImpressaoJson:
+          (m['layoutImpressaoJson'] ?? base.layoutImpressaoJson).toString(),
     );
   }
 

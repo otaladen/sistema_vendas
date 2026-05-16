@@ -23,6 +23,7 @@ import '../model/kit_orcamento.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import '../services/cupom_pdf_layout.dart';
 import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'produto_detalhe_venda_page.dart';
@@ -2760,152 +2761,138 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final validade = dataEmissao.add(Duration(days: _validadeOrcamentoDias));
     final validadeFmt = DateFormat('dd/MM/yyyy').format(validade);
     final descontoOrcamento = venda.descontoImplicitoTotal;
+    final modelo = empresaModeloPdfDeString(empresa.modeloPdf);
+    final comLogo = logoBytes.isNotEmpty;
+    final layout = empresa.layoutImpressao.orcamento;
+    var linhasTexto = 14;
+    if (cliente?.telefone.trim().isNotEmpty ?? false) linhasTexto++;
+    if (venda.enderecoEntrega.trim().isNotEmpty) linhasTexto++;
+    if (venda.observacaoEntrega.trim().isNotEmpty) linhasTexto++;
+    if (descontoOrcamento > 0) linhasTexto++;
+
     doc.addPage(
       pw.Page(
-        pageFormat: empresa.modeloPdf == 'a4'
-            ? PdfPageFormat.a4
-            : PdfPageFormat(80 * PdfPageFormat.mm, double.infinity),
-        margin: const pw.EdgeInsets.all(8),
+        pageFormat: CupomPdfLayout.formatoPagina(
+          modelo,
+          linhasTexto: linhasTexto,
+          qtdItens: venda.itens.length,
+          linhasExtras: 3,
+          comLogo: comLogo,
+        ),
         build: (context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
+            mainAxisSize: pw.MainAxisSize.min,
             children: [
-              pw.Center(
-                child: pw.Text(
-                  'ORCAMENTO - ${empresa.nomeLoja}',
-                  style: pw.TextStyle(
-                    fontSize: 11,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
+              ...CupomPdfLayout.cabecalhoEmpresa(
+                layout: layout,
+                nomeLoja: empresa.nomeLoja,
+                logoBytes: comLogo ? logoBytes : null,
+                telefone: empresa.telefone,
+                endereco: empresa.endereco,
               ),
-              if (logoBytes.isNotEmpty)
-                pw.Center(
-                  child: pw.Padding(
-                    padding: const pw.EdgeInsets.only(top: 4, bottom: 4),
-                    child: pw.Image(pw.MemoryImage(logoBytes), height: 45),
-                  ),
-                ),
-              if (empresa.telefone.trim().isNotEmpty)
-                pw.Center(
-                  child: pw.Text(
-                    'Tel: ${empresa.telefone}',
-                    style: const pw.TextStyle(fontSize: 8),
-                  ),
-                ),
-              if (empresa.endereco.trim().isNotEmpty)
-                pw.Center(
-                  child: pw.Text(
-                    empresa.endereco,
-                    style: const pw.TextStyle(fontSize: 8),
-                    textAlign: pw.TextAlign.center,
-                  ),
-                ),
-              pw.SizedBox(height: 6),
-              pw.Text(
+              CupomPdfLayout.faixaTipoDocumento(
+                layout: layout,
+                titulo: layout.tituloDocumentoEfetivoOrcamento,
+              ),
+              CupomPdfLayout.textoCorpo(
                 'Numero: ${venda.numeroOrcamento}',
-                style: const pw.TextStyle(fontSize: 9),
+                layout,
               ),
-              pw.Text(
-                'Data: $dataHora',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              pw.Text(
+              CupomPdfLayout.textoCorpo('Data: $dataHora', layout),
+              CupomPdfLayout.textoCorpo(
                 'Cliente: ${cliente?.nomeRazao ?? 'Sem cliente'}',
-                style: const pw.TextStyle(fontSize: 9),
+                layout,
               ),
-              pw.Text(
-                'Vendedor: ${_rotuloVendedorOrcamentoPdf(venda)}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              if ((cliente?.telefone.trim().isNotEmpty ?? false))
-                pw.Text(
+              if (layout.exibirVendedor)
+                CupomPdfLayout.textoCorpo(
+                  'Vendedor: ${_rotuloVendedorOrcamentoPdf(venda)}',
+                  layout,
+                ),
+              if (layout.exibirTelefoneCliente &&
+                  (cliente?.telefone.trim().isNotEmpty ?? false))
+                CupomPdfLayout.textoCorpo(
                   'Telefone: ${cliente!.telefone}',
-                  style: const pw.TextStyle(fontSize: 9),
+                  layout,
                 ),
-              pw.Text(
-                'Validade do orcamento: $validadeFmt ($_validadeOrcamentoDias dias)',
-                style: pw.TextStyle(
-                  fontSize: 9,
+              if (layout.exibirValidadeOrcamento)
+                CupomPdfLayout.textoCorpo(
+                  'Validade do orcamento: $validadeFmt ($_validadeOrcamentoDias dias)',
+                  layout,
                   fontWeight: pw.FontWeight.bold,
                 ),
-              ),
-              pw.Text(
-                'Entrega: ${_rotuloTipoEntrega(venda.tipoEntrega)}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
-              if (venda.enderecoEntrega.trim().isNotEmpty)
-                pw.Text(
+              if (layout.exibirEntrega)
+                CupomPdfLayout.textoCorpo(
+                  'Entrega: ${_rotuloTipoEntrega(venda.tipoEntrega)}',
+                  layout,
+                ),
+              if (layout.exibirEnderecoEntrega &&
+                  venda.enderecoEntrega.trim().isNotEmpty)
+                CupomPdfLayout.textoCorpo(
                   'Endereco: ${venda.enderecoEntrega}',
-                  style: const pw.TextStyle(fontSize: 9),
+                  layout,
                 ),
-              if (venda.observacaoEntrega.trim().isNotEmpty)
-                pw.Text(
+              if (layout.exibirObservacaoEntrega &&
+                  venda.observacaoEntrega.trim().isNotEmpty)
+                CupomPdfLayout.textoCorpo(
                   'Obs: ${venda.observacaoEntrega}',
-                  style: const pw.TextStyle(fontSize: 9),
+                  layout,
                 ),
-              pw.SizedBox(height: 8),
-              pw.Text(
-                'ITENS',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.SizedBox(height: 4),
+              CupomPdfLayout.divisoriaSecao(layout: layout),
+              CupomPdfLayout.tituloSecao('ITENS', layout),
+              if (CupomPdfLayout.cabecalhoColunasItens(layout) != null)
+                CupomPdfLayout.cabecalhoColunasItens(layout)!,
               ...venda.itens.map(
-                (item) => pw.Padding(
-                  padding: const pw.EdgeInsets.only(bottom: 4),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(
-                        item.nomeProduto,
-                        style: const pw.TextStyle(fontSize: 9),
-                      ),
-                      pw.Text(
-                        '${item.quantidade} x ${_formatarMoeda(item.precoUnitario)} = ${_formatarMoeda(item.subtotal)}',
-                        style: const pw.TextStyle(fontSize: 8),
-                      ),
-                    ],
-                  ),
+                (item) => CupomPdfLayout.itemVenda(
+                  layout: layout,
+                  nomeProduto: item.nomeProduto,
+                  quantidade: item.quantidade,
+                  precoUnitario: item.precoUnitario,
+                  subtotal: item.subtotal,
+                  formatarMoeda: _formatarMoeda,
                 ),
               ),
-              pw.Divider(),
-              pw.Text(
-                'Subtotal produtos: ${_formatarMoeda(venda.somaSubtotalItens)}',
-                style: const pw.TextStyle(fontSize: 9),
+              if (layout.divisoriaDestaqueAntesTotais)
+                CupomPdfLayout.divisoriaSecao(layout: layout, destaque: true),
+              CupomPdfLayout.linhaTotal(
+                layout: layout,
+                rotulo: 'Subtotal produtos:',
+                valor: _formatarMoeda(venda.somaSubtotalItens),
               ),
-              pw.Text(
-                'Frete: ${_formatarMoeda(venda.valorFrete)}',
-                style: const pw.TextStyle(fontSize: 9),
+              CupomPdfLayout.linhaTotal(
+                layout: layout,
+                rotulo: 'Frete:',
+                valor: _formatarMoeda(venda.valorFrete),
               ),
               if (descontoOrcamento > 0)
-                pw.Text(
-                  'Desconto: - ${_formatarMoeda(descontoOrcamento)}',
-                  style: const pw.TextStyle(fontSize: 9),
+                CupomPdfLayout.linhaTotal(
+                  layout: layout,
+                  rotulo: 'Desconto:',
+                  valor: '- ${_formatarMoeda(descontoOrcamento)}',
                 ),
-              pw.Text(
-                'Total: ${_formatarMoeda(venda.total)}',
-                style: pw.TextStyle(
-                  fontSize: 10,
-                  fontWeight: pw.FontWeight.bold,
-                ),
+              CupomPdfLayout.linhaTotal(
+                layout: layout,
+                rotulo: 'Total:',
+                valor: _formatarMoeda(venda.total),
+                destaque: layout.destacarTotal,
               ),
-              pw.Text(
-                'Pagamento: ${_textoPagamentoOrcamentoPdf(venda)}',
-                style: const pw.TextStyle(fontSize: 9),
+              CupomPdfLayout.linhaTotal(
+                layout: layout,
+                rotulo: 'Pagamento:',
+                valor: _textoPagamentoOrcamentoPdf(venda),
+                colunas: layout.alinharPagamentoColunas,
               ),
-              pw.SizedBox(height: 6),
-              pw.Text(
+              CupomPdfLayout.textoCorpo(
                 'Este orcamento e valido por $_validadeOrcamentoDias dias a partir da data de emissao.',
-                style: const pw.TextStyle(fontSize: 8),
+                layout,
+                fontSize: layout.tamanhoFonteCorpo.fontSizeContato,
               ),
-              pw.SizedBox(height: 6),
-              pw.Text(
-                empresa.rodapeOrcamento,
-                style: const pw.TextStyle(fontSize: 8),
+              CupomPdfLayout.espacoBloco(layout),
+              ...CupomPdfLayout.rodapeDocumento(
+                layout: layout,
+                textoRodape: empresa.rodapeOrcamento,
               ),
+              pw.SizedBox(height: CupomPdfLayout.feedCorteMm * PdfPageFormat.mm),
             ],
           );
         },
@@ -3028,7 +3015,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           name: 'Orcamento ${venda.numeroOrcamento}',
           format: config.modeloPdf == 'a4'
               ? PdfPageFormat.a4
-              : PdfPageFormat(80 * PdfPageFormat.mm, double.infinity),
+              : PdfPageFormat(
+                  CupomPdfLayout.larguraBobinaMm * PdfPageFormat.mm,
+                  280 * PdfPageFormat.mm,
+                ),
         );
         return;
       }

@@ -22,6 +22,7 @@ import 'widgets/rede_sincronizacao_card.dart';
 import '../model/mensagem_log.dart';
 import '../model/mensagem_template.dart';
 import 'config_impressora_page.dart';
+import 'layout_impressao_page.dart';
 
 class ConfiguracoesPage extends StatefulWidget {
   const ConfiguracoesPage({
@@ -1272,6 +1273,25 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         onChanged: (value) {
                           if (value == null) return;
                           setState(() => _modeloPdf = value);
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Layout do cupom e orcamento'),
+                        subtitle: const Text(
+                          'Divisorias, colunas, fontes e campos — com pre-visualizacao',
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () async {
+                          await Navigator.push<void>(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => LayoutImpressaoPage(
+                                appConfigRepository: widget.appConfigRepository,
+                              ),
+                            ),
+                          );
                         },
                       ),
                       const SizedBox(height: 8),

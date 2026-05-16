@@ -7,6 +7,7 @@ import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
+import '../services/cupom_pdf_layout.dart';
 import '../services/print_service.dart';
 
 Future<String?> escolherSalvarPdfCupomVenda({
@@ -99,7 +100,10 @@ Future<void> mostrarFluxoImpressaoCupomVenda(
         name: suggestedFileName.replaceAll('.pdf', ''),
         format: config.modeloPdf == 'a4'
             ? PdfPageFormat.a4
-            : PdfPageFormat(80 * PdfPageFormat.mm, double.infinity),
+            : PdfPageFormat(
+                CupomPdfLayout.larguraBobinaMm * PdfPageFormat.mm,
+                280 * PdfPageFormat.mm,
+              ),
       );
       return;
     }
