@@ -120,7 +120,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(2, 12069401530715107),
     name: 'Produto',
-    lastPropertyId: const obx_int.IdUid(27, 6227758820947378730),
+    lastPropertyId: const obx_int.IdUid(30, 2050939691425796341),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -283,6 +283,24 @@ final _entities = <obx_int.ModelEntity>[
         flags: 8,
         indexId: const obx_int.IdUid(19, 518194309583411298),
       ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(28, 555489406867958111),
+        name: 'cest',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(29, 8206057738670764984),
+        name: 'grupoTributario',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(30, 2050939691425796341),
+        name: 'cfopVenda',
+        type: 9,
+        flags: 0,
+      ),
     ],
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[
@@ -296,7 +314,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(37, 3752092449385205042),
+    lastPropertyId: const obx_int.IdUid(43, 1358223845416889894),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -519,6 +537,42 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(37, 3752092449385205042),
         name: 'caminhaoEntrega',
         type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(38, 7674872352055595985),
+        name: 'nfceChaveAcesso',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(39, 2886104941282757016),
+        name: 'nfceNumero',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(40, 7109635794273905674),
+        name: 'nfceSerie',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(41, 977970962015606801),
+        name: 'nfceProtocolo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(42, 8184989197232184431),
+        name: 'nfceUrlDanfe',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(43, 1358223845416889894),
+        name: 'nfceEmitidaEm',
+        type: 10,
         flags: 0,
       ),
     ],
@@ -1826,7 +1880,10 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final localizacaoOffset = fbb.writeString(object.localizacao);
         final ncmOffset = fbb.writeString(object.ncm);
         final fotoPathOffset = fbb.writeString(object.fotoPath);
-        fbb.startTable(28);
+        final cestOffset = fbb.writeString(object.cest);
+        final grupoTributarioOffset = fbb.writeString(object.grupoTributario);
+        final cfopVendaOffset = fbb.writeString(object.cfopVenda);
+        fbb.startTable(31);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, nomeOffset);
         fbb.addInt64(2, object.estoque);
@@ -1853,6 +1910,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addInt64(24, object.estoqueReservado);
         fbb.addFloat64(25, object.custoMedio);
         fbb.addBool(26, object.ativo);
+        fbb.addOffset(27, cestOffset);
+        fbb.addOffset(28, grupoTributarioOffset);
+        fbb.addOffset(29, cfopVendaOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1904,6 +1964,15 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final ncmParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 38, '');
+        final cestParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 58, '');
+        final grupoTributarioParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 60, '');
+        final cfopVendaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 62, '');
         final estoqueParam = const fb.Int64Reader().vTableGet(
           buffer,
           rootOffset,
@@ -1989,6 +2058,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           fotoPath: fotoPathParam,
           localizacao: localizacaoParam,
           ncm: ncmParam,
+          cest: cestParam,
+          grupoTributario: grupoTributarioParam,
+          cfopVenda: cfopVendaParam,
           estoque: estoqueParam,
           estoqueReal: estoqueRealParam,
           estoqueReservado: estoqueReservadoParam,
@@ -2056,7 +2128,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
           object.complementoEntregaJson,
         );
         final caminhaoEntregaOffset = fbb.writeString(object.caminhaoEntrega);
-        fbb.startTable(38);
+        final nfceChaveAcessoOffset = fbb.writeString(object.nfceChaveAcesso);
+        final nfceNumeroOffset = fbb.writeString(object.nfceNumero);
+        final nfceSerieOffset = fbb.writeString(object.nfceSerie);
+        final nfceProtocoloOffset = fbb.writeString(object.nfceProtocolo);
+        final nfceUrlDanfeOffset = fbb.writeString(object.nfceUrlDanfe);
+        fbb.startTable(44);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -2093,6 +2170,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addBool(34, object.carretoReservaAteSaida);
         fbb.addInt64(35, object.ordemEntrega);
         fbb.addOffset(36, caminhaoEntregaOffset);
+        fbb.addOffset(37, nfceChaveAcessoOffset);
+        fbb.addOffset(38, nfceNumeroOffset);
+        fbb.addOffset(39, nfceSerieOffset);
+        fbb.addOffset(40, nfceProtocoloOffset);
+        fbb.addOffset(41, nfceUrlDanfeOffset);
+        fbb.addInt64(42, object.nfceEmitidaEm?.millisecondsSinceEpoch);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -2105,6 +2188,11 @@ obx_int.ModelDefinition getObjectBoxModel() {
           buffer,
           rootOffset,
           56,
+        );
+        final nfceEmitidaEmValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          88,
         );
         final idParam = const fb.Int64Reader().vTableGet(
           buffer,
@@ -2258,6 +2346,27 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final complementoEntregaJsonParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 70, '');
+        final nfceChaveAcessoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 78, '');
+        final nfceNumeroParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 80, '');
+        final nfceSerieParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 82, '');
+        final nfceProtocoloParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 84, '');
+        final nfceUrlDanfeParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 86, '');
+        final nfceEmitidaEmParam = nfceEmitidaEmValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                nfceEmitidaEmValue,
+                isUtc: true,
+              );
         final object = Venda(
           id: idParam,
           data: dataParam,
@@ -2293,6 +2402,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
           ordemEntrega: ordemEntregaParam,
           caminhaoEntrega: caminhaoEntregaParam,
           complementoEntregaJson: complementoEntregaJsonParam,
+          nfceChaveAcesso: nfceChaveAcessoParam,
+          nfceNumero: nfceNumeroParam,
+          nfceSerie: nfceSerieParam,
+          nfceProtocolo: nfceProtocoloParam,
+          nfceUrlDanfe: nfceUrlDanfeParam,
+          nfceEmitidaEm: nfceEmitidaEmParam,
         );
         object.cliente.targetId = const fb.Int64Reader().vTableGet(
           buffer,
@@ -3928,6 +4043,21 @@ class Produto_ {
     _entities[1].properties[25],
   );
 
+  /// See [Produto.cest].
+  static final cest = obx.QueryStringProperty<Produto>(
+    _entities[1].properties[26],
+  );
+
+  /// See [Produto.grupoTributario].
+  static final grupoTributario = obx.QueryStringProperty<Produto>(
+    _entities[1].properties[27],
+  );
+
+  /// See [Produto.cfopVenda].
+  static final cfopVenda = obx.QueryStringProperty<Produto>(
+    _entities[1].properties[28],
+  );
+
   /// see [Produto.historicoEntradas]
   static final historicoEntradas =
       obx.QueryBacklinkToMany<HistoricoEntrada, Produto>(
@@ -4111,6 +4241,36 @@ class Venda_ {
   /// See [Venda.caminhaoEntrega].
   static final caminhaoEntrega = obx.QueryStringProperty<Venda>(
     _entities[2].properties[35],
+  );
+
+  /// See [Venda.nfceChaveAcesso].
+  static final nfceChaveAcesso = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[36],
+  );
+
+  /// See [Venda.nfceNumero].
+  static final nfceNumero = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[37],
+  );
+
+  /// See [Venda.nfceSerie].
+  static final nfceSerie = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[38],
+  );
+
+  /// See [Venda.nfceProtocolo].
+  static final nfceProtocolo = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[39],
+  );
+
+  /// See [Venda.nfceUrlDanfe].
+  static final nfceUrlDanfe = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[40],
+  );
+
+  /// See [Venda.nfceEmitidaEm].
+  static final nfceEmitidaEm = obx.QueryDateProperty<Venda>(
+    _entities[2].properties[41],
   );
 
   /// see [Venda.itens]

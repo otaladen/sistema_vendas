@@ -1571,6 +1571,30 @@ class VendaRepository {
     _notificarRedeAposEscrita();
   }
 
+  void registrarNfceEmitida({
+    required int vendaId,
+    required String chaveAcesso,
+    String numero = '',
+    String serie = '',
+    String protocolo = '',
+    String urlDanfe = '',
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      venda.nfceChaveAcesso = chaveAcesso.trim();
+      venda.nfceNumero = numero.trim();
+      venda.nfceSerie = serie.trim();
+      venda.nfceProtocolo = protocolo.trim();
+      venda.nfceUrlDanfe = urlDanfe.trim();
+      venda.nfceEmitidaEm = DateTime.now().toUtc();
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita();
+  }
+
   void vincularClienteVendaFinalizada(int vendaId, int clienteId) {
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);

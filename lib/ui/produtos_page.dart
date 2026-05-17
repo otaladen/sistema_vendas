@@ -7,12 +7,18 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../main.dart';
 import '../data/produto_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
+import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../model/produto.dart';
+import '../config/busca_imagem_config.dart';
+import '../services/brasil_api_service.dart';
+import '../services/gemini_service.dart';
 import '../services/print_service.dart';
+import '../services/produto_imagem_busca_service.dart';
 import '../services/produto_imagem_service.dart';
 import 'widgets/abas_historico_produto_widget.dart';
 
@@ -71,6 +77,7 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   static const List<String> _unidades = [
     'UN',
     'M',
+    'MTS',
     'M2',
     'M3',
     'KG',
@@ -201,6 +208,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   final _fabricanteController = TextEditingController();
   final _codigoBarrasController = TextEditingController();
   final _ncmController = TextEditingController();
+  final _cestController = TextEditingController();
+  final _cfopVendaController = TextEditingController();
   final _localizacaoController = TextEditingController();
   final _precoCustoController = TextEditingController();
   final _preco1Controller = TextEditingController();
@@ -209,7 +218,16 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   final _estoqueController = TextEditingController();
   final _quantidadeMinimaController = TextEditingController();
   final _subcategoriaLivreController = TextEditingController();
+  final _brasilApiService = BrasilApiService();
+  final _geminiService = GeminiService();
+  final _produtoImagemBuscaService = ProdutoImagemBuscaService();
+  bool _consultandoGtin = false;
+  bool _buscandoFoto = false;
+  bool _consultandoNcm = false;
+  bool _consultandoGemini = false;
+  String _infoNcmBrasilApi = '';
   String _unidadeSelecionada = 'UN';
+  String _grupoTributarioSelecionado = GrupoTributarioProduto.tributado.codigo;
   String? _categoriaSelecionada;
   String? _subcategoriaSelecionada;
   int? _produtoEmEdicaoId;
@@ -272,6 +290,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     _fabricanteController.dispose();
     _codigoBarrasController.dispose();
     _ncmController.dispose();
+    _cestController.dispose();
+    _cfopVendaController.dispose();
     _localizacaoController.dispose();
     _precoCustoController.dispose();
     _preco1Controller.dispose();
@@ -313,6 +333,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _fabricanteController,
       _codigoBarrasController,
       _ncmController,
+      _cestController,
+      _cfopVendaController,
       _localizacaoController,
       _precoCustoController,
       _preco1Controller,
@@ -891,7 +913,10 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _fabricanteController.clear();
       _codigoBarrasController.clear();
       _ncmController.clear();
+      _cestController.clear();
+      _cfopVendaController.clear();
       _localizacaoController.clear();
+      _grupoTributarioSelecionado = GrupoTributarioProduto.tributado.codigo;
       _precoCustoController.clear();
       _preco1Controller.clear();
       _preco2Controller.clear();
@@ -909,6 +934,11 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _fotoPathAtual = '';
       _fotoOrigemLocalPath = null;
       _fotoFoiRemovida = false;
+      _consultandoGtin = false;
+      _consultandoNcm = false;
+      _consultandoGemini = false;
+      _buscandoFoto = false;
+      _infoNcmBrasilApi = '';
     });
     _formKey.currentState?.reset();
   }
@@ -932,6 +962,212 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       }
       _fotoPathAtual = '';
     });
+  }
+
+  Future<void> _excluirArquivoTemporarioSeExistir(String? path) async {
+    if (path == null || path.trim().isEmpty) return;
+    try {
+      final f = File(path);
+      if (f.existsSync()) {
+        await f.delete();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _abrirUrlExterna(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    try {
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        await launchUrl(uri);
+      }
+    } catch (_) {
+      if (mounted) {
+        _snackbarBrasilApi('Nao foi possivel abrir: $url', erro: true);
+      }
+    }
+  }
+
+  Future<void> _mostrarDialogoErroGemini(GeminiServiceException erro) async {
+    final passos = erro.instrucoesCorrecao ?? const <String>[];
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('API Gemini indisponivel'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(erro.message),
+              if (passos.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                for (var i = 0; i < passos.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text('${i + 1}. ${passos[i]}'),
+                  ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fechar'),
+          ),
+          if (erro.chaveBloqueadaParaApi)
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _abrirUrlExterna('https://aistudio.google.com/apikey');
+              },
+              child: const Text('Criar chave Gemini'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _mostrarDialogoErroBuscaImagem(BuscaImagemException erro) async {
+    final passos = erro.instrucoesCorrecao ?? const <String>[];
+    final url = erro.urlAtivacao;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Busca de foto indisponivel'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(erro.message),
+              if (passos.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                for (var i = 0; i < passos.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text('${i + 1}. ${passos[i]}'),
+                  ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fechar'),
+          ),
+          if (url != null && url.isNotEmpty)
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _abrirUrlExterna(url);
+              },
+              child: const Text('Abrir ajuda'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _mostrarDialogoConfigBuscaImagem() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Busca de foto'),
+        content: const Text(
+          'A busca usa DuckDuckGo (gratuita, sem cadastro). '
+          'Confira sua conexao com a internet e tente de novo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _buscarFotoProdutoNaWeb() async {
+    final nome = _nomeController.text.trim();
+    if (nome.isEmpty) {
+      _snackbarBrasilApi(
+        'Informe o nome do produto (ou padronize com IA) antes de buscar foto.',
+        erro: true,
+      );
+      return;
+    }
+
+    if (!BuscaImagemConfig.configurado) {
+      await _mostrarDialogoConfigBuscaImagem();
+      return;
+    }
+
+    final termo = ProdutoImagemBuscaService.montarTermoBusca(
+      nome: nome,
+      marca: _marcaController.text,
+    );
+
+    final pathAnterior = _fotoOrigemLocalPath;
+    setState(() => _buscandoFoto = true);
+
+    try {
+      final pathLocal = await _produtoImagemBuscaService
+          .buscarEBaixarPrimeiraImagem(termo);
+      if (!mounted) return;
+
+      if (pathLocal == null) {
+        _snackbarBrasilApi(
+          'Nenhuma imagem encontrada ou baixavel para "$termo".',
+          erro: true,
+        );
+        return;
+      }
+
+      await _excluirArquivoTemporarioSeExistir(pathAnterior);
+      if (!mounted) return;
+
+      setState(() {
+        _fotoOrigemLocalPath = pathLocal;
+        _fotoFoiRemovida = false;
+      });
+
+      final semantic = Theme.of(context).extension<AppSemanticColors>();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Foto carregada na pre-visualizacao. Salve o produto para gravar.',
+          ),
+          duration: const Duration(seconds: 4),
+          backgroundColor: semantic?.successFg ?? Colors.green.shade700,
+        ),
+      );
+    } on BuscaImagemConfigException catch (e) {
+      if (e.instrucoesCorrecao != null && e.instrucoesCorrecao!.isNotEmpty) {
+        await _mostrarDialogoErroBuscaImagem(
+          BuscaImagemException(
+            e.message,
+            instrucoesCorrecao: e.instrucoesCorrecao,
+            urlAtivacao: BuscaImagemConfig.urlCadastroBraveApi,
+            codigoErro: 'CONFIG_MISSING',
+          ),
+        );
+      } else {
+        _snackbarBrasilApi(e.message, erro: true);
+      }
+    } on BuscaImagemException catch (e) {
+      if (e.instrucoesCorrecao != null && e.instrucoesCorrecao!.isNotEmpty) {
+        await _mostrarDialogoErroBuscaImagem(e);
+      } else {
+        _snackbarBrasilApi(e.message, erro: true);
+      }
+    } catch (e) {
+      _snackbarBrasilApi('Erro ao buscar foto: $e', erro: true);
+    } finally {
+      if (mounted) setState(() => _buscandoFoto = false);
+    }
   }
 
   Future<void> _limparFormularioComConfirmacao() async {
@@ -1060,7 +1296,473 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     if (unidade == null || unidade.trim().isEmpty) {
       return 'UN';
     }
-    return _unidades.contains(unidade) ? unidade : 'UN';
+    final u = unidade.trim().toUpperCase();
+    if (u == 'METRO') return 'M';
+    return _unidades.contains(u) ? u : 'UN';
+  }
+
+  String? _validarNcm(String? value) {
+    final digits = (value ?? '').replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      return 'NCM obrigatorio para NFC-e (8 digitos).';
+    }
+    if (digits.length != 8) {
+      return 'NCM deve ter exatamente 8 digitos.';
+    }
+    return null;
+  }
+
+  String _formatarNcmExibicao(String digitos) {
+    final d = digitos.replaceAll(RegExp(r'\D'), '');
+    if (d.length != 8) return digitos.trim();
+    return '${d.substring(0, 4)}.${d.substring(4, 6)}.${d.substring(6, 8)}';
+  }
+
+  Widget? _suffixAcaoCampo({
+    required bool carregando,
+    required VoidCallback? onPressed,
+    required String tooltip,
+    IconData icon = Icons.cloud_download_outlined,
+  }) {
+    if (carregando) {
+      return const Padding(
+        padding: EdgeInsets.all(12),
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    return IconButton(
+      tooltip: tooltip,
+      icon: Icon(icon),
+      onPressed: onPressed,
+    );
+  }
+
+  Widget? _suffixConsultaBrasilApi({
+    required bool carregando,
+    required VoidCallback? onPressed,
+    required String tooltip,
+  }) =>
+      _suffixAcaoCampo(
+        carregando: carregando,
+        onPressed: onPressed,
+        tooltip: tooltip,
+        icon: Icons.cloud_download_outlined,
+      );
+
+  String? _mapearCategoriaGeminiParaSistema(String categoriaGemini) {
+    const mapa = <String, String>{
+      'Hidráulica': 'Hidraulica',
+      'Elétrica': 'Eletrica',
+      'Ferramentas': 'Ferramentas',
+      'Tintas': 'Tintas e Acessorios',
+      'Ferragens': 'Ferragens',
+      'Outros': _categoriaOutros,
+    };
+    final chave = mapa[categoriaGemini.trim()] ?? _categoriaOutros;
+    if (_categoriasMateriaisConstrucao.containsKey(chave)) {
+      return chave;
+    }
+    return _categoriaOutros;
+  }
+
+  String _montarCatalogoSubcategoriasParaGemini() {
+    const mapaGemini = <String, String>{
+      'Hidráulica': 'Hidraulica',
+      'Elétrica': 'Eletrica',
+      'Ferramentas': 'Ferramentas',
+      'Tintas': 'Tintas e Acessorios',
+      'Ferragens': 'Ferragens',
+      'Outros': _categoriaOutros,
+    };
+    final buf = StringBuffer(
+      'Catalogo da loja — use subcategoria_sugerida com o texto EXATO de uma opcao abaixo:\n',
+    );
+    for (final entry in mapaGemini.entries) {
+      final categoriaSistema = entry.value;
+      if (categoriaSistema == _categoriaOutros) continue;
+      final subs = _categoriasMateriaisConstrucao[categoriaSistema] ?? [];
+      if (subs.isEmpty) continue;
+      buf.writeln(
+        '- ${entry.key} ($categoriaSistema): ${subs.join(' | ')}',
+      );
+    }
+    return buf.toString();
+  }
+
+  String? _resolverSubcategoriaGemini({
+    required String categoriaSistema,
+    required String subcategoriaGemini,
+  }) {
+    final sugestao = subcategoriaGemini.trim();
+    if (categoriaSistema == _categoriaOutros) {
+      return null;
+    }
+    if (sugestao.isEmpty) {
+      return null;
+    }
+
+    final lista = _categoriasMateriaisConstrucao[categoriaSistema] ?? [];
+    if (lista.isEmpty) {
+      return null;
+    }
+
+    String norm(String s) =>
+        s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+    final alvo = norm(sugestao);
+    for (final sub in lista) {
+      if (norm(sub) == alvo) {
+        return sub;
+      }
+    }
+    for (final sub in lista) {
+      final ns = norm(sub);
+      if (ns.contains(alvo) || alvo.contains(ns)) {
+        return sub;
+      }
+    }
+
+    if (categoriaSistema == 'Hidraulica') {
+      final t = sugestao.toLowerCase();
+      if (t.contains('tubo') ||
+          t.contains('conex') ||
+          t.contains('pvc') ||
+          t.contains('esgoto') ||
+          t.contains('cano')) {
+        return 'Tubos e Conexoes';
+      }
+      if (t.contains('torneira') || t.contains('misturador')) {
+        return 'Torneiras';
+      }
+    }
+
+    if (categoriaSistema == 'Tintas e Acessorios') {
+      final t = sugestao.toLowerCase();
+      if (t.contains('tinta')) {
+        if (t.contains('esmalte')) return 'Tinta Esmalte';
+        return 'Tinta Acrilica';
+      }
+    }
+
+    if (categoriaSistema == 'Cimento e Argamassas') {
+      final t = sugestao.toLowerCase();
+      if (t.contains('argamassa')) return 'Argamassa';
+      if (t.contains('cimento')) return 'Cimento';
+    }
+
+    return null;
+  }
+
+  String _extrairCodigoBarrasDoTexto(String texto) {
+    for (final match in RegExp(r'\b\d{8,14}\b').allMatches(texto)) {
+      final d = match.group(0)!;
+      if (d.length == 8 ||
+          d.length == 12 ||
+          d.length == 13 ||
+          d.length == 14) {
+        return d;
+      }
+    }
+    return '';
+  }
+
+  Future<void> _enriquecerNcmAposGemini(String ncm8) async {
+    if (ncm8.length != 8) return;
+    try {
+      final dados = await _brasilApiService.consultarNcm(ncm8);
+      if (!mounted || dados == null) return;
+      setState(() {
+        _ncmController.text = _formatarNcmExibicao(dados.codigoDigitos);
+        _infoNcmBrasilApi = dados.descricao.trim().isEmpty
+            ? 'NCM valido: ${_formatarNcmExibicao(ncm8)}'
+            : 'NCM valido: ${dados.descricao.trim()}';
+        if (dados.cest.length == 7 && _cestController.text.trim().isEmpty) {
+          _cestController.text = dados.cest;
+        }
+      });
+    } catch (_) {
+      // Falha na Brasil API nao invalida sugestao da IA.
+    }
+  }
+
+  String _mapearUnidadeGeminiParaSistema(String unidadeGemini) {
+    var u = unidadeGemini.trim().toUpperCase();
+    if (u == 'MT') u = 'M';
+    final normalizada = _normalizarUnidade(u);
+    if (_unidades.contains(normalizada)) {
+      return normalizada;
+    }
+    return 'UN';
+  }
+
+  Future<void> _padronizarProdutoComGemini() async {
+    final texto = _nomeController.text.trim();
+    if (texto.isEmpty) {
+      _snackbarBrasilApi(
+        'Digite o nome ou descricao do produto antes de padronizar com a IA.',
+        erro: true,
+      );
+      return;
+    }
+
+    if (!_geminiService.configurado) {
+      _snackbarBrasilApi(
+        'Chave da API Gemini nao configurada. Cole em lib/services/gemini_service.dart.',
+        erro: true,
+      );
+      return;
+    }
+
+    setState(() => _consultandoGemini = true);
+    try {
+      final model = await _geminiService.padronizarProdutoModel(
+        texto,
+        catalogoSubcategorias: _montarCatalogoSubcategoriasParaGemini(),
+      );
+      if (!mounted) return;
+
+      if (model == null) {
+        _snackbarBrasilApi(
+          'A IA nao retornou sugestao para este produto.',
+          erro: true,
+        );
+        return;
+      }
+
+      final categoriaSistema = _mapearCategoriaGeminiParaSistema(
+        model.categoriaSugerida,
+      );
+      final subcategoriaSistema = _resolverSubcategoriaGemini(
+        categoriaSistema: categoriaSistema ?? _categoriaOutros,
+        subcategoriaGemini: model.subcategoriaSugerida,
+      );
+      final unidadeSistema = _mapearUnidadeGeminiParaSistema(
+        model.unidadeMedida,
+      );
+
+      var codigoBarras = model.codigoBarras;
+      if (codigoBarras.isEmpty) {
+        codigoBarras = _extrairCodigoBarrasDoTexto(texto);
+      }
+
+      setState(() {
+        _nomeController.text = model.nomePadronizado;
+        _categoriaSelecionada = categoriaSistema;
+        if (categoriaSistema == _categoriaOutros) {
+          _subcategoriaSelecionada = null;
+          if (model.subcategoriaSugerida.trim().isNotEmpty) {
+            _subcategoriaLivreController.text = model.subcategoriaSugerida.trim();
+          }
+        } else if (subcategoriaSistema != null) {
+          _subcategoriaSelecionada = subcategoriaSistema;
+          _subcategoriaLivreController.clear();
+        } else {
+          _subcategoriaSelecionada = null;
+        }
+        _unidadeSelecionada = unidadeSistema;
+
+        if (codigoBarras.isNotEmpty) {
+          _codigoBarrasController.text = codigoBarras;
+        }
+        if (model.ncm.length == 8) {
+          _ncmController.text = _formatarNcmExibicao(model.ncm);
+        }
+        if (model.cest.length == 7) {
+          _cestController.text = model.cest;
+        }
+        _grupoTributarioSelecionado = model.grupoTributario;
+      });
+
+      if (model.ncm.length == 8) {
+        await _enriquecerNcmAposGemini(model.ncm);
+      }
+
+      if (!mounted) return;
+      final semantic = Theme.of(context).extension<AppSemanticColors>();
+      final extras = <String>[
+        if (codigoBarras.isNotEmpty) 'cod. barras',
+        if (model.ncm.length == 8) 'NCM',
+        if (model.cest.length == 7) 'CEST',
+        'grupo tributario',
+      ];
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            extras.isEmpty
+                ? 'Produto padronizado pela IA!'
+                : 'Produto padronizado pela IA (${extras.join(', ')})!',
+          ),
+          duration: const Duration(seconds: 4),
+          backgroundColor: semantic?.successFg ?? Colors.green.shade700,
+        ),
+      );
+    } on GeminiConfigException catch (e) {
+      _snackbarBrasilApi(e.message, erro: true);
+    } on GeminiServiceException catch (e) {
+      if (e.instrucoesCorrecao != null && e.instrucoesCorrecao!.isNotEmpty) {
+        await _mostrarDialogoErroGemini(e);
+      } else {
+        _snackbarBrasilApi(e.message, erro: true);
+      }
+    } catch (e) {
+      _snackbarBrasilApi('Erro ao padronizar com IA: $e', erro: true);
+    } finally {
+      if (mounted) setState(() => _consultandoGemini = false);
+    }
+  }
+
+  void _snackbarBrasilApi(String mensagem, {bool erro = false}) {
+    if (!mounted) return;
+    final semantic = Theme.of(context).extension<AppSemanticColors>();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        duration: Duration(seconds: erro ? 8 : 5),
+        backgroundColor: erro
+            ? semantic?.errorFg ?? Colors.red.shade700
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _consultarGtinBrasilApi() async {
+    final codigo = _codigoBarrasController.text.trim();
+    if (codigo.isEmpty) {
+      _snackbarBrasilApi('Informe o codigo de barras ou GTIN para consultar.', erro: true);
+      return;
+    }
+
+    setState(() => _consultandoGtin = true);
+    try {
+      final dados = await _brasilApiService.consultarGtin(codigo);
+      if (!mounted) return;
+
+      if (dados == null) {
+        _snackbarBrasilApi(
+          'Produto nao encontrado na Brasil API para o codigo informado.',
+          erro: true,
+        );
+        return;
+      }
+
+      final nomeAtual = _nomeController.text.trim();
+      final descricaoApi = dados.descricao.trim();
+
+      setState(() {
+        if (nomeAtual.isEmpty && descricaoApi.isNotEmpty) {
+          _nomeController.text = descricaoApi;
+        }
+        if (dados.ncm.length == 8) {
+          _ncmController.text = _formatarNcmExibicao(dados.ncm);
+        }
+      });
+
+      if (nomeAtual.isNotEmpty &&
+          descricaoApi.isNotEmpty &&
+          nomeAtual != descricaoApi) {
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Encontrado: $descricaoApi'),
+            action: SnackBarAction(
+              label: 'Usar nome',
+              onPressed: () {
+                _nomeController.text = descricaoApi;
+              },
+            ),
+          ),
+        );
+      } else {
+        final partes = <String>[
+          if (descricaoApi.isNotEmpty) 'Dados do codigo importados.',
+          if (dados.ncm.length == 8) 'NCM preenchido.',
+        ];
+        if (partes.isNotEmpty) {
+          _snackbarBrasilApi(partes.join(' '));
+        }
+      }
+    } on BrasilApiException catch (e) {
+      _snackbarBrasilApi(e.message, erro: true);
+    } catch (e) {
+      _snackbarBrasilApi('Erro ao consultar codigo de barras: $e', erro: true);
+    } finally {
+      if (mounted) setState(() => _consultandoGtin = false);
+    }
+  }
+
+  Future<void> _consultarNcmBrasilApi() async {
+    final digitos = _ncmController.text.replaceAll(RegExp(r'\D'), '');
+    if (digitos.length != 8) {
+      _snackbarBrasilApi(
+        'Informe um NCM com 8 digitos antes de consultar.',
+        erro: true,
+      );
+      return;
+    }
+
+    setState(() {
+      _consultandoNcm = true;
+      _infoNcmBrasilApi = '';
+    });
+
+    try {
+      final dados = await _brasilApiService.consultarNcm(digitos);
+      if (!mounted) return;
+
+      if (dados == null) {
+        setState(() => _infoNcmBrasilApi = '');
+        _snackbarBrasilApi(
+          'NCM nao encontrado na tabela oficial.',
+          erro: true,
+        );
+        return;
+      }
+
+      final descricaoOficial = dados.descricao.trim();
+      final codigoFmt = _formatarNcmExibicao(
+        dados.codigoDigitos.isNotEmpty ? dados.codigoDigitos : digitos,
+      );
+
+      setState(() {
+        _ncmController.text = codigoFmt;
+        _infoNcmBrasilApi = descricaoOficial.isEmpty
+            ? 'NCM valido: $codigoFmt'
+            : 'NCM valido: $descricaoOficial';
+        if (dados.cest.length == 7 && _cestController.text.trim().isEmpty) {
+          _cestController.text = dados.cest;
+        }
+      });
+    } on BrasilApiException catch (e) {
+      if (mounted) setState(() => _infoNcmBrasilApi = '');
+      _snackbarBrasilApi(e.message, erro: true);
+    } catch (e) {
+      if (mounted) setState(() => _infoNcmBrasilApi = '');
+      _snackbarBrasilApi('Erro ao consultar NCM: $e', erro: true);
+    } finally {
+      if (mounted) setState(() => _consultandoNcm = false);
+    }
+  }
+
+  String? _validarCest(String? value) {
+    final digits = (value ?? '').replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return null;
+    if (digits.length != 7) {
+      return 'CEST deve ter 7 digitos quando informado.';
+    }
+    return null;
+  }
+
+  String? _validarCfopVenda(String? value) {
+    final v = (value ?? '').trim();
+    if (v.isEmpty) return null;
+    if (!RegExp(r'^\d{4}$').hasMatch(v)) {
+      return 'CFOP deve ter 4 digitos ou deixe vazio (automatico).';
+    }
+    return null;
   }
 
   double? _parseValorMonetario(String texto) {
@@ -1466,7 +2168,9 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     final fornecedor = _fornecedorController.text.trim();
     final fabricante = _fabricanteController.text.trim();
     final codigoBarras = _codigoBarrasController.text.trim();
-    final ncm = _ncmController.text.trim();
+    final ncm = _ncmController.text.replaceAll(RegExp(r'\D'), '');
+    final cest = _cestController.text.replaceAll(RegExp(r'\D'), '');
+    final cfopVenda = _cfopVendaController.text.trim();
     final localizacao = _localizacaoController.text.trim();
     final precoCusto = _parseValorMonetario(_precoCustoController.text);
     final produtoExistente = _produtoEmEdicaoId == null
@@ -1536,6 +2240,9 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       fotoPath: fotoPathFinal,
       localizacao: localizacao,
       ncm: ncm,
+      cest: cest,
+      grupoTributario: _grupoTributarioSelecionado,
+      cfopVenda: cfopVenda,
       estoque: estoque,
       quantidadeMinima: quantidadeMinima,
       ativo: _produtoAtivo,
@@ -1602,6 +2309,10 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _fotoOrigemLocalPath = null;
       _fotoFoiRemovida = false;
       _ncmController.text = produto.ncm;
+      _cestController.text = produto.cest;
+      _cfopVendaController.text = produto.cfopVenda;
+      _grupoTributarioSelecionado =
+          grupoTributarioProdutoDeString(produto.grupoTributario).codigo;
       _localizacaoController.text = produto.localizacao;
       _precoCustoController.text = _formatarValorMonetario(produto.precoCusto);
       _preco1Controller.text = _formatarValorMonetario(
@@ -2814,6 +3525,19 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                               context,
                                                               helper:
                                                                   'Nome + Marca + Volume (ex.: Tinta Coral 18L)',
+                                                              suffixIcon:
+                                                                  _suffixAcaoCampo(
+                                                                carregando:
+                                                                    _consultandoGemini,
+                                                                tooltip:
+                                                                    'Padronizar nome, categoria e unidade com IA',
+                                                                icon: Icons
+                                                                    .auto_awesome_outlined,
+                                                                onPressed:
+                                                                    _consultandoGemini
+                                                                        ? null
+                                                                        : _padronizarProdutoComGemini,
+                                                              ),
                                                             ),
                                                       ),
                                                     ],
@@ -2973,33 +3697,55 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                           const SizedBox(
                                                             height: _erpGap16,
                                                           ),
-                                                          Row(
+                                                          Wrap(
+                                                            spacing: _erpGap8,
+                                                            runSpacing: _erpGap8,
                                                             children: [
-                                                              Expanded(
-                                                                child: OutlinedButton.icon(
-                                                                  style:
-                                                                      _estiloBotaoContornoCompacto,
-                                                                  onPressed:
-                                                                      _importarFotoProduto,
-                                                                  icon: const Icon(
-                                                                    Icons
-                                                                        .add_a_photo_outlined,
-                                                                    size: 18,
-                                                                  ),
-                                                                  label: Text(
-                                                                    _fotoPreviewPath() ==
-                                                                            null
-                                                                        ? 'Importar foto'
-                                                                        : 'Trocar foto',
-                                                                  ),
+                                                              OutlinedButton.icon(
+                                                                style:
+                                                                    _estiloBotaoContornoCompacto,
+                                                                onPressed:
+                                                                    _buscandoFoto
+                                                                        ? null
+                                                                        : _importarFotoProduto,
+                                                                icon: const Icon(
+                                                                  Icons
+                                                                      .add_a_photo_outlined,
+                                                                  size: 18,
+                                                                ),
+                                                                label: Text(
+                                                                  _fotoPreviewPath() ==
+                                                                          null
+                                                                      ? 'Importar foto'
+                                                                      : 'Trocar foto',
+                                                                ),
+                                                              ),
+                                                              OutlinedButton.icon(
+                                                                style:
+                                                                    _estiloBotaoContornoCompacto,
+                                                                onPressed:
+                                                                    _buscandoFoto
+                                                                        ? null
+                                                                        : _buscarFotoProdutoNaWeb,
+                                                                icon: _buscandoFoto
+                                                                    ? const SizedBox(
+                                                                        width: 18,
+                                                                        height: 18,
+                                                                        child: CircularProgressIndicator(
+                                                                          strokeWidth: 2,
+                                                                        ),
+                                                                      )
+                                                                    : const Icon(
+                                                                        Icons
+                                                                            .image_search_outlined,
+                                                                        size: 18,
+                                                                      ),
+                                                                label: const Text(
+                                                                  'Buscar foto',
                                                                 ),
                                                               ),
                                                               if (_fotoPreviewPath() !=
-                                                                  null) ...[
-                                                                const SizedBox(
-                                                                  width:
-                                                                      _erpGap16,
-                                                                ),
+                                                                  null)
                                                                 OutlinedButton.icon(
                                                                   style:
                                                                       _estiloBotaoContornoCompacto,
@@ -3015,7 +3761,6 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                                         'Remover',
                                                                       ),
                                                                 ),
-                                                              ],
                                                             ],
                                                           ),
                                                         ],
@@ -3237,6 +3982,12 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                               ),
                                                             ),
                                                             DropdownMenuItem(
+                                                              value: 'MTS',
+                                                              child: Text(
+                                                                'MTS - Metros',
+                                                              ),
+                                                            ),
+                                                            DropdownMenuItem(
                                                               value: 'M2',
                                                               child: Text(
                                                                 'M2 - Metro quadrado',
@@ -3301,6 +4052,19 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                           decoration:
                                                               _erpInputDecoration(
                                                                 context,
+                                                                hint:
+                                                                    'EAN / GTIN / ISBN',
+                                                                suffixIcon:
+                                                                    _suffixConsultaBrasilApi(
+                                                                  carregando:
+                                                                      _consultandoGtin,
+                                                                  tooltip:
+                                                                      'Buscar produto na Brasil API',
+                                                                  onPressed:
+                                                                      _consultandoGtin
+                                                                          ? null
+                                                                          : _consultarGtinBrasilApi,
+                                                                ),
                                                               ),
                                                         ),
                                                       ],
@@ -3316,18 +4080,184 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                         ),
                                                         SizedBox(
                                                           width: _wNcm,
-                                                          child: TextField(
+                                                          child: TextFormField(
                                                             controller:
                                                                 _ncmController,
+                                                            keyboardType:
+                                                                TextInputType
+                                                                    .number,
+                                                            maxLength: 10,
+                                                            validator:
+                                                                _validarNcm,
+                                                            onChanged: (_) {
+                                                              if (_infoNcmBrasilApi
+                                                                  .isNotEmpty) {
+                                                                setState(() =>
+                                                                    _infoNcmBrasilApi =
+                                                                        '');
+                                                              }
+                                                            },
                                                             decoration:
                                                                 _erpInputDecoration(
                                                                   context,
+                                                                  helper:
+                                                                      '8 digitos — obrigatorio p/ NFC-e',
+                                                                  suffixIcon:
+                                                                      _suffixConsultaBrasilApi(
+                                                                    carregando:
+                                                                        _consultandoNcm,
+                                                                    tooltip:
+                                                                        'Conferir descricao oficial do NCM',
+                                                                    onPressed:
+                                                                        _consultandoNcm
+                                                                            ? null
+                                                                            : _consultarNcmBrasilApi,
+                                                                  ),
                                                                 ),
                                                           ),
+                                                        ),
+                                                        if (_infoNcmBrasilApi
+                                                            .isNotEmpty)
+                                                          Padding(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .only(
+                                                              top: 6,
+                                                            ),
+                                                            child: Text(
+                                                              _infoNcmBrasilApi,
+                                                              style: Theme.of(
+                                                                context,
+                                                              )
+                                                                  .textTheme
+                                                                  .bodySmall
+                                                                  ?.copyWith(
+                                                                color: Theme.of(
+                                                                  context,
+                                                                )
+                                                                    .colorScheme
+                                                                    .primary,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w500,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                      ],
+                                                    ),
+                                                  ]),
+                                                ],
+                                              ),
+                                              _erpSurfaceCard(
+                                                context: context,
+                                                title: 'Dados fiscais (NFC-e)',
+                                                icon: Icons.receipt_long_outlined,
+                                                children: [
+                                                  _erpResponsiveGrid(context, [
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'CEST',
+                                                          context,
+                                                        ),
+                                                        TextFormField(
+                                                          controller:
+                                                              _cestController,
+                                                          keyboardType:
+                                                              TextInputType
+                                                                  .number,
+                                                          maxLength: 9,
+                                                          validator:
+                                                              _validarCest,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                helper:
+                                                                    '7 digitos — ST / construcao',
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Grupo tributario',
+                                                          context,
+                                                        ),
+                                                        DropdownButtonFormField<
+                                                          String
+                                                        >(
+                                                          isDense: true,
+                                                          isExpanded: true,
+                                                          initialValue:
+                                                              _grupoTributarioSelecionado,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                              ),
+                                                          items: todosGruposTributariosProduto
+                                                              .map(
+                                                                (g) =>
+                                                                    DropdownMenuItem(
+                                                                  value: g.codigo,
+                                                                  child: Text(
+                                                                    g.rotulo,
+                                                                  ),
+                                                                ),
+                                                              )
+                                                              .toList(),
+                                                          onChanged: (value) {
+                                                            if (value != null) {
+                                                              setState(() {
+                                                                _grupoTributarioSelecionado =
+                                                                    value;
+                                                              });
+                                                            }
+                                                          },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'CFOP na venda (opcional)',
+                                                          context,
+                                                        ),
+                                                        TextFormField(
+                                                          controller:
+                                                              _cfopVendaController,
+                                                          keyboardType:
+                                                              TextInputType
+                                                                  .number,
+                                                          maxLength: 4,
+                                                          validator:
+                                                              _validarCfopVenda,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                helper:
+                                                                    'Vazio = automatico (ex.: 5102 / 5405 na BA)',
+                                                              ),
                                                         ),
                                                       ],
                                                     ),
                                                   ]),
+                                                  Text(
+                                                    'CFOP automatico: consumidor final na Bahia — '
+                                                    'Tributado/Isento 5102, ST 5405.',
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .bodySmall,
+                                                  ),
                                                 ],
                                               ),
                                               _erpSurfaceCard(

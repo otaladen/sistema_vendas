@@ -19,6 +19,9 @@ class Produto {
     this.fotoPath = '',
     this.localizacao = '',
     this.ncm = '',
+    this.cest = '',
+    this.grupoTributario = 'tributado',
+    this.cfopVenda = '',
     int? estoque,
     int? estoqueReal,
     this.estoqueReservado = 0,
@@ -58,7 +61,14 @@ class Produto {
   String codigoBarras;
   String fotoPath;
   String localizacao;
+  /// NCM — 8 digitos (obrigatorio para NFC-e).
   String ncm;
+  /// CEST — 7 digitos (ST / material de construcao).
+  String cest;
+  /// tributado | isento | substituicao_tributaria
+  String grupoTributario;
+  /// CFOP fixo na venda (4 digitos); vazio = calculo automatico no [FiscalService].
+  String cfopVenda;
   int estoqueReal;
   int estoqueReservado;
   int quantidadeMinima;

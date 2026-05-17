@@ -75,7 +75,7 @@
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "27:6227758820947378730",
+      "lastPropertyId": "30:2050939691425796341",
       "name": "Produto",
       "properties": [
         {
@@ -216,13 +216,28 @@
           "indexId": "19:518194309583411298",
           "type": 1,
           "flags": 8
+        },
+        {
+          "id": "28:555489406867958111",
+          "name": "cest",
+          "type": 9
+        },
+        {
+          "id": "29:8206057738670764984",
+          "name": "grupoTributario",
+          "type": 9
+        },
+        {
+          "id": "30:2050939691425796341",
+          "name": "cfopVenda",
+          "type": 9
         }
       ],
       "relations": []
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "37:3752092449385205042",
+      "lastPropertyId": "43:1358223845416889894",
       "name": "Venda",
       "properties": [
         {
@@ -411,6 +426,36 @@
           "id": "37:3752092449385205042",
           "name": "caminhaoEntrega",
           "type": 9
+        },
+        {
+          "id": "38:7674872352055595985",
+          "name": "nfceChaveAcesso",
+          "type": 9
+        },
+        {
+          "id": "39:2886104941282757016",
+          "name": "nfceNumero",
+          "type": 9
+        },
+        {
+          "id": "40:7109635794273905674",
+          "name": "nfceSerie",
+          "type": 9
+        },
+        {
+          "id": "41:977970962015606801",
+          "name": "nfceProtocolo",
+          "type": 9
+        },
+        {
+          "id": "42:8184989197232184431",
+          "name": "nfceUrlDanfe",
+          "type": 9
+        },
+        {
+          "id": "43:1358223845416889894",
+          "name": "nfceEmitidaEm",
+          "type": 10
         }
       ],
       "relations": []

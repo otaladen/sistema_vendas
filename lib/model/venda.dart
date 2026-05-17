@@ -42,6 +42,12 @@ class Venda {
     this.ordemEntrega = 0,
     this.caminhaoEntrega = '',
     this.complementoEntregaJson = '',
+    this.nfceChaveAcesso = '',
+    this.nfceNumero = '',
+    this.nfceSerie = '',
+    this.nfceProtocolo = '',
+    this.nfceUrlDanfe = '',
+    this.nfceEmitidaEm,
   }) : data = data ?? DateTime.now();
 
   @Id()
@@ -103,6 +109,16 @@ class Venda {
   /// Usado com [statusEntrega] `entregue_complemento_pendente` ou pendencia em aberto.
   String complementoEntregaJson;
 
+  /// Chave de acesso da NFC-e emitida para esta venda (apos pagamento no caixa).
+  String nfceChaveAcesso;
+  String nfceNumero;
+  String nfceSerie;
+  String nfceProtocolo;
+  /// URL do PDF DANFE retornada pela API fiscal.
+  String nfceUrlDanfe;
+  @Property(type: PropertyType.dateUtc)
+  DateTime? nfceEmitidaEm;
+
   final cliente = ToOne<Cliente>();
   final vendedor = ToOne<Vendedor>();
 
@@ -115,6 +131,10 @@ class Venda {
   /// Soma dos subtotais das linhas (precos nas linhas do pedido).
   double get somaSubtotalItens =>
       itens.fold<double>(0, (s, ItemVenda i) => s + i.subtotal);
+
+  /// NFC-e ja autorizada e registrada nesta venda.
+  bool get nfceEmitida =>
+      nfceChaveAcesso.trim().isNotEmpty || nfceUrlDanfe.trim().isNotEmpty;
 
   /// Desconto aplicado sobre o bruto (itens + frete) ate chegar em [total], quando
   /// [total] foi reduzido sem alterar [precoUnitario] nas linhas (ex.: PDV e caixa).

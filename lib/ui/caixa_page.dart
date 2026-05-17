@@ -8,6 +8,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../main.dart';
 import '../data/app_config_repository.dart';
@@ -18,11 +19,14 @@ import '../data/usuario_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
+import '../domain/fiscal/fiscal_pedido_nfce.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../model/cliente.dart';
+import '../model/item_venda.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../services/cupom_nao_fiscal_venda_pdf.dart';
+import '../services/fiscal_service.dart';
 import '../services/print_service.dart';
 import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
@@ -2276,6 +2280,81 @@ class _CaixaPageState extends State<CaixaPage> {
     required double totalRecebido,
     required double troco,
   }) async {
+    if (!mounted) return;
+    final numCupom = venda.numeroOrcamento > 0
+        ? venda.numeroOrcamento
+        : venda.id;
+    final cliente = _clienteDaVenda(venda);
+    final acao = await showDialog<String>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('Venda $numCupom finalizada'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Pagamento confirmado. O que deseja fazer agora?',
+                ),
+                const SizedBox(height: 12),
+                Text('Total: ${_formatarMoeda(venda.total)}'),
+                Text(
+                  'Cliente: ${cliente?.nomeRazao ?? 'Consumidor / sem cadastro'}',
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'A NFC-e deve ser emitida no caixa apos o recebimento.',
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'fechar'),
+              child: const Text('Fechar'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'cupom'),
+              icon: const Icon(Icons.receipt_outlined),
+              label: const Text('Cupom nao fiscal'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'nfce'),
+              icon: const Icon(Icons.receipt_long_outlined),
+              label: const Text('Emitir NFC-e'),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || acao == null || acao == 'fechar') return;
+
+    if (acao == 'nfce') {
+      await _aguardarEntreDialogos();
+      if (!mounted) return;
+      await _emitirNfceParaVenda(venda);
+      return;
+    }
+
+    if (acao == 'cupom') {
+      await _imprimirCupomNaoFiscalPosVenda(
+        venda: venda,
+        totalRecebido: totalRecebido,
+        troco: troco,
+      );
+    }
+  }
+
+  Future<void> _imprimirCupomNaoFiscalPosVenda({
+    required Venda venda,
+    required double totalRecebido,
+    required double troco,
+  }) async {
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     final nomeArquivo =
@@ -2296,6 +2375,231 @@ class _CaixaPageState extends State<CaixaPage> {
       ),
       suggestedFileName: nomeArquivo,
     );
+  }
+
+  Future<void> _aguardarEntreDialogos() async {
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+  }
+
+  Future<bool?> _mostrarDialogoFalhaNfce({required String mensagem}) {
+    if (!mounted) return Future.value(false);
+    return showDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Falha na NFC-e'),
+        content: SingleChildScrollView(child: Text(mensagem)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Fechar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Tentar novamente'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<_EmissaoNfceDialogResult> _executarChamadaFiscalNfce(Venda venda) async {
+    final vendaAtual =
+        widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    final itens = List<ItemVenda>.from(vendaAtual.itens);
+    if (itens.isEmpty) {
+      return _EmissaoNfceDialogResult.erroValidacao(
+        'A venda nao possui itens para emitir NFC-e.',
+      );
+    }
+
+    try {
+      final resultado = await FiscalService().emitirNfceDaVenda(
+        venda: vendaAtual,
+        itens: itens,
+        cliente: _clienteDaVenda(vendaAtual),
+        valorDesconto: vendaAtual.descontoImplicitoTotal,
+      );
+
+      if (resultado.sucesso) {
+        return _EmissaoNfceDialogResult.sucesso(
+          resultado: resultado,
+          vendaAtual: vendaAtual,
+        );
+      }
+
+      final msg = resultado.mensagem.isEmpty
+          ? 'A API fiscal retornou erro sem mensagem.'
+          : resultado.mensagem;
+      return _EmissaoNfceDialogResult.erroApi(msg, vendaAtual);
+    } on FiscalConfigIncompletaException catch (e) {
+      return _EmissaoNfceDialogResult.erroConfig(e.message);
+    } on FiscalValidacaoException catch (e) {
+      return _EmissaoNfceDialogResult.erroValidacao(e.message);
+    } catch (e) {
+      return _EmissaoNfceDialogResult.erroGenerico('Erro ao emitir NFC-e: $e');
+    }
+  }
+
+  Future<void> _emitirNfceParaVenda(Venda venda) async {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    var vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? venda;
+
+    while (mounted) {
+      if (vendaAtual.nfceEmitida) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'NFC-e ja consta emitida para esta venda. '
+              'Use Visualizar/Reimprimir DANFE.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      final rootNav = Navigator.of(context, rootNavigator: true);
+      if (!mounted) return;
+
+      showDialog<void>(
+        context: context,
+        useRootNavigator: true,
+        barrierDismissible: false,
+        builder: (ctx) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Row(
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Text(
+                    'Emitindo NFC-e...\nAguarde a resposta da SEFAZ.',
+                    style: Theme.of(ctx).textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await _aguardarEntreDialogos();
+
+      _EmissaoNfceDialogResult dialogResult;
+      try {
+        dialogResult = await _executarChamadaFiscalNfce(vendaAtual);
+      } finally {
+        if (rootNav.mounted && rootNav.canPop()) {
+          rootNav.pop();
+        }
+      }
+
+      await _aguardarEntreDialogos();
+      if (!mounted) return;
+
+      switch (dialogResult.kind) {
+        case _EmissaoNfceDialogKind.erroConfig:
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(dialogResult.mensagem),
+              duration: const Duration(seconds: 8),
+            ),
+          );
+          return;
+        case _EmissaoNfceDialogKind.erroValidacao:
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(dialogResult.mensagem),
+              backgroundColor: Colors.orange.shade800,
+              duration: const Duration(seconds: 8),
+            ),
+          );
+          return;
+        case _EmissaoNfceDialogKind.erroApi:
+        case _EmissaoNfceDialogKind.erroGenerico:
+          final tentar = await _mostrarDialogoFalhaNfce(
+            mensagem: dialogResult.mensagem,
+          );
+          await _aguardarEntreDialogos();
+          if (!mounted) return;
+          if (tentar == true) {
+            vendaAtual =
+                dialogResult.vendaAtual ??
+                widget.vendaRepository.obterPorId(vendaAtual.id) ??
+                vendaAtual;
+            continue;
+          }
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text('NFC-e nao emitida: ${dialogResult.mensagem}'),
+              backgroundColor: Colors.red.shade700,
+              duration: const Duration(seconds: 8),
+            ),
+          );
+          return;
+        case _EmissaoNfceDialogKind.sucesso:
+          final r = dialogResult.resultado!;
+          final vSalvar = dialogResult.vendaAtual ?? vendaAtual;
+          try {
+            widget.vendaRepository.registrarNfceEmitida(
+              vendaId: vSalvar.id,
+              chaveAcesso: r.chaveAcesso,
+              numero: r.numero,
+              serie: r.serie,
+              protocolo: r.protocolo,
+              urlDanfe: r.urlDanfe,
+            );
+          } catch (e) {
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text(
+                  'NFC-e autorizada, mas falhou ao salvar na venda: $e',
+                ),
+                backgroundColor: Colors.orange.shade800,
+                duration: const Duration(seconds: 10),
+              ),
+            );
+            return;
+          }
+
+          final detalhe = <String>[
+            if (r.numero.isNotEmpty) 'Numero: ${r.numero}',
+            if (r.serie.isNotEmpty) 'Serie: ${r.serie}',
+            if (r.chaveAcesso.isNotEmpty) 'Chave: ${r.chaveAcesso}',
+            if (r.protocolo.isNotEmpty) 'Protocolo: ${r.protocolo}',
+            if (r.urlDanfe.isNotEmpty) 'DANFE salvo para reimpressao.',
+          ].join('\n');
+
+          await showDialog<void>(
+            context: context,
+            useRootNavigator: true,
+            builder: (ctx) => AlertDialog(
+              title: const Text('NFC-e emitida com sucesso'),
+              content: Text(
+                detalhe.isEmpty
+                    ? (r.mensagem.isEmpty ? 'Nota autorizada.' : r.mensagem)
+                    : detalhe,
+              ),
+              actions: [
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+          if (!mounted) return;
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('NFC-e emitida com sucesso.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          return;
+      }
+    }
   }
 
   Venda? _buscarVendaFinalizadaParaSegundaVia(int numeroOuId) {
@@ -2325,18 +2629,20 @@ class _CaixaPageState extends State<CaixaPage> {
     return lista.sublist(0, _ultimasVendasFinalizadasLimite);
   }
 
-  Future<void> _emitirSegundaViaCupomParaVenda(Venda vIn) async {
+  Future<void> _abrirAcoesVendaFinalizada(Venda vIn) async {
     final autorizado = await solicitarSenhaAutorizacaoSegundaViaCupom(
       context,
       _usuarioRepository,
     );
     if (!mounted || !autorizado) return;
+    await _aguardarEntreDialogos();
+    if (!mounted) return;
     final v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
     if (!mounted) return;
     if (v.cancelada) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Nao e possivel emitir cupom de venda cancelada.'),
+          content: Text('Nao e possivel abrir acoes de venda cancelada.'),
         ),
       );
       return;
@@ -2344,11 +2650,127 @@ class _CaixaPageState extends State<CaixaPage> {
     if (v.status != 'finalizada') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Segunda via disponivel apenas para vendas finalizadas.'),
+          content: Text(
+            'Acoes disponiveis apenas para vendas finalizadas.',
+          ),
         ),
       );
       return;
     }
+
+    final numCupom = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
+    final cliente = _clienteDaVenda(v);
+    final nfceEmitida = v.nfceEmitida;
+    final temDanfe = v.nfceUrlDanfe.trim().isNotEmpty;
+
+    final acao = await showDialog<String>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('Venda $numCupom'),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Total: ${_formatarMoeda(v.total)}'),
+                Text(
+                  'Cliente: ${cliente?.nomeRazao ?? 'Consumidor / sem cadastro'}',
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(
+                      nfceEmitida
+                          ? Icons.check_circle_outline
+                          : Icons.receipt_long_outlined,
+                      size: 20,
+                      color: nfceEmitida
+                          ? Colors.green.shade700
+                          : Theme.of(ctx).colorScheme.outline,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        nfceEmitida
+                            ? 'NFC-e ja emitida para esta venda.'
+                            : 'NFC-e ainda nao emitida.',
+                        style: Theme.of(ctx).textTheme.titleSmall,
+                      ),
+                    ),
+                  ],
+                ),
+                if (nfceEmitida) ...[
+                  const SizedBox(height: 8),
+                  if (v.nfceNumero.isNotEmpty)
+                    Text('Numero NFC-e: ${v.nfceNumero}'),
+                  if (v.nfceSerie.isNotEmpty) Text('Serie: ${v.nfceSerie}'),
+                  if (v.nfceChaveAcesso.isNotEmpty)
+                    Text(
+                      'Chave: ${v.nfceChaveAcesso}',
+                      style: Theme.of(ctx).textTheme.bodySmall,
+                    ),
+                  if (v.nfceEmitidaEm != null)
+                    Text(
+                      'Emitida em: ${DateFormat('dd/MM/yyyy HH:mm').format(v.nfceEmitidaEm!.toLocal())}',
+                      style: Theme.of(ctx).textTheme.bodySmall,
+                    ),
+                  if (!temDanfe)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Link do DANFE nao foi salvo nesta venda.',
+                        style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                              color: Colors.orange.shade800,
+                            ),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Fechar'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'cupom'),
+              icon: const Icon(Icons.receipt_outlined),
+              label: const Text('Segunda via cupom'),
+            ),
+            if (!nfceEmitida)
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(ctx, 'nfce'),
+                icon: const Icon(Icons.receipt_long_outlined),
+                label: const Text('Emitir NFC-e'),
+              ),
+            if (nfceEmitida && temDanfe)
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(ctx, 'danfe'),
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                label: const Text('Visualizar/Reimprimir DANFE'),
+              ),
+          ],
+        );
+      },
+    );
+    if (!mounted || acao == null) return;
+
+    if (acao == 'cupom') {
+      await _emitirSegundaViaCupomParaVenda(v);
+    } else if (acao == 'nfce') {
+      await _aguardarEntreDialogos();
+      if (!mounted) return;
+      await _emitirNfceParaVenda(v);
+    } else if (acao == 'danfe') {
+      await _abrirDanfeNfceVenda(v);
+    }
+  }
+
+  Future<void> _emitirSegundaViaCupomParaVenda(Venda v) async {
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     final infer = CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(v);
@@ -2372,6 +2794,67 @@ class _CaixaPageState extends State<CaixaPage> {
       ),
       suggestedFileName: nomeArquivo,
     );
+  }
+
+  Future<void> _abrirDanfeNfceVenda(Venda venda) async {
+    final url = venda.nfceUrlDanfe.trim();
+    if (url.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Esta venda nao possui link do DANFE salvo. '
+            'Reemita pela API fiscal ou consulte o portal da SEFAZ.',
+          ),
+          duration: Duration(seconds: 8),
+        ),
+      );
+      return;
+    }
+    await _abrirUrlExterna(url);
+  }
+
+  Future<void> _abrirUrlExterna(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasScheme) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Link do DANFE invalido.')),
+      );
+      return;
+    }
+
+    if (Platform.isWindows) {
+      try {
+        final r = await Process.run(
+          'rundll32',
+          ['url.dll,FileProtocolHandler', uri.toString()],
+        );
+        if (r.exitCode == 0) return;
+      } catch (_) {
+        // segue para launchUrl
+      }
+    }
+
+    try {
+      var ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
+      if (!ok) {
+        ok = await launchUrl(uri);
+      }
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Nao foi possivel abrir o DANFE no navegador.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao abrir DANFE: $e')),
+      );
+    }
   }
 
   Future<void> _abrirSegundaViaCupom() async {
@@ -2460,7 +2943,7 @@ class _CaixaPageState extends State<CaixaPage> {
     );
     numeroController.dispose();
     if (!mounted || encontrada == null) return;
-    await _emitirSegundaViaCupomParaVenda(encontrada);
+    await _abrirAcoesVendaFinalizada(encontrada);
   }
 
   Future<bool?> _mostrarResumoFechamentoVenda({
@@ -3873,7 +4356,7 @@ class _CaixaPageState extends State<CaixaPage> {
             ),
             const SizedBox(height: 2),
             Text(
-              'Toque na venda para segunda via do cupom (ex.: impressora falhou).',
+              'Toque na venda para segunda via, NFC-e ou DANFE.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.outline,
                   ),
@@ -3943,13 +4426,28 @@ class _CaixaPageState extends State<CaixaPage> {
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
-              trailing: Text(
-                _formatarMoeda(v.total),
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (v.nfceEmitida)
+                    Tooltip(
+                      message: 'NFC-e emitida',
+                      child: Icon(
+                        Icons.receipt_long,
+                        size: 18,
+                        color: Colors.green.shade700,
+                      ),
                     ),
+                  if (v.nfceEmitida) const SizedBox(width: 8),
+                  Text(
+                    _formatarMoeda(v.total),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                ],
               ),
-              onTap: () => _emitirSegundaViaCupomParaVenda(v),
+              onTap: () => _abrirAcoesVendaFinalizada(v),
             );
           },
         ),
@@ -4349,6 +4847,63 @@ class _CaixaPageState extends State<CaixaPage> {
       ),
     );
   }
+}
+
+enum _EmissaoNfceDialogKind {
+  sucesso,
+  erroApi,
+  erroConfig,
+  erroValidacao,
+  erroGenerico,
+}
+
+class _EmissaoNfceDialogResult {
+  const _EmissaoNfceDialogResult._({
+    required this.kind,
+    this.resultado,
+    this.mensagem = '',
+    this.vendaAtual,
+  });
+
+  final _EmissaoNfceDialogKind kind;
+  final FiscalEmissaoResultado? resultado;
+  final String mensagem;
+  final Venda? vendaAtual;
+
+  factory _EmissaoNfceDialogResult.sucesso({
+    required FiscalEmissaoResultado resultado,
+    required Venda vendaAtual,
+  }) =>
+      _EmissaoNfceDialogResult._(
+        kind: _EmissaoNfceDialogKind.sucesso,
+        resultado: resultado,
+        vendaAtual: vendaAtual,
+      );
+
+  factory _EmissaoNfceDialogResult.erroApi(String mensagem, Venda vendaAtual) =>
+      _EmissaoNfceDialogResult._(
+        kind: _EmissaoNfceDialogKind.erroApi,
+        mensagem: mensagem,
+        vendaAtual: vendaAtual,
+      );
+
+  factory _EmissaoNfceDialogResult.erroConfig(String mensagem) =>
+      _EmissaoNfceDialogResult._(
+        kind: _EmissaoNfceDialogKind.erroConfig,
+        mensagem: mensagem,
+      );
+
+  factory _EmissaoNfceDialogResult.erroValidacao(String mensagem) =>
+      _EmissaoNfceDialogResult._(
+        kind: _EmissaoNfceDialogKind.erroValidacao,
+        mensagem: mensagem,
+      );
+
+  factory _EmissaoNfceDialogResult.erroGenerico(String mensagem) =>
+      _EmissaoNfceDialogResult._(
+        kind: _EmissaoNfceDialogKind.erroGenerico,
+        mensagem: mensagem,
+      );
 }
 
 class _AumentarQuantidadeIntent extends Intent {
