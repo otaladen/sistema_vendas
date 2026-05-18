@@ -444,50 +444,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     });
   }
 
-  void _mostrarSkuEDescricao(Produto produto) {
-    final desc = produto.descricao.trim().isEmpty
-        ? 'Sem descricao tecnica cadastrada.'
-        : produto.descricao.trim();
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(produto.nome),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SelectableText('SKU: ${produto.codigoInterno}'),
-              const SizedBox(height: 12),
-              const Text(
-                'Descricao',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              SelectableText(desc),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fechar'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute<void>(
-                  builder: (_) => ProdutoDetalheVendaPage(produto: produto),
-                ),
-              );
-            },
-            child: const Text('Pagina completa'),
-          ),
-        ],
-      ),
-    );
+  void _abrirDetalheProduto(Produto produto) {
+    unawaited(mostrarModalDetalheProdutoVenda(context, produto: produto));
   }
 
   bool _ctrlPressionado() {
@@ -3272,8 +3230,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                             return Material(
                               color: corFundoLista,
                               child: InkWell(
-                                onTap: () =>
-                                    _mostrarSkuEDescricao(item),
+                                onTap: () => _abrirDetalheProduto(item),
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
                                     border: Border(
