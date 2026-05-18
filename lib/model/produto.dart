@@ -24,7 +24,11 @@ class Produto {
     this.cfopVenda = '',
     int? estoque,
     int? estoqueReal,
+    int? estoqueAtual,
     this.estoqueReservado = 0,
+    this.leadTimeDias = 7,
+    this.vendaMediaDiaria = 0,
+    this.estoqueSeguranca = 0,
     required this.quantidadeMinima,
     required this.precoCusto,
     this.custoMedio = 0,
@@ -35,6 +39,7 @@ class Produto {
     DateTime? criadoEm,
     this.ativo = true,
   }) : estoqueReal = estoqueReal ?? estoque ?? 0,
+       estoqueAtual = estoqueAtual ?? estoqueReal ?? estoque ?? 0,
        criadoEm = criadoEm ?? DateTime.now();
 
   @Id()
@@ -71,6 +76,19 @@ class Produto {
   String cfopVenda;
   int estoqueReal;
   int estoqueReservado;
+
+  /// Estoque atual para compras preditivas (mantido alinhado a [estoqueReal]).
+  int estoqueAtual;
+
+  /// Dias entre pedir ao fornecedor e receber mercadoria.
+  int leadTimeDias;
+
+  /// Media de unidades vendidas por dia (recalculada apos cada venda).
+  double vendaMediaDiaria;
+
+  /// Colchao extra no ponto de pedido (unidades).
+  int estoqueSeguranca;
+
   int quantidadeMinima;
   double precoCusto;
 
@@ -106,7 +124,18 @@ class Produto {
   // Mantem compatibilidade com o codigo legado enquanto a migracao
   // para estoqueReal/estoqueReservado e finalizada.
   int get estoque => estoqueReal;
-  set estoque(int value) => estoqueReal = value;
+  set estoque(int value) {
+    estoqueReal = value;
+    estoqueAtual = value;
+  }
+
+  /// PP = (vendaMediaDiaria * leadTimeDias) + estoqueSeguranca
+  double get pontoPedido =>
+      (vendaMediaDiaria * leadTimeDias) + estoqueSeguranca;
+
+  /// Estoque atual atingiu ou ficou abaixo do PP (formula simples).
+  /// Para produtos novos, use [ComprasPreditivasService.verificarEstoqueCritico].
+  bool get estoqueCritico => estoqueAtual <= pontoPedido;
 
   /// Fisico menos comprometido em [estoqueReservado] (retirada futura, carreto ate sair).
   int get estoqueLivreParaVenda {

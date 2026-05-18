@@ -1,5 +1,6 @@
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/pagamento_orcamento.dart';
+import '../services/compras_preditivas_service.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
 import '../model/linha_devolucao_entrada.dart';
@@ -242,6 +243,18 @@ class VendaRepository {
 
   final ObjectBox _db;
   final void Function()? _onAposEscrita;
+  void _processarComprasPreditivasAposBaixaEstoque(
+    Produto produto,
+    int quantidadeVendida, {
+    Map<int, int>? consumoVendasPrecalculado,
+  }) {
+    ComprasPreditivasService(_db).atualizarAposVendaRegistrada(
+      produto: produto,
+      quantidadeVendida: quantidadeVendida,
+      estoqueRealJaAbatido: true,
+      consumoPrecalculado: consumoVendasPrecalculado,
+    );
+  }
 
   void _notificarRedeAposEscrita() {
     _onAposEscrita?.call();
@@ -595,6 +608,8 @@ class VendaRepository {
       final itens = <ItemVenda>[];
       double total = 0;
       double custoTotal = 0;
+      final consumoVendas =
+          ComprasPreditivasService(_db).montarConsumoPorProdutoNoPeriodo();
 
       for (final input in itensInput) {
         final produto = _db.produtoBox.get(input.produtoId);
@@ -611,7 +626,11 @@ class VendaRepository {
         }
 
         produto.estoqueReal -= input.quantidade;
-        _db.produtoBox.put(produto);
+        _processarComprasPreditivasAposBaixaEstoque(
+          produto,
+          input.quantidade,
+          consumoVendasPrecalculado: consumoVendas,
+        );
 
         final item = ItemVenda(
           nomeProduto: produto.nome,
@@ -1322,11 +1341,17 @@ class VendaRepository {
               throw StateError('Estoque insuficiente para ${produto.nome}.');
             }
           }
+          final consumoVendas =
+              ComprasPreditivasService(_db).montarConsumoPorProdutoNoPeriodo();
           for (final item in venda.itens) {
             final produto = item.produto.target;
             if (produto != null) {
               produto.estoqueReal -= item.quantidade;
-              _db.produtoBox.put(produto);
+              _processarComprasPreditivasAposBaixaEstoque(
+                produto,
+                item.quantidade,
+                consumoVendasPrecalculado: consumoVendas,
+              );
             }
           }
         }

@@ -120,7 +120,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(2, 12069401530715107),
     name: 'Produto',
-    lastPropertyId: const obx_int.IdUid(30, 2050939691425796341),
+    lastPropertyId: const obx_int.IdUid(34, 2145008850451288435),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -299,6 +299,30 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(30, 2050939691425796341),
         name: 'cfopVenda',
         type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(31, 3534244536600989714),
+        name: 'estoqueAtual',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(32, 4602661833636961339),
+        name: 'leadTimeDias',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(33, 8187361350846211200),
+        name: 'vendaMediaDiaria',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(34, 2145008850451288435),
+        name: 'estoqueSeguranca',
+        type: 6,
         flags: 0,
       ),
     ],
@@ -1883,7 +1907,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final cestOffset = fbb.writeString(object.cest);
         final grupoTributarioOffset = fbb.writeString(object.grupoTributario);
         final cfopVendaOffset = fbb.writeString(object.cfopVenda);
-        fbb.startTable(31);
+        fbb.startTable(35);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, nomeOffset);
         fbb.addInt64(2, object.estoque);
@@ -1913,6 +1937,10 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(27, cestOffset);
         fbb.addOffset(28, grupoTributarioOffset);
         fbb.addOffset(29, cfopVendaOffset);
+        fbb.addInt64(30, object.estoqueAtual);
+        fbb.addInt64(31, object.leadTimeDias);
+        fbb.addFloat64(32, object.vendaMediaDiaria);
+        fbb.addInt64(33, object.estoqueSeguranca);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1985,10 +2013,34 @@ obx_int.ModelDefinition getObjectBoxModel() {
           50,
           0,
         );
+        final estoqueAtualParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          64,
+          0,
+        );
         final estoqueReservadoParam = const fb.Int64Reader().vTableGet(
           buffer,
           rootOffset,
           52,
+          0,
+        );
+        final leadTimeDiasParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          66,
+          0,
+        );
+        final vendaMediaDiariaParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          68,
+          0,
+        );
+        final estoqueSegurancaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          70,
           0,
         );
         final quantidadeMinimaParam = const fb.Int64Reader().vTableGet(
@@ -2063,7 +2115,11 @@ obx_int.ModelDefinition getObjectBoxModel() {
           cfopVenda: cfopVendaParam,
           estoque: estoqueParam,
           estoqueReal: estoqueRealParam,
+          estoqueAtual: estoqueAtualParam,
           estoqueReservado: estoqueReservadoParam,
+          leadTimeDias: leadTimeDiasParam,
+          vendaMediaDiaria: vendaMediaDiariaParam,
+          estoqueSeguranca: estoqueSegurancaParam,
           quantidadeMinima: quantidadeMinimaParam,
           precoCusto: precoCustoParam,
           custoMedio: custoMedioParam,
@@ -4056,6 +4112,26 @@ class Produto_ {
   /// See [Produto.cfopVenda].
   static final cfopVenda = obx.QueryStringProperty<Produto>(
     _entities[1].properties[28],
+  );
+
+  /// See [Produto.estoqueAtual].
+  static final estoqueAtual = obx.QueryIntegerProperty<Produto>(
+    _entities[1].properties[29],
+  );
+
+  /// See [Produto.leadTimeDias].
+  static final leadTimeDias = obx.QueryIntegerProperty<Produto>(
+    _entities[1].properties[30],
+  );
+
+  /// See [Produto.vendaMediaDiaria].
+  static final vendaMediaDiaria = obx.QueryDoubleProperty<Produto>(
+    _entities[1].properties[31],
+  );
+
+  /// See [Produto.estoqueSeguranca].
+  static final estoqueSeguranca = obx.QueryIntegerProperty<Produto>(
+    _entities[1].properties[32],
   );
 
   /// see [Produto.historicoEntradas]

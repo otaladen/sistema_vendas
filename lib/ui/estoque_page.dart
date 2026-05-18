@@ -8,7 +8,9 @@ import 'package:path/path.dart' as p;
 
 import '../data/produto_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
+import '../main.dart';
 import '../model/produto.dart';
+import '../services/compras_preditivas_service.dart';
 import '../services/pdf_tabela_produtos_texto.dart';
 import 'sugestao_compra_page.dart';
 
@@ -26,7 +28,13 @@ class EstoquePage extends StatefulWidget {
 class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   final TextEditingController _buscaController = TextEditingController();
   String _filtroBusca = '';
+  bool _somenteCriticosPp = false;
   List<Produto> _produtos = [];
+  Map<int, bool> _criticoPpPorProdutoId = {};
+  int _qtdCriticosPp = 0;
+
+  ComprasPreditivasService get _comprasSvc =>
+      ComprasPreditivasService(widget.produtoRepository.objectBox);
 
   @override
   void initState() {
@@ -47,9 +55,30 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
 
   void _recarregarProdutos() {
     if (!mounted) return;
+    final produtos = widget.produtoRepository.listarTodos();
+    final consumo = _comprasSvc.montarConsumoPorProdutoNoPeriodo();
+    final criticos = _comprasSvc.mapaProdutosAtivosCriticos(
+      consumoPrecalculado: consumo,
+    );
     setState(() {
-      _produtos = widget.produtoRepository.listarTodos();
+      _produtos = produtos;
+      _criticoPpPorProdutoId = criticos;
+      _qtdCriticosPp = criticos.length;
+      if (_somenteCriticosPp && _qtdCriticosPp == 0) {
+        _somenteCriticosPp = false;
+      }
     });
+  }
+
+  Future<void> _abrirSugestaoCompra() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SugestaoCompraPage(
+          produtoRepository: widget.produtoRepository,
+        ),
+      ),
+    );
+    if (mounted) _recarregarProdutos();
   }
 
   void _snackbarDadosAtualizados({required bool daRede}) {
@@ -118,60 +147,54 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       final tipoArquivo = incluirCustos ? 'tabela_preco_custo' : 'tabela_precos';
       final arquivo = File(p.join(pastaDestino, '${tipoArquivo}_$timestamp.csv'));
       final linhas = <String>[];
-
-      if (incluirCustos) {
-        linhas.add(
-          'SKU;Nome;Unidade;Categoria;Fisico;Reservado;Livre;Minimo;Preco1;PrecoAVista;Preco3;PrecoAPrazo;Custo;CustoMedio',
-        );
-      } else {
-        linhas.add(
-          'SKU;Nome;Unidade;Categoria;Fisico;Reservado;Livre;Minimo;Preco1;PrecoAVista;Preco3;PrecoAPrazo',
-        );
-      }
-
-      for (final produto in produtos) {
-        final colunas = <String>[
-          _csvSeguro(produto.codigoInterno),
-          _csvSeguro(produto.nome),
-          _csvSeguro(produto.unidade),
-          _csvSeguro(produto.categoria),
-          produto.estoqueReal.toString(),
-          produto.estoqueReservado.toString(),
-          produto.estoqueLivreParaVenda.toString(),
-          produto.quantidadeMinima.toString(),
-          _formatarNumeroCsv(produto.preco1),
-          _formatarNumeroCsv(_precoAVista(produto)),
-          _formatarNumeroCsv(produto.preco3),
-          _formatarNumeroCsv(produto.precoVenda),
-        ];
-        if (incluirCustos) {
-          colunas.add(_formatarNumeroCsv(produto.precoCusto));
-          colunas.add(_formatarNumeroCsv(produto.custoMedio));
-        }
-        linhas.add(colunas.join(';'));
-      }
-
-      await arquivo.writeAsString(
-        '\uFEFF${linhas.join('\n')}',
-        encoding: utf8,
+      linhas.add(
+        incluirCustos
+            ? 'SKU;Nome;Unidade;Categoria;Estoque;Minimo;Custo;Custo medio;Preco venda;Preco a vista'
+            : 'SKU;Nome;Unidade;Categoria;Estoque;Minimo;Preco venda;Preco a vista',
       );
+      for (final produto in produtos) {
+        if (incluirCustos) {
+          linhas.add([
+            _csvSeguro(produto.codigoInterno),
+            _csvSeguro(produto.nome),
+            _csvSeguro(produto.unidade),
+            _csvSeguro(produto.categoria),
+            '${produto.estoqueReal}',
+            '${produto.quantidadeMinima}',
+            _formatarNumeroCsv(produto.precoCusto),
+            _formatarNumeroCsv(produto.custoMedio),
+            _formatarNumeroCsv(produto.precoVenda),
+            _formatarNumeroCsv(_precoAVista(produto)),
+          ].join(';'));
+        } else {
+          linhas.add([
+            _csvSeguro(produto.codigoInterno),
+            _csvSeguro(produto.nome),
+            _csvSeguro(produto.unidade),
+            _csvSeguro(produto.categoria),
+            '${produto.estoqueReal}',
+            '${produto.quantidadeMinima}',
+            _formatarNumeroCsv(produto.precoVenda),
+            _formatarNumeroCsv(_precoAVista(produto)),
+          ].join(';'));
+        }
+      }
+      await arquivo.writeAsString('\uFEFF${linhas.join('\n')}', encoding: utf8);
       if (!context.mounted) return;
-      await Navigator.of(context, rootNavigator: true).maybePop();
-      if (!context.mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 6),
-          content: Text('Tabela exportada com sucesso em: ${arquivo.path}'),
+          content: Text('CSV exportado com sucesso em: ${arquivo.path}'),
         ),
       );
     } catch (e) {
       if (!context.mounted) return;
-      await Navigator.of(context, rootNavigator: true).maybePop();
-      if (!context.mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 7),
-          content: Text('Falha ao exportar tabela: $e'),
+          content: Text('Falha ao exportar CSV: $e'),
         ),
       );
     }
@@ -188,15 +211,15 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       return;
     }
 
+    if (!context.mounted) return;
+    _mostrarProgressoExportacao(context);
     try {
       final produtos = widget.produtoRepository.listarTodos();
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final tipoArquivo = incluirCustos ? 'tabela_preco_custo' : 'tabela_precos';
       final arquivo = File(p.join(pastaDestino, '${tipoArquivo}_$timestamp.pdf'));
-      final titulo = incluirCustos
-          ? 'Tabela Preco+Custo - Estoque'
-          : 'Tabela Precos - Estoque';
-
+      final titulo =
+          incluirCustos ? 'Tabela de precos e custos' : 'Tabela de precos';
       final bytes = await gerarPdfTabelaProdutosTexto(
         produtos: produtos,
         incluirCustos: incluirCustos,
@@ -205,6 +228,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       );
       await arquivo.writeAsBytes(bytes);
       if (!context.mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 6),
@@ -213,6 +237,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       );
     } catch (e) {
       if (!context.mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 7),
@@ -226,16 +251,21 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   Widget build(BuildContext context) {
     final produtos = _produtos;
     final termo = _filtroBusca.trim().toLowerCase();
-    final produtosFiltrados = termo.isEmpty
-        ? produtos
-        : produtos.where((p) {
-            return p.nome.toLowerCase().contains(termo) ||
-                p.codigoInterno.toLowerCase().contains(termo) ||
-                p.categoria.toLowerCase().contains(termo);
-          }).toList();
+    final produtosFiltrados = produtos.where((p) {
+      if (_somenteCriticosPp && !(_criticoPpPorProdutoId[p.id] ?? false)) {
+        return false;
+      }
+      if (termo.isEmpty) return true;
+      return p.nome.toLowerCase().contains(termo) ||
+          p.codigoInterno.toLowerCase().contains(termo) ||
+          p.categoria.toLowerCase().contains(termo);
+    }).toList();
     final totalAbaixoMinimo = produtos
-        .where((p) => p.estoque <= p.quantidadeMinima)
+        .where((p) => p.ativo && p.estoque <= p.quantidadeMinima)
         .length;
+    final theme = Theme.of(context);
+    final semantic = theme.extension<AppSemanticColors>();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Estoque'),
@@ -243,15 +273,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           IconButton(
             tooltip: 'Sugestao de compra',
             icon: const Icon(Icons.shopping_cart_outlined),
-            onPressed: () {
-              Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => SugestaoCompraPage(
-                    produtoRepository: widget.produtoRepository,
-                  ),
-                ),
-              );
-            },
+            onPressed: _abrirSugestaoCompra,
           ),
           PopupMenuButton<String>(
             tooltip: 'Exportar tabelas',
@@ -307,6 +329,34 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       ),
       body: Column(
         children: [
+          if (_qtdCriticosPp > 0)
+            MaterialBanner(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              leading: Icon(
+                Icons.shopping_bag_outlined,
+                color: semantic?.warningFg ?? theme.colorScheme.error,
+              ),
+              content: Text(
+                '$_qtdCriticosPp produto(s) no ou abaixo do ponto de pedido. '
+                'Abra a sugestao de compra para repor.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: _abrirSugestaoCompra,
+                  child: const Text('Ver sugestao'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _somenteCriticosPp = !_somenteCriticosPp;
+                    });
+                  },
+                  child: Text(
+                    _somenteCriticosPp ? 'Ver todos' : 'Filtrar lista',
+                  ),
+                ),
+              ],
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Column(
@@ -346,6 +396,29 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                       ),
                       label: Text('Abaixo minimo: $totalAbaixoMinimo'),
                     ),
+                    ActionChip(
+                      avatar: Icon(
+                        Icons.trending_down,
+                        size: 18,
+                        color: _qtdCriticosPp > 0
+                            ? (semantic?.warningFg ?? theme.colorScheme.error)
+                            : Colors.green,
+                      ),
+                      label: Text('PP critico: $_qtdCriticosPp'),
+                      tooltip: _qtdCriticosPp > 0
+                          ? 'Abrir sugestao de compra'
+                          : 'Nenhum item no ponto de pedido',
+                      onPressed:
+                          _qtdCriticosPp > 0 ? _abrirSugestaoCompra : null,
+                    ),
+                    if (_qtdCriticosPp > 0)
+                      FilterChip(
+                        label: const Text('Somente PP critico'),
+                        selected: _somenteCriticosPp,
+                        onSelected: (v) {
+                          setState(() => _somenteCriticosPp = v);
+                        },
+                      ),
                   ],
                 ),
               ],
@@ -357,17 +430,40 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
               padding: const EdgeInsets.all(12),
               itemCount: produtosFiltrados.length,
               cacheExtent: 800,
-              separatorBuilder: (_, _) => const SizedBox(height: 6),
+              separatorBuilder: (context, index) => const SizedBox(height: 6),
               itemBuilder: (context, index) {
                 final produto = produtosFiltrados[index];
-                final abaixoMinimo = produto.estoque <= produto.quantidadeMinima;
+                final abaixoMinimo =
+                    produto.estoque <= produto.quantidadeMinima;
+                final criticoPp =
+                    _criticoPpPorProdutoId[produto.id] ?? false;
+                final ppExibicao =
+                    _comprasSvc.calcularPontoPedidoExibicao(produto);
+                final statusCor = criticoPp
+                    ? (semantic?.errorFg ?? theme.colorScheme.error)
+                    : abaixoMinimo
+                        ? Colors.orange
+                        : Colors.green;
+                final statusTexto = criticoPp
+                    ? 'PP'
+                    : abaixoMinimo
+                        ? 'Min'
+                        : 'OK';
+
                 return Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: Theme.of(context).colorScheme.outlineVariant,
+                      color: criticoPp
+                          ? (semantic?.errorFg ?? theme.colorScheme.error)
+                              .withValues(alpha: 0.45)
+                          : theme.colorScheme.outlineVariant,
                     ),
+                    color: criticoPp
+                        ? (semantic?.errorBg ?? theme.colorScheme.errorContainer)
+                            .withValues(alpha: 0.2)
+                        : null,
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -380,30 +476,43 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                               '${produto.nome} (${produto.unidade})',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleSmall,
+                              style: theme.textTheme.titleSmall,
                             ),
                             const SizedBox(height: 2),
                             Text(
                               'SKU: ${produto.codigoInterno} | Livre: ${produto.estoqueLivreParaVenda} · '
                               'Fis: ${produto.estoqueReal} · Res: ${produto.estoqueReservado} | '
-                              'Minimo: ${produto.quantidadeMinima}',
-                              maxLines: 1,
+                              'Min: ${produto.quantidadeMinima}',
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall,
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | Medio: ${_formatarMoedaBRL(produto.custoMedio)} | Venda: ${_formatarMoedaBRL(produto.precoVenda)}',
+                              'PP/limiar: ${ppExibicao.toStringAsFixed(1)} · '
+                              'Atual: ${produto.estoqueAtual} · '
+                              'Media: ${produto.vendaMediaDiaria.toStringAsFixed(2)}/dia',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | '
+                              'Medio: ${_formatarMoedaBRL(produto.custoMedio)} | '
+                              'Venda: ${_formatarMoedaBRL(produto.precoVenda)}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall,
                             ),
                           ],
                         ),
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        abaixoMinimo ? 'Abaixo' : 'OK',
+                        statusTexto,
                         style: TextStyle(
-                          color: abaixoMinimo ? Colors.red : Colors.green,
+                          color: statusCor,
                           fontWeight: FontWeight.w700,
                         ),
                       ),

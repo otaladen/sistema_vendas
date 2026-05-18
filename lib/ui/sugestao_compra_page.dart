@@ -8,8 +8,10 @@ import 'package:path/path.dart' as p;
 
 import '../data/produto_repository.dart';
 import '../data/sugestao_compra_repository.dart';
+import '../main.dart';
+import '../services/compras_preditivas_service.dart';
 
-/// Relatorio de reposicao: giro recente, minimo e ultima entrada por NF-e.
+/// Relatorio de reposicao: giro recente, minimo, ponto de pedido e ultima entrada por NF-e.
 class SugestaoCompraPage extends StatefulWidget {
   const SugestaoCompraPage({super.key, required this.produtoRepository});
 
@@ -49,7 +51,7 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
     final arquivo = File(p.join(pasta, 'sugestao_compra_$ts.csv'));
 
     final out = <String>[
-      'SKU;Nome;Unidade;Livre;Minimo;Vendido no periodo;Media dia;Dias cobertura;Ultima NF-e;Sugerido comprar',
+      'SKU;Nome;Unidade;Atual;Livre;Minimo;PP;Critico PP;Media dia;Lead time;Seguranca;Vendido periodo;Cobertura dias;Ultima NF-e;Sugerido comprar;Sugerido PP',
     ];
     for (final l in linhas) {
       final pr = l.produto;
@@ -62,13 +64,19 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
         _csvSeguro(pr.codigoInterno),
         _csvSeguro(pr.nome),
         _csvSeguro(pr.unidade),
+        '${pr.estoqueAtual}',
         '${pr.estoqueLivreParaVenda}',
         '${pr.quantidadeMinima}',
-        '${l.consumoNoPeriodoUnidades}',
+        _dec1.format(l.pontoPedido).replaceAll('.', ','),
+        l.estoqueCritico ? 'SIM' : 'NAO',
         _dec1.format(l.mediaUnidadesPorDia).replaceAll('.', ','),
+        '${pr.leadTimeDias}',
+        '${pr.estoqueSeguranca}',
+        '${l.consumoNoPeriodoUnidades}',
         diasStr.replaceAll('.', ','),
         ult,
         '${l.quantidadeSugerida}',
+        '${l.quantidadeSugeridaPorPp}',
       ].join(';'));
     }
 
@@ -86,6 +94,47 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
     }
   }
 
+  Future<void> _recalcularMediasTodosProdutos() async {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Text('Recalculando medias de venda (60 dias)...'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final svc = ComprasPreditivasService(widget.produtoRepository.objectBox);
+    final atualizados = await svc.recalcularTodosProdutosAtivosAsync();
+
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 3),
+        content: Text(
+          'Medias recalculadas para $atualizados produto(s) ativo(s).',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final linhas = _repo.montarLinhas(
@@ -93,11 +142,18 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
       diasCoberturaAlvo: _diasCoberturaAlvo,
       apenasComSugestaoOuRisco: _apenasPrioritarios,
     );
+    final qtdCriticosPp =
+        linhas.where((l) => l.estoqueCritico).length;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sugestao de compra'),
         actions: [
+          IconButton(
+            tooltip: 'Recalcular media diaria de todos os produtos',
+            onPressed: () => _recalcularMediasTodosProdutos(),
+            icon: const Icon(Icons.refresh_outlined),
+          ),
           IconButton(
             tooltip: 'Exportar CSV',
             onPressed: linhas.isEmpty ? null : _exportarCsv,
@@ -114,8 +170,8 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Usa vendas finalizadas no periodo, estoque minimo e meta de cobertura em dias. '
-                  'Ultima NF-e vem do historico de importacao XML.',
+                  'Usa vendas finalizadas, estoque minimo, ponto de pedido (PP) e meta de cobertura. '
+                  'PP = (media diaria x lead time) + estoque seguranca.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -161,7 +217,7 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${linhas.length} produto(s) listado(s)',
+                  '${linhas.length} produto(s) · $qtdCriticosPp em PP critico',
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
               ],
@@ -198,9 +254,17 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                       final livre = pr.estoqueLivreParaVenda;
                       final abaixoMin = livre <= pr.quantidadeMinima;
                       final dias = l.diasCoberturaComEstoqueAtual;
-                      final giroBaixo = dias != null && dias < _diasCoberturaAlvo;
+                      final giroBaixo =
+                          dias != null && dias < _diasCoberturaAlvo;
+                      final semantic =
+                          Theme.of(context).extension<AppSemanticColors>();
 
                       return Card(
+                        color: l.estoqueCritico
+                            ? (semantic?.errorBg ?? Theme.of(context)
+                                    .colorScheme.errorContainer)
+                                .withValues(alpha: 0.25)
+                            : null,
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Column(
@@ -217,7 +281,19 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                                       ),
                                     ),
                                   ),
-                                  if (abaixoMin)
+                                  if (l.estoqueCritico)
+                                    Chip(
+                                      label: Text(
+                                        l.alertaPorEstoqueSeguranca
+                                            ? 'Seguranca'
+                                            : 'PP critico',
+                                      ),
+                                      visualDensity: VisualDensity.compact,
+                                      backgroundColor: Theme.of(context)
+                                          .colorScheme
+                                          .errorContainer,
+                                    ),
+                                  if (!l.estoqueCritico && abaixoMin)
                                     Chip(
                                       label: const Text('Minimo'),
                                       visualDensity: VisualDensity.compact,
@@ -225,7 +301,9 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                                           .colorScheme
                                           .errorContainer,
                                     ),
-                                  if (!abaixoMin && giroBaixo)
+                                  if (!l.estoqueCritico &&
+                                      !abaixoMin &&
+                                      giroBaixo)
                                     Chip(
                                       label: const Text('Giro'),
                                       visualDensity: VisualDensity.compact,
@@ -238,13 +316,22 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                               const SizedBox(height: 4),
                               Text(
                                 'SKU ${pr.codigoInterno} · ${pr.unidade} · '
-                                'Livre $livre · Min ${pr.quantidadeMinima}',
+                                'Atual ${pr.estoqueAtual} · Livre $livre · Min ${pr.quantidadeMinima}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Vendido ($_diasPeriodo d): ${l.consumoNoPeriodoUnidades} un '
-                                '· Media/dia ${_dec1.format(l.mediaUnidadesPorDia)}',
+                                l.alertaPorEstoqueSeguranca
+                                    ? 'Limiar seguranca: ${_dec1.format(l.pontoPedido)} un '
+                                        '(produto novo ou sem giro no periodo)'
+                                    : 'PP ${_dec1.format(l.pontoPedido)} un '
+                                        '(media ${_dec1.format(l.mediaUnidadesPorDia)}/dia x '
+                                        '${pr.leadTimeDias}d + seg ${pr.estoqueSeguranca})',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(fontWeight: FontWeight.w500),
+                              ),
+                              Text(
+                                'Vendido ($_diasPeriodo d): ${l.consumoNoPeriodoUnidades} un',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                               Text(
@@ -261,7 +348,8 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Sugerido comprar: ${l.quantidadeSugerida} ${pr.unidade}',
+                                'Sugerido comprar: ${l.quantidadeSugerida} ${pr.unidade}'
+                                '${l.quantidadeSugeridaPorPp > 0 ? ' (ate PP: ${l.quantidadeSugeridaPorPp})' : ''}',
                                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                       color: Theme.of(context).colorScheme.primary,
                                       fontWeight: FontWeight.w700,

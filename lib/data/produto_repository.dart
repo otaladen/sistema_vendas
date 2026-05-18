@@ -142,6 +142,18 @@ class ProdutoRepository extends ChangeNotifier {
         produto.preco3 = precoBase;
         houveAjuste = true;
       }
+      if (produto.estoqueAtual != produto.estoqueReal) {
+        produto.estoqueAtual = produto.estoqueReal;
+        houveAjuste = true;
+      }
+      if (produto.leadTimeDias <= 0) {
+        produto.leadTimeDias = 7;
+        houveAjuste = true;
+      }
+      if (produto.estoqueSeguranca <= 0 && produto.quantidadeMinima > 0) {
+        produto.estoqueSeguranca = produto.quantidadeMinima;
+        houveAjuste = true;
+      }
       if (houveAjuste) {
         alterados.add(produto);
       }
@@ -523,6 +535,7 @@ class ProdutoRepository extends ChangeNotifier {
   }
 
   int salvar(Produto produto) {
+    produto.estoqueAtual = produto.estoqueReal;
     final id = _db.produtoBox.put(produto);
     invalidarCacheBusca();
     notificarAlteracaoParaRede();

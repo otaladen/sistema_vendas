@@ -27,6 +27,10 @@ class SyncEntityCodec {
       'cfopVenda': p.cfopVenda,
       'estoqueReal': p.estoqueReal,
       'estoqueReservado': p.estoqueReservado,
+      'estoqueAtual': p.estoqueAtual,
+      'leadTimeDias': p.leadTimeDias,
+      'vendaMediaDiaria': p.vendaMediaDiaria,
+      'estoqueSeguranca': p.estoqueSeguranca,
       'quantidadeMinima': p.quantidadeMinima,
       'precoCusto': p.precoCusto,
       'custoMedio': p.custoMedio,
@@ -60,6 +64,12 @@ class SyncEntityCodec {
       cfopVenda: (m['cfopVenda'] ?? '').toString(),
       estoqueReal: (m['estoqueReal'] as num?)?.toInt() ?? 0,
       estoqueReservado: (m['estoqueReservado'] as num?)?.toInt() ?? 0,
+      estoqueAtual: (m['estoqueAtual'] as num?)?.toInt() ??
+          (m['estoqueReal'] as num?)?.toInt() ??
+          0,
+      leadTimeDias: (m['leadTimeDias'] as num?)?.toInt() ?? 7,
+      vendaMediaDiaria: (m['vendaMediaDiaria'] as num?)?.toDouble() ?? 0,
+      estoqueSeguranca: (m['estoqueSeguranca'] as num?)?.toInt() ?? 0,
       quantidadeMinima: (m['quantidadeMinima'] as num?)?.toInt() ?? 0,
       precoCusto: (m['precoCusto'] as num?)?.toDouble() ?? 0,
       custoMedio: (m['custoMedio'] as num?)?.toDouble() ?? 0,

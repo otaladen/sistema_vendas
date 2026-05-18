@@ -75,7 +75,7 @@
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "30:2050939691425796341",
+      "lastPropertyId": "34:2145008850451288435",
       "name": "Produto",
       "properties": [
         {
@@ -231,6 +231,26 @@
           "id": "30:2050939691425796341",
           "name": "cfopVenda",
           "type": 9
+        },
+        {
+          "id": "31:3534244536600989714",
+          "name": "estoqueAtual",
+          "type": 6
+        },
+        {
+          "id": "32:4602661833636961339",
+          "name": "leadTimeDias",
+          "type": 6
+        },
+        {
+          "id": "33:8187361350846211200",
+          "name": "vendaMediaDiaria",
+          "type": 8
+        },
+        {
+          "id": "34:2145008850451288435",
+          "name": "estoqueSeguranca",
+          "type": 6
         }
       ],
       "relations": []

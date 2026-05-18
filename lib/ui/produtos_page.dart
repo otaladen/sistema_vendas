@@ -18,6 +18,7 @@ import '../config/busca_imagem_config.dart';
 import '../services/brasil_api_service.dart';
 import '../services/gemini_service.dart';
 import '../services/print_service.dart';
+import '../services/compras_preditivas_service.dart';
 import '../services/produto_imagem_busca_service.dart';
 import '../services/produto_imagem_service.dart';
 import 'widgets/abas_historico_produto_widget.dart';
@@ -217,6 +218,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   final _preco3Controller = TextEditingController();
   final _estoqueController = TextEditingController();
   final _quantidadeMinimaController = TextEditingController();
+  final _leadTimeDiasController = TextEditingController(text: '7');
+  final _estoqueSegurancaController = TextEditingController();
   final _subcategoriaLivreController = TextEditingController();
   final _brasilApiService = BrasilApiService();
   final _geminiService = GeminiService();
@@ -299,6 +302,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     _preco3Controller.dispose();
     _estoqueController.dispose();
     _quantidadeMinimaController.dispose();
+    _leadTimeDiasController.dispose();
+    _estoqueSegurancaController.dispose();
     _subcategoriaLivreController.dispose();
     _scrollController.dispose();
     _cadastroKeyboardFocusNode.dispose();
@@ -342,6 +347,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _preco3Controller,
       _estoqueController,
       _quantidadeMinimaController,
+      _leadTimeDiasController,
+      _estoqueSegurancaController,
     ];
     final existeTexto = controllers.any(
       (controller) => controller.text.trim().isNotEmpty,
@@ -383,6 +390,102 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     return Padding(
       padding: const EdgeInsets.only(bottom: _erpGap8),
       child: Text(text, style: _erpLabelStyle(context)),
+    );
+  }
+
+  Widget _buildPainelPontoPedido(BuildContext context) {
+    final estoqueAtual = int.tryParse(_estoqueController.text) ?? 0;
+    final leadTime = int.tryParse(_leadTimeDiasController.text) ?? 7;
+    final seguranca = int.tryParse(_estoqueSegurancaController.text) ?? 0;
+    final minimo = int.tryParse(_quantidadeMinimaController.text) ?? 0;
+    final produto = _produtoEmEdicaoId != null
+        ? widget.produtoRepository.obterPorId(_produtoEmEdicaoId!)
+        : null;
+    final comprasSvc = ComprasPreditivasService(
+      widget.produtoRepository.objectBox,
+    );
+
+    double media = 0;
+    double pp;
+    bool critico;
+    bool semGiroConfiavel;
+
+    if (produto != null) {
+      produto.leadTimeDias = leadTime > 0 ? leadTime : 7;
+      produto.estoqueSeguranca = seguranca;
+      produto.estoqueAtual = estoqueAtual;
+      media = produto.vendaMediaDiaria;
+      semGiroConfiavel = !comprasSvc.temGiroVendaConfiavel(produto);
+      pp = comprasSvc.calcularPontoPedidoExibicao(produto);
+      critico = comprasSvc.verificarEstoqueCritico(produto);
+    } else {
+      media = 0;
+      semGiroConfiavel = true;
+      pp = (seguranca > 0 ? seguranca : minimo).toDouble();
+      critico = estoqueAtual <= pp;
+    }
+
+    final theme = Theme.of(context);
+    final semantic = theme.extension<AppSemanticColors>();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(_erpGap8),
+      decoration: BoxDecoration(
+        color: critico
+            ? (semantic?.errorBg ?? theme.colorScheme.errorContainer)
+                .withValues(alpha: 0.35)
+            : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: critico
+              ? theme.colorScheme.error.withValues(alpha: 0.4)
+              : theme.colorScheme.outline.withValues(alpha: 0.25),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Compras preditivas (ponto de pedido)',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            semGiroConfiavel
+                ? 'Produto novo ou sem giro: alerta pelo estoque de seguranca '
+                    '(min. ${comprasSvc.diasMinimosCadastroParaGiro} dias de cadastro + vendas).'
+                : 'PP = (media diaria x lead time) + estoque seguranca',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            semGiroConfiavel
+                ? 'Limiar seguranca: ${pp.toStringAsFixed(0)} un · '
+                    'Atual: $estoqueAtual un'
+                : 'Media diaria: ${media.toStringAsFixed(2)} un/dia · '
+                    'PP: ${pp.toStringAsFixed(1)} un · Atual: $estoqueAtual un',
+            style: theme.textTheme.bodyMedium,
+          ),
+          if (critico)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                semGiroConfiavel
+                    ? 'Alerta: estoque no ou abaixo do limiar de seguranca.'
+                    : 'Alerta: estoque no ou abaixo do ponto de pedido.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: semantic?.errorFg ?? theme.colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -923,6 +1026,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _preco3Controller.clear();
       _estoqueController.clear();
       _quantidadeMinimaController.clear();
+      _leadTimeDiasController.text = '7';
+      _estoqueSegurancaController.clear();
       _subcategoriaLivreController.clear();
       _unidadeSelecionada = 'UN';
       _categoriaSelecionada = null;
@@ -2189,6 +2294,9 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     final estoque = int.tryParse(_estoqueController.text) ?? 0;
     final quantidadeMinima =
         int.tryParse(_quantidadeMinimaController.text) ?? 0;
+    final leadTimeDias = int.tryParse(_leadTimeDiasController.text) ?? 7;
+    final estoqueSeguranca =
+        int.tryParse(_estoqueSegurancaController.text) ?? 0;
     final codigoInternoFinal = _gerarSkuAutomatico
         ? _gerarSkuAutomaticamente()
         : codigoInternoDigitado;
@@ -2245,6 +2353,9 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       cfopVenda: cfopVenda,
       estoque: estoque,
       quantidadeMinima: quantidadeMinima,
+      leadTimeDias: leadTimeDias > 0 ? leadTimeDias : 7,
+      estoqueSeguranca: estoqueSeguranca,
+      vendaMediaDiaria: produtoExistente?.vendaMediaDiaria ?? 0,
       ativo: _produtoAtivo,
       precoCusto: pc,
       custoMedio: custoMedioPersistido < 0 ? 0.0 : custoMedioPersistido,
@@ -2256,6 +2367,12 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     );
     final estavaEditando = _produtoEmEdicaoId != null;
     final idSalvo = widget.produtoRepository.salvar(produto);
+    final salvoPosGravacao = widget.produtoRepository.obterPorId(idSalvo);
+    if (salvoPosGravacao != null) {
+      ComprasPreditivasService(widget.produtoRepository.objectBox)
+          .atualizarVendaMediaDiaria(salvoPosGravacao);
+      widget.produtoRepository.salvar(salvoPosGravacao);
+    }
     if (!estavaEditando) {
       final salvo = widget.produtoRepository.obterPorId(idSalvo);
       if (salvo != null) {
@@ -2326,6 +2443,9 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       );
       _estoqueController.text = produto.estoque.toString();
       _quantidadeMinimaController.text = produto.quantidadeMinima.toString();
+      _leadTimeDiasController.text =
+          produto.leadTimeDias > 0 ? produto.leadTimeDias.toString() : '7';
+      _estoqueSegurancaController.text = produto.estoqueSeguranca.toString();
       _unidadeSelecionada = _normalizarUnidade(produto.unidade);
       _produtoAtivo = produto.ativo;
       _status = 'Editando produto: ${produto.nome}';
@@ -4723,6 +4843,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                               keyboardType:
                                                                   TextInputType
                                                                       .number,
+                                                              onChanged: (_) =>
+                                                                  setState(() {}),
                                                               decoration:
                                                                   _erpInputDecoration(
                                                                     context,
@@ -4756,7 +4878,71 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                           ],
                                                         ),
                                                       ),
+                                                      SizedBox(
+                                                        width: _wQtdInteira,
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            _erpFieldLabel(
+                                                              'Lead time (dias)',
+                                                              context,
+                                                            ),
+                                                            TextField(
+                                                              controller:
+                                                                  _leadTimeDiasController,
+                                                              keyboardType:
+                                                                  TextInputType
+                                                                      .number,
+                                                              onChanged: (_) =>
+                                                                  setState(() {}),
+                                                              decoration:
+                                                                  _erpInputDecoration(
+                                                                    context,
+                                                                    hint:
+                                                                        '7',
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      SizedBox(
+                                                        width: _wQtdInteira,
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            _erpFieldLabel(
+                                                              'Estoque seguranca',
+                                                              context,
+                                                            ),
+                                                            TextField(
+                                                              controller:
+                                                                  _estoqueSegurancaController,
+                                                              keyboardType:
+                                                                  TextInputType
+                                                                      .number,
+                                                              onChanged: (_) =>
+                                                                  setState(() {}),
+                                                              decoration:
+                                                                  _erpInputDecoration(
+                                                                    context,
+                                                                    hint:
+                                                                        '0',
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
                                                     ],
+                                                  ),
+                                                  const SizedBox(
+                                                    height: _erpGap8,
+                                                  ),
+                                                  _buildPainelPontoPedido(
+                                                    context,
                                                   ),
                                                   const SizedBox(
                                                     height: _erpGap16,

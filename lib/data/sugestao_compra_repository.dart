@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import '../model/produto.dart';
+import '../services/compras_preditivas_service.dart';
 import 'objectbox.dart';
 
 /// Linha do relatorio de sugestao de reposicao (somente leitura / exportacao).
@@ -12,6 +13,10 @@ class LinhaSugestaoCompra {
     this.diasCoberturaComEstoqueAtual,
     this.ultimaEntradaNfe,
     required this.quantidadeSugerida,
+    required this.pontoPedido,
+    required this.estoqueCritico,
+    required this.quantidadeSugeridaPorPp,
+    this.alertaPorEstoqueSeguranca = false,
   });
 
   final Produto produto;
@@ -26,9 +31,21 @@ class LinhaSugestaoCompra {
 
   /// max(falta para minimo, falta para cobrir giro alvo).
   final int quantidadeSugerida;
+
+  /// PP = (vendaMediaDiaria * leadTimeDias) + estoqueSeguranca
+  final double pontoPedido;
+
+  /// [estoqueAtual] <= [pontoPedido] ou limiar de seguranca (produto novo).
+  final bool estoqueCritico;
+
+  /// Unidades para repor ate o PP (0 se acima do PP).
+  final int quantidadeSugeridaPorPp;
+
+  /// Produto sem giro confiavel: alerta prioriza estoque de seguranca.
+  final bool alertaPorEstoqueSeguranca;
 }
 
-/// Cruza vendas finalizadas, estoque minimo e historico de entrada NF-e.
+/// Cruza vendas finalizadas, estoque minimo, PP e historico de entrada NF-e.
 class SugestaoCompraRepository {
   SugestaoCompraRepository(this._db);
 
@@ -74,6 +91,7 @@ class SugestaoCompraRepository {
       );
     }
 
+    final comprasSvc = ComprasPreditivasService(_db, diasHistoricoVendas: dias);
     final produtos = _db.produtoBox.getAll();
     final linhas = <LinhaSugestaoCompra>[];
 
@@ -81,14 +99,31 @@ class SugestaoCompraRepository {
       if (!pr.ativo) continue;
 
       final vendido = consumoPorProduto[pr.id] ?? 0;
-      final media = vendido / dias;
+      final mediaHistorico = vendido / dias;
+      final media = pr.vendaMediaDiaria > 0 ? pr.vendaMediaDiaria : mediaHistorico;
       final livre = pr.estoqueLivreParaVenda;
+      final estoqueAtual = pr.estoqueAtual;
       final minimo = pr.quantidadeMinima;
+
+      final pp = comprasSvc.calcularPontoPedidoExibicao(
+        pr,
+        consumoNoPeriodo: vendido,
+      );
+      final criticoPp = comprasSvc.verificarEstoqueCritico(
+        pr,
+        consumoNoPeriodo: vendido,
+      );
+      final porSeguranca = !comprasSvc.temGiroVendaConfiavel(
+        pr,
+        consumoNoPeriodo: vendido,
+      );
+      final faltaPp = pp.ceil() - estoqueAtual;
+      final qtdPorPp = faltaPp > 0 ? faltaPp : 0;
 
       final faltaMinimo = livre < minimo ? (minimo - livre) : 0;
       final metaGiro = (media * cobertura).ceil();
       final faltaGiro = livre < metaGiro ? (metaGiro - livre) : 0;
-      final qtdSugerida = math.max(faltaMinimo, faltaGiro);
+      final qtdSugerida = math.max(math.max(faltaMinimo, faltaGiro), qtdPorPp);
 
       double? diasCobertura;
       if (media > 1e-9) {
@@ -102,9 +137,16 @@ class SugestaoCompraRepository {
         final giroBaixo = media > 1e-9 &&
             diasCobertura != null &&
             diasCobertura < cobertura;
-        if (!abaixoMinimo && !giroBaixo && qtdSugerida <= 0) {
+        if (!abaixoMinimo && !giroBaixo && !criticoPp && qtdSugerida <= 0) {
           continue;
         }
+      }
+
+      // Atualiza media persistida se ainda zerada e houve venda no periodo.
+      if (pr.vendaMediaDiaria <= 0 && mediaHistorico > 0) {
+        pr.vendaMediaDiaria = mediaHistorico;
+        comprasSvc.atualizarVendaMediaDiaria(pr);
+        _db.produtoBox.put(pr);
       }
 
       linhas.add(
@@ -115,11 +157,18 @@ class SugestaoCompraRepository {
           diasCoberturaComEstoqueAtual: diasCobertura,
           ultimaEntradaNfe: ult,
           quantidadeSugerida: qtdSugerida,
+          pontoPedido: pp,
+          estoqueCritico: criticoPp,
+          quantidadeSugeridaPorPp: qtdPorPp,
+          alertaPorEstoqueSeguranca: porSeguranca && criticoPp,
         ),
       );
     }
 
     linhas.sort((a, b) {
+      if (a.estoqueCritico != b.estoqueCritico) {
+        return a.estoqueCritico ? -1 : 1;
+      }
       final c = b.quantidadeSugerida.compareTo(a.quantidadeSugerida);
       if (c != 0) return c;
       return a.produto.nome.compareTo(b.produto.nome);
