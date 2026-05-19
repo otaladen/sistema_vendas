@@ -19,6 +19,7 @@ import '../data/usuario_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
+import '../domain/entrega_venda_helper.dart';
 import '../domain/fiscal/fiscal_pedido_nfce.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../model/cliente.dart';
@@ -1927,17 +1928,11 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
-  String _rotuloTipoEntrega(String tipoEntrega) {
-    switch (tipoEntrega) {
-      case 'entrega_loja':
-        return 'Carreto';
-      case 'retirada_futura':
-        return 'Retirada futura';
-      case 'retirada':
-      default:
-        return 'Leva Agora';
-    }
-  }
+  String _textoEntregaCaixa(Venda v) =>
+      EntregaVendaHelper.textoEntregaCabecalhoVenda(v);
+
+  bool _vendaExigeDadosCarreto(Venda v) =>
+      EntregaVendaHelper.vendaTemItensCarreto(v);
 
   String _rotuloStatusEntrega(String status) {
     switch (status) {
@@ -3496,15 +3491,15 @@ class _CaixaPageState extends State<CaixaPage> {
                                           const SizedBox(height: 6),
                                           Text(
                                             [
-                                              'Entrega: ${_rotuloTipoEntrega(selecionado.tipoEntrega)}',
-                                              if (selecionado.tipoEntrega == 'entrega_loja')
+                                              'Entrega: ${_textoEntregaCaixa(selecionado)}',
+                                              if (_vendaExigeDadosCarreto(selecionado))
                                                 'Frete: ${_formatarMoeda(selecionado.valorFrete)}',
-                                              if (selecionado.tipoEntrega == 'entrega_loja' &&
+                                              if (_vendaExigeDadosCarreto(selecionado) &&
                                                   selecionado.enderecoEntrega.trim().isNotEmpty)
                                                 'Endereco: ${selecionado.enderecoEntrega}',
-                                              if (selecionado.tipoEntrega == 'entrega_loja')
+                                              if (_vendaExigeDadosCarreto(selecionado))
                                                 'Status: ${_rotuloStatusEntrega(selecionado.statusEntrega)}',
-                                              if (selecionado.tipoEntrega == 'entrega_loja' &&
+                                              if (_vendaExigeDadosCarreto(selecionado) &&
                                                   selecionado.observacaoEntrega.trim().isNotEmpty)
                                                 'Obs: ${selecionado.observacaoEntrega}',
                                             ].join(' | '),
@@ -3714,7 +3709,8 @@ class _CaixaPageState extends State<CaixaPage> {
                                                                           flex:
                                                                               4,
                                                                           child: Text(
-                                                                            item.nomeProduto,
+                                                                            '${item.nomeProduto} '
+                                                                            '(${EntregaVendaHelper.abreviacaoTipoItem(item.tipoEntregaItem)})',
                                                                           ),
                                                                         ),
                                                                         Expanded(

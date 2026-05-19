@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../data/app_config_repository.dart';
+import '../domain/entrega_venda_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../model/cliente.dart';
 import '../model/venda.dart';
@@ -63,17 +64,8 @@ class CupomNaoFiscalVendaPdf {
     return _textoDetalheLinhasPagamento(linhas);
   }
 
-  static String rotuloTipoEntrega(String tipoEntrega) {
-    switch (tipoEntrega) {
-      case 'entrega_loja':
-        return 'Carreto';
-      case 'retirada_futura':
-        return 'Retirada Futura';
-      case 'retirada':
-      default:
-        return 'Leva Agora';
-    }
-  }
+  static String rotuloTipoEntrega(String tipoEntrega) =>
+      EntregaVendaHelper.rotuloTipoEntregaVenda(tipoEntrega);
 
   static String rotuloVendedorUmLinha(Vendedor? v) {
     if (v == null) return 'Sem vendedor';
@@ -211,14 +203,14 @@ class CupomNaoFiscalVendaPdf {
                     children: [
                       const pw.TextSpan(text: 'Entrega: '),
                       pw.TextSpan(
-                        text: rotuloTipoEntrega(venda.tipoEntrega),
+                        text: EntregaVendaHelper.textoEntregaCabecalhoVenda(venda),
                         style: CupomPdfLayout.estilo(
                           layout,
                           fontSize: layout.tamanhoFonteCorpo.fontSizeCorpo,
                           fontWeight: pw.FontWeight.bold,
                         ),
                       ),
-                      if (venda.tipoEntrega == 'entrega_loja')
+                      if (EntregaVendaHelper.vendaTemItensCarreto(venda))
                         pw.TextSpan(
                           text:
                               ' | Frete: ${formatarMoeda(venda.valorFrete)}',
@@ -244,6 +236,7 @@ class CupomNaoFiscalVendaPdf {
                   precoUnitario: item.precoUnitario,
                   subtotal: item.subtotal,
                   formatarMoeda: formatarMoeda,
+                  sufixoEntrega: EntregaVendaHelper.sufixoEntregaItemPdf(item),
                 ),
               ),
               if (layout.divisoriaDestaqueAntesTotais)

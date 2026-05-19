@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../model/historico_entrada.dart';
 import '../model/produto.dart';
+import 'produto_busca_sinonimos.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
 import 'sync/sync_write_trigger.dart';
@@ -184,7 +185,8 @@ class ProdutoRepository extends ChangeNotifier {
     final consultaBruta = termo.trim();
     final consultaNormalizada = _normalizarTexto(consultaBruta);
     final tokensBase = _tokenizar(consultaNormalizada);
-    final tokens = _expandirTokensComSinonimos(tokensBase).toSet().toList();
+    final tokens =
+        expandirTokensBuscaComSinonimos(tokensBase).toSet().toList();
     if (consultaNormalizada.isEmpty) {
       final ordenados = [..._cacheDocs]
         ..sort((a, b) => a.nomeNormalizado.compareTo(b.nomeNormalizado));
@@ -472,29 +474,6 @@ class ProdutoRepository extends ChangeNotifier {
         .map((t) => t.trim())
         .where((t) => t.isNotEmpty)
         .toList();
-  }
-
-  Iterable<String> _expandirTokensComSinonimos(List<String> tokens) sync* {
-    const sinonimos = <String, List<String>>{
-      'vergalhao': ['ferro', 'barra', 'aco'],
-      'ferro': ['vergalhao', 'barra', 'aco'],
-      'cx': ['caixa'],
-      'caixa': ['cx'],
-      'dagua': ['dagua', 'd agua', "d'agua"],
-      'cimento': ['cp2', 'cpii', 'cp-2'],
-      'cp2': ['cimento', 'cpii', 'cp-2'],
-      'areia': ['fina', 'media', 'grossa'],
-      'brita': ['pedra'],
-    };
-    for (final token in tokens) {
-      yield token;
-      final encontrados = sinonimos[token];
-      if (encontrados != null) {
-        for (final sin in encontrados) {
-          yield _normalizarTexto(sin);
-        }
-      }
-    }
   }
 
   String _normalizarTexto(String texto) {

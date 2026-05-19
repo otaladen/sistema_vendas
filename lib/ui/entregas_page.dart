@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/motorista_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
+import '../domain/entrega_venda_helper.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../model/historico_entrega.dart';
 import '../model/item_venda.dart';
@@ -217,13 +218,12 @@ class _EntregasPageState extends State<EntregasPage> {
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
 
   bool _vendaUsaItensCarretoMigrado(Venda v) {
-    return v.tipoEntrega == 'entrega_loja' &&
-        v.itens.any((i) => i.quantidadeNoCarreto > 0);
+    return v.itens.any((i) => i.quantidadeNoCarreto > 0);
   }
 
   /// Carreto nativo (reserva ate a saida), nao migrado de retirada futura.
   bool _vendaCarretoReservaNativaSemMigracao(Venda v) {
-    return v.tipoEntrega == 'entrega_loja' &&
+    return EntregaVendaHelper.vendaTemItensCarreto(v) &&
         v.carretoReservaAteSaida &&
         !_vendaUsaItensCarretoMigrado(v);
   }
@@ -236,6 +236,9 @@ class _EntregasPageState extends State<EntregasPage> {
   }
 
   int _quantidadeExibicaoEntrega(Venda v, ItemVenda item) {
+    if (!EntregaVendaHelper.itemEntraNaCargaEntrega(v, item)) {
+      return 0;
+    }
     if (_vendaUsaItensCarretoMigrado(v)) {
       return item.quantidadeParaExibicaoEntrega(true);
     }
@@ -262,7 +265,7 @@ class _EntregasPageState extends State<EntregasPage> {
   /// Carreto com checklist "Saiu" e entrega em andamento ou concluida (mercadoria pode voltar).
   bool _podeDevolucaoPosCarretoNaEntrega(Venda v) {
     if (!_podeRegistrarDevolucaoTrocaBase(v)) return false;
-    if (v.tipoEntrega != 'entrega_loja') return false;
+    if (!EntregaVendaHelper.vendaTemItensCarreto(v)) return false;
     if (!v.cargaSaiu) return false;
     return v.statusEntrega == 'saiu_entrega' ||
         v.statusEntrega == 'entregue' ||
@@ -934,7 +937,9 @@ class _EntregasPageState extends State<EntregasPage> {
     final linhas = venda.itens
         .map((item) {
           final q = _quantidadeExibicaoEntrega(venda, item);
-          return q > 0 ? '${q}x ${item.nomeProduto}' : null;
+          if (q <= 0) return null;
+          final tag = EntregaVendaHelper.abreviacaoTipoItem(item.tipoEntregaItem);
+          return '${q}x ${item.nomeProduto} ($tag)';
         })
         .whereType<String>()
         .toList();
@@ -2463,11 +2468,25 @@ class _EntregasPageState extends State<EntregasPage> {
                                   ),
                                 ),
                                 Expanded(
-                                  child: Text(
-                                    item.nomeProduto,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item.nomeProduto,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      Text(
+                                        EntregaVendaHelper.rotuloTipoItem(
+                                          item.tipoEntregaItem,
+                                        ),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall,
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 const SizedBox(width: 12),
@@ -2643,12 +2662,40 @@ class _EntregasPageState extends State<EntregasPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Venda ${venda.numeroOrcamento} - ${_formatarMoeda(venda.total)}',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Venda ${venda.numeroOrcamento} - ${_formatarMoeda(venda.total)}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
                               ),
+                            ),
+                            if (venda.tipoEntrega ==
+                                EntregaVendaHelper.tipoMisto)
+                              Chip(
+                                label: const Text('Mista'),
+                                visualDensity: VisualDensity.compact,
+                                backgroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .tertiaryContainer,
+                              ),
+                          ],
                         ),
+                        if (venda.tipoEntrega == EntregaVendaHelper.tipoMisto)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              EntregaVendaHelper.resumoContagem(
+                                venda.itens.map((i) => i.tipoEntregaItem),
+                              ),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
                         const SizedBox(height: 6),
             if (paradaNoMesmoCarro != null) ...[
               Padding(

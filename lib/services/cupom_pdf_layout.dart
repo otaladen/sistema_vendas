@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../model/cliente.dart';
 import '../model/config_layout_impressao.dart';
 
 /// Layout compacto para cupom/orcamento em bobina 80 mm (menos papel).
@@ -163,7 +164,11 @@ class CupomPdfLayout {
     required double precoUnitario,
     required double subtotal,
     required String Function(double) formatarMoeda,
+    String sufixoEntrega = '',
   }) {
+    final nomeLinha = sufixoEntrega.isEmpty
+        ? nomeProduto
+        : '$nomeProduto$sufixoEntrega';
     final fsNome = layout.tamanhoFonteItens.fontSizeItem;
     final fsDet = layout.tamanhoFonteItens.fontSizeItemDetalhe;
 
@@ -174,7 +179,7 @@ class CupomPdfLayout {
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Text(
-              nomeProduto,
+              nomeLinha,
               style: estilo(layout, fontSize: fsNome),
             ),
             if (layout.linhaQuantidadePreco)
@@ -194,7 +199,7 @@ class CupomPdfLayout {
         children: [
           linhaColunas(
             layout: layout,
-            esquerda: nomeProduto,
+            esquerda: nomeLinha,
             direita: formatarMoeda(subtotal),
             fontSize: fsNome,
             fontWeightDireita: pw.FontWeight.bold,
@@ -379,6 +384,59 @@ class CupomPdfLayout {
         ),
       ),
     ];
+  }
+
+  /// Cabecalho do orcamento (sem entrega; cliente/vendedor opcionais).
+  static int contarLinhasCabecalhoOrcamento({
+    required ConfigLayoutImpressao layout,
+    required bool temCliente,
+    required bool temVendedor,
+    Cliente? cliente,
+  }) {
+    var n = 3;
+    if (temCliente) {
+      n++;
+      if (layout.exibirDocumentoCliente &&
+          (cliente?.documento.trim().isNotEmpty ?? false)) {
+        n++;
+      }
+      if (layout.exibirTelefoneCliente &&
+          (cliente?.telefone.trim().isNotEmpty ?? false)) {
+        n++;
+      }
+    }
+    if (temVendedor && layout.exibirVendedor) n++;
+    if (layout.exibirValidadeOrcamento) n += 2;
+    return n;
+  }
+
+  static int contarLinhasExtrasOrcamento({
+    required ConfigLayoutImpressao layout,
+    required bool temDesconto,
+    required bool temFrete,
+    String textoRodape = '',
+  }) {
+    var n = 13;
+    if (layout.divisoriaDestaqueAntesTotais) n++;
+    if (cabecalhoColunasItens(layout) != null) n++;
+    if (temDesconto) n++;
+    if (temFrete) n++;
+    n += linhasTexto(textoRodape).length;
+    if (layout.divisoriaAntesRodape && textoRodape.trim().isNotEmpty) n++;
+    return n;
+  }
+
+  static int unidadesAlturaItensTermico(
+    Iterable<String> nomesProduto, {
+    int caracteresPorLinha = 24,
+  }) {
+    var u = 0;
+    for (final nome in nomesProduto) {
+      final linhasNome =
+          (nome.length / caracteresPorLinha).ceil().clamp(1, 4);
+      u += linhasNome + 1;
+    }
+    return u.clamp(0, 999);
   }
 
   static PdfPageFormat formatoPaginaTermica({

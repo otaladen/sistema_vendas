@@ -12,6 +12,7 @@ class ItemVenda {
     this.quantidadeJaRetirada = 0,
     this.quantidadeNoCarreto = 0,
     this.quantidadeDevolvida = 0,
+    this.tipoEntregaItem = 'retirada',
     this.precoTipo = 'preco1',
     required this.precoUnitario,
     required this.precoCustoUnitario,
@@ -32,6 +33,9 @@ class ItemVenda {
 
   /// Devolvido/trocado acumulado (registros de devolucao ligados a esta venda).
   int quantidadeDevolvida;
+
+  /// retirada | retirada_futura | entrega_loja (padrao: leva agora).
+  String tipoEntregaItem;
 
   String precoTipo;
   double precoUnitario;

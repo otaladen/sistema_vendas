@@ -5,7 +5,7 @@
   "entities": [
     {
       "id": "1:805574422642691043",
-      "lastPropertyId": "11:7736469216551977158",
+      "lastPropertyId": "12:7292283824246218916",
       "name": "ItemVenda",
       "properties": [
         {
@@ -69,6 +69,11 @@
           "id": "11:7736469216551977158",
           "name": "quantidadeDevolvida",
           "type": 6
+        },
+        {
+          "id": "12:7292283824246218916",
+          "name": "tipoEntregaItem",
+          "type": 9
         }
       ],
       "relations": []

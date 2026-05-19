@@ -110,14 +110,14 @@ class CupomLayoutPreviewPdf {
                   layout,
                   fontWeight: pw.FontWeight.bold,
                 ),
-              if (layout.exibirEntrega)
+              if (!orcamento && layout.exibirEntrega)
                 CupomPdfLayout.textoCorpo('Entrega: Entrega na loja', layout),
-              if (layout.exibirEnderecoEntrega)
+              if (!orcamento && layout.exibirEnderecoEntrega)
                 CupomPdfLayout.textoCorpo(
                   'Endereco: Rua das Flores, 100',
                   layout,
                 ),
-              if (orcamento && layout.exibirObservacaoEntrega)
+              if (!orcamento && layout.exibirObservacaoEntrega)
                 CupomPdfLayout.textoCorpo(
                   'Obs: Entregar no periodo da tarde',
                   layout,

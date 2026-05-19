@@ -1,4 +1,5 @@
 import '../domain/complemento_entrega_codec.dart';
+import '../domain/entrega_venda_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../services/compras_preditivas_service.dart';
 import '../model/item_venda.dart';
@@ -90,12 +91,88 @@ class ItemVendaInput {
     required this.quantidade,
     required this.precoUnitario,
     this.precoTipo = 'preco1',
+    this.tipoEntregaItem = EntregaVendaHelper.tipoRetirada,
   });
 
   final int produtoId;
   final int quantidade;
   final double precoUnitario;
   final String precoTipo;
+  final String tipoEntregaItem;
+}
+
+ItemVenda _criarItemVendaFromInput(
+  ItemVendaInput input,
+  Produto produto,
+) {
+  return ItemVenda(
+    nomeProduto: produto.nome,
+    quantidade: input.quantidade,
+    precoTipo: input.precoTipo,
+    precoUnitario: input.precoUnitario,
+    precoCustoUnitario: produto.precoCusto,
+    tipoEntregaItem: EntregaVendaHelper.normalizarTipoItem(input.tipoEntregaItem),
+  );
+}
+
+void _aplicarDadosEntregaOrcamentoNaVenda(
+  Venda venda,
+  DadosEntregaOrcamento entrega,
+  List<ItemVendaInput> itensInput,
+) {
+  final tipos = itensInput.map((i) => i.tipoEntregaItem);
+  final temCarreto = EntregaVendaHelper.iterableTemCarreto(tipos);
+  final temFutura = EntregaVendaHelper.iterableTemRetiradaFutura(tipos);
+  venda.tipoEntrega = EntregaVendaHelper.resolverTipoEntregaVenda(tipos);
+  venda.entregaPendente = temFutura;
+  venda.valorFrete = temCarreto ? entrega.valorFrete : 0;
+  venda.enderecoEntrega = temCarreto ? entrega.enderecoEntrega : '';
+  venda.observacaoEntrega = temCarreto ? entrega.observacaoEntrega : '';
+  venda.statusEntrega = temCarreto ? 'pendente' : 'nao_aplicavel';
+  venda.prioridadeEntrega = temCarreto ? entrega.prioridadeEntrega : 'normal';
+  venda.janelaEntrega = temCarreto ? entrega.janelaEntrega : 'nao_definida';
+  venda.dataEntregaMarcada = temCarreto ? entrega.dataEntregaMarcada : null;
+}
+
+void _baixarEstoqueItemAoFinalizarOrcamento({
+  required ObjectBox db,
+  required ItemVenda item,
+  required bool permitirVendaSemEstoque,
+  Map<int, int>? consumoVendasPrecalculado,
+}) {
+  final produto = item.produto.target;
+  if (produto == null) {
+    throw StateError('Produto do item "${item.nomeProduto}" nao encontrado.');
+  }
+  final q = item.quantidade;
+  if (q <= 0) return;
+
+  final tipo = EntregaVendaHelper.tipoEfetivoItem(item);
+  if (!permitirVendaSemEstoque && produto.estoqueLivreParaVenda < q) {
+    throw StateError('Estoque insuficiente para ${produto.nome}.');
+  }
+
+  switch (tipo) {
+    case EntregaVendaHelper.tipoRetirada:
+      produto.estoqueReal -= q;
+      ComprasPreditivasService(db).atualizarAposVendaRegistrada(
+        produto: produto,
+        quantidadeVendida: q,
+        estoqueRealJaAbatido: true,
+        consumoPrecalculado: consumoVendasPrecalculado,
+      );
+      break;
+    case EntregaVendaHelper.tipoRetiradaFutura:
+      produto.estoqueReservado += q;
+      db.produtoBox.put(produto);
+      break;
+    case EntregaVendaHelper.tipoEntregaLoja:
+      produto.estoqueReservado += q;
+      item.quantidadeNoCarreto = q;
+      db.produtoBox.put(produto);
+      db.itemVendaBox.put(item);
+      break;
+  }
 }
 
 class LinhaDevolucaoEntradaInput {
@@ -309,7 +386,15 @@ class VendaRepository {
       c = c & Venda_.formaPagamento.equals(f.formaPagamento);
     }
     if (f.tipoEntrega != 'todos') {
-      c = c & Venda_.tipoEntrega.equals(f.tipoEntrega);
+      if (f.tipoEntrega == EntregaVendaHelper.tipoEntregaLoja) {
+        final condCarreto = Venda_.tipoEntrega.equals(
+              EntregaVendaHelper.tipoEntregaLoja,
+            ) |
+            Venda_.tipoEntrega.equals(EntregaVendaHelper.tipoMisto);
+        c = c & condCarreto;
+      } else {
+        c = c & Venda_.tipoEntrega.equals(f.tipoEntrega);
+      }
     }
     if (f.entregaPendente == 'sim') {
       c = c & Venda_.entregaPendente.equals(true);
@@ -682,30 +767,8 @@ class VendaRepository {
         formaPagamento: 'dinheiro',
         quantidadeParcelas: 1,
         pagamentosJson: '',
-        tipoEntrega: entrega.tipoEntrega,
-        valorFrete: entrega.tipoEntrega == 'entrega_loja'
-            ? entrega.valorFrete
-            : 0,
-        enderecoEntrega: entrega.tipoEntrega == 'entrega_loja'
-            ? entrega.enderecoEntrega
-            : '',
-        observacaoEntrega: entrega.tipoEntrega == 'entrega_loja'
-            ? entrega.observacaoEntrega
-            : '',
-        statusEntrega: entrega.tipoEntrega == 'entrega_loja'
-            ? 'pendente'
-            : 'nao_aplicavel',
-        prioridadeEntrega: entrega.tipoEntrega == 'entrega_loja'
-            ? entrega.prioridadeEntrega
-            : 'normal',
-        janelaEntrega: entrega.tipoEntrega == 'entrega_loja'
-            ? entrega.janelaEntrega
-            : 'nao_definida',
-        dataEntregaMarcada: entrega.tipoEntrega == 'entrega_loja'
-            ? entrega.dataEntregaMarcada
-            : null,
-        entregaPendente: entrega.tipoEntrega == 'retirada_futura',
       );
+      _aplicarDadosEntregaOrcamentoNaVenda(venda, entrega, itensInput);
       if (clienteId != null) {
         final cliente = _db.clienteBox.get(clienteId);
         if (cliente != null) {
@@ -731,20 +794,14 @@ class VendaRepository {
           throw StateError('Quantidade invalida para ${produto.nome}.');
         }
 
-        final item = ItemVenda(
-          nomeProduto: produto.nome,
-          quantidade: input.quantidade,
-          precoTipo: input.precoTipo,
-          precoUnitario: input.precoUnitario,
-          precoCustoUnitario: produto.precoCusto,
-        );
+        final item = _criarItemVendaFromInput(input, produto);
         item.produto.target = produto;
         itens.add(item);
         total += item.subtotal;
         custoTotal += item.subtotalCusto;
       }
 
-      if (venda.tipoEntrega == 'entrega_loja') {
+      if (EntregaVendaHelper.vendaTemItensCarreto(venda)) {
         if (venda.valorFrete < 0) {
           throw StateError('Valor de frete nao pode ser negativo.');
         }
@@ -945,7 +1002,7 @@ class VendaRepository {
       for (final v in vendas) {
         if (v.cancelada ||
             v.status != 'finalizada' ||
-            v.tipoEntrega != 'entrega_loja') {
+            !EntregaVendaHelper.vendaTemItensCarreto(v)) {
           throw StateError(
             'Somente entregas de carreto finalizadas podem ser agrupadas.',
           );
@@ -999,7 +1056,7 @@ class VendaRepository {
           throw StateError('Nenhuma entrega encontrada neste grupo.');
         }
         for (final v in vendas) {
-          if (v.tipoEntrega != 'entrega_loja') {
+          if (!EntregaVendaHelper.vendaTemItensCarreto(v)) {
             throw StateError('Somente entregas da loja possuem motorista.');
           }
           v.motoristaEntrega = motorista;
@@ -1162,29 +1219,7 @@ class VendaRepository {
         throw StateError('Nao e possivel editar orcamento cancelado.');
       }
 
-      venda.tipoEntrega = entrega.tipoEntrega;
-      venda.valorFrete = entrega.tipoEntrega == 'entrega_loja'
-          ? entrega.valorFrete
-          : 0;
-      venda.enderecoEntrega = entrega.tipoEntrega == 'entrega_loja'
-          ? entrega.enderecoEntrega
-          : '';
-      venda.observacaoEntrega = entrega.tipoEntrega == 'entrega_loja'
-          ? entrega.observacaoEntrega
-          : '';
-      venda.statusEntrega = entrega.tipoEntrega == 'entrega_loja'
-          ? 'pendente'
-          : 'nao_aplicavel';
-      venda.prioridadeEntrega = entrega.tipoEntrega == 'entrega_loja'
-          ? entrega.prioridadeEntrega
-          : 'normal';
-      venda.janelaEntrega = entrega.tipoEntrega == 'entrega_loja'
-          ? entrega.janelaEntrega
-          : 'nao_definida';
-      venda.dataEntregaMarcada = entrega.tipoEntrega == 'entrega_loja'
-          ? entrega.dataEntregaMarcada
-          : null;
-      venda.entregaPendente = entrega.tipoEntrega == 'retirada_futura';
+      _aplicarDadosEntregaOrcamentoNaVenda(venda, entrega, itensInput);
 
       if (clienteId == null) {
         venda.cliente.target = null;
@@ -1222,13 +1257,7 @@ class VendaRepository {
         if (input.quantidade <= 0) {
           throw StateError('Quantidade invalida para ${produto.nome}.');
         }
-        final item = ItemVenda(
-          nomeProduto: produto.nome,
-          quantidade: input.quantidade,
-          precoTipo: input.precoTipo,
-          precoUnitario: input.precoUnitario,
-          precoCustoUnitario: produto.precoCusto,
-        );
+        final item = _criarItemVendaFromInput(input, produto);
         item.produto.target = produto;
         item.venda.target = venda;
         _db.itemVendaBox.put(item);
@@ -1236,7 +1265,7 @@ class VendaRepository {
         custoTotal += item.subtotalCusto;
       }
 
-      if (venda.tipoEntrega == 'entrega_loja') {
+      if (EntregaVendaHelper.vendaTemItensCarreto(venda)) {
         if (venda.valorFrete < 0) {
           throw StateError('Valor de frete nao pode ser negativo.');
         }
@@ -1283,77 +1312,26 @@ class VendaRepository {
       final filhoFreteRetirada = venda.vendaOrigemFreteRetiradaId > 0;
 
       if (!filhoFreteRetirada) {
-        if (venda.entregaPendente) {
-          venda.carretoReservaAteSaida = false;
-          if (!permitirVendaSemEstoque) {
-            for (final item in venda.itens) {
-              final produto = item.produto.target;
-              if (produto == null) {
-                throw StateError('Produto do item ${item.id} nao encontrado.');
-              }
-              if (produto.estoqueLivreParaVenda < item.quantidade) {
-                throw StateError(
-                  'Estoque insuficiente para reservar ${produto.nome}.',
-                );
-              }
-            }
-          }
-          for (final item in venda.itens) {
-            final produto = item.produto.target;
-            if (produto != null) {
-              produto.estoqueReservado += item.quantidade;
-              _db.produtoBox.put(produto);
-            }
-          }
-        } else if (venda.tipoEntrega == 'entrega_loja') {
-          venda.carretoReservaAteSaida = true;
-          if (!permitirVendaSemEstoque) {
-            for (final item in venda.itens) {
-              final produto = item.produto.target;
-              if (produto == null) {
-                throw StateError('Produto do item ${item.id} nao encontrado.');
-              }
-              if (produto.estoqueLivreParaVenda < item.quantidade) {
-                throw StateError(
-                  'Estoque insuficiente para reservar ${produto.nome} '
-                  '(livre ${produto.estoqueLivreParaVenda}, '
-                  'pedido ${item.quantidade}).',
-                );
-              }
-            }
-          }
-          for (final item in venda.itens) {
-            final produto = item.produto.target;
-            if (produto != null) {
-              produto.estoqueReservado += item.quantidade;
-              _db.produtoBox.put(produto);
-            }
-          }
-        } else {
-          venda.carretoReservaAteSaida = false;
-          for (final item in venda.itens) {
-            final produto = item.produto.target;
-            if (produto == null) {
-              throw StateError('Produto do item ${item.id} nao encontrado.');
-            }
-            if (!permitirVendaSemEstoque &&
-                produto.estoqueLivreParaVenda < item.quantidade) {
-              throw StateError('Estoque insuficiente para ${produto.nome}.');
-            }
-          }
-          final consumoVendas =
-              ComprasPreditivasService(_db).montarConsumoPorProdutoNoPeriodo();
-          for (final item in venda.itens) {
-            final produto = item.produto.target;
-            if (produto != null) {
-              produto.estoqueReal -= item.quantidade;
-              _processarComprasPreditivasAposBaixaEstoque(
-                produto,
-                item.quantidade,
-                consumoVendasPrecalculado: consumoVendas,
-              );
-            }
-          }
+        EntregaVendaHelper.aplicarLegadoTipoUnicoNosItensSeNecessario(venda);
+        venda.carretoReservaAteSaida = venda.itens.any(
+          (i) =>
+              EntregaVendaHelper.tipoEfetivoItem(i) ==
+              EntregaVendaHelper.tipoEntregaLoja,
+        );
+        venda.entregaPendente = venda.itens.any(
+          (i) =>
+              EntregaVendaHelper.tipoEfetivoItem(i) ==
+              EntregaVendaHelper.tipoRetiradaFutura,
+        );
+        final consumoVendas =
+            ComprasPreditivasService(_db).montarConsumoPorProdutoNoPeriodo();
+        for (final item in venda.itens) {
+          _baixarEstoqueItemAoFinalizarOrcamento(
+            db: _db,
+            item: item,
+            permitirVendaSemEstoque: permitirVendaSemEstoque,
+            consumoVendasPrecalculado: consumoVendas,
+          );
         }
       }
 
@@ -1434,7 +1412,7 @@ class VendaRepository {
   }
 
   bool _vendaCarretoReservaComSaidaParaEstoqueComplemento(Venda v) {
-    return v.tipoEntrega == 'entrega_loja' &&
+    return EntregaVendaHelper.vendaTemItensCarreto(v) &&
         v.carretoReservaAteSaida &&
         v.cargaSaiu &&
         v.status == 'finalizada' &&
@@ -1755,7 +1733,7 @@ class VendaRepository {
     final fimUtc = fim?.toUtc();
     return listarTodas().where((venda) {
       if (venda.status != 'finalizada') return false;
-      if (venda.tipoEntrega != 'entrega_loja') return false;
+      if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) return false;
       if (statusEntrega != null &&
           statusEntrega != 'todos' &&
           venda.statusEntrega != statusEntrega) {
@@ -1782,7 +1760,7 @@ class VendaRepository {
       if (venda == null) {
         throw StateError('Venda/Orcamento $vendaId nao encontrado.');
       }
-      if (venda.tipoEntrega != 'entrega_loja') {
+      if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) {
         throw StateError(
           'Somente pedidos de entrega podem ter status de entrega.',
         );
@@ -1845,7 +1823,7 @@ class VendaRepository {
       if (venda == null) {
         throw StateError('Venda/Orcamento $vendaId nao encontrado.');
       }
-      if (venda.tipoEntrega != 'entrega_loja') {
+      if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) {
         throw StateError(
           'Somente entregas da loja possuem checklist de carga.',
         );
@@ -1877,7 +1855,7 @@ class VendaRepository {
       if (venda == null) {
         throw StateError('Venda/Orcamento $vendaId nao encontrado.');
       }
-      if (venda.tipoEntrega != 'entrega_loja') {
+      if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) {
         throw StateError('Somente entregas da loja possuem motorista.');
       }
       venda.motoristaEntrega = motorista.trim();
@@ -1893,7 +1871,7 @@ class VendaRepository {
       if (venda == null) {
         throw StateError('Venda/Orcamento $vendaId nao encontrado.');
       }
-      if (venda.tipoEntrega != 'entrega_loja') {
+      if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) {
         throw StateError(
           'Somente entregas da loja possuem data de entrega marcada.',
         );
@@ -1919,7 +1897,7 @@ class VendaRepository {
       final vendas = _db.vendaBox.getAll();
       var totalMigradas = 0;
       for (final venda in vendas) {
-        if (venda.tipoEntrega != 'entrega_loja') continue;
+        if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) continue;
         if (venda.motoristaEntrega.trim().isNotEmpty) continue;
         final linhas = venda.observacaoEntrega.split('\n');
         String? motorista;
@@ -2373,7 +2351,7 @@ class VendaRepository {
             produto.estoqueReservado = (reservadoAtual - item.quantidade)
                 .clamp(0, reservadoAtual)
                 .toInt();
-          } else if (venda.tipoEntrega == 'entrega_loja' &&
+          } else if (EntregaVendaHelper.vendaTemItensCarreto(venda) &&
               venda.carretoReservaAteSaida) {
             if (venda.cargaSaiu) {
               produto.estoqueReal += item.quantidade;
@@ -2550,7 +2528,7 @@ class VendaRepository {
         }
       }
 
-      if (venda.tipoEntrega == 'entrega_loja') {
+      if (EntregaVendaHelper.vendaTemItensCarreto(venda)) {
         final hist = HistoricoEntrega(
           statusAnterior: venda.statusEntrega,
           statusNovo: tipoLimpo == 'troca'
@@ -2676,6 +2654,42 @@ class VendaRepository {
     );
   }
 
+  /// Ids de produtos mais vendidos no periodo (quantidade liquida desc).
+  List<int> listarProdutoIdsMaisVendidos({
+    int dias = 30,
+    int limite = 50,
+  }) {
+    if (limite <= 0) return const [];
+    final fim = DateTime.now().toUtc();
+    final inicio = fim.subtract(Duration(days: dias));
+    final qb = _db.itemVendaBox.query();
+    qb.link(
+      ItemVenda_.venda,
+      Venda_.status
+          .equals('finalizada')
+          .and(Venda_.cancelada.equals(false))
+          .and(Venda_.data.greaterOrEqualDate(inicio))
+          .and(Venda_.data.lessOrEqualDate(fim)),
+    );
+    final query = qb.build();
+    try {
+      final itens = query.find();
+      final qtdPorProduto = <int, int>{};
+      for (final item in itens) {
+        final pid = item.produto.targetId;
+        if (pid <= 0) continue;
+        final q = item.quantidade - item.quantidadeDevolvida;
+        if (q <= 0) continue;
+        qtdPorProduto[pid] = (qtdPorProduto[pid] ?? 0) + q;
+      }
+      final ordenado = qtdPorProduto.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      return ordenado.take(limite).map((e) => e.key).toList();
+    } finally {
+      query.close();
+    }
+  }
+
   List<DeltaProdutoDevolucao> listarDeltasProdutosDevolucaoPeriodo(
     PeriodoFiltro periodo,
   ) {
@@ -2759,7 +2773,7 @@ class VendaRepository {
       if (daCliente > 0) {
         produto.estoqueReal += daCliente;
       }
-    } else if (venda.tipoEntrega == 'entrega_loja' &&
+    } else if (EntregaVendaHelper.vendaTemItensCarreto(venda) &&
         venda.carretoReservaAteSaida &&
         !venda.cargaSaiu) {
       final r = produto.estoqueReservado;

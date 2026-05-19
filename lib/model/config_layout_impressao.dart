@@ -247,7 +247,9 @@ class ConfigLayoutImpressao {
 
   static ConfigLayoutImpressao padraoOrcamento() => const ConfigLayoutImpressao(
         exibirValidadeOrcamento: true,
-        exibirObservacaoEntrega: true,
+        exibirEntrega: false,
+        exibirEnderecoEntrega: false,
+        exibirObservacaoEntrega: false,
       );
 
   static ConfigLayoutImpressao compacto({required bool orcamento}) =>

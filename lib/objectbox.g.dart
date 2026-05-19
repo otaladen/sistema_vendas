@@ -38,7 +38,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(1, 805574422642691043),
     name: 'ItemVenda',
-    lastPropertyId: const obx_int.IdUid(11, 7736469216551977158),
+    lastPropertyId: const obx_int.IdUid(12, 7292283824246218916),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -111,6 +111,12 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(11, 7736469216551977158),
         name: 'quantidadeDevolvida',
         type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 7292283824246218916),
+        name: 'tipoEntregaItem',
+        type: 9,
         flags: 0,
       ),
     ],
@@ -1782,7 +1788,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
       objectToFB: (ItemVenda object, fb.Builder fbb) {
         final nomeProdutoOffset = fbb.writeString(object.nomeProduto);
         final precoTipoOffset = fbb.writeString(object.precoTipo);
-        fbb.startTable(12);
+        final tipoEntregaItemOffset = fbb.writeString(object.tipoEntregaItem);
+        fbb.startTable(13);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.quantidade);
         fbb.addFloat64(2, object.precoUnitario);
@@ -1794,6 +1801,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addInt64(8, object.quantidadeJaRetirada);
         fbb.addInt64(9, object.quantidadeNoCarreto);
         fbb.addInt64(10, object.quantidadeDevolvida);
+        fbb.addOffset(11, tipoEntregaItemOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -1833,6 +1841,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           24,
           0,
         );
+        final tipoEntregaItemParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 26, '');
         final precoTipoParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 18, '');
@@ -1855,6 +1866,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           quantidadeJaRetirada: quantidadeJaRetiradaParam,
           quantidadeNoCarreto: quantidadeNoCarretoParam,
           quantidadeDevolvida: quantidadeDevolvidaParam,
+          tipoEntregaItem: tipoEntregaItemParam,
           precoTipo: precoTipoParam,
           precoUnitario: precoUnitarioParam,
           precoCustoUnitario: precoCustoUnitarioParam,
@@ -3964,6 +3976,11 @@ class ItemVenda_ {
   /// See [ItemVenda.quantidadeDevolvida].
   static final quantidadeDevolvida = obx.QueryIntegerProperty<ItemVenda>(
     _entities[0].properties[10],
+  );
+
+  /// See [ItemVenda.tipoEntregaItem].
+  static final tipoEntregaItem = obx.QueryStringProperty<ItemVenda>(
+    _entities[0].properties[11],
   );
 }
 

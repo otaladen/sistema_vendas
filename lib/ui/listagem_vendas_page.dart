@@ -14,6 +14,7 @@ import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
+import '../domain/entrega_venda_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
@@ -401,16 +402,14 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         .join(' | ');
   }
 
-  String _rotuloTipoEntrega(String tipo) {
-    switch (tipo) {
-      case 'entrega_loja':
-        return 'Carreto';
-      case 'retirada_futura':
-        return 'Retirada futura';
-      case 'retirada':
-      default:
-        return 'Leva Agora';
+  String _rotuloTipoEntrega(String tipo) =>
+      EntregaVendaHelper.rotuloTipoEntregaVenda(tipo);
+
+  String _textoEntregaLista(Venda v) {
+    if (v.tipoEntrega == EntregaVendaHelper.tipoMisto) {
+      return '${_rotuloTipoEntrega(v.tipoEntrega)} (${EntregaVendaHelper.resumoContagem(v.itens.map((i) => i.tipoEntregaItem))})';
     }
+    return _rotuloTipoEntrega(v.tipoEntrega);
   }
 
   String _linhaRetiradaFutura(Venda v) {
@@ -581,6 +580,18 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  SizedBox(
+                                    width: 44,
+                                    child: Text(
+                                      EntregaVendaHelper.abreviacaoTipoItem(
+                                        item.tipoEntregaItem,
+                                      ),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: Theme.of(ctx).colorScheme.primary,
+                                      ),
+                                    ),
+                                  ),
                                   Expanded(
                                     child: Text(
                                       '${item.quantidade}x ${item.nomeProduto}',
@@ -1192,6 +1203,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 value: 'entrega_loja',
                                 child: Text('Carreto'),
                               ),
+                              DropdownMenuItem(
+                                value: 'misto',
+                                child: Text('Venda mista'),
+                              ),
                             ],
                             onChanged: (v) {
                               if (v != null) setState(() => _tipoEntrega = v);
@@ -1474,7 +1489,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                   '${_rotuloPagamentoLinhaLista(v)}',
                                 ),
                                 Text(
-                                  '${_rotuloTipoEntrega(v.tipoEntrega)} | '
+                                  '${_textoEntregaLista(v)} | '
                                   '${_linhaRetiradaFutura(v)} | '
                                   '${v.itens.length} itens',
                                 ),
