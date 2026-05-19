@@ -153,10 +153,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     ('preco3', 'Atacado', 'F3'),
   ];
 
-  static const _opcoesEntregaPadraoPdv = <(String, String)>[
-    (EntregaVendaHelper.tipoRetirada, 'Leva agora'),
-    (EntregaVendaHelper.tipoRetiradaFutura, 'Retirada futura'),
-    (EntregaVendaHelper.tipoEntregaLoja, 'Carreto'),
+  static const _opcoesEntregaPadraoPdv = <(String, String, String)>[
+    (EntregaVendaHelper.tipoRetirada, 'Leva agora', 'Ctrl+F1'),
+    (EntregaVendaHelper.tipoRetiradaFutura, 'Retirada futura', 'Ctrl+F2'),
+    (EntregaVendaHelper.tipoEntregaLoja, 'Carreto', 'Ctrl+F3'),
   ];
 
   IconData _iconePrecoLista(String precoTipo) {
@@ -238,35 +238,49 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final tipo = _tipoEntregaSelecionada;
     final rotulo = EntregaVendaHelper.rotuloTipoItem(tipo);
     return PopupMenuButton<String>(
-      tooltip: 'Entrega padrao para novos itens: $rotulo',
+      tooltip: 'Entrega padrao para novos itens: $rotulo (Ctrl+F1–F3)',
       onSelected: (value) => setState(() => _tipoEntregaSelecionada = value),
       icon: Icon(
         PdvBotaoTipoEntregaItem.iconePara(tipo),
         color: PdvBotaoTipoEntregaItem.corPara(context, tipo),
       ),
-      itemBuilder: (context) => [
-        for (final opcao in _opcoesEntregaPadraoPdv)
-          PopupMenuItem<String>(
-            value: opcao.$1,
-            child: Row(
-              children: [
-                Icon(
-                  PdvBotaoTipoEntregaItem.iconePara(opcao.$1),
-                  size: 20,
-                  color: PdvBotaoTipoEntregaItem.corPara(context, opcao.$1),
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text(opcao.$2)),
-                if (tipo == opcao.$1)
+      itemBuilder: (context) {
+        final labelSmall = Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            );
+        return [
+          for (final opcao in _opcoesEntregaPadraoPdv)
+            PopupMenuItem<String>(
+              value: opcao.$1,
+              child: Row(
+                children: [
                   Icon(
-                    Icons.check,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.primary,
+                    PdvBotaoTipoEntregaItem.iconePara(opcao.$1),
+                    size: 20,
+                    color: PdvBotaoTipoEntregaItem.corPara(context, opcao.$1),
                   ),
-              ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(opcao.$2),
+                        Text(opcao.$3, style: labelSmall),
+                      ],
+                    ),
+                  ),
+                  if (tipo == opcao.$1)
+                    Icon(
+                      Icons.check,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                ],
+              ),
             ),
-          ),
-      ],
+        ];
+      },
     );
   }
 
@@ -326,10 +340,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   int? _indiceLinhaParaMesclar(
     int produtoId,
     String precoTipo,
-    String tipoEntregaItem, {
-    bool forcarNovaLinha = false,
-  }) {
-    if (forcarNovaLinha) return null;
+    String tipoEntregaItem,
+  ) {
     final idx = _carrinho.indexWhere(
       (e) =>
           e.produto.id == produtoId &&
@@ -778,12 +790,20 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _voltarFocoParaPesquisa();
   }
 
+  /// Carrinho vazio: abre consulta (F4). Com itens: foco no campo de busca do PDV.
+  void _atalhoF8Pdv() {
+    if (_carrinho.isEmpty) {
+      unawaited(_abrirConsultaProdutos());
+      return;
+    }
+    _irParaPesquisaProdutos();
+  }
+
   void _adicionarComQuantidade(
     Produto produto,
     int quantidade, {
     String? precoTipo,
     String? tipoEntregaItem,
-    bool forcarNovaLinha = false,
   }) {
     if (quantidade <= 0) return;
     final preco = precoTipo ?? _precoListaAtivo;
@@ -812,12 +832,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final tipoNovo = EntregaVendaHelper.normalizarTipoItem(
       tipoEntregaItem ?? _tipoEntregaSelecionada,
     );
-    final idxExistente = _indiceLinhaParaMesclar(
-      produto.id,
-      preco,
-      tipoNovo,
-      forcarNovaLinha: forcarNovaLinha,
-    );
+    final idxExistente = _indiceLinhaParaMesclar(produto.id, preco, tipoNovo);
     setState(() {
       if (idxExistente != null) {
         _carrinho[idxExistente].quantidade += quantidade;
@@ -1437,7 +1452,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       result.quantidade,
       precoTipo: result.precoTipo,
       tipoEntregaItem: result.tipoEntregaItem,
-      forcarNovaLinha: result.forcarNovaLinha,
     );
   }
 
@@ -3136,6 +3150,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         SingleActivator(LogicalKeyboardKey.f3): SelecionarPrecoListaIntent(
           'preco3',
         ),
+        SingleActivator(LogicalKeyboardKey.f1, control: true):
+            SelecionarEntregaPadraoIntent('retirada'),
+        SingleActivator(LogicalKeyboardKey.f2, control: true):
+            SelecionarEntregaPadraoIntent('retirada_futura'),
+        SingleActivator(LogicalKeyboardKey.f3, control: true):
+            SelecionarEntregaPadraoIntent('entrega_loja'),
         SingleActivator(LogicalKeyboardKey.f4): PdvAbrirConsultaIntent(),
         SingleActivator(LogicalKeyboardKey.f5): PdvRecarregarProdutosIntent(),
         SingleActivator(LogicalKeyboardKey.f6): PdvFocarCarrinhoIntent(),
@@ -3155,6 +3175,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               CallbackAction<SelecionarPrecoListaIntent>(
                 onInvoke: (intent) {
                   setState(() => _precoListaAtivo = intent.precoTipo);
+                  return null;
+                },
+              ),
+          SelecionarEntregaPadraoIntent:
+              CallbackAction<SelecionarEntregaPadraoIntent>(
+                onInvoke: (intent) {
+                  setState(() => _tipoEntregaSelecionada = intent.tipoEntrega);
                   return null;
                 },
               ),
@@ -3180,7 +3207,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           PdvFocarPesquisaProdutosIntent:
               CallbackAction<PdvFocarPesquisaProdutosIntent>(
                 onInvoke: (_) {
-                  _irParaPesquisaProdutos();
+                  _atalhoF8Pdv();
                   return null;
                 },
               ),
@@ -3282,7 +3309,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                       onRemoverItem: _removerItemCarrinho,
                       onAlternarTipoEntrega: _alternarTipoEntregaLinhaCarrinho,
                       onDividirLinha: _dividirLinhaCarrinho,
-                      onIrPesquisaQuandoVazio: _irParaPesquisaProdutos,
+                      onIrPesquisaQuandoVazio: () =>
+                          unawaited(_abrirConsultaProdutos()),
                     ),
                     subtotalProdutos: _totalOrcamento,
                     valorFrete: _valorFreteAtual,
@@ -3476,8 +3504,8 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                       vertical: 8,
                     ),
                     child: Text(
-                      'Icones topo: preco (F1–F3) e entrega padrao · F4/Enter consulta · F5 recarrega · '
-                      'F6 carrinho · F8 foco busca · E no item altera entrega · Ctrl+D dividir · '
+                      'F1–F3 preco · Ctrl+F1–F3 entrega padrao (novos itens) · F4/Enter consulta · F5 recarrega · '
+                      'F6 carrinho · F8 consulta (vazio) ou foco busca · E no item altera entrega · Ctrl+D dividir · '
                       'Ctrl+K limpa · Ctrl+O ler orcamento · F10 salvar · Na consulta: setas, Enter, Esc.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
@@ -3591,7 +3619,7 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Atalho: F8',
+                  'Atalho: F8 ou F4',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: scheme.outline,
                   ),
@@ -3783,30 +3811,64 @@ class _PdvPainelCheckout extends StatelessWidget {
                       ),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                  padding: const EdgeInsets.fromLTRB(8, 4, 4, 4),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              'Venda em atendimento · $carrinhoCount itens',
-                              style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            child: Text.rich(
+                              TextSpan(
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelLarge
+                                    ?.copyWith(fontWeight: FontWeight.w600),
+                                children: [
+                                  TextSpan(
+                                    text:
+                                        'Venda em atendimento · $carrinhoCount itens',
+                                  ),
+                                  if (resumoEntregaItens.isNotEmpty) ...[
+                                    TextSpan(
+                                      text: ' · Entrega: $resumoEntregaItens',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           IconButton(
                             tooltip:
                                 'Pesquisar produto (Enter abre consulta)',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 36,
+                              minHeight: 36,
+                            ),
                             onPressed: onIrPesquisaProdutos,
-                            icon: const Icon(Icons.search),
+                            icon: const Icon(Icons.search, size: 20),
                           ),
                           if (!leiauteEmpilhado)
                             IconButton(
                               tooltip: 'Recolher checkout',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
                               onPressed: onRecolherCheckout,
-                              icon: const Icon(Icons.chevron_right),
+                              icon: const Icon(Icons.chevron_right, size: 20),
                             ),
                         ],
                       ),
@@ -3839,22 +3901,11 @@ class _PdvPainelCheckout extends StatelessWidget {
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
-                            'F6 foca aqui · F8 pesquisa · E tipo · Ctrl+D dividir item · ↑↓ qtd · Ctrl+↑↓ outro item · Del remove',
+                            'F6 foca aqui · F8 pesquisa · Ctrl+F1–F3 entrega padrao · E tipo do item · Ctrl+D dividir · ↑↓ qtd · Ctrl+↑↓ outro item · Del remove',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ),
-                      if (resumoEntregaItens.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2, bottom: 2),
-                          child: Text(
-                            'Entrega: $resumoEntregaItens',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 2),
                       Expanded(child: carrinhoBody),
                       const SizedBox(height: 6),
                       _PdvCheckoutTotaisBase(
@@ -3982,12 +4033,10 @@ class _AdicionarOrcamentoResult {
     required this.quantidade,
     required this.precoTipo,
     required this.tipoEntregaItem,
-    this.forcarNovaLinha = false,
   });
   final int quantidade;
   final String precoTipo;
   final String tipoEntregaItem;
-  final bool forcarNovaLinha;
 }
 
 class _DividirLinhaCarrinhoResult {
@@ -4357,7 +4406,6 @@ class _AdicionarAoOrcamentoDialogState
     extends State<_AdicionarAoOrcamentoDialog> {
   late String _precoTipo;
   late String _tipoEntrega;
-  var _forcarNovaLinha = false;
   late final TextEditingController _qtdController;
   final _qtdFocus = FocusNode(debugLabel: 'pdvDialogQtd');
 
@@ -4400,7 +4448,6 @@ class _AdicionarAoOrcamentoDialogState
         quantidade: q,
         precoTipo: _precoTipo,
         tipoEntregaItem: _tipoEntrega,
-        forcarNovaLinha: _forcarNovaLinha,
       ),
     );
   }
@@ -4457,18 +4504,7 @@ class _AdicionarAoOrcamentoDialogState
               textInputAction: TextInputAction.done,
               onFieldSubmitted: (_) => _confirmar(),
             ),
-            const SizedBox(height: 4),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Outro item (nao somar no existente)'),
-              subtitle: const Text(
-                'Mesmo produto, preco e entrega podem ficar em itens separados.',
-              ),
-              value: _forcarNovaLinha,
-              onChanged: (v) => setState(() => _forcarNovaLinha = v ?? false),
-              controlAffinity: ListTileControlAffinity.leading,
-            ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerLeft,
               child: Text('Preco: ${widget.formatarMoeda(precoUnit)}'),
@@ -4491,6 +4527,12 @@ class _AdicionarAoOrcamentoDialogState
 class SelecionarPrecoListaIntent extends Intent {
   const SelecionarPrecoListaIntent(this.precoTipo);
   final String precoTipo;
+}
+
+/// Ctrl+F1/F2/F3 definem entrega padrao para novos itens (icone E altera cada linha).
+class SelecionarEntregaPadraoIntent extends Intent {
+  const SelecionarEntregaPadraoIntent(this.tipoEntrega);
+  final String tipoEntrega;
 }
 
 class PdvAbrirConsultaIntent extends Intent {

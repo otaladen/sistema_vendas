@@ -155,6 +155,8 @@ void _baixarEstoqueItemAoFinalizarOrcamento({
   switch (tipo) {
     case EntregaVendaHelper.tipoRetirada:
       produto.estoqueReal -= q;
+      item.quantidadeJaRetirada = q;
+      db.itemVendaBox.put(item);
       ComprasPreditivasService(db).atualizarAposVendaRegistrada(
         produto: produto,
         quantidadeVendida: q,
@@ -1349,12 +1351,16 @@ class VendaRepository {
     _notificarRedeAposEscrita();
   }
 
+  /// Unidades do item que ainda seguem no carreto ao marcar "Saiu" (apos retiradas na loja).
   static int _quantidadeItemParaEstoqueCarreto(ItemVenda item) {
-    final base = item.quantidade - item.quantidadeDevolvida;
-    if (base < 0) return 0;
-    final loja = item.quantidadeJaRetirada;
-    final truck = base - loja;
-    return truck < 0 ? 0 : truck;
+    if (EntregaVendaHelper.itemMigradoRetiradaFuturaParaCarreto(item)) {
+      return item.quantidadeNoCarreto;
+    }
+    if (EntregaVendaHelper.tipoEfetivoItem(item) !=
+        EntregaVendaHelper.tipoEntregaLoja) {
+      return 0;
+    }
+    return item.quantidadeAindaNoCarretoAntesSaida;
   }
 
   void _baixarEstoqueCarretoAoMarcarSaida(Venda venda) {
@@ -1363,20 +1369,15 @@ class VendaRepository {
       if (produto == null) continue;
       final q = _quantidadeItemParaEstoqueCarreto(item);
       if (q <= 0) continue;
-      if (produto.estoqueReservado < q) {
-        throw StateError(
-          'Reservado insuficiente para ${produto.nome} ao marcar saida do carreto '
-          '(reservado ${produto.estoqueReservado}, precisa $q).',
-        );
-      }
-      if (produto.estoqueReal < q) {
-        throw StateError(
-          'Estoque fisico insuficiente para ${produto.nome} ao marcar saida '
-          '(real ${produto.estoqueReal}, precisa $q).',
-        );
-      }
-      produto.estoqueReservado -= q;
-      produto.estoqueReal -= q;
+
+      // Retirada na loja ja baixou reserva e fisico; sobra no romaneio.
+      final qReserva = q.clamp(0, produto.estoqueReservado);
+      if (qReserva <= 0) continue;
+
+      produto.estoqueReservado -= qReserva;
+      // Fisico pode ja estar baixo/negativo se houve retirada na loja antes;
+      // a saida do carro consome o que ainda estava reservado para o carreto.
+      produto.estoqueReal -= qReserva;
       _db.produtoBox.put(produto);
     }
   }
@@ -2111,6 +2112,12 @@ class VendaRepository {
         if (item.venda.targetId != vendaId) {
           throw StateError('Item $itemId nao pertence a esta venda.');
         }
+        if (EntregaVendaHelper.tipoEfetivoItem(item) !=
+            EntregaVendaHelper.tipoRetiradaFutura) {
+          throw StateError(
+            '"${item.nomeProduto}" nao e retirada futura (ja foi leva agora ou carreto).',
+          );
+        }
         final pendente = item.quantidadePendenteRetirada;
         if (qRet > pendente) {
           throw StateError(
@@ -2209,9 +2216,9 @@ class VendaRepository {
       if (venda.status != 'finalizada') {
         throw StateError('Somente vendas finalizadas permitem retirada na loja.');
       }
-      if (venda.tipoEntrega != 'entrega_loja') {
+      if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) {
         throw StateError(
-          'Somente entregas da loja (carreto) permitem retirada na loja por esta acao.',
+          'Esta venda nao tem itens de carreto para retirada na loja.',
         );
       }
       if (!venda.carretoReservaAteSaida) {
@@ -2224,12 +2231,6 @@ class VendaRepository {
           'O carro ja marcou saida; retirada na loja so e permitida ate antes disso.',
         );
       }
-      final migrada = venda.itens.any((i) => i.quantidadeNoCarreto > 0);
-      if (migrada) {
-        throw StateError(
-          'Venda migrada de retirada futura: use a listagem de vendas para retirada futura.',
-        );
-      }
 
       for (final e in filtrado.entries) {
         final itemId = e.key;
@@ -2240,6 +2241,17 @@ class VendaRepository {
         }
         if (item.venda.targetId != vendaId) {
           throw StateError('Item $itemId nao pertence a esta venda.');
+        }
+        if (EntregaVendaHelper.tipoEfetivoItem(item) !=
+            EntregaVendaHelper.tipoEntregaLoja) {
+          throw StateError(
+            '"${item.nomeProduto}" nao e carreto; use retirada futura na listagem.',
+          );
+        }
+        if (EntregaVendaHelper.itemMigradoRetiradaFuturaParaCarreto(item)) {
+          throw StateError(
+            '"${item.nomeProduto}" migrou de retirada futura: use retirada futura na listagem.',
+          );
         }
         final pendente = item.quantidadeAindaNoCarretoAntesSaida;
         if (qRet > pendente) {

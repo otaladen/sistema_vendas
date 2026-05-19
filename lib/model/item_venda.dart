@@ -1,5 +1,6 @@
 import 'package:objectbox/objectbox.dart';
 
+import '../domain/entrega_venda_helper.dart';
 import 'produto.dart';
 import 'venda.dart';
 
@@ -48,15 +49,23 @@ class ItemVenda {
   double get subtotalCusto => quantidade * precoCustoUnitario;
   double get lucro => subtotal - subtotalCusto;
 
-  /// Unidades ainda nao retiradas quando a venda esta com retirada futura.
+  /// Unidades ainda nao retiradas (somente itens [retirada_futura]).
   int get quantidadePendenteRetirada {
+    if (EntregaVendaHelper.tipoEfetivoItem(this) !=
+        EntregaVendaHelper.tipoRetiradaFutura) {
+      return 0;
+    }
     final p = quantidade - quantidadeJaRetirada;
     return p < 0 ? 0 : p;
   }
 
-  /// Para carreto com reserva ate a saida (venda nativa, nao migrada de retirada
-  /// futura): unidades que ainda seguem para o envio apos retirada na loja.
+  /// Carreto com reserva ate a saida: unidades que ainda seguem no romaneio
+  /// (cliente pode buscar na loja antes do carro sair).
   int get quantidadeAindaNoCarretoAntesSaida {
+    if (EntregaVendaHelper.tipoEfetivoItem(this) !=
+        EntregaVendaHelper.tipoEntregaLoja) {
+      return 0;
+    }
     final p = quantidade - quantidadeDevolvida - quantidadeJaRetirada;
     return p < 0 ? 0 : p;
   }

@@ -148,9 +148,27 @@ class EntregaVendaHelper {
     }
   }
 
+  /// Item de venda que migrou de retirada futura para carreto (apos frete).
+  static bool itemMigradoRetiradaFuturaParaCarreto(ItemVenda item) {
+    return tipoEfetivoItem(item) == tipoRetiradaFutura &&
+        item.quantidadeNoCarreto > 0;
+  }
+
+  /// Venda com itens migrados retirada futura > carreto (nao usar retirada na loja nativa).
+  static bool vendaTemItensMigradosRetiradaParaCarreto(Venda venda) {
+    return venda.itens.any(itemMigradoRetiradaFuturaParaCarreto);
+  }
+
+  /// Cliente pode buscar na loja itens de carreto antes do romaneio sair.
+  static bool vendaPermiteRetiradaLojaCarretoAntesSaida(Venda venda) {
+    if (venda.cancelada || venda.status != 'finalizada') return false;
+    if (!venda.carretoReservaAteSaida || venda.cargaSaiu) return false;
+    return venda.itens.any((i) => i.quantidadeAindaNoCarretoAntesSaida > 0);
+  }
+
   /// Itens que entram na carga / tela Entregas (carreto ou migrado retirada futura).
   static bool itemEntraNaCargaEntrega(Venda venda, ItemVenda item) {
-    if (item.quantidadeNoCarreto > 0) return true;
+    if (itemMigradoRetiradaFuturaParaCarreto(item)) return true;
     return tipoEfetivoItem(item) == tipoEntregaLoja;
   }
 

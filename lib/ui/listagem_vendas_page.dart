@@ -18,6 +18,7 @@ import '../domain/entrega_venda_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
+import '../model/item_venda.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../services/cupom_nao_fiscal_venda_pdf.dart';
@@ -423,31 +424,29 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     return 'Retirada futura: Pendente ($unidades un. a retirar)';
   }
 
+  bool _vendaTemRetiradaPendenteParaCliente(Venda v) {
+    if (v.cancelada || v.status != 'finalizada') return false;
+    return v.itens.any((i) => i.quantidadePendenteRetirada > 0) ||
+        EntregaVendaHelper.vendaPermiteRetiradaLojaCarretoAntesSaida(v);
+  }
+
   Future<void> _abrirRegistrarRetirada(Venda v) async {
     final atual = widget.vendaRepository.obterPorId(v.id);
-    if (atual == null || atual.cancelada || !atual.entregaPendente) {
+    if (atual == null || !_vendaTemRetiradaPendenteParaCliente(atual)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'So e possivel registrar retirada em vendas com retirada futura pendente.',
+            'Nao ha itens pendentes para o cliente retirar na loja '
+            '(retirada futura ou carreto antes da saida do romaneio).',
           ),
-        ),
-      );
-      return;
-    }
-    if (!atual.itens.any((i) => i.quantidadePendenteRetirada > 0)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Nao ha quantidade pendente de retirada nesta venda.'),
         ),
       );
       return;
     }
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => _DialogRetiradaFutura(
+      builder: (ctx) => _DialogRegistrarRetiradaCliente(
         venda: atual,
         vendaRepository: widget.vendaRepository,
         usuario: widget.usuarioAtual,
@@ -1628,7 +1627,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                           value: 'pagar_frete',
                                           child: Text('Pagar frete (carreto)'),
                                         ),
-                                      if (v.entregaPendente && !v.cancelada)
+                                      if (_vendaTemRetiradaPendenteParaCliente(v))
                                         const PopupMenuItem<String>(
                                           value: 'retirada',
                                           child: Text('Registrar retirada'),
@@ -1955,8 +1954,22 @@ class _DialogoFreteCarretoRetiradaFuturaState
   }
 }
 
-class _DialogRetiradaFutura extends StatefulWidget {
-  const _DialogRetiradaFutura({
+class _LinhaRetiradaCliente {
+  const _LinhaRetiradaCliente({
+    required this.item,
+    required this.pendente,
+    required this.rotulo,
+    required this.carretoNaLoja,
+  });
+
+  final ItemVenda item;
+  final int pendente;
+  final String rotulo;
+  final bool carretoNaLoja;
+}
+
+class _DialogRegistrarRetiradaCliente extends StatefulWidget {
+  const _DialogRegistrarRetiradaCliente({
     required this.venda,
     required this.vendaRepository,
     required this.usuario,
@@ -1967,20 +1980,56 @@ class _DialogRetiradaFutura extends StatefulWidget {
   final String usuario;
 
   @override
-  State<_DialogRetiradaFutura> createState() => _DialogRetiradaFuturaState();
+  State<_DialogRegistrarRetiradaCliente> createState() =>
+      _DialogRegistrarRetiradaClienteState();
 }
 
-class _DialogRetiradaFuturaState extends State<_DialogRetiradaFutura> {
+class _DialogRegistrarRetiradaClienteState
+    extends State<_DialogRegistrarRetiradaCliente> {
   late final Map<int, TextEditingController> _controllers;
   late final TextEditingController _quemRetirouController;
+
+  List<_LinhaRetiradaCliente> get _linhasPendentes {
+    final v = widget.venda;
+    final carretoLoja =
+        EntregaVendaHelper.vendaPermiteRetiradaLojaCarretoAntesSaida(v);
+    final linhas = <_LinhaRetiradaCliente>[];
+    for (final it in v.itens) {
+      final qFut = it.quantidadePendenteRetirada;
+      if (qFut > 0) {
+        linhas.add(
+          _LinhaRetiradaCliente(
+            item: it,
+            pendente: qFut,
+            rotulo: 'Retirada futura',
+            carretoNaLoja: false,
+          ),
+        );
+      }
+      if (carretoLoja) {
+        final qCar = it.quantidadeAindaNoCarretoAntesSaida;
+        if (qCar > 0) {
+          linhas.add(
+            _LinhaRetiradaCliente(
+              item: it,
+              pendente: qCar,
+              rotulo: 'Carreto (busca na loja)',
+              carretoNaLoja: true,
+            ),
+          );
+        }
+      }
+    }
+    return linhas;
+  }
 
   @override
   void initState() {
     super.initState();
     _quemRetirouController = TextEditingController();
     _controllers = {
-      for (final it in widget.venda.itens)
-        it.id: TextEditingController(text: ''),
+      for (final linha in _linhasPendentes)
+        linha.item.id: TextEditingController(text: ''),
     };
   }
 
@@ -1994,26 +2043,30 @@ class _DialogRetiradaFuturaState extends State<_DialogRetiradaFutura> {
   }
 
   void _preencherTudo() {
-    for (final it in widget.venda.itens) {
-      final c = _controllers[it.id];
-      if (c != null && it.quantidadePendenteRetirada > 0) {
-        c.text = '${it.quantidadePendenteRetirada}';
+    for (final linha in _linhasPendentes) {
+      final c = _controllers[linha.item.id];
+      if (c != null) {
+        c.text = '${linha.pendente}';
       }
     }
     setState(() {});
   }
 
   Future<void> _confirmar() async {
-    final map = <int, int>{};
-    for (final it in widget.venda.itens) {
-      final c = _controllers[it.id];
+    final mapFutura = <int, int>{};
+    final mapCarretoLoja = <int, int>{};
+    for (final linha in _linhasPendentes) {
+      final c = _controllers[linha.item.id];
       if (c == null) continue;
       final q = int.tryParse(c.text.trim()) ?? 0;
-      if (q > 0) {
-        map[it.id] = q;
+      if (q <= 0) continue;
+      if (linha.carretoNaLoja) {
+        mapCarretoLoja[linha.item.id] = q;
+      } else {
+        mapFutura[linha.item.id] = q;
       }
     }
-    if (map.isEmpty) {
+    if (mapFutura.isEmpty && mapCarretoLoja.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Informe ao menos uma quantidade maior que zero.'),
@@ -2023,12 +2076,23 @@ class _DialogRetiradaFuturaState extends State<_DialogRetiradaFutura> {
     }
     try {
       final quem = _quemRetirouController.text.trim();
-      widget.vendaRepository.registrarRetiradaParcial(
-        widget.venda.id,
-        map,
-        usuario: widget.usuario,
-        retiradoPor: quem.isEmpty ? null : quem,
-      );
+      final retiradoPor = quem.isEmpty ? null : quem;
+      if (mapFutura.isNotEmpty) {
+        widget.vendaRepository.registrarRetiradaParcial(
+          widget.venda.id,
+          mapFutura,
+          usuario: widget.usuario,
+          retiradoPor: retiradoPor,
+        );
+      }
+      if (mapCarretoLoja.isNotEmpty) {
+        widget.vendaRepository.registrarRetiradaParcialLojaCarretoAntesSaida(
+          widget.venda.id,
+          mapCarretoLoja,
+          usuario: widget.usuario,
+          retiradoPor: retiradoPor,
+        );
+      }
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
@@ -2052,8 +2116,8 @@ class _DialogRetiradaFuturaState extends State<_DialogRetiradaFutura> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Informe quantas unidades o cliente esta retirando agora '
-                '(parcial ou total).',
+                'Cliente retirando na loja agora (parcial ou total). '
+                'Itens de carreto so aparecem enquanto o romaneio nao saiu.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -2069,7 +2133,7 @@ class _DialogRetiradaFuturaState extends State<_DialogRetiradaFutura> {
                 ),
               ),
               const SizedBox(height: 12),
-              for (final it in widget.venda.itens)
+              for (final linha in _linhasPendentes)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Row(
@@ -2080,13 +2144,13 @@ class _DialogRetiradaFuturaState extends State<_DialogRetiradaFutura> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              it.nomeProduto,
+                              linha.item.nomeProduto,
                               style: theme.textTheme.titleSmall?.copyWith(
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                             Text(
-                              'Pendente: ${it.quantidadePendenteRetirada} un.',
+                              '${linha.rotulo} · pendente ${linha.pendente} un.',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
@@ -2097,8 +2161,8 @@ class _DialogRetiradaFuturaState extends State<_DialogRetiradaFutura> {
                       SizedBox(
                         width: 88,
                         child: TextField(
-                          controller: _controllers[it.id],
-                          enabled: it.quantidadePendenteRetirada > 0,
+                          controller: _controllers[linha.item.id],
+                          enabled: linha.pendente > 0,
                           keyboardType: TextInputType.number,
                           textAlign: TextAlign.right,
                           decoration: const InputDecoration(

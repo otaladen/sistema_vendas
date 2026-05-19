@@ -218,7 +218,7 @@ class _EntregasPageState extends State<EntregasPage> {
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
 
   bool _vendaUsaItensCarretoMigrado(Venda v) {
-    return v.itens.any((i) => i.quantidadeNoCarreto > 0);
+    return EntregaVendaHelper.vendaTemItensMigradosRetiradaParaCarreto(v);
   }
 
   /// Carreto nativo (reserva ate a saida), nao migrado de retirada futura.
@@ -229,10 +229,8 @@ class _EntregasPageState extends State<EntregasPage> {
   }
 
   bool _podeRegistrarRetiradaLojaAntesSaidaCarreto(Venda v) {
-    if (v.cancelada || v.status != 'finalizada') return false;
-    if (!_vendaCarretoReservaNativaSemMigracao(v)) return false;
-    if (v.cargaSaiu) return false;
-    return v.itens.any((i) => i.quantidadeAindaNoCarretoAntesSaida > 0);
+    return EntregaVendaHelper.vendaPermiteRetiradaLojaCarretoAntesSaida(v) &&
+        _vendaCarretoReservaNativaSemMigracao(v);
   }
 
   int _quantidadeExibicaoEntrega(Venda v, ItemVenda item) {
@@ -4025,12 +4023,16 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
   late final Map<int, TextEditingController> _controllers;
   late final TextEditingController _quemRetirouController;
 
+  List<ItemVenda> get _itensCarretoPendentes => widget.venda.itens
+      .where((i) => i.quantidadeAindaNoCarretoAntesSaida > 0)
+      .toList();
+
   @override
   void initState() {
     super.initState();
     _quemRetirouController = TextEditingController();
     _controllers = {
-      for (final it in widget.venda.itens)
+      for (final it in _itensCarretoPendentes)
         it.id: TextEditingController(text: ''),
     };
   }
@@ -4045,9 +4047,9 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
   }
 
   void _preencherPendente() {
-    for (final it in widget.venda.itens) {
+    for (final it in _itensCarretoPendentes) {
       final c = _controllers[it.id];
-      if (c != null && it.quantidadeAindaNoCarretoAntesSaida > 0) {
+      if (c != null) {
         c.text = '${it.quantidadeAindaNoCarretoAntesSaida}';
       }
     }
@@ -4056,7 +4058,7 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
 
   Future<void> _confirmar() async {
     final map = <int, int>{};
-    for (final it in widget.venda.itens) {
+    for (final it in _itensCarretoPendentes) {
       final c = _controllers[it.id];
       if (c == null) continue;
       final q = int.tryParse(c.text.trim()) ?? 0;
@@ -4130,7 +4132,7 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
                 ),
               ),
               const SizedBox(height: 12),
-              for (final it in widget.venda.itens)
+              for (final it in _itensCarretoPendentes)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Row(

@@ -368,11 +368,12 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   }
 
   Widget _buildPainelPreview(Produto produto, {required bool compacto}) {
-    final preco = widget.precoUnitarioDe(produto, _precoListaAtivo);
     return PdvConsultaPreviewPanel(
       produto: produto,
-      precoFormatado: widget.formatarMoeda(preco),
-      rotuloPreco: widget.rotuloPreco(_precoListaAtivo),
+      precoListaAtivo: _precoListaAtivo,
+      precoUnitarioDe: widget.precoUnitarioDe,
+      rotuloPreco: widget.rotuloPreco,
+      formatarMoeda: widget.formatarMoeda,
       estoqueCritico: _estoqueCritico(produto),
       compacto: compacto,
       onDetalhes: _abrirDetalhesProduto,
@@ -571,40 +572,42 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                 child: CallbackShortcuts(
                   bindings: <ShortcutActivator, VoidCallback>{
+                    const SingleActivator(LogicalKeyboardKey.f8):
+                        _focarCampoBusca,
                     const SingleActivator(LogicalKeyboardKey.arrowDown):
                         _focarListaPrimeiroItem,
                   },
                   child: TextField(
-                    controller: _pesquisaController,
-                    focusNode: _pesquisaFocus,
-                    autofocus: widget.termoInicial.isEmpty,
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      labelText: 'Filtrar na consulta',
-                      hintText: 'Nome, codigo ou codigo de barras',
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.search),
-                        onPressed: () => _atualizarLista(
-                          confirmarSeUmResultado: true,
-                          focarListaSeTiverItens: true,
+                      controller: _pesquisaController,
+                      focusNode: _pesquisaFocus,
+                      autofocus: widget.termoInicial.isEmpty,
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                        labelText: 'Filtrar na consulta',
+                        hintText: 'Nome, codigo ou codigo de barras',
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.search),
+                          onPressed: () => _atualizarLista(
+                            confirmarSeUmResultado: true,
+                            focarListaSeTiverItens: true,
+                          ),
                         ),
                       ),
+                      onChanged: (_) => _agendarBuscaDigitacao(),
+                      onSubmitted: (_) => _atualizarLista(
+                        confirmarSeUmResultado: true,
+                        focarListaSeTiverItens: true,
+                      ),
                     ),
-                    onChanged: (_) => _agendarBuscaDigitacao(),
-                    onSubmitted: (_) => _atualizarLista(
-                      confirmarSeUmResultado: true,
-                      focarListaSeTiverItens: true,
-                    ),
-                  ),
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Text(
-                  'Preco lista: ${widget.rotuloPreco(_precoListaAtivo)} · '
-                  'F8 ou seta cima no 1º item volta ao filtro · '
-                  'seta baixo no filtro volta à lista · '
-                  'F1–F3 preco · Enter confirma · Espaco/F9 detalhes · '
+                  'Lista ativa: ${widget.rotuloPreco(_precoListaAtivo)} · '
+                  'painel mostra os 3 precos · F1–F3 troca lista · '
+                  'F8 foco filtro · setas lista/filtro · Enter confirma · '
+                  'Espaco/F9 detalhes · '
                   'duplo clique confirma · Esc volta · Numpad+ adiciona 1',
                   style: Theme.of(context).textTheme.bodySmall,
                   softWrap: true,
