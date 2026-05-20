@@ -124,18 +124,26 @@ class CupomPdfLayout {
       fontSize: fs,
       fontWeight: fontWeightDireita ?? fontWeight,
     );
+    final flexDir = (10 - flexEsquerda).clamp(1, 10);
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Expanded(
           flex: flexEsquerda,
-          child: pw.Text(esquerda, style: estiloEsq),
+          child: pw.Text(
+            esquerda,
+            style: estiloEsq,
+            softWrap: false,
+          ),
         ),
         if (direita.isNotEmpty)
-          pw.Text(
-            direita,
-            style: estiloDir,
-            textAlign: pw.TextAlign.right,
+          pw.Expanded(
+            flex: flexDir,
+            child: pw.Text(
+              direita,
+              style: estiloDir,
+              textAlign: pw.TextAlign.right,
+            ),
           ),
       ],
     );
@@ -232,15 +240,33 @@ class CupomPdfLayout {
             : layout.tamanhoFonteTotais.fontSizeTotais);
     final usarColunas = colunas ?? layout.alinharTotaisColunas;
     final negrito = destaque ? pw.FontWeight.bold : pw.FontWeight.normal;
+    final estiloLinha = estilo(layout, fontSize: fs, fontWeight: negrito);
+
     if (!usarColunas) {
       return pw.Padding(
         padding: pw.EdgeInsets.only(bottom: 0.5 * PdfPageFormat.mm),
         child: pw.Text(
           '$rotulo $valor',
-          style: estilo(layout, fontSize: fs, fontWeight: negrito),
+          style: estiloLinha,
         ),
       );
     }
+
+    // Valor longo (ex.: pagamento misto) — rotulo em linha propria evita quebrar "Pagamento:".
+    if (valor.length > 32) {
+      return pw.Padding(
+        padding: pw.EdgeInsets.only(bottom: 0.5 * PdfPageFormat.mm),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            pw.Text(rotulo, style: estiloLinha),
+            pw.SizedBox(height: 0.3 * PdfPageFormat.mm),
+            pw.Text(valor, style: estiloLinha),
+          ],
+        ),
+      );
+    }
+
     return pw.Padding(
       padding: pw.EdgeInsets.only(bottom: 0.5 * PdfPageFormat.mm),
       child: linhaColunas(

@@ -44,21 +44,30 @@ class CupomNaoFiscalVendaPdf {
     }
   }
 
+  static String _detalheLinhaPagamentoPdf(PagamentoOrcamentoLinha l) {
+    final base =
+        '${rotuloFormaPagamento(l.meio)} ${formatarMoeda(l.valor)}';
+    if (l.meio == 'cartao_credito' && l.parcelas > 0) {
+      final vp = l.valor / l.parcelas;
+      return '$base ${l.parcelas}x de ${formatarMoeda(vp)}';
+    }
+    return base;
+  }
+
   static String _textoDetalheLinhasPagamento(List<PagamentoOrcamentoLinha> linhas) {
     if (linhas.isEmpty) return '';
-    return linhas
-        .map(
-          (l) =>
-              '${rotuloFormaPagamento(l.meio)} ${formatarMoeda(l.valor)}'
-              '${l.meio == 'cartao_credito' ? ' ${l.parcelas}x' : ''}',
-        )
-        .join(' + ');
+    return linhas.map(_detalheLinhaPagamentoPdf).join('; ');
   }
 
   static String rotuloPagamentoCabecalho(Venda v) {
     if (v.formaPagamento != 'misto' || v.pagamentosJson.trim().isEmpty) {
-      return '${rotuloFormaPagamento(v.formaPagamento)}'
-          '${v.formaPagamento == 'cartao_credito' ? ' | ${v.quantidadeParcelas}x' : ''}';
+      final rotulo = rotuloFormaPagamento(v.formaPagamento);
+      if (v.formaPagamento == 'cartao_credito' && v.quantidadeParcelas > 0) {
+        final vp = v.total / v.quantidadeParcelas;
+        return '$rotulo ${formatarMoeda(v.total)} '
+            '${v.quantidadeParcelas}x de ${formatarMoeda(vp)}';
+      }
+      return rotulo;
     }
     final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
     if (linhas.isEmpty) return 'Misto';

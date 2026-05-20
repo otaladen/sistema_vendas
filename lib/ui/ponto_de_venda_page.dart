@@ -93,6 +93,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   /// Botão "Editar dados da entrega" (frete/endereço estão no dialogo).
   final _focusEditarEntregaPdV = FocusNode(debugLabel: 'pdvEditarEntrega');
   final _focusSalvarOrcamentoPdV = FocusNode(debugLabel: 'pdvSalvarOrcamento');
+  final _focusDescontoPdV = FocusNode(debugLabel: 'pdvDescontoCheckout');
+  final _focusPagamentoMistoSwitchPdV =
+      FocusNode(debugLabel: 'pdvMistoSwitchCheckout');
+  final _focusCheckoutAcaoPrimaria =
+      FocusNode(debugLabel: 'pdvCheckoutAcaoPrimaria');
+
+  /// Dialogo "Dados para enviar ao caixa" aberto (atalhos F10/Esc/1-6).
+  bool _checkoutDialogAberto = false;
+  StateSetter? _checkoutDialogSetState;
+  BuildContext? _checkoutDialogFechamentoContext;
+  ScrollController? _checkoutDialogScroll;
+  int _indiceChipPagamentoFocado = 0;
 
   /// Produtos usados recentemente nesta sessao (consulta vazia).
   final List<int> _produtosRecentesPdv = [];
@@ -117,6 +129,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   String _formaPagamentoSelecionada = 'dinheiro';
   int _parcelasSelecionadas = 1;
   bool _pagamentoMistoPdV = false;
+  /// Checkout simplificado (venda leva agora, sem carreto).
+  bool _checkoutModoRapido = false;
+  /// Passo do wizard (0=resumo, 1=quem/entrega, 2=pagamento) no modo completo.
+  int _checkoutPassoWizard = 0;
   final List<_LinhaPagamentoMistoPdV> _linhasPagamentoMisto = [];
   List<PlanoFiadoParcela> _planoFiadoParcelas = [];
   static const double _valorMinimoParcelaCreditoPdV = 5.0;
@@ -147,6 +163,19 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   bool get _carrinhoEntregaMista =>
       _resolverTipoEntregaVendaCarrinho() == EntregaVendaHelper.tipoMisto;
+
+  /// Venda simples: todos itens leva agora, sem carreto nem entrega mista.
+  bool _elegivelCheckoutModoRapido() {
+    if (_carrinho.isEmpty) return false;
+    if (_orcamentoEmEdicaoId != null) return false;
+    if (_carrinhoTemItemCarreto) return false;
+    if (_carrinhoEntregaMista) return false;
+    return _carrinho.every(
+      (i) =>
+          EntregaVendaHelper.normalizarTipoItem(i.tipoEntregaItem) ==
+          EntregaVendaHelper.tipoRetirada,
+    );
+  }
 
   void _aplicarEnderecoCarretoDoClienteSeVazio() {
     if (!_carrinhoTemItemCarreto) return;
@@ -293,50 +322,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
   }
 
-  Widget _buildBlocoEntregaItensFechamento(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final resumo = _resumoEntregaItensCarrinho;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Entrega dos itens desta venda',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-          if (_carrinhoEntregaMista) ...[
-            const SizedBox(height: 4),
-            Text(
-              'Venda mista',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: scheme.primary,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-          ],
-          if (resumo.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              resumo,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   void _alternarTipoEntregaLinhaCarrinho(int index) {
     if (index < 0 || index >= _carrinho.length) return;
     setState(() {
@@ -433,6 +418,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   final _descontoPdVController = TextEditingController();
   int? _orcamentoEmEdicaoId;
   int? _orcamentoEmEdicaoNumero;
+  /// Ultimo orcamento enviado ao caixa (exibido no painel apos salvar).
+  int? _ultimoOrcamentoSalvoNumero;
   bool _mostrarAjudaAtalhos = false;
 
   /// Agrupa varios KeyDown do F7 no mesmo ciclo (Windows); senao executa dois passos de uma vez.
@@ -527,6 +514,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _focusParcelasPdV.dispose();
     _focusEditarEntregaPdV.dispose();
     _focusSalvarOrcamentoPdV.dispose();
+    _focusDescontoPdV.dispose();
+    _focusPagamentoMistoSwitchPdV.dispose();
+    _focusCheckoutAcaoPrimaria.dispose();
     _descontoPdVController.dispose();
     _pesquisaFocus.dispose();
     _pesquisaController.dispose();
@@ -735,6 +725,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       return true;
     }
 
+    if (_checkoutDialogAberto &&
+        event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.f10) {
+      _checkoutDialogAcaoF10();
+      return true;
+    }
+
     if (event.logicalKey != LogicalKeyboardKey.f7) return false;
 
     if (event is KeyRepeatEvent) {
@@ -742,6 +739,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
 
     if (event is! KeyDownEvent) return false;
+
+    if (_checkoutDialogAberto) return false;
 
     _agendarCheckoutF7Microtask(_shiftPressionado());
     return true;
@@ -1531,6 +1530,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       onExpandirPainel: _irParaPesquisaProdutos,
       orcamentoEmEdicao: _orcamentoEmEdicaoId != null,
       orcamentoEmEdicaoNumero: _orcamentoEmEdicaoNumero?.toString(),
+      ultimoOrcamentoSalvoNumero: _ultimoOrcamentoSalvoNumero,
       onCancelarEdicaoOrcamento: () {
         setState(() {
           _orcamentoEmEdicaoId = null;
@@ -1634,14 +1634,194 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
   }
 
-  static const List<String> _meiosPagamentoMistoPdV = [
-    'dinheiro',
-    'pix',
-    'cartao_credito',
-    'cartao_debito',
-    'transferencia',
-    'fiado',
+  static const List<({String id, String rotulo, IconData icone})>
+      _opcoesFormaPagamentoPdV = [
+    (id: 'dinheiro', rotulo: 'Dinheiro', icone: Icons.payments_outlined),
+    (id: 'pix', rotulo: 'PIX', icone: Icons.qr_code_2_outlined),
+    (
+      id: 'cartao_debito',
+      rotulo: 'Debito',
+      icone: Icons.credit_card_outlined,
+    ),
+    (
+      id: 'cartao_credito',
+      rotulo: 'Credito',
+      icone: Icons.credit_score_outlined,
+    ),
+    (id: 'transferencia', rotulo: 'Transfer.', icone: Icons.account_balance_outlined),
+    (id: 'fiado', rotulo: 'Fiado', icone: Icons.receipt_long_outlined),
   ];
+
+  bool _podeSelecionarMeioMistoFiado(String meioAtualLinha) {
+    if (meioAtualLinha == 'fiado') return true;
+    return !_linhasPagamentoMisto.any((l) => l.meio == 'fiado');
+  }
+
+  void _selecionarMeioPagamentoMisto({
+    required _LinhaPagamentoMistoPdV linha,
+    required String meio,
+    required StateSetter setDialogState,
+  }) {
+    if (meio == 'fiado' && !_podeSelecionarMeioMistoFiado(linha.meio)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pagamento misto: use apenas uma linha Fiado.'),
+        ),
+      );
+      return;
+    }
+    _atualizarCheckoutFechamento(setDialogState, () {
+      linha.meio = meio;
+      if (meio != 'cartao_credito') linha.parcelas = 1;
+    });
+  }
+
+  Widget _buildChipFormaPagamento({
+    required String rotulo,
+    required IconData icone,
+    required bool selecionado,
+    required bool destacadoTeclado,
+    required VoidCallback? onTap,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return ChoiceChip(
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icone, size: 17),
+          const SizedBox(width: 5),
+          Text(rotulo),
+        ],
+      ),
+      selected: selecionado,
+      side: destacadoTeclado && !selecionado
+          ? BorderSide(color: scheme.primary, width: 2)
+          : null,
+      onSelected: onTap == null ? null : (_) => onTap(),
+    );
+  }
+
+  Widget _buildChipsFormaPagamentoCheckout(StateSetter setDialogState) {
+    final theme = Theme.of(context);
+    final pagamentoComFoco = _focusPagamentoPdV.hasFocus;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Forma de pagamento (1-6 ou setas)',
+          style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Focus(
+          focusNode: _focusPagamentoPdV,
+          onFocusChange: (hasFocus) {
+            if (hasFocus) _sincronizarIndiceChipPagamentoComSelecao();
+            _checkoutDialogSetState?.call(() {});
+          },
+          onKeyEvent: (node, event) =>
+              _onKeyPagamentoCheckout(node, event, setDialogState),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (var i = 0; i < _opcoesFormaPagamentoPdV.length; i++)
+                _buildChipFormaPagamento(
+                  rotulo: _opcoesFormaPagamentoPdV[i].rotulo,
+                  icone: _opcoesFormaPagamentoPdV[i].icone,
+                  selecionado:
+                      _formaPagamentoSelecionada == _opcoesFormaPagamentoPdV[i].id,
+                  destacadoTeclado:
+                      pagamentoComFoco && _indiceChipPagamentoFocado == i,
+                  onTap: () => _aplicarFormaPagamentoPorIndice(i, setDialogState),
+                ),
+            ],
+          ),
+        ),
+        if (_formaPagamentoSelecionada == 'fiado') ...[
+          const SizedBox(height: 8),
+          Text(
+            'O caixa finaliza a venda; o cliente quita as parcelas depois.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+        if (_formaPagamentoSelecionada == 'cartao_credito') ...[
+          const SizedBox(height: 10),
+          _buildChipsParcelasCreditoCheckout(setDialogState),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildChipsParcelasCreditoCheckout(StateSetter setDialogState) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Parcelas no cartao',
+          style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        Focus(
+          focusNode: _focusParcelasPdV,
+          child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: List.generate(12, (i) {
+            final n = i + 1;
+            return ChoiceChip(
+              label: Text(
+                _rotuloParcelaCreditoValor(n, _totalLiquidoPagamentoPdV()),
+              ),
+              selected: _parcelasSelecionadas == n,
+              onSelected: (_) {
+                _atualizarCheckoutFechamento(
+                  setDialogState,
+                  () => _parcelasSelecionadas = n,
+                );
+              },
+            );
+          }),
+        ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _rotuloParcela(_parcelasSelecionadas),
+          style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildChipsMeioMistoLinha({
+    required _LinhaPagamentoMistoPdV linha,
+    required StateSetter setDialogState,
+  }) {
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        for (final op in _opcoesFormaPagamentoPdV)
+          _buildChipFormaPagamento(
+            rotulo: op.rotulo,
+            icone: op.icone,
+            selecionado: linha.meio == op.id,
+            destacadoTeclado: false,
+            onTap: op.id == 'fiado' &&
+                    !_podeSelecionarMeioMistoFiado(linha.meio)
+                ? null
+                : () => _selecionarMeioPagamentoMisto(
+                      linha: linha,
+                      meio: op.id,
+                      setDialogState: setDialogState,
+                    ),
+          ),
+      ],
+    );
+  }
 
   Widget _buildPainelPagamentoMistoPdV(StateSetter setDialogState) {
     final restante = _totalLiquidoPagamentoPdV() - _somaDigitadaMistoPdV();
@@ -1652,99 +1832,131 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         ...List.generate(_linhasPagamentoMisto.length, (i) {
           final linha = _linhasPagamentoMisto[i];
           return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: linha.meio,
-                    decoration: const InputDecoration(labelText: 'Meio'),
-                    items: _meiosPagamentoMistoPdV
-                        .map(
-                          (m) => DropdownMenuItem(
-                            value: m,
-                            child: Text(_rotuloFormaPagamento(m)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      if (v == 'fiado') {
-                        final outrasFiado = _linhasPagamentoMisto
-                            .where((l) => l.meio == 'fiado')
-                            .length;
-                        if (linha.meio != 'fiado' && outrasFiado >= 1) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Pagamento misto: use apenas uma linha Fiado.',
-                              ),
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Parte ${i + 1}',
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
                             ),
-                          );
-                          return;
-                        }
-                      }
-                      _atualizarCheckoutFechamento(setDialogState, () {
-                        linha.meio = v;
-                        if (v != 'cartao_credito') linha.parcelas = 1;
-                      });
-                    },
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Remover parte',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: _linhasPagamentoMisto.length <= 2
+                            ? null
+                            : () {
+                                _atualizarCheckoutFechamento(setDialogState, () {
+                                  final rem = _linhasPagamentoMisto.removeAt(i);
+                                  rem.dispose();
+                                });
+                              },
+                        icon: const Icon(Icons.remove_circle_outline, size: 20),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: TextField(
-                    controller: linha.valorController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Valor',
-                      hintText: '0,00',
-                    ),
-                    onChanged: (_) => setDialogState(() {}),
+                  _buildChipsMeioMistoLinha(
+                    linha: linha,
+                    setDialogState: setDialogState,
                   ),
-                ),
-                if (linha.meio == 'cartao_credito') ...[
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 92,
-                    child: DropdownButtonFormField<int>(
-                      initialValue: linha.parcelas.clamp(1, 12),
-                      decoration: const InputDecoration(labelText: 'Parc.'),
-                      items: List.generate(
-                        12,
-                        (k) => DropdownMenuItem(
-                          value: k + 1,
-                          child: Text('${k + 1}x'),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: linha.valorController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'Valor R\$',
+                            hintText: '0,00',
+                            isDense: true,
+                          ),
+                          onChanged: (_) => setDialogState(() {}),
                         ),
                       ),
-                      onChanged: (p) {
-                        if (p != null) {
-                          _atualizarCheckoutFechamento(setDialogState, () {
-                            linha.parcelas = p;
-                          });
-                        }
-                      },
-                    ),
+                      if (linha.meio == 'cartao_credito') ...[
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Builder(
+                            builder: (context) {
+                              final valorLinha = _parseValorMonetario(
+                                linha.valorController.text,
+                              );
+                              return DropdownButtonFormField<int>(
+                                isExpanded: true,
+                                initialValue: linha.parcelas.clamp(1, 12),
+                                decoration: const InputDecoration(
+                                  labelText: 'Parc. credito',
+                                  isDense: true,
+                                ),
+                                selectedItemBuilder: (context) {
+                                  return List.generate(12, (k) {
+                                    final n = k + 1;
+                                    return Align(
+                                      alignment: AlignmentDirectional.centerStart,
+                                      child: Text(
+                                        _rotuloParcelaCreditoValor(
+                                          n,
+                                          valorLinha,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        softWrap: false,
+                                      ),
+                                    );
+                                  });
+                                },
+                                items: List.generate(
+                                  12,
+                                  (k) {
+                                    final n = k + 1;
+                                    return DropdownMenuItem(
+                                      value: n,
+                                      child: Text(
+                                        _rotuloParcelaCreditoValor(
+                                          n,
+                                          valorLinha,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                onChanged: (p) {
+                                  if (p != null) {
+                                    _atualizarCheckoutFechamento(
+                                      setDialogState,
+                                      () => linha.parcelas = p,
+                                    );
+                                  }
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ],
-                IconButton(
-                  tooltip: 'Remover parte',
-                  onPressed: _linhasPagamentoMisto.length <= 2
-                      ? null
-                      : () {
-                          _atualizarCheckoutFechamento(setDialogState, () {
-                            final rem = _linhasPagamentoMisto.removeAt(i);
-                            rem.dispose();
-                          });
-                        },
-                  icon: const Icon(Icons.remove_circle_outline),
-                ),
-              ],
+              ),
             ),
           );
         }),
@@ -1803,6 +2015,242 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
   }
 
+  int _indiceFormaPagamentoSelecionadaPdV() {
+    final idx = _opcoesFormaPagamentoPdV.indexWhere(
+      (o) => o.id == _formaPagamentoSelecionada,
+    );
+    return idx >= 0 ? idx : 0;
+  }
+
+  void _sincronizarIndiceChipPagamentoComSelecao() {
+    _indiceChipPagamentoFocado = _indiceFormaPagamentoSelecionadaPdV();
+  }
+
+  void _aplicarFormaPagamentoPorIndice(
+    int index,
+    StateSetter setDialogState,
+  ) {
+    if (index < 0 || index >= _opcoesFormaPagamentoPdV.length) return;
+    final op = _opcoesFormaPagamentoPdV[index];
+    _atualizarCheckoutFechamento(setDialogState, () {
+      _formaPagamentoSelecionada = op.id;
+      _indiceChipPagamentoFocado = index;
+      if (op.id != 'cartao_credito') {
+        _parcelasSelecionadas = 1;
+      }
+    });
+    if (op.id == 'cartao_credito' && _checkoutDialogAberto) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusParcelasPdV.requestFocus();
+      });
+    }
+  }
+
+  KeyEventResult _onKeyClienteCheckout(
+    FocusNode node,
+    KeyEvent event,
+    StateSetter setDialogState,
+  ) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.f4) {
+      unawaited(
+        _abrirSeletorClienteNoPdv(setDialogState: setDialogState),
+      );
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _onKeyPagamentoCheckout(
+    FocusNode node,
+    KeyEvent event,
+    StateSetter setDialogState,
+  ) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (_pagamentoMistoPdV) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+
+    int? indiceTeclaNumerica;
+    if (key == LogicalKeyboardKey.digit1 ||
+        key == LogicalKeyboardKey.numpad1) {
+      indiceTeclaNumerica = 0;
+    } else if (key == LogicalKeyboardKey.digit2 ||
+        key == LogicalKeyboardKey.numpad2) {
+      indiceTeclaNumerica = 1;
+    } else if (key == LogicalKeyboardKey.digit3 ||
+        key == LogicalKeyboardKey.numpad3) {
+      indiceTeclaNumerica = 2;
+    } else if (key == LogicalKeyboardKey.digit4 ||
+        key == LogicalKeyboardKey.numpad4) {
+      indiceTeclaNumerica = 3;
+    } else if (key == LogicalKeyboardKey.digit5 ||
+        key == LogicalKeyboardKey.numpad5) {
+      indiceTeclaNumerica = 4;
+    } else if (key == LogicalKeyboardKey.digit6 ||
+        key == LogicalKeyboardKey.numpad6) {
+      indiceTeclaNumerica = 5;
+    }
+
+    if (indiceTeclaNumerica != null) {
+      _aplicarFormaPagamentoPorIndice(indiceTeclaNumerica, setDialogState);
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.arrowDown) {
+      final next = (_indiceChipPagamentoFocado + 1) %
+          _opcoesFormaPagamentoPdV.length;
+      _aplicarFormaPagamentoPorIndice(next, setDialogState);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowUp) {
+      final prev = (_indiceChipPagamentoFocado -
+              1 +
+              _opcoesFormaPagamentoPdV.length) %
+          _opcoesFormaPagamentoPdV.length;
+      _aplicarFormaPagamentoPorIndice(prev, setDialogState);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.space) {
+      _aplicarFormaPagamentoPorIndice(
+        _indiceChipPagamentoFocado,
+        setDialogState,
+      );
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _aplicarFocoInicialCheckoutDialog() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_checkoutDialogAberto || !mounted) return;
+
+      if (_maxDescontoPercentualPdv > 0.004 &&
+          (_checkoutModoRapido || _checkoutPassoWizard == 0)) {
+        _focusDescontoPdV.requestFocus();
+        return;
+      }
+
+      if (_checkoutModoRapido) {
+        _sincronizarIndiceChipPagamentoComSelecao();
+        _focusPagamentoPdV.requestFocus();
+        return;
+      }
+
+      switch (_checkoutPassoWizard) {
+        case 0:
+          _focusCheckoutAcaoPrimaria.requestFocus();
+          break;
+        case 1:
+          _focusClientePdV.requestFocus();
+          break;
+        case 2:
+          _sincronizarIndiceChipPagamentoComSelecao();
+          _focusPagamentoPdV.requestFocus();
+          break;
+      }
+    });
+  }
+
+  void _checkoutDialogFecharOuRetroceder() {
+    final ctx = _checkoutDialogFechamentoContext;
+    final setDialogState = _checkoutDialogSetState;
+    final scroll = _checkoutDialogScroll;
+    if (ctx == null || setDialogState == null) return;
+
+    if (_checkoutModoRapido || _checkoutPassoWizard <= 0) {
+      if (ctx.mounted) Navigator.of(ctx).pop();
+      return;
+    }
+    _atualizarCheckoutFechamento(
+      setDialogState,
+      () => _checkoutPassoWizard--,
+      scrollCheckout: scroll,
+    );
+    if (scroll != null) _scrollCheckoutAoTopo(scroll);
+    _aplicarFocoInicialCheckoutDialog();
+  }
+
+  void _checkoutDialogAvancarPasso() {
+    final setDialogState = _checkoutDialogSetState;
+    final scroll = _checkoutDialogScroll;
+    if (setDialogState == null) return;
+
+    final erro = _mensagemErroAvancoCheckoutPasso();
+    if (erro != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(erro)),
+      );
+      return;
+    }
+    _atualizarCheckoutFechamento(
+      setDialogState,
+      () => _checkoutPassoWizard++,
+      scrollCheckout: scroll,
+    );
+    if (scroll != null) _scrollCheckoutAoTopo(scroll);
+    _aplicarFocoInicialCheckoutDialog();
+  }
+
+  void _checkoutDialogAcaoF10() {
+    if (!_checkoutDialogAberto) return;
+    if (!_checkoutModoRapido && _checkoutPassoWizard < 2) {
+      _checkoutDialogAvancarPasso();
+      return;
+    }
+    final ctx = _checkoutDialogFechamentoContext;
+    if (ctx == null) return;
+    unawaited(_salvarOrcamento(fechamentoDialogContext: ctx));
+  }
+
+  Widget _buildCheckoutDicaAtalhosTeclado() {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text(
+        'F10 proximo ou confirmar · Esc voltar · Tab campos · '
+        '1-6 pagamento · setas formas · Enter/F4 cliente',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildClienteCheckoutCampo(StateSetter setDialogState) {
+    return Focus(
+      focusNode: _focusClientePdV,
+      onKeyEvent: (node, event) =>
+          _onKeyClienteCheckout(node, event, setDialogState),
+      child: InkWell(
+        onTap: () =>
+            _abrirSeletorClienteNoPdv(setDialogState: setDialogState),
+        borderRadius: BorderRadius.circular(12),
+        child: InputDecorator(
+          decoration: InputDecoration(
+            labelText: _precisaPlanoFiadoPdV()
+                ? 'Cliente (obrigatorio para fiado)'
+                : 'Cliente (opcional)',
+            suffixIcon: const Icon(Icons.search),
+            helperText: 'Enter ou F4 buscar cliente',
+            errorText: _precisaPlanoFiadoPdV() &&
+                    (_clienteSelecionadoId == null ||
+                        _clienteSelecionadoId! <= 0)
+                ? 'Selecione o cliente'
+                : null,
+          ),
+          child: Text(_rotuloClienteSelecionadoPdV()),
+        ),
+      ),
+    );
+  }
+
   Future<void> _abrirPassoFechamentoVenda() async {
     _descontoPdVController.clear();
     _tipoDescontoPdV = 'percentual';
@@ -1813,187 +2261,460 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       return;
     }
     _aplicarEnderecoCarretoDoClienteSeVazio();
-    await showDialog<void>(
+    _checkoutModoRapido = _elegivelCheckoutModoRapido();
+    _checkoutPassoWizard = 0;
+    if (_checkoutModoRapido) {
+      _pagamentoMistoPdV = false;
+      _disposeLinhasPagamentoMisto();
+      if (_formaPagamentoSelecionada == 'fiado') {
+        _formaPagamentoSelecionada = 'dinheiro';
+      }
+    }
+    final scrollCheckout = ScrollController();
+    _checkoutDialogAberto = true;
+    _checkoutDialogScroll = scrollCheckout;
+    try {
+      await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            return AlertDialog(
+            _checkoutDialogSetState = setDialogState;
+            _checkoutDialogFechamentoContext = dialogContext;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_checkoutDialogAberto) _aplicarFocoInicialCheckoutDialog();
+            });
+            return CallbackShortcuts(
+              bindings: <ShortcutActivator, VoidCallback>{
+                const SingleActivator(LogicalKeyboardKey.escape):
+                    _checkoutDialogFecharOuRetroceder,
+                const SingleActivator(LogicalKeyboardKey.f10):
+                    _checkoutDialogAcaoF10,
+              },
+              child: Focus(
+                autofocus: true,
+                child: AlertDialog(
               title: Text(
                 _orcamentoEmEdicaoId != null
                     ? 'Concluir atualizacao da venda'
                     : 'Dados para enviar ao caixa',
               ),
               content: SizedBox(
-                width: 520,
-                child: SingleChildScrollView(
-                  child: Theme(
-                    data: Theme.of(context).copyWith(
-                      visualDensity: VisualDensity.compact,
-                      inputDecorationTheme: Theme.of(context)
-                          .inputDecorationTheme
-                          .copyWith(
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 10,
+                width: 560,
+                height: (MediaQuery.sizeOf(context).height * 0.78)
+                    .clamp(480.0, 680.0),
+                child: Theme(
+                  data: Theme.of(context).copyWith(
+                    visualDensity: VisualDensity.compact,
+                    inputDecorationTheme: Theme.of(context)
+                        .inputDecorationTheme
+                        .copyWith(
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 10,
+                          ),
+                        ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildCheckoutResumoFixo(setDialogState),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: Scrollbar(
+                          controller: scrollCheckout,
+                          thumbVisibility: true,
+                          trackVisibility: true,
+                          interactive: true,
+                          child: SingleChildScrollView(
+                            controller: scrollCheckout,
+                            primary: false,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.only(
+                              right: 8,
+                              bottom: 120,
+                            ),
+                            child: FocusTraversalGroup(
+                              policy: OrderedTraversalPolicy(),
+                              child: _buildFormularioFechamentoVenda(
+                                setDialogState: setDialogState,
+                                scrollCheckout: scrollCheckout,
+                              ),
                             ),
                           ),
-                    ),
-                    child: _buildFormularioFechamentoVenda(
-                      setDialogState: setDialogState,
-                    ),
+                        ),
+                      ),
+                      _buildCheckoutDicaAtalhosTeclado(),
+                    ],
                   ),
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('Voltar'),
+              actions: _buildCheckoutDialogActions(
+                dialogContext: dialogContext,
+                setDialogState: setDialogState,
+                scrollCheckout: scrollCheckout,
+              ),
                 ),
-                FilledButton.icon(
-                  onPressed: () async {
-                    await _salvarOrcamento(
-                      fechamentoDialogContext: dialogContext,
-                    );
-                  },
-                  icon: const Icon(Icons.save_outlined),
-                  label: Text(
-                    _orcamentoEmEdicaoId != null
-                        ? 'Confirmar atualizacao'
-                        : 'Confirmar e enviar ao caixa',
-                  ),
-                ),
-              ],
+              ),
             );
           },
         );
       },
     );
+    } finally {
+      _checkoutDialogAberto = false;
+      _checkoutDialogSetState = null;
+      _checkoutDialogFechamentoContext = null;
+      _checkoutDialogScroll = null;
+      scrollCheckout.dispose();
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _pesquisaFocus.requestFocus();
+        });
+      }
+    }
   }
 
   /// O dialog de fechamento e uma rota overlay; `setState` na pagina nao redesenha o
   /// AlertDialog. Este helper atualiza o estado da pagina e forca o rebuild do dialog.
   void _atualizarCheckoutFechamento(
     StateSetter setDialogState,
-    VoidCallback fn,
-  ) {
+    VoidCallback fn, {
+    ScrollController? scrollCheckout,
+  }) {
     setState(fn);
+    if (_pagamentoMistoPdV || _precisaPlanoFiadoPdV()) {
+      _checkoutModoRapido = false;
+      _checkoutPassoWizard = 2;
+    }
     setDialogState(() {});
+    if (scrollCheckout != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!scrollCheckout.hasClients) return;
+        final max = scrollCheckout.position.maxScrollExtent;
+        if (scrollCheckout.offset > max) {
+          scrollCheckout.jumpTo(max);
+        }
+      });
+    }
   }
 
-  Widget _buildFormularioFechamentoVenda({
+  Widget _buildAlternarModoCheckout({
     required StateSetter setDialogState,
+    ScrollController? scrollCheckout,
   }) {
+    if (!_elegivelCheckoutModoRapido() && !_checkoutModoRapido) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: TextButton.icon(
+          onPressed: () {
+            _atualizarCheckoutFechamento(
+              setDialogState,
+              () {
+                final irParaRapido = !_checkoutModoRapido;
+                _checkoutModoRapido = irParaRapido;
+                if (irParaRapido && _elegivelCheckoutModoRapido()) {
+                  _pagamentoMistoPdV = false;
+                  _disposeLinhasPagamentoMisto();
+                  if (_formaPagamentoSelecionada == 'fiado') {
+                    _formaPagamentoSelecionada = 'dinheiro';
+                  }
+                  _checkoutPassoWizard = 0;
+                } else if (!irParaRapido) {
+                  _checkoutPassoWizard = 0;
+                }
+              },
+              scrollCheckout: scrollCheckout,
+            );
+            _aplicarFocoInicialCheckoutDialog();
+          },
+          icon: Icon(
+            _checkoutModoRapido ? Icons.tune_outlined : Icons.bolt_outlined,
+          ),
+          label: Text(
+            _checkoutModoRapido
+                ? 'Mais opções (vendedor, entrega, pagamento misto)'
+                : 'Modo rápido',
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCheckoutModoRapido({
+    required StateSetter setDialogState,
+    ScrollController? scrollCheckout,
+  }) {
+    final theme = Theme.of(context);
+    final resumoEntrega = _resumoEntregaItensCarrinho;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Subtotal produtos: ${_formatarMoeda(_totalOrcamento)}',
-          style: Theme.of(context).textTheme.bodyLarge,
-        ),
-        const SizedBox(height: 2),
-        Text(
-          'Frete: ${_formatarMoeda(_valorFreteAtual)}',
-          style: Theme.of(context).textTheme.bodyLarge,
-        ),
-        const SizedBox(height: 2),
-        if (_maxDescontoPercentualPdv > 0) ...[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.tertiaryContainer.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: theme.colorScheme.tertiary.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Row(
             children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment<String>(
-                      value: 'percentual',
-                      label: Text('%'),
-                    ),
-                    ButtonSegment<String>(value: 'valor', label: Text('R\$')),
-                  ],
-                  selected: {_tipoDescontoPdV},
-                  onSelectionChanged: (values) {
-                    _atualizarCheckoutFechamento(setDialogState, () {
-                      _tipoDescontoPdV = values.first;
-                      _descontoPdVController.clear();
-                    });
-                  },
-                ),
-              ),
+              Icon(Icons.bolt_outlined, color: theme.colorScheme.tertiary),
               const SizedBox(width: 8),
               Expanded(
-                child: TextField(
-                  controller: _descontoPdVController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                child: Text(
+                  'Venda simples'
+                  '${resumoEntrega.isNotEmpty ? ' · $resumoEntrega' : ''}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
                   ),
-                  decoration: InputDecoration(
-                    labelText: _tipoDescontoPdV == 'percentual'
-                        ? 'Desconto % (subtotal produtos)'
-                        : 'Desconto em reais (subtotal)',
-                    helperText: _descontoPdVDigitadoUltrapassaTeto()
-                        ? null
-                        : 'Teto: ${_maxDescontoPercentualPdv.toStringAsFixed(1)}% '
-                              'do subtotal = ${_formatarMoeda(_valorMaximoDescontoReaisPdV())}',
-                    errorText: _descontoPdVDigitadoUltrapassaTeto()
-                        ? _mensagemErroDescontoPdVUltrapassaTeto()
-                        : null,
-                    isDense: true,
-                  ),
-                  onChanged: (_) =>
-                      _atualizarCheckoutFechamento(setDialogState, () {}),
                 ),
               ),
             ],
           ),
-          if (_valorDescontoReaisPdV() > 0.004) ...[
-            const SizedBox(height: 4),
-            Text(
-              'Desconto: - ${_formatarMoeda(_valorDescontoReaisPdV())} '
-              '(${_percentualEfetivoSobreSubtotalPdV().toStringAsFixed(1)}% do subtotal)',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+        ),
+        const SizedBox(height: 10),
+        _buildSecaoCheckoutDialog(
+          titulo: 'Cliente',
+          icone: Icons.person_outline,
+          children: [
+            _buildClienteCheckoutCampo(setDialogState),
           ],
-          const SizedBox(height: 4),
-          Text(
-            'Total a pagar (caixa): ${_formatarMoeda(_totalLiquidoPagamentoPdV())}',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ] else ...[
-          Text(
-            'Total geral: ${_formatarMoeda(_totalGeralComFrete)}',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ],
-        const SizedBox(height: 6),
+        ),
+        _buildSecaoCheckoutDialog(
+          titulo: 'Pagamento',
+          icone: Icons.payments_outlined,
+          children: [
+            _buildChipsFormaPagamentoCheckout(setDialogState),
+          ],
+        ),
+      ],
+    );
+  }
+
+  static const List<String> _rotulosPassosCheckoutWizard = [
+    'Resumo',
+    'Cliente e entrega',
+    'Pagamento',
+  ];
+
+  String? _mensagemErroAvancoCheckoutPasso() {
+    switch (_checkoutPassoWizard) {
+      case 0:
+        if (_maxDescontoPercentualPdv > 0 &&
+            _descontoPdVDigitadoUltrapassaTeto()) {
+          return _mensagemErroDescontoPdVUltrapassaTeto();
+        }
+        return null;
+      case 1:
+        if (_carrinhoTemItemCarreto &&
+            _enderecoEntregaController.text.trim().isEmpty) {
+          return 'Informe o endereco para carreto.';
+        }
+        if (_carrinhoTemItemCarreto && _dataEntregaMarcada == null) {
+          return 'Defina a data combinada da entrega com o cliente.';
+        }
+        if (_carrinhoTemItemCarreto &&
+            _prioridadeEntregaSelecionada == 'agendada' &&
+            _janelaEntregaSelecionada == 'nao_definida') {
+          return 'Para entrega agendada, selecione janela Manha ou Tarde.';
+        }
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  void _scrollCheckoutAoTopo(ScrollController scrollCheckout) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!scrollCheckout.hasClients) return;
+      scrollCheckout.jumpTo(0);
+    });
+  }
+
+  List<Widget> _buildCheckoutDialogActions({
+    required BuildContext dialogContext,
+    required StateSetter setDialogState,
+    required ScrollController scrollCheckout,
+  }) {
+    final confirmarLabel = _orcamentoEmEdicaoId != null
+        ? 'Confirmar atualizacao'
+        : 'Confirmar e enviar ao caixa';
+    final voltarFechaDialog =
+        _checkoutModoRapido || _checkoutPassoWizard <= 0;
+
+    final mostraProximo = !_checkoutModoRapido && _checkoutPassoWizard < 2;
+
+    return [
+      TextButton(
+        onPressed: () {
+          if (voltarFechaDialog) {
+            Navigator.pop(dialogContext);
+          } else {
+            _atualizarCheckoutFechamento(
+              setDialogState,
+              () => _checkoutPassoWizard--,
+            );
+            _scrollCheckoutAoTopo(scrollCheckout);
+            _aplicarFocoInicialCheckoutDialog();
+          }
+        },
+        child: Text(voltarFechaDialog ? 'Voltar (Esc)' : 'Passo anterior (Esc)'),
+      ),
+      if (mostraProximo)
         Focus(
-          focusNode: _focusClientePdV,
-          child: InkWell(
-            onTap: () =>
-                _abrirSeletorClienteNoPdv(setDialogState: setDialogState),
-            borderRadius: BorderRadius.circular(12),
-            child: InputDecorator(
-              decoration: InputDecoration(
-                labelText: _precisaPlanoFiadoPdV()
-                    ? 'Cliente (obrigatório para fiado)'
-                    : 'Cliente (opcional)',
-                suffixIcon: const Icon(Icons.search),
-                errorText: _precisaPlanoFiadoPdV() &&
-                        (_clienteSelecionadoId == null ||
-                            _clienteSelecionadoId! <= 0)
-                    ? 'Selecione o cliente'
-                    : null,
-              ),
-              child: Text(_rotuloClienteSelecionadoPdV()),
-            ),
+          focusNode: _focusCheckoutAcaoPrimaria,
+          child: FilledButton(
+            onPressed: _checkoutDialogAvancarPasso,
+            child: const Text('Proximo (F10)'),
+          ),
+        )
+      else
+        Focus(
+          focusNode: _focusCheckoutAcaoPrimaria,
+          child: FilledButton.icon(
+            onPressed: () async {
+              await _salvarOrcamento(
+                fechamentoDialogContext: dialogContext,
+              );
+            },
+            icon: const Icon(Icons.save_outlined),
+            label: Text('$confirmarLabel (F10)'),
           ),
         ),
+    ];
+  }
+
+  Widget _buildCheckoutWizardIndicador(StateSetter setDialogState) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: List.generate(_rotulosPassosCheckoutWizard.length, (i) {
+          final ativo = i == _checkoutPassoWizard;
+          final concluido = i < _checkoutPassoWizard;
+          final podeVoltar = i < _checkoutPassoWizard;
+          return Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: i == 0 ? 0 : 4,
+                right: i == _rotulosPassosCheckoutWizard.length - 1 ? 0 : 4,
+              ),
+              child: InkWell(
+                onTap: podeVoltar
+                    ? () {
+                        _atualizarCheckoutFechamento(
+                          setDialogState,
+                          () => _checkoutPassoWizard = i,
+                        );
+                      }
+                    : null,
+                borderRadius: BorderRadius.circular(8),
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 14,
+                      backgroundColor: ativo
+                          ? theme.colorScheme.primary
+                          : concluido
+                              ? theme.colorScheme.primary.withValues(
+                                  alpha: 0.55,
+                                )
+                              : theme.colorScheme.surfaceContainerHighest,
+                      foregroundColor: ativo || concluido
+                          ? theme.colorScheme.onPrimary
+                          : theme.colorScheme.onSurfaceVariant,
+                      child: Text(
+                        '${i + 1}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _rotulosPassosCheckoutWizard[i],
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontWeight:
+                            ativo ? FontWeight.w700 : FontWeight.w500,
+                        color: ativo
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _buildCheckoutPassoResumo(StateSetter setDialogState) {
+    final theme = Theme.of(context);
+    final desconto = _valorDescontoReaisPdV();
+    return _buildSecaoCheckoutDialog(
+      titulo: 'Revise a venda',
+      icone: Icons.receipt_long_outlined,
+      children: [
+        Text(
+          '${_carrinho.length} ${_carrinho.length == 1 ? 'item' : 'itens'}'
+          '${_resumoEntregaItensCarrinho.isNotEmpty ? ' · $_resumoEntregaItensCarrinho' : ''}',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Subtotal ${_formatarMoeda(_totalOrcamento)} · '
+          'Frete ${_formatarMoeda(_valorFreteAtual)}'
+          '${desconto > 0.004 ? ' · Desconto -${_formatarMoeda(desconto)}' : ''}',
+          style: theme.textTheme.bodySmall,
+        ),
+        if (_maxDescontoPercentualPdv > 0) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Ajuste o desconto no resumo fixo acima, se necessario.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+        if (_carrinhoEntregaMista) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Venda com entrega mista — confira os tipos no proximo passo.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.tertiary,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildCheckoutSecaoQuem(StateSetter setDialogState) {
+    return _buildSecaoCheckoutDialog(
+      titulo: 'Quem',
+      icone: Icons.person_outline,
+      children: [
+        _buildClienteCheckoutCampo(setDialogState),
         const SizedBox(height: 8),
         DropdownButtonFormField<int?>(
           focusNode: _focusVendedorPdV,
@@ -2018,9 +2739,38 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             );
           },
         ),
-        const SizedBox(height: 8),
-        _buildBlocoEntregaItensFechamento(context),
+      ],
+    );
+  }
+
+  Widget _buildCheckoutSecaoEntrega({
+    required StateSetter setDialogState,
+    ScrollController? scrollCheckout,
+  }) {
+    return _buildSecaoCheckoutDialog(
+      titulo: 'Entrega',
+      icone: Icons.local_shipping_outlined,
+      children: [
+        Text(
+          _resumoEntregaItensCarrinho.isEmpty
+              ? 'Sem itens com entrega definida'
+              : _resumoEntregaItensCarrinho,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+        if (_carrinhoEntregaMista) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Venda com tipos de entrega mistos',
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
         if (_carrinhoTemItemCarreto) ...[
+          const SizedBox(height: 10),
           const SizedBox(height: 8),
           if (_clienteSelecionado() != null &&
               _enderecosClienteSelecionado().isNotEmpty) ...[
@@ -2231,102 +2981,105 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             ),
           ),
         ],
-        if (!_pagamentoMistoPdV) ...[
-          DropdownButtonFormField<String>(
-            focusNode: _focusPagamentoPdV,
-            initialValue: _formaPagamentoSelecionada,
-            decoration: const InputDecoration(labelText: 'Forma de pagamento'),
-            items: const [
-              DropdownMenuItem(value: 'dinheiro', child: Text('Dinheiro')),
-              DropdownMenuItem(value: 'pix', child: Text('PIX')),
-              DropdownMenuItem(
-                value: 'cartao_credito',
-                child: Text('Cartao de credito'),
-              ),
-              DropdownMenuItem(
-                value: 'cartao_debito',
-                child: Text('Cartao de debito'),
-              ),
-              DropdownMenuItem(value: 'fiado', child: Text('Fiado')),
-              DropdownMenuItem(
-                value: 'transferencia',
-                child: Text('Transferencia'),
-              ),
-            ],
-            onChanged: (value) {
-              if (value == null) return;
-              _atualizarCheckoutFechamento(setDialogState, () {
-                _formaPagamentoSelecionada = value;
-                if (_formaPagamentoSelecionada != 'cartao_credito') {
-                  _parcelasSelecionadas = 1;
-                }
-              });
-            },
-          ),
-          if (_formaPagamentoSelecionada == 'cartao_credito') ...[
-            const SizedBox(height: 8),
-            DropdownButtonFormField<int>(
-              key: ValueKey<String>(_formaPagamentoSelecionada),
-              focusNode: _focusParcelasPdV,
-              initialValue: _parcelasSelecionadas,
-              decoration: const InputDecoration(labelText: 'Parcelas'),
-              items: List.generate(
-                12,
-                (index) => DropdownMenuItem(
-                  value: index + 1,
-                  child: Text(_rotuloParcela(index + 1)),
-                ),
-              ),
-              onChanged: (value) {
-                if (value != null) {
+      ],
+    );
+  }
+
+  Widget _buildCheckoutSecaoPagamento({
+    required StateSetter setDialogState,
+    ScrollController? scrollCheckout,
+  }) {
+    return _buildSecaoCheckoutDialog(
+      titulo: 'Pagamento',
+      icone: Icons.payments_outlined,
+      children: [
+            Focus(
+              focusNode: _focusPagamentoMistoSwitchPdV,
+              child: SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _pagamentoMistoPdV,
+                onChanged: (on) {
                   _atualizarCheckoutFechamento(
                     setDialogState,
-                    () => _parcelasSelecionadas = value,
+                    () {
+                      _pagamentoMistoPdV = on;
+                      if (on) {
+                        _inicializarLinhasMistoPadrao();
+                      } else {
+                        _disposeLinhasPagamentoMisto();
+                      }
+                    },
+                    scrollCheckout: scrollCheckout,
                   );
-                }
-              },
+                },
+                title: const Text('Dividir pagamento (misto)'),
+                subtitle: const Text(
+                  'Ex.: parte em dinheiro e parte em fiado',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Selecionado: ${_rotuloParcela(_parcelasSelecionadas)}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        ] else ...[
-          const SizedBox(height: 6),
+        if (_pagamentoMistoPdV) ...[
+          const SizedBox(height: 4),
           _buildPainelPagamentoMistoPdV(setDialogState),
+        ] else ...[
+          _buildChipsFormaPagamentoCheckout(setDialogState),
         ],
-        const SizedBox(height: 8),
-        SwitchListTile.adaptive(
-          contentPadding: EdgeInsets.zero,
-          value: _pagamentoMistoPdV,
-          onChanged: (on) {
-            _atualizarCheckoutFechamento(setDialogState, () {
-              _pagamentoMistoPdV = on;
-              if (on) {
-                _inicializarLinhasMistoPadrao();
-              } else {
-                _disposeLinhasPagamentoMisto();
-              }
-            });
-          },
-          title: const Text('Pagamento misto'),
-        ),
         if (_precisaPlanoFiadoPdV()) ...[
-          const SizedBox(height: 8),
-          PlanoFiadoPdvPanel(
-            key: ValueKey(_valorFiadoCheckoutPdV().toStringAsFixed(2)),
-            valorFiado: _valorFiadoCheckoutPdV(),
-            parcelasIniciais: _planoFiadoParcelas,
-            onChanged: (parcelas) {
-              _atualizarCheckoutFechamento(
-                setDialogState,
-                () => _planoFiadoParcelas = parcelas,
-              );
-            },
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Theme.of(context)
+                  .colorScheme
+                  .primaryContainer
+                  .withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.primary.withValues(
+                      alpha: 0.4,
+                    ),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                PlanoFiadoPdvPanel(
+                  key: ValueKey(
+                    _valorFiadoCheckoutPdV().toStringAsFixed(2),
+                  ),
+                  valorFiado: _valorFiadoCheckoutPdV(),
+                  parcelasIniciais: _planoFiadoParcelas,
+                  onChanged: (parcelas) {
+                    _atualizarCheckoutFechamento(
+                      setDialogState,
+                      () => _planoFiadoParcelas = parcelas,
+                    );
+                  },
+                ),
+                _buildResumoLimiteCreditoCheckoutPdV(),
+              ],
+            ),
           ),
-          _buildResumoLimiteCreditoCheckoutPdV(),
         ],
+      ],
+    );
+  }
+
+  Widget _buildCheckoutRodapeFormulario(StateSetter setDialogState) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(
+            'Sera gerado um orcamento para o caixa finalizar e receber o pagamento.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+        ),
         if (_orcamentoEmEdicaoId != null) ...[
           const SizedBox(height: 8),
           Row(
@@ -2351,6 +3104,297 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             ],
           ),
         ],
+      ],
+    );
+  }
+
+  Widget _buildCheckoutWizardConteudo({
+    required StateSetter setDialogState,
+    ScrollController? scrollCheckout,
+  }) {
+    return switch (_checkoutPassoWizard) {
+      0 => _buildCheckoutPassoResumo(setDialogState),
+      1 => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildCheckoutSecaoQuem(setDialogState),
+            _buildCheckoutSecaoEntrega(
+              setDialogState: setDialogState,
+              scrollCheckout: scrollCheckout,
+            ),
+          ],
+        ),
+      _ => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildCheckoutSecaoPagamento(
+              setDialogState: setDialogState,
+              scrollCheckout: scrollCheckout,
+            ),
+            _buildCheckoutRodapeFormulario(setDialogState),
+          ],
+        ),
+    };
+  }
+
+  double _valorEntraCaixaAgoraPdV() {
+    final total = _totalLiquidoPagamentoPdV();
+    final fiado = _valorFiadoCheckoutPdV();
+    return (total - fiado).clamp(0.0, double.infinity).toDouble();
+  }
+
+  Widget _buildSecaoCheckoutDialog({
+    required String titulo,
+    required IconData icone,
+    required List<Widget> children,
+  }) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icone, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                titulo,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckoutResumoFixo(StateSetter setDialogState) {
+    final theme = Theme.of(context);
+    final total = _totalLiquidoPagamentoPdV();
+    final fiado = _valorFiadoCheckoutPdV();
+    final agora = _valorEntraCaixaAgoraPdV();
+    final desconto = _valorDescontoReaisPdV();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Text(
+                  'Total a pagar (caixa)',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                _formatarMoeda(total),
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Subtotal ${_formatarMoeda(_totalOrcamento)} · '
+            'Frete ${_formatarMoeda(_valorFreteAtual)}'
+            '${desconto > 0.004 ? ' · Desconto -${_formatarMoeda(desconto)} (${_percentualEfetivoSobreSubtotalPdV().toStringAsFixed(1)}%)' : ''}',
+            style: theme.textTheme.bodySmall,
+          ),
+          if (_checkoutModoRapido) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Chip(
+                avatar: Icon(
+                  Icons.bolt_outlined,
+                  size: 16,
+                  color: theme.colorScheme.tertiary,
+                ),
+                label: const Text('Modo rápido'),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Chip(
+                avatar: Icon(
+                  Icons.linear_scale,
+                  size: 16,
+                  color: theme.colorScheme.secondary,
+                ),
+                label: Text(
+                  'Passo ${_checkoutPassoWizard + 1} de ${_rotulosPassosCheckoutWizard.length}',
+                ),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ],
+          if (fiado > 0.001) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _chipResumoCheckout(
+                    rotulo: 'No caixa agora',
+                    valor: agora,
+                    destaque: true,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _chipResumoCheckout(
+                    rotulo: 'Fiado (a receber)',
+                    valor: fiado,
+                    destaque: false,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (_maxDescontoPercentualPdv > 0) ...[
+            const SizedBox(height: 10),
+            _buildCheckoutCampoDesconto(setDialogState),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _chipResumoCheckout({
+    required String rotulo,
+    required double valor,
+    required bool destaque,
+  }) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: destaque
+            ? theme.colorScheme.surface
+            : theme.colorScheme.surface.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(rotulo, style: theme.textTheme.labelSmall),
+          Text(
+            _formatarMoeda(valor),
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckoutCampoDesconto(StateSetter setDialogState) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: SegmentedButton<String>(
+            segments: const [
+              ButtonSegment<String>(value: 'percentual', label: Text('%')),
+              ButtonSegment<String>(value: 'valor', label: Text('R\$')),
+            ],
+            selected: {_tipoDescontoPdV},
+            onSelectionChanged: (values) {
+              _atualizarCheckoutFechamento(setDialogState, () {
+                _tipoDescontoPdV = values.first;
+                _descontoPdVController.clear();
+              });
+            },
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: TextField(
+            focusNode: _focusDescontoPdV,
+            controller: _descontoPdVController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: _tipoDescontoPdV == 'percentual'
+                  ? 'Desconto %'
+                  : 'Desconto R\$',
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.92),
+              helperText: _descontoPdVDigitadoUltrapassaTeto()
+                  ? null
+                  : 'Max. ${_maxDescontoPercentualPdv.toStringAsFixed(1)}% '
+                        '(${_formatarMoeda(_valorMaximoDescontoReaisPdV())})',
+              errorText: _descontoPdVDigitadoUltrapassaTeto()
+                  ? _mensagemErroDescontoPdVUltrapassaTeto()
+                  : null,
+              isDense: true,
+            ),
+            onChanged: (_) =>
+                _atualizarCheckoutFechamento(setDialogState, () {}),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFormularioFechamentoVenda({
+    required StateSetter setDialogState,
+    ScrollController? scrollCheckout,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildAlternarModoCheckout(
+          setDialogState: setDialogState,
+          scrollCheckout: scrollCheckout,
+        ),
+        if (_checkoutModoRapido)
+          _buildCheckoutModoRapido(
+            setDialogState: setDialogState,
+            scrollCheckout: scrollCheckout,
+          )
+        else ...[
+          _buildCheckoutWizardIndicador(setDialogState),
+          _buildCheckoutWizardConteudo(
+            setDialogState: setDialogState,
+            scrollCheckout: scrollCheckout,
+          ),
+        ],
+        if (_checkoutModoRapido) _buildCheckoutRodapeFormulario(setDialogState),
       ],
     );
   }
@@ -2663,6 +3707,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       final numeroOrcamentoSalvo =
           vendaSalva?.numeroOrcamento ?? _orcamentoEmEdicaoNumero;
       setState(() {
+        if (numeroOrcamentoSalvo != null && numeroOrcamentoSalvo > 0) {
+          _ultimoOrcamentoSalvoNumero = numeroOrcamentoSalvo;
+        }
         _carrinho.clear();
         _pagamentoMistoPdV = false;
         _disposeLinhasPagamentoMisto();
@@ -3096,13 +4143,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           '${v.formaPagamento == 'cartao_credito' ? ' | ${v.quantidadeParcelas}x' : ''}';
     }
     final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
-    return linhas
-        .map(
-          (l) =>
-              '${_rotuloFormaPagamento(l.meio)} ${_formatarMoeda(l.valor)}'
-              '${l.meio == 'cartao_credito' ? ' ${l.parcelas}x' : ''}',
-        )
-        .join('; ');
+    return linhas.map((l) {
+      final base =
+          '${_rotuloFormaPagamento(l.meio)} ${_formatarMoeda(l.valor)}';
+      if (l.meio == 'cartao_credito' && l.parcelas > 0) {
+        final vp = l.valor / l.parcelas;
+        return '$base ${l.parcelas}x de ${_formatarMoeda(vp)}';
+      }
+      return base;
+    }).join('; ');
   }
 
   Cliente? _clienteDaVenda(Venda venda) {
@@ -3589,13 +4638,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   bool _precisaPlanoFiadoPdV() => _valorFiadoCheckoutPdV() > 0.001;
 
-  String _rotuloParcela(int parcelas) {
-    if (parcelas <= 0) {
-      return '1x';
+  String _rotuloParcelaCreditoValor(int parcelas, double valorBase) {
+    final n = parcelas <= 0 ? 1 : parcelas;
+    if (valorBase <= 0.001) {
+      return '${n}x';
     }
-    final valorParcela = _totalLiquidoPagamentoPdV() / parcelas;
-    return '${parcelas}x de ${_formatarMoeda(valorParcela)}';
+    final valorParcela = valorBase / n;
+    return '${n}x · ${_formatarMoeda(valorParcela)}';
   }
+
+  String _rotuloParcela(int parcelas) =>
+      _rotuloParcelaCreditoValor(parcelas, _totalLiquidoPagamentoPdV());
 
   @override
   Widget build(BuildContext context) {
@@ -4089,6 +5142,7 @@ class _PdvPainelCheckout extends StatelessWidget {
     required this.onExpandirPainel,
     required this.orcamentoEmEdicao,
     required this.orcamentoEmEdicaoNumero,
+    this.ultimoOrcamentoSalvoNumero,
     required this.onCancelarEdicaoOrcamento,
     required this.mostrarDicaAtalhosCarrinho,
     required this.resumoEntregaItens,
@@ -4115,6 +5169,7 @@ class _PdvPainelCheckout extends StatelessWidget {
   final VoidCallback onExpandirPainel;
   final bool orcamentoEmEdicao;
   final String? orcamentoEmEdicaoNumero;
+  final int? ultimoOrcamentoSalvoNumero;
   final VoidCallback onCancelarEdicaoOrcamento;
   final bool mostrarDicaAtalhosCarrinho;
   final String resumoEntregaItens;
@@ -4249,6 +5304,19 @@ class _PdvPainelCheckout extends StatelessWidget {
                                           ),
                                     ),
                                   ],
+                                  if (!orcamentoEmEdicao &&
+                                      ultimoOrcamentoSalvoNumero != null)
+                                    TextSpan(
+                                      text:
+                                          ' · Ultimo orcamento: $ultimoOrcamentoSalvoNumero',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: scheme.onSurfaceVariant,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                    ),
                                 ],
                               ),
                               maxLines: 1,
