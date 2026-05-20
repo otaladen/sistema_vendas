@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../model/produto.dart';
+import 'produto_detalhe_venda_page.dart';
 
 /// Tres listas de preco do produto (ativo em destaque).
 class PdvConsultaTresPrecos extends StatelessWidget {
@@ -103,6 +104,8 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
     required this.estoqueCritico,
     required this.onDetalhes,
     this.compacto = false,
+    this.mostrarDescricaoInline = false,
+    this.tituloPainel = 'Selecionado',
   });
 
   final Produto produto;
@@ -113,6 +116,8 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
   final bool estoqueCritico;
   final VoidCallback onDetalhes;
   final bool compacto;
+  final bool mostrarDescricaoInline;
+  final String tituloPainel;
 
   @override
   Widget build(BuildContext context) {
@@ -142,7 +147,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Selecionado',
+                tituloPainel,
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
                       color: scheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
@@ -197,6 +202,25 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
                 formatarMoeda: formatarMoeda,
                 compacto: compacto,
               ),
+              if (produto.rotuloConversaoEmbalagem.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  produto.rotuloConversaoEmbalagem,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ],
+              if (produto.permiteQuantidadeFracionada) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Venda fracionada permitida',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
               const SizedBox(height: 8),
               Text(
                 'Livre: ${produto.estoqueLivreParaVenda} · '
@@ -207,12 +231,27 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
               ),
+              if (mostrarDescricaoInline) ...[
+                const SizedBox(height: 10),
+                ProdutoDescricaoTecnicaInline(
+                  produto: produto,
+                  alturaMaxima: compacto ? 96 : 150,
+                  compacto: compacto,
+                ),
+              ],
               const SizedBox(height: 12),
-              FilledButton.tonalIcon(
-                onPressed: onDetalhes,
-                icon: const Icon(Icons.info_outline, size: 20),
-                label: const Text('Detalhes (Espaco / F9)'),
-              ),
+              if (!mostrarDescricaoInline)
+                FilledButton.tonalIcon(
+                  onPressed: onDetalhes,
+                  icon: const Icon(Icons.info_outline, size: 20),
+                  label: const Text('Detalhes (Espaco / F9)'),
+                )
+              else
+                TextButton.icon(
+                  onPressed: onDetalhes,
+                  icon: const Icon(Icons.open_in_full, size: 18),
+                  label: const Text('Ampliar (Espaco / F9)'),
+                ),
             ],
           ),
         ),

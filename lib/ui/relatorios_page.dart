@@ -17,8 +17,10 @@ import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../services/pdf_relatorio_texto.dart';
 import '../services/pdf_tabela_produtos_texto.dart';
+import 'relatorio_fiados_page.dart';
 import 'widgets/hub_nav_button.dart';
 
+const Color _corRelFiados = Color(0xFFC62828);
 const Color _corRelVendasPeriodo = Color(0xFF1565C0);
 const Color _corRelProdutosRanking = Color(0xFF2E7D32);
 const Color _corRelVendasVendedor = Color(0xFF00897B);
@@ -51,6 +53,22 @@ class RelatoriosPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          HubNavButton(
+            icon: Icons.account_balance_wallet_outlined,
+            corDestaque: _corRelFiados,
+            titulo: 'Fiados em aberto',
+            subtitulo:
+                'Titulos a receber por cliente, vencimento e saldo; filtro de vencidos.',
+            onTap: () => Navigator.push<void>(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => RelatorioFiadosPage(
+                  vendaRepository: vendaRepository,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           HubNavButton(
             icon: Icons.date_range_outlined,
             corDestaque: _corRelVendasPeriodo,

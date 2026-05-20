@@ -1,6 +1,8 @@
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/limite_credito_helper.dart';
 import '../domain/pagamento_orcamento.dart';
+import '../domain/plano_fiado.dart';
 import '../services/compras_preditivas_service.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
@@ -11,7 +13,19 @@ import '../model/registro_devolucao.dart';
 import '../model/venda.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'recebimento_fiado_repository.dart';
 import 'sync/sync_write_trigger.dart';
+import 'titulo_receber_repository.dart';
+
+void _marcarUltimaVendaNosProdutos(ObjectBox db, Venda venda) {
+  final agora = DateTime.now().toUtc();
+  for (final item in venda.itens) {
+    final produto = item.produto.target;
+    if (produto == null) continue;
+    produto.ultimaVendaEm = agora;
+    db.produtoBox.put(produto);
+  }
+}
 
 void _aplicarPagamentoNoOrcamento(
   Venda venda,
@@ -49,6 +63,25 @@ void _aplicarPagamentoNoOrcamento(
   venda.formaPagamento = pagamento.formaPagamento;
   venda.quantidadeParcelas = parcelas;
   venda.pagamentosJson = '';
+}
+
+void _aplicarPlanoFiadoNoOrcamento(
+  Venda venda, {
+  List<PlanoFiadoParcela>? planoFiado,
+}) {
+  final valorFiado = LimiteCreditoHelper.valorFiadoNaVenda(venda);
+  if (valorFiado <= 0.001) {
+    venda.planoFiadoJson = '';
+    return;
+  }
+  final parcelas = planoFiado ?? PlanoFiadoCodec.decode(venda.planoFiadoJson);
+  if (!PlanoFiadoCodec.validarContraValor(parcelas, valorFiado)) {
+    throw StateError(
+      'Plano de parcelas do fiado invalido. A soma das parcelas deve igualar '
+      'o valor fiado (${valorFiado.toStringAsFixed(2)}).',
+    );
+  }
+  venda.planoFiadoJson = PlanoFiadoCodec.encode(parcelas);
 }
 
 class PeriodoFiltro {
@@ -246,6 +279,7 @@ class DadosPagamentoOrcamento {
     required this.formaPagamento,
     required this.quantidadeParcelas,
     this.linhasMisto,
+    this.planoFiado,
   });
 
   final String formaPagamento;
@@ -253,6 +287,9 @@ class DadosPagamentoOrcamento {
 
   /// Quando preenchido (2+ linhas ou modo misto), [formaPagamento] deve ser `misto`.
   final List<PagamentoOrcamentoLinha>? linhasMisto;
+
+  /// Parcelas e vencimentos do fiado (obrigatorio no PDV quando ha fiado).
+  final List<PlanoFiadoParcela>? planoFiado;
 }
 
 class DadosEntregaOrcamento {
@@ -318,10 +355,15 @@ class ListagemVendasPagina {
 
 class VendaRepository {
   VendaRepository(this._db, {void Function()? onAposEscrita})
-    : _onAposEscrita = onAposEscrita;
+    : _onAposEscrita = onAposEscrita {
+    titulos = TituloReceberRepository(_db);
+    recebimentos = RecebimentoFiadoRepository(_db, titulos);
+  }
 
   final ObjectBox _db;
   final void Function()? _onAposEscrita;
+  late final TituloReceberRepository titulos;
+  late final RecebimentoFiadoRepository recebimentos;
   void _processarComprasPreditivasAposBaixaEstoque(
     Produto produto,
     int quantidadeVendida, {
@@ -348,6 +390,23 @@ class VendaRepository {
     final vendas = query.find();
     query.close();
     return vendas;
+  }
+
+  /// Vendas finalizadas (ativas ou canceladas) vinculadas ao vendedor.
+  int contarVendasFinalizadasPorVendedor(int vendedorId) {
+    if (vendedorId <= 0) return 0;
+    final q = _db.vendaBox
+        .query(
+          Venda_.status
+              .equals('finalizada')
+              .and(Venda_.vendedor.equals(vendedorId)),
+        )
+        .build();
+    try {
+      return q.count();
+    } finally {
+      q.close();
+    }
   }
 
   Query<Venda> _queryListagemVendasOrdenada(Condition<Venda> cond, FiltroListagemVendas f) {
@@ -593,6 +652,140 @@ class VendaRepository {
     ).fold<double>(0, (total, venda) => total + venda.total);
   }
 
+  /// Saldo em titulos a receber em aberto (apos finalizar no caixa).
+  double saldoFiadoEmAbertoCliente(int clienteId, {int? ignorarVendaId}) {
+    if (clienteId <= 0) return 0;
+    titulos.migrarTitulosLegadoSeNecessario();
+    final abertos = titulos.listarAbertosPorCliente(clienteId);
+    if (ignorarVendaId == null) {
+      return abertos.fold<double>(0, (s, t) => s + t.saldo);
+    }
+    return abertos
+        .where((t) => t.venda.targetId != ignorarVendaId)
+        .fold<double>(0, (s, t) => s + t.saldo);
+  }
+
+  /// Fiado em orcamentos ainda nao finalizados no caixa (nao entram nos titulos).
+  double fiadoPendenteEmOrcamentosCliente(
+    int clienteId, {
+    int? ignorarVendaId,
+  }) {
+    if (clienteId <= 0) return 0;
+    final q = _db.vendaBox
+        .query(
+          Venda_.cliente.equals(clienteId) &
+              Venda_.status.equals('orcamento') &
+              Venda_.cancelada.equals(false),
+        )
+        .build();
+    try {
+      var total = 0.0;
+      for (final v in q.find()) {
+        if (ignorarVendaId != null && v.id == ignorarVendaId) continue;
+        total += LimiteCreditoHelper.valorFiadoNaVenda(v);
+      }
+      return total;
+    } finally {
+      q.close();
+    }
+  }
+
+  /// Titulos em aberto + fiado em outros orcamentos do cliente.
+  double exposicaoFiadoCliente(int clienteId, {int? ignorarVendaId}) {
+    return saldoFiadoEmAbertoCliente(clienteId, ignorarVendaId: ignorarVendaId) +
+        fiadoPendenteEmOrcamentosCliente(clienteId, ignorarVendaId: ignorarVendaId);
+  }
+
+  ValidacaoLimiteCredito validarLimiteCredito({
+    required int clienteId,
+    required double valorFiadoOperacao,
+    int? ignorarVendaId,
+  }) {
+    if (clienteId <= 0) {
+      return ValidacaoLimiteCredito.semFiado();
+    }
+    if (valorFiadoOperacao <= 0.001) {
+      return ValidacaoLimiteCredito.semFiado();
+    }
+    final cliente = _db.clienteBox.get(clienteId);
+    if (cliente == null) {
+      return const ValidacaoLimiteCredito(
+        permitido: false,
+        mensagem: 'Cliente nao encontrado para validar limite de credito.',
+      );
+    }
+    if (cliente.limiteCredito <= 0) {
+      return ValidacaoLimiteCredito.semLimiteConfigurado();
+    }
+    // Somente fiado ja finalizado no caixa (titulos). Orcamentos abertos
+    // nao entram no saldo ate finalizar — evita duplicar com orcamento pendente.
+    final saldo = saldoFiadoEmAbertoCliente(
+      clienteId,
+      ignorarVendaId: ignorarVendaId,
+    );
+    final disponivel = (cliente.limiteCredito - saldo).clamp(0, double.infinity).toDouble();
+    final apos = saldo + valorFiadoOperacao;
+    if (apos <= cliente.limiteCredito + 0.02) {
+      return ValidacaoLimiteCredito(
+        permitido: true,
+        saldoEmAberto: saldo,
+        limite: cliente.limiteCredito,
+        valorFiadoOperacao: valorFiadoOperacao,
+        saldoAposOperacao: apos,
+        nomeCliente: cliente.nomeRazao,
+      );
+    }
+    final excedeDisponivel = valorFiadoOperacao - disponivel;
+    return ValidacaoLimiteCredito(
+      permitido: false,
+      saldoEmAberto: saldo,
+      limite: cliente.limiteCredito,
+      valorFiadoOperacao: valorFiadoOperacao,
+      saldoAposOperacao: apos,
+      nomeCliente: cliente.nomeRazao,
+      mensagem:
+          'Limite de credito excedido para ${cliente.nomeRazao}. '
+          'Fiado em aberto (vendas finalizadas): ${LimiteCreditoHelper.formatarMoedaBr(saldo)}. '
+          'Disponivel para novo fiado: ${LimiteCreditoHelper.formatarMoedaBr(disponivel)}. '
+          'Fiado desta operacao: ${LimiteCreditoHelper.formatarMoedaBr(valorFiadoOperacao)}'
+          '${excedeDisponivel > 0.02 ? ' (excede o disponivel em ${LimiteCreditoHelper.formatarMoedaBr(excedeDisponivel)})' : ''}. '
+          'Total ficaria ${LimiteCreditoHelper.formatarMoedaBr(apos)} '
+          '(limite ${LimiteCreditoHelper.formatarMoedaBr(cliente.limiteCredito)}).',
+    );
+  }
+
+  void _exigirClienteParaFiado({
+    required int? clienteId,
+    required double valorFiadoOperacao,
+  }) {
+    if (valorFiadoOperacao <= 0.001) return;
+    if (clienteId == null || clienteId <= 0) {
+      throw StateError(
+        'Vincule um cliente ao orcamento para usar pagamento fiado.',
+      );
+    }
+  }
+
+  void _exigirLimiteCredito({
+    required int? clienteId,
+    required double valorFiadoOperacao,
+    int? ignorarVendaId,
+  }) {
+    _exigirClienteParaFiado(
+      clienteId: clienteId,
+      valorFiadoOperacao: valorFiadoOperacao,
+    );
+    if (clienteId == null || clienteId <= 0) return;
+    final r = validarLimiteCredito(
+      clienteId: clienteId,
+      valorFiadoOperacao: valorFiadoOperacao,
+      ignorarVendaId: ignorarVendaId,
+    );
+    if (!r.permitido) {
+      throw StateError(r.mensagem ?? 'Limite de credito excedido.');
+    }
+  }
+
   List<Venda> listarPorPeriodo(PeriodoFiltro periodo) {
     final inicioUtc = periodo.inicio.toUtc();
     final fimUtc = periodo.fim.toUtc();
@@ -828,6 +1021,11 @@ class VendaRepository {
         pagamento,
         totalOrcamento: venda.total,
       );
+      _exigirClienteParaFiado(
+        clienteId: clienteId,
+        valorFiadoOperacao: LimiteCreditoHelper.valorFiadoNaVenda(venda),
+      );
+      _aplicarPlanoFiadoNoOrcamento(venda, planoFiado: pagamento.planoFiado);
       final vendaId = _db.vendaBox.put(venda);
       venda.id = vendaId;
 
@@ -1293,6 +1491,11 @@ class VendaRepository {
         pagamento,
         totalOrcamento: venda.total,
       );
+      _exigirClienteParaFiado(
+        clienteId: venda.cliente.targetId,
+        valorFiadoOperacao: LimiteCreditoHelper.valorFiadoNaVenda(venda),
+      );
+      _aplicarPlanoFiadoNoOrcamento(venda, planoFiado: pagamento.planoFiado);
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita();
@@ -1337,12 +1540,30 @@ class VendaRepository {
         }
       }
 
+      _exigirLimiteCredito(
+        clienteId: venda.cliente.targetId,
+        valorFiadoOperacao: LimiteCreditoHelper.valorFiadoNaVenda(venda),
+      );
+
+      final valorFiado = LimiteCreditoHelper.valorFiadoNaVenda(venda);
+      if (valorFiado > 0.001) {
+        final plano = PlanoFiadoCodec.decode(venda.planoFiadoJson);
+        if (!PlanoFiadoCodec.validarContraValor(plano, valorFiado)) {
+          throw StateError(
+            'Orcamento fiado sem plano de parcelas valido. '
+            'Edite o orcamento no PDV e defina as parcelas.',
+          );
+        }
+      }
+
       venda.status = 'finalizada';
       venda.cancelada = false;
       venda.motivoCancelamento = '';
       venda.canceladaPor = '';
       venda.canceladaEm = null;
+      _marcarUltimaVendaNosProdutos(_db, venda);
       _db.vendaBox.put(venda);
+      titulos.gerarTitulosDaVenda(venda);
 
       if (filhoFreteRetirada) {
         _migrarVendaMaeRetiradaFuturaParaCarretoNaTransacao(venda);
@@ -1977,10 +2198,19 @@ class VendaRepository {
   }) {
     final motivoLimpo = motivo.trim();
     if (motivoLimpo.isEmpty) return;
+    final quem = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
       if (venda == null) return;
-      _anexarLinhaObservacaoEntregaEmVenda(venda, status, motivoLimpo, usuario);
+      _anexarLinhaObservacaoEntregaEmVenda(venda, status, motivoLimpo, quem);
+      final hist = HistoricoEntrega(
+        statusAnterior: motivoLimpo,
+        statusNovo: status,
+        usuario: quem,
+        dataHora: DateTime.now(),
+      );
+      hist.venda.target = venda;
+      _db.historicoEntregaBox.put(hist);
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita();
@@ -2176,7 +2406,7 @@ class VendaRepository {
     }
     registrarOcorrenciaEntrega(
       vendaId: vendaId,
-      status: 'retirada_futura',
+      status: HistoricoEntregaEventos.retiradaFutura,
       motivo: motivoFinal,
       usuario: usuarioLimpo,
     );
@@ -2302,7 +2532,7 @@ class VendaRepository {
     }
     registrarOcorrenciaEntrega(
       vendaId: vendaId,
-      status: 'retirada_loja_pre_saida',
+      status: HistoricoEntregaEventos.retiradaLojaPreSaida,
       motivo: motivoFinal,
       usuario: usuarioLimpo,
     );
@@ -2386,6 +2616,9 @@ class VendaRepository {
       venda.canceladaPor = usuarioCancelamento;
       venda.canceladaEm = DateTime.now();
       _db.vendaBox.put(venda);
+      if (venda.status == 'finalizada') {
+        titulos.cancelarPorVenda(vendaId);
+      }
     });
     _notificarRedeAposEscrita();
   }

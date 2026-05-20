@@ -31,4 +31,20 @@ class HistoricoEntregaEventos {
 
   static const devolucao = 'entrega_evento_devolucao';
   static const troca = 'entrega_evento_troca';
+  static const retiradaFutura = 'retirada_futura';
+  static const retiradaLojaPreSaida = 'retirada_loja_pre_saida';
+  static const complementoPendente = 'complemento_pendente';
+
+  static bool ehEventoOcorrencia(String statusNovo) {
+    switch (statusNovo) {
+      case devolucao:
+      case troca:
+      case retiradaFutura:
+      case retiradaLojaPreSaida:
+      case complementoPendente:
+        return true;
+      default:
+        return false;
+    }
+  }
 }

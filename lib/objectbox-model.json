@@ -80,7 +80,7 @@
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "34:2145008850451288435",
+      "lastPropertyId": "39:2186671636523465925",
       "name": "Produto",
       "properties": [
         {
@@ -256,13 +256,38 @@
           "id": "34:2145008850451288435",
           "name": "estoqueSeguranca",
           "type": 6
+        },
+        {
+          "id": "35:7559716899860066839",
+          "name": "unidadeCompra",
+          "type": 9
+        },
+        {
+          "id": "36:510759840591864887",
+          "name": "quantidadePorEmbalagem",
+          "type": 8
+        },
+        {
+          "id": "37:5434875089581398511",
+          "name": "embalagemMultiplica",
+          "type": 1
+        },
+        {
+          "id": "38:7000124695845192671",
+          "name": "permiteQuantidadeFracionada",
+          "type": 1
+        },
+        {
+          "id": "39:2186671636523465925",
+          "name": "ultimaVendaEm",
+          "type": 10
         }
       ],
       "relations": []
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "43:1358223845416889894",
+      "lastPropertyId": "44:8986871678185575789",
       "name": "Venda",
       "properties": [
         {
@@ -481,6 +506,11 @@
           "id": "43:1358223845416889894",
           "name": "nfceEmitidaEm",
           "type": 10
+        },
+        {
+          "id": "44:8986871678185575789",
+          "name": "planoFiadoJson",
+          "type": 9
         }
       ],
       "relations": []
@@ -750,7 +780,7 @@
     },
     {
       "id": "7:3249171710221978790",
-      "lastPropertyId": "27:9200179167574943727",
+      "lastPropertyId": "36:3017231887720912664",
       "name": "Funcionario",
       "properties": [
         {
@@ -888,6 +918,51 @@
           "id": "27:9200179167574943727",
           "name": "valesJson",
           "type": 9
+        },
+        {
+          "id": "28:5264856135576528757",
+          "name": "setor",
+          "type": 9
+        },
+        {
+          "id": "29:1973917488065316865",
+          "name": "funcao",
+          "type": 9
+        },
+        {
+          "id": "30:1721693254565008717",
+          "name": "funcaoOutro",
+          "type": 9
+        },
+        {
+          "id": "31:2744341541418241049",
+          "name": "contatoEmergenciaNome",
+          "type": 9
+        },
+        {
+          "id": "32:2744566081220261667",
+          "name": "contatoEmergenciaTelefone",
+          "type": 9
+        },
+        {
+          "id": "33:5524273883113032783",
+          "name": "motivoDemissao",
+          "type": 9
+        },
+        {
+          "id": "34:3854803190817457081",
+          "name": "motivoDemissaoOutro",
+          "type": 9
+        },
+        {
+          "id": "35:9051499931352292052",
+          "name": "dataDemissao",
+          "type": 10
+        },
+        {
+          "id": "36:3017231887720912664",
+          "name": "vendedorId",
+          "type": 6
         }
       ],
       "relations": []
@@ -1416,10 +1491,184 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "19:5851755353918478054",
+      "lastPropertyId": "8:8490691264653340577",
+      "name": "LancamentoFuncionario",
+      "properties": [
+        {
+          "id": "1:2549234501368440798",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:2536030793733652060",
+          "name": "tipo",
+          "type": 9
+        },
+        {
+          "id": "3:4720230939263114137",
+          "name": "valor",
+          "type": 8
+        },
+        {
+          "id": "4:7406112559157668097",
+          "name": "observacao",
+          "type": 9
+        },
+        {
+          "id": "5:2981101484149370355",
+          "name": "estornado",
+          "type": 1
+        },
+        {
+          "id": "6:6129349704205278749",
+          "name": "data",
+          "type": 10
+        },
+        {
+          "id": "7:361205022933524823",
+          "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "8:8490691264653340577",
+          "name": "funcionarioId",
+          "indexId": "34:8298185084980119289",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Funcionario"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "20:5326987134583092463",
+      "lastPropertyId": "8:6541075949374536941",
+      "name": "RecebimentoFiado",
+      "properties": [
+        {
+          "id": "1:996878043985931258",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:650631902406352781",
+          "name": "valorTotal",
+          "type": 8
+        },
+        {
+          "id": "3:9197587303923015851",
+          "name": "formaPagamento",
+          "type": 9
+        },
+        {
+          "id": "4:2082955152826862407",
+          "name": "observacao",
+          "type": 9
+        },
+        {
+          "id": "5:7141601629024744006",
+          "name": "alocacoesJson",
+          "type": 9
+        },
+        {
+          "id": "6:4580943406967217581",
+          "name": "data",
+          "type": 10
+        },
+        {
+          "id": "7:4687861643552332097",
+          "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "8:6541075949374536941",
+          "name": "clienteId",
+          "indexId": "35:6420487020185815936",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Cliente"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "21:491656429780770622",
+      "lastPropertyId": "11:2059542965711187713",
+      "name": "TituloReceber",
+      "properties": [
+        {
+          "id": "1:260569806563522537",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:439035966504430654",
+          "name": "numeroParcela",
+          "type": 6
+        },
+        {
+          "id": "3:8788031057088049598",
+          "name": "totalParcelas",
+          "type": 6
+        },
+        {
+          "id": "4:4130386765358255379",
+          "name": "valorOriginal",
+          "type": 8
+        },
+        {
+          "id": "5:154448513170772691",
+          "name": "saldo",
+          "type": 8
+        },
+        {
+          "id": "6:3567165681344611975",
+          "name": "status",
+          "type": 9
+        },
+        {
+          "id": "7:7034060097457663445",
+          "name": "vencimento",
+          "type": 10
+        },
+        {
+          "id": "8:2907504768872024972",
+          "name": "dataQuitacao",
+          "type": 10
+        },
+        {
+          "id": "9:1795661149684358823",
+          "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "10:5938309689424453502",
+          "name": "clienteId",
+          "indexId": "36:7212826272704908184",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Cliente"
+        },
+        {
+          "id": "11:2059542965711187713",
+          "name": "vendaId",
+          "indexId": "37:5307829810048413015",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Venda"
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "18:1528420293365359871",
-  "lastIndexId": "33:2349180519764485688",
+  "lastEntityId": "21:491656429780770622",
+  "lastIndexId": "37:5307829810048413015",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

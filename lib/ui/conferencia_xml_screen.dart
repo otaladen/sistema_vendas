@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../data/nfe_entrada_repository.dart';
 import '../data/produto_repository.dart';
+import '../domain/produto_embalagem.dart';
 import '../model/item_nota_temporario.dart';
 import '../model/produto.dart';
 
@@ -126,9 +127,17 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     if (f <= 0) return 0;
     final q = linha.sugestao.item.quantidadeComercial;
     if (!q.isFinite || q < 0) return 0;
-    final prod = q * f;
-    if (!prod.isFinite) return 0;
-    return prod;
+    var multiplica = true;
+    final id = linha.produtoDestinoId();
+    if (id != null) {
+      final p = widget.produtoRepository.obterPorId(id);
+      if (p != null) multiplica = p.embalagemMultiplica;
+    }
+    return ProdutoEmbalagem.quantidadeNotaParaEstoque(
+      quantidadeComercial: q,
+      fator: f,
+      embalagemMultiplica: multiplica,
+    ).toDouble();
   }
 
   /// Custo unitario na [unidade interna] do cadastro (mesma formula de [NfeEntradaRepository.confirmarEntrada]).
@@ -138,7 +147,13 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     if (f <= 0 || !vUn.isFinite || vUn < 0) {
       return null;
     }
-    final unit = vUn / f;
+    var multiplica = true;
+    final id = linha.produtoDestinoId();
+    if (id != null) {
+      final p = widget.produtoRepository.obterPorId(id);
+      if (p != null) multiplica = p.embalagemMultiplica;
+    }
+    final unit = multiplica ? vUn / f : vUn * f;
     if (!unit.isFinite || unit < 0) {
       return null;
     }
@@ -355,10 +370,21 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     if (!q.isFinite || q < 0) {
       return 'Quantidade da nota invalida; confira o XML.';
     }
-    final qtd = (q * f).round();
+    var multiplica = true;
+    final id = linha.produtoDestinoId();
+    if (id != null) {
+      final p = widget.produtoRepository.obterPorId(id);
+      if (p != null) multiplica = p.embalagemMultiplica;
+    }
+    final qtd = ProdutoEmbalagem.quantidadeNotaParaEstoque(
+      quantidadeComercial: q,
+      fator: f,
+      embalagemMultiplica: multiplica,
+    );
     final qFmt = _nfQtd.format(q);
-    return 'Na nota: $qFmt $uComLabel. Cada 1 $uComLabel da nota vale $f $uIntLabel '
-        'no cadastro - total previsto: $qtd $uIntLabel no estoque.';
+    final modo = multiplica ? 'multiplica' : 'divide';
+    return 'Na nota: $qFmt $uComLabel. Fator $f ($modo) -> '
+        '$qtd $uIntLabel no estoque.';
   }
 
   ({Color bg, Color fg, String label}) _coresStatusChip(_LinhaEdicao linha) {

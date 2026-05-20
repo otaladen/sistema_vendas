@@ -38,6 +38,11 @@ class SyncEntityCodec {
       'preco2': p.preco2,
       'preco3': p.preco3,
       'precoVenda': p.precoVenda,
+      'unidadeCompra': p.unidadeCompra,
+      'quantidadePorEmbalagem': p.quantidadePorEmbalagem,
+      'embalagemMultiplica': p.embalagemMultiplica,
+      'permiteQuantidadeFracionada': p.permiteQuantidadeFracionada,
+      'ultimaVendaEm': p.ultimaVendaEm?.toUtc().toIso8601String(),
       'criadoEm': p.criadoEm.toUtc().toIso8601String(),
       'ativo': p.ativo,
     };
@@ -77,6 +82,14 @@ class SyncEntityCodec {
       preco2: (m['preco2'] as num?)?.toDouble() ?? 0,
       preco3: (m['preco3'] as num?)?.toDouble() ?? 0,
       precoVenda: (m['precoVenda'] as num?)?.toDouble() ?? 0,
+      unidadeCompra: (m['unidadeCompra'] ?? '').toString(),
+      quantidadePorEmbalagem:
+          (m['quantidadePorEmbalagem'] as num?)?.toDouble() ?? 1,
+      embalagemMultiplica: m['embalagemMultiplica'] != false,
+      permiteQuantidadeFracionada: m['permiteQuantidadeFracionada'] == true,
+      ultimaVendaEm: DateTime.tryParse(
+        (m['ultimaVendaEm'] ?? '').toString(),
+      )?.toUtc(),
       criadoEm: DateTime.tryParse((m['criadoEm'] ?? '').toString())?.toUtc(),
       ativo: m['ativo'] != false,
     );
@@ -205,6 +218,7 @@ class SyncEntityCodec {
       'formaPagamento': v.formaPagamento,
       'quantidadeParcelas': v.quantidadeParcelas,
       'pagamentosJson': v.pagamentosJson,
+      'planoFiadoJson': v.planoFiadoJson,
       'tipoEntrega': v.tipoEntrega,
       'valorFrete': v.valorFrete,
       'enderecoEntrega': v.enderecoEntrega,
@@ -252,6 +266,7 @@ class SyncEntityCodec {
       formaPagamento: (m['formaPagamento'] ?? 'dinheiro').toString(),
       quantidadeParcelas: (m['quantidadeParcelas'] as num?)?.toInt() ?? 1,
       pagamentosJson: (m['pagamentosJson'] ?? '').toString(),
+      planoFiadoJson: (m['planoFiadoJson'] ?? '').toString(),
       tipoEntrega: (m['tipoEntrega'] ?? 'retirada').toString(),
       valorFrete: (m['valorFrete'] as num?)?.toDouble() ?? 0,
       enderecoEntrega: (m['enderecoEntrega'] ?? '').toString(),

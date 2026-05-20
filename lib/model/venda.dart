@@ -18,6 +18,7 @@ class Venda {
     this.formaPagamento = 'dinheiro',
     this.quantidadeParcelas = 1,
     this.pagamentosJson = '',
+    this.planoFiadoJson = '',
     this.tipoEntrega = 'retirada',
     this.valorFrete = 0,
     this.enderecoEntrega = '',
@@ -64,6 +65,10 @@ class Venda {
   int quantidadeParcelas;
   /// JSON lista [PagamentoOrcamentoLinha]; vazio se pagamento unico (legado).
   String pagamentosJson;
+
+  /// JSON lista [PlanoFiadoParcela]; plano de quitação definido no PDV.
+  String planoFiadoJson;
+
   String tipoEntrega;
   double valorFrete;
   String enderecoEntrega;

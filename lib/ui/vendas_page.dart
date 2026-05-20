@@ -20,7 +20,6 @@ const Color _corCaixa = Color(0xFF00897B);
 const Color _corEntregas = Color(0xFF0277BD);
 const Color _corListagem = Color(0xFF3949AB);
 const Color _corRelatorios = Color(0xFFEF6C00);
-
 class VendasPage extends StatelessWidget {
   const VendasPage({
     super.key,

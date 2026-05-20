@@ -22,6 +22,7 @@ import '../data/vendedor_repository.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/fiscal/fiscal_pedido_nfce.dart';
 import '../domain/pagamento_orcamento.dart';
+import '../domain/plano_fiado.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
@@ -31,6 +32,8 @@ import '../services/fiscal_service.dart';
 import '../services/print_service.dart';
 import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
+import 'widgets/receber_fiado_panel.dart';
+import '../services/recibo_recebimento_fiado_pdf.dart';
 
 class CaixaPage extends StatefulWidget {
   const CaixaPage({
@@ -1077,6 +1080,21 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
+  ({double total, int quantidade}) _resumoRecebimentosFiadoNoPeriodoCaixa() {
+    final abertura = _aberturaCaixaEm;
+    if (abertura == null) {
+      return (total: 0.0, quantidade: 0);
+    }
+    final lista = widget.vendaRepository.recebimentos.listarNoPeriodo(
+      inicio: abertura,
+      fim: DateTime.now(),
+    );
+    return (
+      total: lista.fold<double>(0, (s, r) => s + r.valorTotal),
+      quantidade: lista.length,
+    );
+  }
+
   Map<String, double> _totaisEsperadosFechamento() {
     final abertura = _aberturaCaixaEm;
     final agora = DateTime.now();
@@ -1125,6 +1143,27 @@ class _CaixaPageState extends State<CaixaPage> {
           dinheiro += venda.total;
       }
     }
+    if (abertura != null) {
+      for (final rec in widget.vendaRepository.recebimentos.listarNoPeriodo(
+        inicio: abertura,
+        fim: agora,
+      )) {
+        switch (rec.formaPagamento) {
+          case 'pix':
+            pix += rec.valorTotal;
+            break;
+          case 'cartao_debito':
+            debito += rec.valorTotal;
+            break;
+          case 'cartao_credito':
+            credito += rec.valorTotal;
+            break;
+          case 'dinheiro':
+          default:
+            dinheiro += rec.valorTotal;
+        }
+      }
+    }
     final dinheiroEsperado = (_fundoTrocoAbertura + dinheiro + _totalSuprimentos - _totalSangrias)
         .clamp(0, double.infinity)
         .toDouble();
@@ -1151,6 +1190,112 @@ class _CaixaPageState extends State<CaixaPage> {
     return (totalVendas: totalVendas, quantidadeVendas: quantidadeVendas);
   }
 
+  Future<void> _abrirReceberFiado() async {
+    if (!_caixaAberto) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Abra o caixa antes de receber pagamentos de fiado.'),
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Receber fiado'),
+          content: SizedBox(
+            width: 720,
+            height: 520,
+            child: ReceberFiadoPanel(
+              vendaRepository: widget.vendaRepository,
+              clienteRepository: widget.clienteRepository,
+              onRecebimentoRegistrado: (resultado) {
+                _aposRecebimentoFiadoNoCaixa(resultado);
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Fechar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _aposRecebimentoFiadoNoCaixa(
+    RecebimentoFiadoResultado resultado,
+  ) async {
+    await _registrarAuditoriaCaixa(
+      'recebimento_fiado',
+      detalhes: {
+        'recebimentoId': resultado.recebimentoId,
+        'clienteId': resultado.cliente.id,
+        'clienteNome': resultado.cliente.nomeRazao,
+        'valor': resultado.valorTotal,
+        'formaPagamento': resultado.formaPagamento,
+      },
+    );
+    if (!mounted) return;
+
+    final rotuloForma = _rotuloFormaPagamento(resultado.formaPagamento);
+    final acaoRecibo = await showDialog<String>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Recebimento registrado'),
+        content: Text(
+          '${resultado.cliente.nomeRazao}\n'
+          'Valor: ${_formatarMoeda(resultado.valorTotal)}\n'
+          'Forma: $rotuloForma\n\n'
+          'O valor entrou no fluxo do caixa (fechamento/leitura parcial).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'fechar'),
+            child: const Text('Fechar'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'recibo'),
+            icon: const Icon(Icons.receipt_outlined),
+            label: const Text('Recibo (opcional)'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || acaoRecibo != 'recibo') return;
+
+    final rec = widget.vendaRepository.recebimentos.obterPorId(
+      resultado.recebimentoId,
+    );
+    if (rec == null) return;
+
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!mounted) return;
+
+    await mostrarFluxoImpressaoCupomVenda(
+      context,
+      printService: widget.printService,
+      config: config,
+      title: 'Recibo de pagamento (fiado)',
+      content: 'Deseja imprimir o recibo para o cliente?',
+      suggestedFileName:
+          'recibo_fiado_${resultado.cliente.id}_${rec.id}.pdf',
+      gerarPdfBytes: () => ReciboRecebimentoFiadoPdf.gerarBytes(
+        recebimento: rec,
+        cliente: resultado.cliente,
+        vendaRepository: widget.vendaRepository,
+        config: config,
+        operadorCaixa: _operadorCaixa,
+      ),
+    );
+  }
+
   Future<void> _mostrarLeituraParcial() async {
     if (!widget.podeLeituraParcialCaixa) {
       return;
@@ -1166,11 +1311,14 @@ class _CaixaPageState extends State<CaixaPage> {
     }
     final esperados = _totaisEsperadosFechamento();
     final vendas = _totalVendasNoPeriodoCaixa();
+    final recFiado = _resumoRecebimentosFiadoNoPeriodoCaixa();
     await _registrarAuditoriaCaixa(
       'leitura_parcial_caixa',
       detalhes: {
         'totalVendas': vendas.totalVendas,
         'quantidadeVendas': vendas.quantidadeVendas,
+        'recebimentosFiado': recFiado.total,
+        'quantidadeRecebimentosFiado': recFiado.quantidade,
         'esperadoDinheiro': esperados['dinheiro'] ?? 0,
         'esperadoPix': esperados['pix'] ?? 0,
         'esperadoDebito': esperados['debito'] ?? 0,
@@ -1205,10 +1353,19 @@ class _CaixaPageState extends State<CaixaPage> {
                   ),
                   Text('Quantidade: ${vendas.quantidadeVendas}'),
                   Text('Total em vendas: ${_formatarMoeda(vendas.totalVendas)}'),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Recebimentos de fiado: ${recFiado.quantidade} '
+                    '(${_formatarMoeda(recFiado.total)})',
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     'Recebimentos por forma de pagamento (esperado)',
                     style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  Text(
+                    'Inclui vendas do periodo + quitacoes de fiado no caixa.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -1701,11 +1858,24 @@ class _CaixaPageState extends State<CaixaPage> {
     final tv = _totalComDesconto(v);
     final scaled = _linhasPagamentoEscaladasCaixa(v, tv);
     _mistoLinhasModelo = List<PagamentoOrcamentoLinha>.from(scaled);
-    for (final _ in scaled) {
-      _mistoValorControllers.add(TextEditingController(text: '0,00'));
+    for (final linha in scaled) {
+      final textoValor = linha.meio == 'fiado'
+          ? linha.valor.toStringAsFixed(2).replaceAll('.', ',')
+          : '0,00';
+      _mistoValorControllers.add(TextEditingController(text: textoValor));
       _mistoValorFocusNodes.add(FocusNode());
     }
     _mistoPreparadoParaId = v.id;
+  }
+
+  double _valorFiadoMistoOrcamentoCaixa() =>
+      PagamentoOrcamentoCodec.somaPorMeio(_mistoLinhasModelo, 'fiado');
+
+  double _somaMistoRecebidaNoCaixaAgora() {
+    final linhas = _linhasMistoDoFormulario();
+    return linhas
+        .where((l) => l.meio != 'fiado')
+        .fold<double>(0, (s, l) => s + l.valor);
   }
 
   List<PagamentoOrcamentoLinha> _linhasMistoDoFormulario() {
@@ -1740,6 +1910,9 @@ class _CaixaPageState extends State<CaixaPage> {
       final mesmasParcelas = linhaEsperada.parcelas == linhaInformada.parcelas;
       if (!mesmoMeio || !mesmasParcelas) {
         return 'Forma de pagamento alterada no caixa. Use o mesmo resumo do pedido.';
+      }
+      if (linhaEsperada.meio == 'fiado') {
+        continue;
       }
       if ((linhaInformada.valor - linhaEsperada.valor).abs() > _tolMistoPagamento) {
         final sufixoParcelas = linhaEsperada.meio == 'cartao_credito'
@@ -2023,6 +2196,24 @@ class _CaixaPageState extends State<CaixaPage> {
     } catch (_) {}
   }
 
+  double _valorFiadoEfetivoNaFinalizacao(Venda venda, double totalVenda) {
+    if (venda.formaPagamento == 'misto') {
+      final doForm = PagamentoOrcamentoCodec.somaPorMeio(
+        _linhasMistoDoFormulario(),
+        'fiado',
+      );
+      if (doForm > 0.001) return doForm;
+      return PagamentoOrcamentoCodec.somaPorMeio(
+        PagamentoOrcamentoCodec.decode(venda.pagamentosJson),
+        'fiado',
+      );
+    }
+    if (venda.formaPagamento == 'fiado') {
+      return totalVenda;
+    }
+    return 0;
+  }
+
   Future<void> _finalizarOrcamento(Venda venda) async {
     if (!_caixaAberto) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2057,14 +2248,67 @@ class _CaixaPageState extends State<CaixaPage> {
 
     final descontoAplicado = _descontoAplicado(venda);
     final totalVenda = _totalComDesconto(venda);
+    final valorFiado = _valorFiadoEfetivoNaFinalizacao(venda, totalVenda);
+    final clienteId = venda.cliente.targetId;
+    if (valorFiado > 0.001 && clienteId <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Orcamento com fiado exige cliente vinculado. Edite o orcamento no PDV.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (valorFiado > 0.001) {
+      final plano = PlanoFiadoCodec.decode(venda.planoFiadoJson);
+      if (!PlanoFiadoCodec.validarContraValor(plano, valorFiado)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Orçamento fiado sem plano de parcelas válido. '
+              'Edite no PDV e defina vencimentos antes de finalizar.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+    if (valorFiado > 0.001 && clienteId > 0) {
+      final r = widget.vendaRepository.validarLimiteCredito(
+        clienteId: clienteId,
+        valorFiadoOperacao: valorFiado,
+      );
+      if (!r.permitido) {
+        if (!mounted) return;
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Limite de credito'),
+            content: Text(r.mensagem ?? 'Limite de credito excedido.'),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Entendi'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
     late final double totalRecebido;
     late final double trocoFinal;
     if (venda.formaPagamento == 'misto') {
       final linhasBruto = _linhasMistoDoFormulario();
-      final somaBruto = PagamentoOrcamentoCodec.soma(linhasBruto);
-      totalRecebido = somaBruto;
+      final fiado = PagamentoOrcamentoCodec.somaPorMeio(linhasBruto, 'fiado');
+      final recebidoCaixa = linhasBruto
+          .where((l) => l.meio != 'fiado')
+          .fold<double>(0, (s, l) => s + l.valor);
+      final aPagarAgora = (totalVenda - fiado).clamp(0, double.infinity).toDouble();
+      totalRecebido = recebidoCaixa + fiado;
       trocoFinal =
-          (somaBruto - totalVenda).clamp(0, double.infinity).toDouble();
+          (recebidoCaixa - aPagarAgora).clamp(0, double.infinity).toDouble();
     } else {
       final parteDinheiro = _parteDinheiroNaFinalizacao(venda, totalVenda);
       totalRecebido = parteDinheiro > 0.001
@@ -2080,7 +2324,11 @@ class _CaixaPageState extends State<CaixaPage> {
 
     if (venda.formaPagamento == 'misto') {
       final linhasBruto = _linhasMistoDoFormulario();
-      final soma = PagamentoOrcamentoCodec.soma(linhasBruto);
+      final fiado = PagamentoOrcamentoCodec.somaPorMeio(linhasBruto, 'fiado');
+      final recebidoCaixa = linhasBruto
+          .where((l) => l.meio != 'fiado')
+          .fold<double>(0, (s, l) => s + l.valor);
+      final aPagarAgora = (totalVenda - fiado).clamp(0, double.infinity).toDouble();
       final divergenciaMisto = _validarConferenciaMistoIgualOrcamento(
         venda,
         totalVenda,
@@ -2091,12 +2339,13 @@ class _CaixaPageState extends State<CaixaPage> {
         );
         return;
       }
-      if (soma < totalVenda - _tolMistoPagamento) {
+      if (recebidoCaixa < aPagarAgora - _tolMistoPagamento) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Pagamento misto: total informado (${_formatarMoeda(soma)}) e inferior '
-              'ao valor a pagar (${_formatarMoeda(totalVenda)}).',
+              'Pagamento misto: recebido agora (${_formatarMoeda(recebidoCaixa)}) '
+              'menor que o esperado (${_formatarMoeda(aPagarAgora)}). '
+              '${fiado > 0.001 ? 'Fiado ${_formatarMoeda(fiado)} ja esta no orcamento.' : ''}',
             ),
           ),
         );
@@ -2166,9 +2415,15 @@ class _CaixaPageState extends State<CaixaPage> {
         return;
       }
     }
+    final planoFiado = valorFiado > 0.001
+        ? PlanoFiadoCodec.decode(venda.planoFiadoJson)
+        : const <PlanoFiadoParcela>[];
     final confirmarFinalizacao = await _mostrarResumoFechamentoVenda(
       numeroOrcamento: venda.numeroOrcamento,
       textoPagamento: _rotuloPagamentoResumoNaFinalizacao(venda),
+      textoPlanoFiado: planoFiado.isEmpty
+          ? null
+          : PlanoFiadoCodec.formatarResumoLinhas(planoFiado),
       totalVenda: totalVenda,
       descontoAplicado: descontoAplicado,
       totalRecebido: totalRecebido,
@@ -2944,6 +3199,7 @@ class _CaixaPageState extends State<CaixaPage> {
   Future<bool?> _mostrarResumoFechamentoVenda({
     required int numeroOrcamento,
     required String textoPagamento,
+    String? textoPlanoFiado,
     required double totalVenda,
     required double descontoAplicado,
     required double totalRecebido,
@@ -2964,6 +3220,16 @@ class _CaixaPageState extends State<CaixaPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Pagamento: $textoPagamento'),
+                if (textoPlanoFiado != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Plano fiado (definido no PDV):',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  Text(textoPlanoFiado),
+                ],
                 const SizedBox(height: 4),
                 Text('Itens: $quantidadeItens'),
                 const SizedBox(height: 12),
@@ -3316,6 +3582,16 @@ class _CaixaPageState extends State<CaixaPage> {
                                   onPressed: _abrirSegundaViaCupom,
                                   icon: const Icon(Icons.receipt_long_outlined),
                                   label: const Text('Segunda via da nota'),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.tonalIcon(
+                                  onPressed:
+                                      _caixaAberto ? _abrirReceberFiado : null,
+                                  icon: const Icon(Icons.payments_outlined),
+                                  label: const Text('Receber fiado'),
                                 ),
                               ),
                               const SizedBox(height: 10),
@@ -4566,17 +4842,15 @@ class _CaixaPageState extends State<CaixaPage> {
   }) {
     if (_mistoValorControllers.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
-    final linhasLidas = _linhasMistoDoFormulario();
-    final somaAtual = linhasLidas.isEmpty
-        ? 0.0
-        : PagamentoOrcamentoCodec.soma(linhasLidas);
-    final parteDinheiroForm = linhasLidas.isEmpty
-        ? 0.0
-        : PagamentoOrcamentoCodec.somaPorMeio(linhasLidas, 'dinheiro');
+    final fiadoOrc = _valorFiadoMistoOrcamentoCaixa();
+    final recebidoAgora = _somaMistoRecebidaNoCaixaAgora();
+    final aPagarAgora =
+        (totalComDesconto - fiadoOrc).clamp(0, double.infinity).toDouble();
     final pagamentoInsuficiente =
-        somaAtual < totalComDesconto - _tolMistoPagamento;
+        recebidoAgora < aPagarAgora - _tolMistoPagamento;
     final trocoSobreTotal =
-        (somaAtual - totalComDesconto).clamp(0.0, double.infinity).toDouble();
+        (recebidoAgora - aPagarAgora).clamp(0.0, double.infinity).toDouble();
+    final planoFiado = PlanoFiadoCodec.decode(venda.planoFiadoJson);
 
     return Container(
       width: double.infinity,
@@ -4633,8 +4907,27 @@ class _CaixaPageState extends State<CaixaPage> {
             ),
           ],
           const SizedBox(height: 8),
+          if (fiadoOrc > 0.001) ...[
+            Text(
+              'Fiado ${_formatarMoeda(fiadoOrc)}: a receber depois (definido no PDV). '
+              'Confira abaixo apenas o que entra no caixa agora.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            if (planoFiado.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                PlanoFiadoCodec.formatarResumoLinhas(planoFiado),
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+            const SizedBox(height: 8),
+          ],
           for (var i = 0; i < _mistoValorControllers.length; i++)
-            Padding(
+            if (_mistoLinhasModelo[i].meio != 'fiado')
+              Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -4684,14 +4977,14 @@ class _CaixaPageState extends State<CaixaPage> {
               children: [
                 Expanded(
                   child: Text(
-                    'Soma dos meios',
+                    'Recebido agora (caixa)',
                     style: theme.textTheme.bodySmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
                 Text(
-                  _formatarMoeda(somaAtual),
+                  _formatarMoeda(recebidoAgora),
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: pagamentoInsuficiente
@@ -4702,13 +4995,33 @@ class _CaixaPageState extends State<CaixaPage> {
               ],
             ),
           ),
+          if (fiadoOrc > 0.001)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '+ Fiado (a receber)',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _formatarMoeda(fiadoOrc),
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Row(
               children: [
                 Expanded(
                   child: Text(
-                    'Total a pagar',
+                    'Total da venda',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -4727,7 +5040,8 @@ class _CaixaPageState extends State<CaixaPage> {
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                'A soma ainda nao cobre o total a pagar. Aumente um dos meios.',
+                'O valor recebido agora ainda nao cobre '
+                '${_formatarMoeda(aPagarAgora)} (total menos fiado).',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.error,
                 ),
@@ -4775,10 +5089,11 @@ class _CaixaPageState extends State<CaixaPage> {
             ),
           const SizedBox(height: 8),
           Text(
-            parteDinheiroForm > 0.001
-                ? 'Parcelas do cartao seguem o PDV. Em dinheiro, informe o que o '
-                    'cliente entregou; o troco aparece acima quando passar do total.'
-                : 'Parcelas do cartao seguem o PDV.',
+            fiadoOrc > 0.001
+                ? 'Fiado nao e recebido no caixa. Confira PIX, cartao e dinheiro; '
+                    'o troco considera so o que entra agora.'
+                : 'Parcelas do cartao seguem o PDV. Em dinheiro, o troco aparece '
+                    'quando o cliente entregar a mais.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

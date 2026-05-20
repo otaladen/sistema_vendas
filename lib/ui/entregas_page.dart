@@ -345,6 +345,12 @@ class _EntregasPageState extends State<EntregasPage> {
         return 'Devolucao registrada';
       case HistoricoEntregaEventos.troca:
         return 'Troca registrada';
+      case HistoricoEntregaEventos.retiradaFutura:
+        return 'Retirada futura';
+      case HistoricoEntregaEventos.retiradaLojaPreSaida:
+        return 'Retirada na loja (pre-saida)';
+      case HistoricoEntregaEventos.complementoPendente:
+        return 'Complemento pendente';
       case 'pendente':
         return 'Pendente';
       case 'roteirizada':
@@ -1976,14 +1982,23 @@ class _EntregasPageState extends State<EntregasPage> {
                     separatorBuilder: (_, _) => const Divider(height: 8),
                     itemBuilder: (context, index) {
                       final item = historico[index];
+                      final evento = HistoricoEntregaEventos.ehEventoOcorrencia(
+                        item.statusNovo,
+                      );
+                      final quando =
+                          '${DateFormat('dd/MM/yyyy HH:mm').format(item.dataHora.toLocal())} · ${item.usuario}';
                       return ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
                         title: Text(
-                          '${_rotuloStatusEntrega(item.statusAnterior)} -> ${_rotuloStatusEntrega(item.statusNovo)}',
+                          evento
+                              ? _rotuloStatusEntrega(item.statusNovo)
+                              : '${_rotuloStatusEntrega(item.statusAnterior)} -> ${_rotuloStatusEntrega(item.statusNovo)}',
                         ),
                         subtitle: Text(
-                          '${DateFormat('dd/MM/yyyy HH:mm').format(item.dataHora.toLocal())} · ${item.usuario}',
+                          evento && item.statusAnterior.trim().isNotEmpty
+                              ? '$quando\n${item.statusAnterior}'
+                              : quando,
                         ),
                       );
                     },
@@ -2104,7 +2119,7 @@ class _EntregasPageState extends State<EntregasPage> {
         if (resumo != null) {
           widget.vendaRepository.registrarOcorrenciaEntrega(
             vendaId: venda.id,
-            status: 'complemento_pendente',
+            status: HistoricoEntregaEventos.complementoPendente,
             motivo: resumo,
             usuario: widget.usuarioAtual,
           );

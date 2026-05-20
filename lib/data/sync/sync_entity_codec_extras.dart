@@ -1,5 +1,6 @@
 import '../../model/fornecedor_nfe.dart';
 import '../../model/funcionario.dart';
+import '../../model/lancamento_funcionario.dart';
 import '../../model/historico_entrada.dart';
 import '../../model/historico_entrega.dart';
 import '../../model/kit_orcamento.dart';
@@ -7,6 +8,8 @@ import '../../model/linha_devolucao_entrada.dart';
 import '../../model/linha_troca_saida.dart';
 import '../../model/mensagem_template.dart';
 import '../../model/motorista.dart';
+import '../../model/recebimento_fiado.dart';
+import '../../model/titulo_receber.dart';
 import '../../model/nfe_importada_registro.dart';
 import '../../model/registro_devolucao.dart';
 import '../../model/usuario_sistema.dart';
@@ -25,12 +28,17 @@ class SyncEntityCodecExtras {
         'codigoInterno': f.codigoInterno,
         'nomeCompleto': f.nomeCompleto,
         'cargo': f.cargo,
+        'setor': f.setor,
+        'funcao': f.funcao,
+        'funcaoOutro': f.funcaoOutro,
         'cpf': f.cpf,
         'rg': f.rg,
         'pis': f.pis,
         'telefone': f.telefone,
         'whatsapp': f.whatsapp,
         'email': f.email,
+        'contatoEmergenciaNome': f.contatoEmergenciaNome,
+        'contatoEmergenciaTelefone': f.contatoEmergenciaTelefone,
         'endereco': f.endereco,
         'numero': f.numero,
         'bairro': f.bairro,
@@ -45,8 +53,12 @@ class SyncEntityCodecExtras {
         'valesJson': f.valesJson,
         'diaPagamento': f.diaPagamento,
         'ativo': f.ativo,
+        'motivoDemissao': f.motivoDemissao,
+        'motivoDemissaoOutro': f.motivoDemissaoOutro,
         'dataNascimento': _dt(f.dataNascimento),
         'dataAdmissao': _dt(f.dataAdmissao),
+        'dataDemissao': _dt(f.dataDemissao),
+        'vendedorId': f.vendedorId,
         'criadoEm': _dt(f.criadoEm),
       };
 
@@ -55,12 +67,18 @@ class SyncEntityCodecExtras {
         codigoInterno: (m['codigoInterno'] ?? '').toString(),
         nomeCompleto: (m['nomeCompleto'] ?? '').toString(),
         cargo: (m['cargo'] ?? '').toString(),
+        setor: (m['setor'] ?? '').toString(),
+        funcao: (m['funcao'] ?? '').toString(),
+        funcaoOutro: (m['funcaoOutro'] ?? '').toString(),
         cpf: (m['cpf'] ?? '').toString(),
         rg: (m['rg'] ?? '').toString(),
         pis: (m['pis'] ?? '').toString(),
         telefone: (m['telefone'] ?? '').toString(),
         whatsapp: (m['whatsapp'] ?? '').toString(),
         email: (m['email'] ?? '').toString(),
+        contatoEmergenciaNome: (m['contatoEmergenciaNome'] ?? '').toString(),
+        contatoEmergenciaTelefone:
+            (m['contatoEmergenciaTelefone'] ?? '').toString(),
         endereco: (m['endereco'] ?? '').toString(),
         numero: (m['numero'] ?? '').toString(),
         bairro: (m['bairro'] ?? '').toString(),
@@ -75,10 +93,48 @@ class SyncEntityCodecExtras {
         valesJson: (m['valesJson'] ?? '[]').toString(),
         diaPagamento: (m['diaPagamento'] as num?)?.toInt() ?? 5,
         ativo: m['ativo'] != false,
+        motivoDemissao: (m['motivoDemissao'] ?? '').toString(),
+        motivoDemissaoOutro: (m['motivoDemissaoOutro'] ?? '').toString(),
         dataNascimento: _parseDt((m['dataNascimento'] ?? '').toString()),
         dataAdmissao: _parseDt((m['dataAdmissao'] ?? '').toString()),
+        dataDemissao: _parseDt((m['dataDemissao'] ?? '').toString()),
+        vendedorId: (m['vendedorId'] as num?)?.toInt() ?? 0,
         criadoEm: _parseDt((m['criadoEm'] ?? '').toString()),
       );
+
+  // --- LancamentoFuncionario ---
+  static Map<String, dynamic> lancamentoFuncionarioParaMap(
+    LancamentoFuncionario l,
+  ) =>
+      {
+        'id': l.id,
+        'tipo': l.tipo,
+        'valor': l.valor,
+        'observacao': l.observacao,
+        'estornado': l.estornado,
+        'data': _dt(l.data),
+        'criadoEm': _dt(l.criadoEm),
+        'funcionarioId': l.funcionario.targetId,
+      };
+
+  static LancamentoFuncionario lancamentoFuncionarioDeMap(
+    Map<String, dynamic> m,
+  ) {
+    final l = LancamentoFuncionario(
+      id: (m['id'] as num?)?.toInt() ?? 0,
+      tipo: (m['tipo'] ?? 'vale').toString(),
+      valor: (m['valor'] as num?)?.toDouble() ?? 0,
+      observacao: (m['observacao'] ?? '').toString(),
+      estornado: m['estornado'] == true,
+      data: _parseDt((m['data'] ?? '').toString()),
+      criadoEm: _parseDt((m['criadoEm'] ?? '').toString()),
+    );
+    final fid = (m['funcionarioId'] as num?)?.toInt() ?? 0;
+    if (fid > 0) {
+      l.funcionario.targetId = fid;
+    }
+    return l;
+  }
 
   // --- Motorista ---
   static Map<String, dynamic> motoristaParaMap(Motorista m) => {
@@ -409,5 +465,66 @@ class SyncEntityCodecExtras {
         .whereType<Map>()
         .map((e) => UsuarioSistema.fromMap(e.cast<String, dynamic>()))
         .toList();
+  }
+
+  // --- TituloReceber ---
+  static Map<String, dynamic> tituloReceberParaMap(TituloReceber t) => {
+        'id': t.id,
+        'numeroParcela': t.numeroParcela,
+        'totalParcelas': t.totalParcelas,
+        'valorOriginal': t.valorOriginal,
+        'saldo': t.saldo,
+        'status': t.status,
+        'vencimento': _dt(t.vencimento),
+        'dataQuitacao': _dt(t.dataQuitacao),
+        'criadoEm': _dt(t.criadoEm),
+        'clienteId': t.cliente.targetId,
+        'vendaId': t.venda.targetId,
+      };
+
+  static TituloReceber tituloReceberDeMap(Map<String, dynamic> m) {
+    final t = TituloReceber(
+      id: (m['id'] as num?)?.toInt() ?? 0,
+      numeroParcela: (m['numeroParcela'] as num?)?.toInt() ?? 1,
+      totalParcelas: (m['totalParcelas'] as num?)?.toInt() ?? 1,
+      valorOriginal: (m['valorOriginal'] as num?)?.toDouble() ?? 0,
+      saldo: (m['saldo'] as num?)?.toDouble() ?? 0,
+      status: (m['status'] ?? 'aberto').toString(),
+      vencimento: _parseDt((m['vencimento'] ?? '').toString()),
+      dataQuitacao: _parseDt((m['dataQuitacao'] ?? '').toString()),
+      criadoEm: _parseDt((m['criadoEm'] ?? '').toString()),
+    );
+    final cid = (m['clienteId'] as num?)?.toInt() ?? 0;
+    final vid = (m['vendaId'] as num?)?.toInt() ?? 0;
+    if (cid > 0) t.cliente.targetId = cid;
+    if (vid > 0) t.venda.targetId = vid;
+    return t;
+  }
+
+  // --- RecebimentoFiado ---
+  static Map<String, dynamic> recebimentoFiadoParaMap(RecebimentoFiado r) => {
+        'id': r.id,
+        'valorTotal': r.valorTotal,
+        'formaPagamento': r.formaPagamento,
+        'observacao': r.observacao,
+        'alocacoesJson': r.alocacoesJson,
+        'data': _dt(r.data),
+        'criadoEm': _dt(r.criadoEm),
+        'clienteId': r.cliente.targetId,
+      };
+
+  static RecebimentoFiado recebimentoFiadoDeMap(Map<String, dynamic> m) {
+    final r = RecebimentoFiado(
+      id: (m['id'] as num?)?.toInt() ?? 0,
+      valorTotal: (m['valorTotal'] as num?)?.toDouble() ?? 0,
+      formaPagamento: (m['formaPagamento'] ?? 'dinheiro').toString(),
+      observacao: (m['observacao'] ?? '').toString(),
+      alocacoesJson: (m['alocacoesJson'] ?? '').toString(),
+      data: _parseDt((m['data'] ?? '').toString()),
+      criadoEm: _parseDt((m['criadoEm'] ?? '').toString()),
+    );
+    final cid = (m['clienteId'] as num?)?.toInt() ?? 0;
+    if (cid > 0) r.cliente.targetId = cid;
+    return r;
   }
 }

@@ -139,38 +139,9 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
   }
 
   Widget _buildDescricao(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final desc = produto.descricao.trim().isEmpty
-        ? 'Sem descricao tecnica cadastrada.'
-        : produto.descricao.trim();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Descricao tecnica',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-        ),
-        const SizedBox(height: 6),
-        Expanded(
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.6),
-              ),
-            ),
-            child: SingleChildScrollView(
-              child: SelectableText(desc),
-            ),
-          ),
-        ),
-      ],
+    return ProdutoDescricaoTecnicaInline(
+      produto: produto,
+      expandir: true,
     );
   }
 
@@ -258,6 +229,71 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
             ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+/// Bloco de descricao tecnica (painel PDV ou modal).
+class ProdutoDescricaoTecnicaInline extends StatelessWidget {
+  const ProdutoDescricaoTecnicaInline({
+    super.key,
+    required this.produto,
+    this.alturaMaxima = 160,
+    this.expandir = false,
+    this.compacto = false,
+  });
+
+  final Produto produto;
+  final double alturaMaxima;
+  final bool expandir;
+  final bool compacto;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final desc = produto.descricao.trim().isEmpty
+        ? 'Sem descricao tecnica cadastrada.'
+        : produto.descricao.trim();
+
+    final caixa = Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      child: SingleChildScrollView(
+        child: SelectableText(
+          desc,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ),
+    );
+
+    final conteudo = expandir
+        ? Expanded(child: caixa)
+        : ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: alturaMaxima),
+            child: caixa,
+          );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: expandir ? MainAxisSize.max : MainAxisSize.min,
+      children: [
+        Text(
+          'Descricao tecnica',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: compacto ? 13 : null,
+              ),
+        ),
+        const SizedBox(height: 6),
+        conteudo,
       ],
     );
   }

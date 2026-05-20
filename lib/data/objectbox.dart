@@ -12,6 +12,9 @@ import '../model/cliente.dart';
 import '../model/fornecedor_nfe.dart';
 import '../model/historico_entrada.dart';
 import '../model/funcionario.dart';
+import '../model/lancamento_funcionario.dart';
+import '../model/recebimento_fiado.dart';
+import '../model/titulo_receber.dart';
 import '../model/historico_entrega.dart';
 import '../model/motorista.dart';
 import '../model/produto.dart';
@@ -35,6 +38,7 @@ class ObjectBox {
     motoristaBox = Box<Motorista>(store);
     vendedorBox = Box<Vendedor>(store);
     funcionarioBox = Box<Funcionario>(store);
+    lancamentoFuncionarioBox = Box<LancamentoFuncionario>(store);
     fornecedorNfeBox = Box<FornecedorNfe>(store);
     vinculoFornecedorProdutoBox = Box<VinculoFornecedorProduto>(store);
     historicoEntradaBox = Box<HistoricoEntrada>(store);
@@ -42,6 +46,8 @@ class ObjectBox {
     kitOrcamentoBox = Box<KitOrcamento>(store);
     kitOrcamentoItemBox = Box<KitOrcamentoItem>(store);
     contaPagarBox = Box<ContaPagar>(store);
+    tituloReceberBox = Box<TituloReceber>(store);
+    recebimentoFiadoBox = Box<RecebimentoFiado>(store);
   }
 
   late final Store store;
@@ -56,6 +62,7 @@ class ObjectBox {
   late final Box<Motorista> motoristaBox;
   late final Box<Vendedor> vendedorBox;
   late final Box<Funcionario> funcionarioBox;
+  late final Box<LancamentoFuncionario> lancamentoFuncionarioBox;
   late final Box<FornecedorNfe> fornecedorNfeBox;
   late final Box<VinculoFornecedorProduto> vinculoFornecedorProdutoBox;
   late final Box<HistoricoEntrada> historicoEntradaBox;
@@ -63,6 +70,8 @@ class ObjectBox {
   late final Box<KitOrcamento> kitOrcamentoBox;
   late final Box<KitOrcamentoItem> kitOrcamentoItemBox;
   late final Box<ContaPagar> contaPagarBox;
+  late final Box<TituloReceber> tituloReceberBox;
+  late final Box<RecebimentoFiado> recebimentoFiadoBox;
   late final Directory productImagesDir;
   late final String storeDirectoryPath;
 

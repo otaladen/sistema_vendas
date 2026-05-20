@@ -128,6 +128,8 @@ class CadastrosPage extends StatelessWidget {
                   MaterialPageRoute(
                     builder: (_) => FuncionariosPage(
                       funcionarioRepository: funcionarioRepository,
+                      vendedorRepository: vendedorRepository,
+                      vendaRepository: vendaRepository,
                     ),
                   ),
                 );

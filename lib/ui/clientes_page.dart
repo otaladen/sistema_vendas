@@ -15,6 +15,7 @@ import '../services/brasil_api_cep_service.dart';
 import '../services/brasil_api_cnpj_service.dart';
 import '../model/mensagem_template.dart';
 import '../model/venda.dart';
+import 'widgets/extrato_fiado_cliente_card.dart';
 
 class ClientesPage extends StatefulWidget {
   const ClientesPage({
@@ -116,6 +117,9 @@ class _ClientesPageState extends State<ClientesPage>
   bool _consultaCnpjEmAndamento = false;
   bool _consultaCepEmAndamento = false;
   TextEditingController? _cepControllerEmConsulta;
+  final ScrollController _scrollAbaBasicos = ScrollController();
+  final ScrollController _scrollAbaContato = ScrollController();
+  final ScrollController _scrollAbaComercial = ScrollController();
   final ScrollController _scrollAbaEndereco = ScrollController();
   final ScrollController _scrollAbaHistorico = ScrollController();
 
@@ -155,6 +159,9 @@ class _ClientesPageState extends State<ClientesPage>
     for (final endereco in _enderecosExtras) {
       endereco.dispose();
     }
+    _scrollAbaBasicos.dispose();
+    _scrollAbaContato.dispose();
+    _scrollAbaComercial.dispose();
     _scrollAbaEndereco.dispose();
     _scrollAbaHistorico.dispose();
     super.dispose();
@@ -1312,6 +1319,65 @@ class _ClientesPageState extends State<ClientesPage>
     ];
   }
 
+  Cliente? _clienteParaExtratoFiado() {
+    final id = _clienteEmEdicaoId;
+    if (id == null || id <= 0) return null;
+    return widget.clienteRepository.obterPorId(id);
+  }
+
+  double _limiteCreditoDigitado() =>
+      double.tryParse(
+        _limiteController.text.trim().replaceAll('.', '').replaceAll(',', '.'),
+      ) ??
+      0;
+
+  Widget _buildResumoLimiteCredito(BuildContext context) {
+    final id = _clienteEmEdicaoId;
+    if (id == null) return const SizedBox.shrink();
+
+    final limite = _limiteCreditoDigitado();
+    final saldo = widget.vendaRepository.saldoFiadoEmAbertoCliente(id);
+    final theme = Theme.of(context);
+    final disponivel = limite > 0
+        ? (limite - saldo).clamp(0.0, double.infinity).toDouble()
+        : 0.0;
+
+    String fmt(double v) => 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Fiado em aberto: ${fmt(saldo)}'
+            '${limite > 0 ? ' · Limite: ${fmt(limite)} · Disponivel: ${fmt(disponivel)}' : ' · Sem limite cadastrado'}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (limite > 0 && saldo > limite)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Atencao: saldo acima do limite (vendas fiado finalizadas).',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCardComercialComLimiteDestaque() {
     final theme = Theme.of(context);
     return Card(
@@ -1381,6 +1447,16 @@ class _ClientesPageState extends State<ClientesPage>
                     ),
                   ),
                   const SizedBox(height: 10),
+                  if (_clienteEmEdicaoId != null) ...[
+                    _buildResumoLimiteCredito(context),
+                    if (_clienteParaExtratoFiado() != null)
+                      ExtratoFiadoClienteCard(
+                        vendaRepository: widget.vendaRepository,
+                        cliente: _clienteParaExtratoFiado()!,
+                        limiteCredito: _limiteCreditoDigitado(),
+                      ),
+                    const SizedBox(height: 8),
+                  ],
                   TextField(
                     controller: _limiteController,
                     decoration: InputDecoration(
@@ -1524,15 +1600,15 @@ class _ClientesPageState extends State<ClientesPage>
               children: [
                 _buildScrollAba(
                   _buildAbaBasicos(theme, emEdicao, formWide),
+                  _scrollAbaBasicos,
                 ),
                 _buildScrollAba(
                   _buildAbaContato(theme),
+                  _scrollAbaContato,
                 ),
                 _buildScrollAba(
-                  Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: _buildCardComercialComLimiteDestaque(),
-                  ),
+                  _buildCardComercialComLimiteDestaque(),
+                  _scrollAbaComercial,
                 ),
                 _buildScrollAbaEndereco(theme),
                 _buildScrollAbaHistorico(
@@ -1553,14 +1629,16 @@ class _ClientesPageState extends State<ClientesPage>
     );
   }
 
-  Widget _buildScrollAba(Widget child) {
+  Widget _buildScrollAba(Widget child, ScrollController controller) {
     return Scrollbar(
+      controller: controller,
       thumbVisibility: true,
       trackVisibility: true,
       child: SingleChildScrollView(
+        controller: controller,
         primary: false,
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 48),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 96),
         child: child,
       ),
     );

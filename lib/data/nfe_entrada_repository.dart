@@ -1,5 +1,6 @@
 import 'package:intl/intl.dart';
 
+import '../domain/produto_embalagem.dart';
 import '../data/models/conta_pagar.dart';
 import '../model/fornecedor_nfe.dart';
 import '../model/historico_entrada.dart';
@@ -146,6 +147,11 @@ class NfeEntradaRepository {
       final fatorVinculo = (vinculo != null && vinculo.fatorConversao > 0)
           ? vinculo.fatorConversao
           : 1.0;
+      final fatorInicial = _fatorInicialConferencia(
+        produto: produtoResolvido,
+        fatorVinculo: fatorVinculo,
+        unidadeNota: item.unidadeComercial,
+      );
 
       if (produtoResolvido != null) {
         final tipo = resolvidoPorEan
@@ -156,7 +162,7 @@ class NfeEntradaRepository {
             item: item,
             produtoNovo: false,
             produtoExistenteId: produtoResolvido.id,
-            fatorInicial: fatorVinculo,
+            fatorInicial: fatorInicial,
             unidadeInternaInicial: produtoResolvido.unidade.trim().isEmpty
                 ? 'UN'
                 : produtoResolvido.unidade.trim(),
@@ -169,7 +175,7 @@ class NfeEntradaRepository {
             item: item,
             produtoNovo: true,
             produtoExistenteId: null,
-            fatorInicial: fatorVinculo,
+            fatorInicial: fatorInicial,
             unidadeInternaInicial: 'UN',
             tipoMatch: ConferenciaNfeMatchTipo.produtoNovo,
           ),
@@ -440,7 +446,20 @@ class NfeEntradaRepository {
           throw StateError('Unidade interna invalida: $unidade');
         }
 
-        final qtdInterna = (linha.item.quantidadeComercial * fator).round();
+        var embalagemMultiplica = true;
+        Produto? produtoEmbalagemRef;
+        if (linha.produtoExistenteId != null) {
+          produtoEmbalagemRef = _db.produtoBox.get(linha.produtoExistenteId!);
+          if (produtoEmbalagemRef != null) {
+            embalagemMultiplica = produtoEmbalagemRef.embalagemMultiplica;
+          }
+        }
+
+        final qtdInterna = ProdutoEmbalagem.quantidadeNotaParaEstoque(
+          quantidadeComercial: linha.item.quantidadeComercial,
+          fator: fator,
+          embalagemMultiplica: embalagemMultiplica,
+        );
         if (qtdInterna < 0) {
           throw StateError(
             'Quantidade interna negativa (${linha.item.codigo}).',
@@ -449,7 +468,9 @@ class NfeEntradaRepository {
 
         final custoUnitInterno =
             linha.item.valorUnitarioComercial > 0 && fator > 0
-            ? linha.item.valorUnitarioComercial / fator
+            ? (embalagemMultiplica
+                  ? linha.item.valorUnitarioComercial / fator
+                  : linha.item.valorUnitarioComercial * fator)
             : 0.0;
 
         final nomeFantasiaOuRazao = fornecedor.nomeFantasia.trim().isNotEmpty
@@ -468,6 +489,12 @@ class NfeEntradaRepository {
           produto.estoqueReal = produto.estoqueReal + qtdInterna;
           produto.precoCusto = custoUnitInterno;
           produto.unidade = unidade;
+          _sincronizarEmbalagemProdutoComNota(
+            produto,
+            unidadeNota: linha.item.unidadeComercial,
+            fator: fator,
+            embalagemMultiplica: embalagemMultiplica,
+          );
           produto.fornecedor = nomeFantasiaOuRazao;
           if (linha.item.ncm.isNotEmpty) {
             produto.ncm = linha.item.ncm;
@@ -479,6 +506,12 @@ class NfeEntradaRepository {
           _db.produtoBox.put(produto);
         } else {
           final codigoInterno = _gerarCodigoInterno(nfe, linha.item);
+          final uNota = ProdutoEmbalagem.normalizarUnidade(
+            linha.item.unidadeComercial,
+          );
+          final uVenda = ProdutoEmbalagem.normalizarUnidade(unidade);
+          final converteEmbalagem =
+              uNota != uVenda && fator > 0 && (fator - 1).abs() > 0.0001;
           produto = Produto(
             codigoInterno: codigoInterno,
             nome: linha.item.descricao.length > 120
@@ -486,6 +519,9 @@ class NfeEntradaRepository {
                 : linha.item.descricao,
             descricao: linha.item.descricao,
             unidade: unidade,
+            unidadeCompra: converteEmbalagem ? uNota : '',
+            quantidadePorEmbalagem: converteEmbalagem ? fator : 1,
+            embalagemMultiplica: embalagemMultiplica,
             codigoBarras: linha.item.codigoBarras,
             ncm: linha.item.ncm,
             fornecedor: nomeFantasiaOuRazao,
@@ -708,5 +744,47 @@ class NfeEntradaRepository {
     } finally {
       q.close();
     }
+  }
+
+  double _fatorInicialConferencia({
+    required Produto? produto,
+    required double fatorVinculo,
+    required String unidadeNota,
+  }) {
+    if (produto != null) {
+      final doCadastro = ProdutoEmbalagem.fatorSugeridoNotaParaEstoque(
+        produto: produto,
+        unidadeNota: unidadeNota,
+      );
+      if (doCadastro != null && doCadastro > 0) {
+        if (fatorVinculo > 0 &&
+            (fatorVinculo - 1).abs() > 0.0001 &&
+            (fatorVinculo - doCadastro).abs() > 0.0001) {
+          return fatorVinculo;
+        }
+        return doCadastro;
+      }
+    }
+    return fatorVinculo > 0 ? fatorVinculo : 1.0;
+  }
+
+  void _sincronizarEmbalagemProdutoComNota(
+    Produto produto, {
+    required String unidadeNota,
+    required double fator,
+    required bool embalagemMultiplica,
+  }) {
+    if (fator <= 0 || (fator - 1).abs() < 0.0001) return;
+    final uNota = ProdutoEmbalagem.normalizarUnidade(unidadeNota);
+    final uVenda = ProdutoEmbalagem.normalizarUnidade(produto.unidade);
+    if (uNota == uVenda) return;
+
+    final compraVazia = produto.unidadeCompra.trim().isEmpty;
+    final semConversao = !produto.temConversaoEmbalagem;
+    if (!compraVazia && !semConversao) return;
+
+    produto.unidadeCompra = uNota;
+    produto.quantidadePorEmbalagem = fator;
+    produto.embalagemMultiplica = embalagemMultiplica;
   }
 }

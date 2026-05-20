@@ -1,5 +1,6 @@
 import 'package:objectbox/objectbox.dart';
 
+import '../domain/produto_embalagem.dart';
 import 'historico_entrada.dart';
 
 @Entity()
@@ -36,6 +37,11 @@ class Produto {
     this.preco2 = 0,
     this.preco3 = 0,
     required this.precoVenda,
+    this.unidadeCompra = '',
+    this.quantidadePorEmbalagem = 1,
+    this.embalagemMultiplica = true,
+    this.permiteQuantidadeFracionada = false,
+    this.ultimaVendaEm,
     DateTime? criadoEm,
     this.ativo = true,
   }) : estoqueReal = estoqueReal ?? estoque ?? 0,
@@ -99,6 +105,22 @@ class Produto {
   double preco2;
   double preco3;
   double precoVenda;
+
+  /// Unidade de compra/estoque (vazio = igual a [unidade] de venda).
+  String unidadeCompra;
+
+  /// Fator de conversao embalagem (ex.: 12 unidades por caixa).
+  double quantidadePorEmbalagem;
+
+  /// true: 1 CX com fator 12 = +12 UN no estoque; false: divide.
+  bool embalagemMultiplica;
+
+  /// Permite quantidade decimal no PDV (m, m², kg, etc.).
+  bool permiteQuantidadeFracionada;
+
+  @Property(type: PropertyType.dateUtc)
+  DateTime? ultimaVendaEm;
+
   double get lucroValor => precoVenda - precoCusto;
   double get markupPercentual {
     if (precoCusto <= 0) {
@@ -142,6 +164,19 @@ class Produto {
     final livre = estoqueReal - estoqueReservado;
     return livre < 0 ? 0 : livre;
   }
+
+  String get unidadeCompraEfetiva {
+    final u = unidadeCompra.trim();
+    return u.isEmpty ? unidade : u;
+  }
+
+  bool get temConversaoEmbalagem => ProdutoEmbalagem.temConversao(this);
+
+  bool get pdvPodeVenderEmUnidadeCompra =>
+      ProdutoEmbalagem.vendaPodeUsarUnidadeCompra(this);
+
+  /// Texto curto para UI (ex.: "1 CX = 12 UN").
+  String get rotuloConversaoEmbalagem => ProdutoEmbalagem.rotuloConversao(this);
 
   @Backlink('produto')
   final historicoEntradas = ToMany<HistoricoEntrada>();

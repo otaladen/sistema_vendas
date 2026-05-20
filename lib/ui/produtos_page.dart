@@ -13,6 +13,7 @@ import '../main.dart';
 import '../data/produto_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
+import '../domain/produto_precificacao.dart';
 import '../model/produto.dart';
 import '../config/busca_imagem_config.dart';
 import '../services/brasil_api_service.dart';
@@ -31,6 +32,8 @@ class _CadastroProdutoCancelarIntent extends Intent {
   const _CadastroProdutoCancelarIntent();
 }
 
+enum _BaseCalculoPrecoProduto { custoDigitado, custoMedio }
+
 class ProdutosPage extends StatefulWidget {
   const ProdutosPage({
     super.key,
@@ -45,7 +48,14 @@ class ProdutosPage extends StatefulWidget {
   State<ProdutosPage> createState() => _ProdutosPageState();
 }
 
-class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
+class _ProdutosPageState extends State<ProdutosPage>
+    with SafeSyncRefreshMixin, SingleTickerProviderStateMixin {
+  static const List<String> _subAbasCadastro = [
+    'Principal',
+    'Precos',
+    'Estoque',
+    'Fiscal',
+  ];
   static ButtonStyle get _estiloBotaoContornoCompacto =>
       OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
@@ -221,6 +231,11 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   final _leadTimeDiasController = TextEditingController(text: '7');
   final _estoqueSegurancaController = TextEditingController();
   final _subcategoriaLivreController = TextEditingController();
+  final _margemAlvoPreco1Controller = TextEditingController();
+  final _margemAlvoPreco2Controller = TextEditingController();
+  final _margemAlvoPreco3Controller = TextEditingController();
+  final _quantidadeEmbalagemController = TextEditingController(text: '1');
+  final _unidadeCompraController = TextEditingController();
   final _brasilApiService = BrasilApiService();
   final _geminiService = GeminiService();
   final _produtoImagemBuscaService = ProdutoImagemBuscaService();
@@ -231,6 +246,10 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   String _infoNcmBrasilApi = '';
   String _unidadeSelecionada = 'UN';
   String _grupoTributarioSelecionado = GrupoTributarioProduto.tributado.codigo;
+  _BaseCalculoPrecoProduto _baseCalculoPreco = _BaseCalculoPrecoProduto.custoDigitado;
+  bool _embalagemMultiplica = true;
+  bool _permiteQuantidadeFracionada = false;
+  DateTime? _ultimaVendaEmCadastro;
   String? _categoriaSelecionada;
   String? _subcategoriaSelecionada;
   int? _produtoEmEdicaoId;
@@ -243,6 +262,9 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   String? _fotoOrigemLocalPath;
   bool _fotoFoiRemovida = false;
   final ScrollController _scrollController = ScrollController();
+  late final TabController _subAbaCadastroController;
+  final FocusNode _codigoBarrasFocus =
+      FocusNode(debugLabel: 'produtoCadastroBarras');
   int _historicoVersao = 0;
   final FocusNode _cadastroKeyboardFocusNode =
       FocusNode(debugLabel: 'produtosCadastroTeclado');
@@ -254,6 +276,10 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
   @override
   void initState() {
     super.initState();
+    _subAbaCadastroController = TabController(
+      length: _subAbasCadastro.length,
+      vsync: this,
+    );
     _produtoImagemService = ProdutoImagemService(
       imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
     );
@@ -262,6 +288,25 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       bloquearAtualizacao: _bloquearSyncProdutos,
       aoConcluir: _snackbarDadosAtualizados,
     );
+    _subAbaCadastroController.addListener(_onSubAbaCadastroChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focarBarrasSeNovoCadastro();
+    });
+  }
+
+  void _onSubAbaCadastroChanged() {
+    if (_subAbaCadastroController.indexIsChanging) return;
+    if (!mounted) return;
+    setState(() {});
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+  }
+
+  void _focarBarrasSeNovoCadastro() {
+    if (_produtoEmEdicaoId != null) return;
+    _codigoBarrasFocus.requestFocus();
   }
 
   bool _bloquearSyncProdutos() =>
@@ -305,7 +350,15 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     _leadTimeDiasController.dispose();
     _estoqueSegurancaController.dispose();
     _subcategoriaLivreController.dispose();
+    _margemAlvoPreco1Controller.dispose();
+    _margemAlvoPreco2Controller.dispose();
+    _margemAlvoPreco3Controller.dispose();
+    _quantidadeEmbalagemController.dispose();
+    _unidadeCompraController.dispose();
     _scrollController.dispose();
+    _subAbaCadastroController.removeListener(_onSubAbaCadastroChanged);
+    _subAbaCadastroController.dispose();
+    _codigoBarrasFocus.dispose();
     _cadastroKeyboardFocusNode.dispose();
     super.dispose();
   }
@@ -757,6 +810,187 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
     );
   }
 
+  Widget _buildCabecalhoFixoCadastro(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final sku = _codigoInternoController.text.trim();
+    final skuRotulo = _gerarSkuAutomatico
+        ? 'SKU automatico ao salvar'
+        : (sku.isEmpty ? 'SKU manual pendente' : 'SKU $sku');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        border: Border(
+          bottom: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.45),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          _erpGap16,
+          _erpGap8,
+          _erpGap16,
+          _erpGap8,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final empilhar = constraints.maxWidth < 720;
+                final campoBarras = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _erpFieldLabel('Codigo de barras (EAN)', context),
+                    TextField(
+                      focusNode: _codigoBarrasFocus,
+                      controller: _codigoBarrasController,
+                      textInputAction: TextInputAction.next,
+                      decoration: _erpInputDecoration(
+                        context,
+                        hint: 'Leia ou digite o GTIN',
+                        suffixIcon: _suffixConsultaBrasilApi(
+                          carregando: _consultandoGtin,
+                          tooltip: 'Buscar produto na Brasil API',
+                          onPressed: _consultandoGtin
+                              ? null
+                              : _consultarGtinBrasilApi,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+                final campoNome = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _erpFieldLabel('Nome do produto', context),
+                    TextFormField(
+                      controller: _nomeController,
+                      validator: _validarNome,
+                      textInputAction: TextInputAction.next,
+                      decoration: _erpInputDecoration(
+                        context,
+                        helper: 'Nome + Marca + Volume (ex.: Tinta Coral 18L)',
+                        suffixIcon: _suffixAcaoCampo(
+                          carregando: _consultandoGemini,
+                          tooltip:
+                              'Padronizar nome, categoria e unidade com IA',
+                          icon: Icons.auto_awesome_outlined,
+                          onPressed: _consultandoGemini
+                              ? null
+                              : _padronizarProdutoComGemini,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+                if (empilhar) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      campoBarras,
+                      const SizedBox(height: _erpGap8),
+                      campoNome,
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 2, child: campoBarras),
+                    const SizedBox(width: _erpGap16),
+                    Expanded(flex: 3, child: campoNome),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: _erpGap8),
+            Wrap(
+              spacing: _erpGap8,
+              runSpacing: _erpGap8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text(skuRotulo),
+                ),
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text(
+                    _produtoAtivo ? 'Ativo no PDV' : 'Inativo no PDV',
+                  ),
+                  backgroundColor: _produtoAtivo
+                      ? scheme.primaryContainer.withValues(alpha: 0.55)
+                      : scheme.errorContainer.withValues(alpha: 0.4),
+                ),
+                if (_produtoEmEdicaoId != null)
+                  Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text('Edicao #${_produtoEmEdicaoId!}'),
+                  ),
+                if (_ultimaVendaEmCadastro != null)
+                  Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text(
+                      'Ultima venda: ${DateFormat('dd/MM/yy HH:mm').format(_ultimaVendaEmCadastro!.toLocal())}',
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildCamposNcmCadastro(BuildContext context) {
+    return [
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _erpFieldLabel('NCM', context),
+          SizedBox(
+            width: _wNcm,
+            child: TextFormField(
+              controller: _ncmController,
+              keyboardType: TextInputType.number,
+              maxLength: 10,
+              validator: _validarNcm,
+              onChanged: (_) {
+                if (_infoNcmBrasilApi.isNotEmpty) {
+                  setState(() => _infoNcmBrasilApi = '');
+                }
+              },
+              decoration: _erpInputDecoration(
+                context,
+                helper: '8 digitos — obrigatorio p/ NFC-e',
+                suffixIcon: _suffixConsultaBrasilApi(
+                  carregando: _consultandoNcm,
+                  tooltip: 'Conferir descricao oficial do NCM',
+                  onPressed:
+                      _consultandoNcm ? null : _consultarNcmBrasilApi,
+                ),
+              ),
+            ),
+          ),
+          if (_infoNcmBrasilApi.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                _infoNcmBrasilApi,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
+            ),
+        ],
+      ),
+    ];
+  }
+
   Widget _erpRodapeAcaoCadastroProduto(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
@@ -788,13 +1022,13 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
         final narrow = constraints.maxWidth < _erpRodapeAcaoBreakpoint;
 
         Widget salvar = Tooltip(
-          message: 'Salvar cadastro (F10)',
+          message: 'Salvar cadastro (F5 ou F10)',
           child: ElevatedButton.icon(
             style: saveStyle,
             onPressed: _salvarProduto,
             icon: const Icon(Icons.save_rounded),
             label: const Text(
-              'Salvar (F10)',
+              'Salvar (F5 · F10)',
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
@@ -1044,8 +1278,22 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       _consultandoGemini = false;
       _buscandoFoto = false;
       _infoNcmBrasilApi = '';
+      _subAbaCadastroController.index = 0;
+      _baseCalculoPreco = _BaseCalculoPrecoProduto.custoDigitado;
+      _embalagemMultiplica = true;
+      _permiteQuantidadeFracionada = false;
+      _ultimaVendaEmCadastro = null;
+      _margemAlvoPreco1Controller.clear();
+      _margemAlvoPreco2Controller.clear();
+      _margemAlvoPreco3Controller.clear();
+      _quantidadeEmbalagemController.text = '1';
+      _unidadeCompraController.clear();
     });
     _formKey.currentState?.reset();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focarBarrasSeNovoCadastro();
+    });
   }
 
   Future<void> _importarFotoProduto() async {
@@ -1379,22 +1627,282 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
         null;
   }
 
-  double _margemCalculadaPorController(TextEditingController precoController) {
-    final custo = _parseValorMonetario(_precoCustoController.text) ?? 0;
-    final venda = _parseValorMonetario(precoController.text) ?? 0;
-    if (venda <= 0) {
-      return 0;
+  double _custoBaseParaCalculoPrecos() {
+    if (_baseCalculoPreco == _BaseCalculoPrecoProduto.custoMedio) {
+      return _custoMedioInteligenteParaExibicao();
     }
-    return ((venda - custo) / venda) * 100;
+    final digitado = _parseValorMonetario(_precoCustoController.text) ?? 0;
+    return digitado < 0 ? 0 : digitado;
+  }
+
+  double _margemCalculadaPorController(TextEditingController precoController) {
+    final custo = _custoBaseParaCalculoPrecos();
+    final venda = _parseValorMonetario(precoController.text) ?? 0;
+    return ProdutoPrecificacao.margemSobrePrecoVenda(
+      custo: custo,
+      precoVenda: venda,
+    );
   }
 
   double _markupCalculadoPorController(TextEditingController precoController) {
-    final custo = _parseValorMonetario(_precoCustoController.text) ?? 0;
+    final custo = _custoBaseParaCalculoPrecos();
     final venda = _parseValorMonetario(precoController.text) ?? 0;
     if (custo <= 0) {
       return 0;
     }
     return ((venda - custo) / custo) * 100;
+  }
+
+  double _margemAlvoOuAtual(
+    TextEditingController alvo,
+    TextEditingController preco,
+  ) {
+    final texto = alvo.text.trim().replaceAll(',', '.');
+    if (texto.isNotEmpty) {
+      final v = double.tryParse(texto);
+      if (v != null) return v.clamp(0, 95);
+    }
+    return _margemCalculadaPorController(preco);
+  }
+
+  void _aplicarMargemNosTresPrecos() {
+    final custo = _custoBaseParaCalculoPrecos();
+    if (custo <= 0) {
+      _definirStatus(
+        'Informe o preco de custo ou use custo medio (NF-e) como base.',
+        erro: true,
+      );
+      return;
+    }
+    final m1 = _margemAlvoOuAtual(_margemAlvoPreco1Controller, _preco1Controller);
+    final m2 = _margemAlvoOuAtual(_margemAlvoPreco2Controller, _preco2Controller);
+    final m3 = _margemAlvoOuAtual(_margemAlvoPreco3Controller, _preco3Controller);
+    setState(() {
+      _preco1Controller.text = _formatarValorMonetario(
+        ProdutoPrecificacao.precoComMargemSobreVenda(
+          custo: custo,
+          margemPercentual: m1,
+        ),
+      );
+      _preco2Controller.text = _formatarValorMonetario(
+        ProdutoPrecificacao.precoComMargemSobreVenda(
+          custo: custo,
+          margemPercentual: m2,
+        ),
+      );
+      _preco3Controller.text = _formatarValorMonetario(
+        ProdutoPrecificacao.precoComMargemSobreVenda(
+          custo: custo,
+          margemPercentual: m3,
+        ),
+      );
+      _margemAlvoPreco1Controller.text = m1.toStringAsFixed(1);
+      _margemAlvoPreco2Controller.text = m2.toStringAsFixed(1);
+      _margemAlvoPreco3Controller.text = m3.toStringAsFixed(1);
+    });
+    final base = _baseCalculoPreco == _BaseCalculoPrecoProduto.custoMedio
+        ? 'custo medio'
+        : 'custo digitado';
+    _definirStatus(
+      'Precos calculados com margem sobre $base (${_formatarValorMonetario(custo)}).',
+      erro: false,
+    );
+  }
+
+  double _lerQuantidadeEmbalagem() {
+    final t = _quantidadeEmbalagemController.text.trim().replaceAll(',', '.');
+    final v = double.tryParse(t);
+    if (v == null || v <= 0) return 1;
+    return v;
+  }
+
+  Widget _buildPainelCalcularMargemPrecos(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(_erpGap16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Calcular precos pela margem',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: _erpGap8),
+          Text(
+            'Base: ${_formatarValorMonetario(_custoBaseParaCalculoPrecos())} '
+            '(${_baseCalculoPreco == _BaseCalculoPrecoProduto.custoMedio ? 'custo medio' : 'custo digitado'})',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: _erpGap8),
+          SegmentedButton<_BaseCalculoPrecoProduto>(
+            segments: const [
+              ButtonSegment(
+                value: _BaseCalculoPrecoProduto.custoDigitado,
+                label: Text('Custo digitado'),
+              ),
+              ButtonSegment(
+                value: _BaseCalculoPrecoProduto.custoMedio,
+                label: Text('Custo medio'),
+              ),
+            ],
+            selected: {_baseCalculoPreco},
+            onSelectionChanged: (s) {
+              if (s.isEmpty) return;
+              setState(() => _baseCalculoPreco = s.first);
+            },
+          ),
+          const SizedBox(height: _erpGap8),
+          _erpResponsiveGrid(context, [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _erpFieldLabel('Margem alvo Preco 1 (%)', context),
+                TextField(
+                  controller: _margemAlvoPreco1Controller,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: _erpInputDecoration(
+                    context,
+                    hint: 'Ex.: 35 — vazio usa margem atual',
+                  ),
+                ),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _erpFieldLabel('Margem alvo Preco 2 (%)', context),
+                TextField(
+                  controller: _margemAlvoPreco2Controller,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: _erpInputDecoration(context),
+                ),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _erpFieldLabel('Margem alvo Preco 3 (%)', context),
+                TextField(
+                  controller: _margemAlvoPreco3Controller,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: _erpInputDecoration(context),
+                ),
+              ],
+            ),
+          ]),
+          const SizedBox(height: _erpGap8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: _aplicarMargemNosTresPrecos,
+              icon: const Icon(Icons.calculate_outlined),
+              label: const Text('Aplicar margem nos 3 precos'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCardEmbalagemUnidade(BuildContext context) {
+    final uVenda = _normalizarUnidade(_unidadeSelecionada);
+    final fator = _lerQuantidadeEmbalagem();
+    final uCompra = _unidadeCompraController.text.trim().isEmpty
+        ? uVenda
+        : _unidadeCompraController.text.trim().toUpperCase();
+    final preview = fator <= 1 || (fator - 1).abs() < 0.0001
+        ? 'Sem conversao (1:1).'
+        : (_embalagemMultiplica
+            ? '1 $uCompra = ${fator == fator.roundToDouble() ? fator.toInt() : fator} $uVenda no estoque.'
+            : '1 $uCompra entra como 1 $uVenda (estoque ÷ $fator).');
+
+    return _erpSurfaceCard(
+      context: context,
+      title: 'Embalagem e unidade',
+      icon: Icons.inventory_outlined,
+      children: [
+        _erpResponsiveGrid(context, [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _erpFieldLabel('Unidade de compra (opcional)', context),
+              TextField(
+                controller: _unidadeCompraController,
+                textCapitalization: TextCapitalization.characters,
+                decoration: _erpInputDecoration(
+                  context,
+                  hint: 'CX, FD, SC — vazio = $uVenda',
+                ),
+              ),
+            ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _erpFieldLabel('Qtd. por embalagem', context),
+              TextField(
+                controller: _quantidadeEmbalagemController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: _erpInputDecoration(
+                  context,
+                  helper: 'Ex.: 12 (unidades por caixa)',
+                ),
+              ),
+            ],
+          ),
+        ]),
+        const SizedBox(height: _erpGap8),
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(
+              value: true,
+              label: Text('Multiplica'),
+              icon: Icon(Icons.close, size: 16),
+            ),
+            ButtonSegment(
+              value: false,
+              label: Text('Divide'),
+              icon: Icon(Icons.percent, size: 16),
+            ),
+          ],
+          selected: {_embalagemMultiplica},
+          onSelectionChanged: (s) {
+            if (s.isEmpty) return;
+            setState(() => _embalagemMultiplica = s.first);
+          },
+        ),
+        const SizedBox(height: _erpGap8),
+        SwitchListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Permite venda fracionada'),
+          subtitle: const Text(
+            'Ex.: metro, m², kg — quantidade decimal no PDV.',
+          ),
+          value: _permiteQuantidadeFracionada,
+          onChanged: (v) => setState(() => _permiteQuantidadeFracionada = v),
+        ),
+        Text(
+          preview,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+      ],
+    );
   }
 
   String _normalizarUnidade(String? unidade) {
@@ -2363,6 +2871,11 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
       preco2: preco2!,
       preco3: preco3!,
       precoVenda: preco1,
+      unidadeCompra: _unidadeCompraController.text.trim(),
+      quantidadePorEmbalagem: _lerQuantidadeEmbalagem(),
+      embalagemMultiplica: _embalagemMultiplica,
+      permiteQuantidadeFracionada: _permiteQuantidadeFracionada,
+      ultimaVendaEm: produtoExistente?.ultimaVendaEm,
       criadoEm: produtoExistente?.criadoEm,
     );
     final estavaEditando = _produtoEmEdicaoId != null;
@@ -2447,6 +2960,24 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
           produto.leadTimeDias > 0 ? produto.leadTimeDias.toString() : '7';
       _estoqueSegurancaController.text = produto.estoqueSeguranca.toString();
       _unidadeSelecionada = _normalizarUnidade(produto.unidade);
+      _unidadeCompraController.text = produto.unidadeCompra;
+      _quantidadeEmbalagemController.text =
+          produto.quantidadePorEmbalagem.toString();
+      _embalagemMultiplica = produto.embalagemMultiplica;
+      _permiteQuantidadeFracionada = produto.permiteQuantidadeFracionada;
+      _ultimaVendaEmCadastro = produto.ultimaVendaEm;
+      _margemAlvoPreco1Controller.text = ProdutoPrecificacao.margemSobrePrecoVenda(
+        custo: produto.precoCusto,
+        precoVenda: produto.preco1 > 0 ? produto.preco1 : produto.precoVenda,
+      ).toStringAsFixed(1);
+      _margemAlvoPreco2Controller.text = ProdutoPrecificacao.margemSobrePrecoVenda(
+        custo: produto.precoCusto,
+        precoVenda: produto.preco2 > 0 ? produto.preco2 : produto.precoVenda,
+      ).toStringAsFixed(1);
+      _margemAlvoPreco3Controller.text = ProdutoPrecificacao.margemSobrePrecoVenda(
+        custo: produto.precoCusto,
+        precoVenda: produto.preco3 > 0 ? produto.preco3 : produto.precoVenda,
+      ).toStringAsFixed(1);
       _produtoAtivo = produto.ativo;
       _status = 'Editando produto: ${produto.nome}';
       _statusEhErro = false;
@@ -3450,6 +3981,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
           builder: (tabCtx) {
             return Shortcuts(
               shortcuts: const <ShortcutActivator, Intent>{
+                SingleActivator(LogicalKeyboardKey.f5):
+                    _CadastroProdutoSalvarIntent(),
                 SingleActivator(LogicalKeyboardKey.f10):
                     _CadastroProdutoSalvarIntent(),
                 SingleActivator(LogicalKeyboardKey.escape):
@@ -3608,8 +4141,8 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                               const SizedBox(height: _erpGap16),
                                               Text(
                                                 _produtoEmEdicaoId == null
-                                                    ? 'Novo cadastro — preencha os blocos abaixo e inclua o produto.'
-                                                    : 'Edicao — SKU ${_codigoInternoController.text.trim().isEmpty ? "..." : _codigoInternoController.text.trim()}: revise e salve.',
+                                                    ? 'Novo cadastro — use as abas abaixo (F5 salva · setas na busca do PDV).'
+                                                    : 'Edicao — revise as abas e salve (F5 ou F10).',
                                                 style: theme.textTheme.bodySmall
                                                     ?.copyWith(
                                                       color: theme
@@ -3620,51 +4153,35 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                           ),
                                                     ),
                                               ),
-                                              const SizedBox(height: _erpGap16),
+                                              const SizedBox(height: _erpGap8),
+                                              _buildCabecalhoFixoCadastro(
+                                                context,
+                                              ),
+                                              Material(
+                                                color: theme
+                                                    .colorScheme.surface,
+                                                child: TabBar(
+                                                  controller:
+                                                      _subAbaCadastroController,
+                                                  isScrollable: true,
+                                                  tabAlignment:
+                                                      TabAlignment.start,
+                                                  tabs: [
+                                                    for (final t
+                                                        in _subAbasCadastro)
+                                                      Tab(text: t),
+                                                  ],
+                                                ),
+                                              ),
+                                              if (_subAbaCadastroController
+                                                      .index ==
+                                                  0) ...[
                                               _erpSurfaceCard(
                                                 context: context,
                                                 title: 'Informacoes basicas',
                                                 icon:
                                                     Icons.inventory_2_outlined,
                                                 children: [
-                                                  Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .stretch,
-                                                    children: [
-                                                      _erpFieldLabel(
-                                                        'Nome do produto',
-                                                        context,
-                                                      ),
-                                                      TextFormField(
-                                                        controller:
-                                                            _nomeController,
-                                                        validator: _validarNome,
-                                                        decoration:
-                                                            _erpInputDecoration(
-                                                              context,
-                                                              helper:
-                                                                  'Nome + Marca + Volume (ex.: Tinta Coral 18L)',
-                                                              suffixIcon:
-                                                                  _suffixAcaoCampo(
-                                                                carregando:
-                                                                    _consultandoGemini,
-                                                                tooltip:
-                                                                    'Padronizar nome, categoria e unidade com IA',
-                                                                icon: Icons
-                                                                    .auto_awesome_outlined,
-                                                                onPressed:
-                                                                    _consultandoGemini
-                                                                        ? null
-                                                                        : _padronizarProdutoComGemini,
-                                                              ),
-                                                            ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(
-                                                    height: _erpGap16,
-                                                  ),
                                                   LayoutBuilder(
                                                     builder: (context, constraints) {
                                                       final sideBySide =
@@ -4157,289 +4674,31 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                         ),
                                                       ],
                                                     ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'Codigo de barras',
-                                                          context,
-                                                        ),
-                                                        TextField(
-                                                          controller:
-                                                              _codigoBarrasController,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                                hint:
-                                                                    'EAN / GTIN / ISBN',
-                                                                suffixIcon:
-                                                                    _suffixConsultaBrasilApi(
-                                                                  carregando:
-                                                                      _consultandoGtin,
-                                                                  tooltip:
-                                                                      'Buscar produto na Brasil API',
-                                                                  onPressed:
-                                                                      _consultandoGtin
-                                                                          ? null
-                                                                          : _consultarGtinBrasilApi,
-                                                                ),
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'NCM',
-                                                          context,
-                                                        ),
-                                                        SizedBox(
-                                                          width: _wNcm,
-                                                          child: TextFormField(
-                                                            controller:
-                                                                _ncmController,
-                                                            keyboardType:
-                                                                TextInputType
-                                                                    .number,
-                                                            maxLength: 10,
-                                                            validator:
-                                                                _validarNcm,
-                                                            onChanged: (_) {
-                                                              if (_infoNcmBrasilApi
-                                                                  .isNotEmpty) {
-                                                                setState(() =>
-                                                                    _infoNcmBrasilApi =
-                                                                        '');
-                                                              }
-                                                            },
-                                                            decoration:
-                                                                _erpInputDecoration(
-                                                                  context,
-                                                                  helper:
-                                                                      '8 digitos — obrigatorio p/ NFC-e',
-                                                                  suffixIcon:
-                                                                      _suffixConsultaBrasilApi(
-                                                                    carregando:
-                                                                        _consultandoNcm,
-                                                                    tooltip:
-                                                                        'Conferir descricao oficial do NCM',
-                                                                    onPressed:
-                                                                        _consultandoNcm
-                                                                            ? null
-                                                                            : _consultarNcmBrasilApi,
-                                                                  ),
-                                                                ),
-                                                          ),
-                                                        ),
-                                                        if (_infoNcmBrasilApi
-                                                            .isNotEmpty)
-                                                          Padding(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .only(
-                                                              top: 6,
-                                                            ),
-                                                            child: Text(
-                                                              _infoNcmBrasilApi,
-                                                              style: Theme.of(
-                                                                context,
-                                                              )
-                                                                  .textTheme
-                                                                  .bodySmall
-                                                                  ?.copyWith(
-                                                                color: Theme.of(
-                                                                  context,
-                                                                )
-                                                                    .colorScheme
-                                                                    .primary,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w500,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                      ],
-                                                    ),
                                                   ]),
                                                 ],
                                               ),
-                                              _erpSurfaceCard(
-                                                context: context,
-                                                title: 'Dados fiscais (NFC-e)',
-                                                icon: Icons.receipt_long_outlined,
-                                                children: [
-                                                  _erpResponsiveGrid(context, [
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'CEST',
-                                                          context,
-                                                        ),
-                                                        TextFormField(
-                                                          controller:
-                                                              _cestController,
-                                                          keyboardType:
-                                                              TextInputType
-                                                                  .number,
-                                                          maxLength: 9,
-                                                          validator:
-                                                              _validarCest,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                                helper:
-                                                                    '7 digitos — ST / construcao',
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'Grupo tributario',
-                                                          context,
-                                                        ),
-                                                        DropdownButtonFormField<
-                                                          String
-                                                        >(
-                                                          isDense: true,
-                                                          isExpanded: true,
-                                                          initialValue:
-                                                              _grupoTributarioSelecionado,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                              ),
-                                                          items: todosGruposTributariosProduto
-                                                              .map(
-                                                                (g) =>
-                                                                    DropdownMenuItem(
-                                                                  value: g.codigo,
-                                                                  child: Text(
-                                                                    g.rotulo,
-                                                                  ),
-                                                                ),
-                                                              )
-                                                              .toList(),
-                                                          onChanged: (value) {
-                                                            if (value != null) {
-                                                              setState(() {
-                                                                _grupoTributarioSelecionado =
-                                                                    value;
-                                                              });
-                                                            }
-                                                          },
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'CFOP na venda (opcional)',
-                                                          context,
-                                                        ),
-                                                        TextFormField(
-                                                          controller:
-                                                              _cfopVendaController,
-                                                          keyboardType:
-                                                              TextInputType
-                                                                  .number,
-                                                          maxLength: 4,
-                                                          validator:
-                                                              _validarCfopVenda,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                                helper:
-                                                                    'Vazio = automatico (ex.: 5102 / 5405 na BA)',
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ]),
-                                                  Text(
-                                                    'CFOP automatico: consumidor final na Bahia — '
-                                                    'Tributado/Isento 5102, ST 5405.',
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .bodySmall,
-                                                  ),
-                                                ],
+                                              _buildCardEmbalagemUnidade(
+                                                context,
                                               ),
-                                              _erpSurfaceCard(
-                                                context: context,
-                                                title: 'Logistica e descricao',
-                                                icon: Icons
-                                                    .local_shipping_outlined,
-                                                children: [
-                                                  Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      _erpFieldLabel(
-                                                        'Localizacao no deposito',
-                                                        context,
-                                                      ),
-                                                      TextField(
-                                                        controller:
-                                                            _localizacaoController,
-                                                        decoration:
-                                                            _erpInputDecoration(
-                                                              context,
-                                                              hint:
-                                                                  'Corredor, prateleira, nivel',
-                                                            ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(
-                                                    height: _erpGap16,
-                                                  ),
-                                                  Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      _erpFieldLabel(
-                                                        'Descricao tecnica',
-                                                        context,
-                                                      ),
-                                                      TextField(
-                                                        controller:
-                                                            _descricaoController,
-                                                        maxLines: 4,
-                                                        decoration:
-                                                            _erpInputDecoration(
-                                                              context,
-                                                              helper:
-                                                                  'Beneficios, aplicacao e diferenciais para o vendedor',
-                                                            ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ],
+                                              const SizedBox(
+                                                height: _erpGap16,
                                               ),
+                                              ],
+                                              if (_subAbaCadastroController
+                                                      .index ==
+                                                  1)
                                               _erpSurfaceCard(
                                                 context: context,
                                                 title:
                                                     'Precos, custos e margem de lucro',
                                                 icon: Icons.payments_outlined,
                                                 children: [
+                                                  _buildPainelCalcularMargemPrecos(
+                                                    context,
+                                                  ),
+                                                  const SizedBox(
+                                                    height: _erpGap16,
+                                                  ),
                                                   LayoutBuilder(
                                                     builder: (context, constraints) {
                                                       final wideKpi =
@@ -4813,6 +5072,187 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                   ),
                                                 ],
                                               ),
+                                              if (_subAbaCadastroController
+                                                      .index ==
+                                                  3) ...[
+                                              _erpSurfaceCard(
+                                                context: context,
+                                                title: 'NCM (NFC-e)',
+                                                icon: Icons.numbers_outlined,
+                                                children: _buildCamposNcmCadastro(
+                                                  context,
+                                                ),
+                                              ),
+                                              _erpSurfaceCard(
+                                                context: context,
+                                                title: 'Dados fiscais (NFC-e)',
+                                                icon: Icons.receipt_long_outlined,
+                                                children: [
+                                                  _erpResponsiveGrid(context, [
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'CEST',
+                                                          context,
+                                                        ),
+                                                        TextFormField(
+                                                          controller:
+                                                              _cestController,
+                                                          keyboardType:
+                                                              TextInputType
+                                                                  .number,
+                                                          maxLength: 9,
+                                                          validator:
+                                                              _validarCest,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                helper:
+                                                                    '7 digitos — ST / construcao',
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Grupo tributario',
+                                                          context,
+                                                        ),
+                                                        DropdownButtonFormField<
+                                                          String
+                                                        >(
+                                                          isDense: true,
+                                                          isExpanded: true,
+                                                          initialValue:
+                                                              _grupoTributarioSelecionado,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                              ),
+                                                          items: todosGruposTributariosProduto
+                                                              .map(
+                                                                (g) =>
+                                                                    DropdownMenuItem(
+                                                                  value: g.codigo,
+                                                                  child: Text(
+                                                                    g.rotulo,
+                                                                  ),
+                                                                ),
+                                                              )
+                                                              .toList(),
+                                                          onChanged: (value) {
+                                                            if (value != null) {
+                                                              setState(() {
+                                                                _grupoTributarioSelecionado =
+                                                                    value;
+                                                              });
+                                                            }
+                                                          },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'CFOP na venda (opcional)',
+                                                          context,
+                                                        ),
+                                                        TextFormField(
+                                                          controller:
+                                                              _cfopVendaController,
+                                                          keyboardType:
+                                                              TextInputType
+                                                                  .number,
+                                                          maxLength: 4,
+                                                          validator:
+                                                              _validarCfopVenda,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                helper:
+                                                                    'Vazio = automatico (ex.: 5102 / 5405 na BA)',
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ]),
+                                                  Text(
+                                                    'CFOP automatico: consumidor final na Bahia — '
+                                                    'Tributado/Isento 5102, ST 5405.',
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .bodySmall,
+                                                  ),
+                                                ],
+                                              ),
+                                              ],
+                                              if (_subAbaCadastroController
+                                                      .index ==
+                                                  2) ...[
+                                              _erpSurfaceCard(
+                                                context: context,
+                                                title: 'Logistica e descricao',
+                                                icon: Icons
+                                                    .local_shipping_outlined,
+                                                children: [
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      _erpFieldLabel(
+                                                        'Localizacao no deposito',
+                                                        context,
+                                                      ),
+                                                      TextField(
+                                                        controller:
+                                                            _localizacaoController,
+                                                        decoration:
+                                                            _erpInputDecoration(
+                                                              context,
+                                                              hint:
+                                                                  'Corredor, prateleira, nivel',
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(
+                                                    height: _erpGap16,
+                                                  ),
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      _erpFieldLabel(
+                                                        'Descricao tecnica',
+                                                        context,
+                                                      ),
+                                                      TextField(
+                                                        controller:
+                                                            _descricaoController,
+                                                        maxLines: 4,
+                                                        decoration:
+                                                            _erpInputDecoration(
+                                                              context,
+                                                              helper:
+                                                                  'Beneficios, aplicacao e diferenciais para o vendedor',
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
                                               _erpSurfaceCard(
                                                 context: context,
                                                 title:
@@ -5007,6 +5447,7 @@ class _ProdutosPageState extends State<ProdutosPage> with SafeSyncRefreshMixin {
                                                     ),
                                                   ),
                                                 ),
+                                              ],
                                               ],
                                             ],
                                           ),

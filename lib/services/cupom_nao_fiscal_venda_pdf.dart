@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/pagamento_orcamento.dart';
+import '../domain/plano_fiado.dart';
 import '../model/cliente.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
@@ -98,6 +99,11 @@ class CupomNaoFiscalVendaPdf {
     if (venda.enderecoEntrega.trim().isNotEmpty) n++;
     if (venda.descontoImplicitoTotal > 0) n++;
     if (segundaVia) n += 2;
+    final pagamento = rotuloPagamentoCabecalho(venda);
+    if (pagamento.length > 30) {
+      n += (pagamento.length / 30).ceil() - 1;
+    }
+    n += PlanoFiadoCodec.contarLinhasPdf(venda);
     return n;
   }
 
@@ -269,6 +275,20 @@ class CupomNaoFiscalVendaPdf {
                 valor: rotuloPagamentoCabecalho(venda),
                 colunas: layout.alinharPagamentoColunas,
               ),
+              if (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda)) ...[
+                CupomPdfLayout.textoCorpo(
+                  'Condicao de quitacao (fiado):',
+                  layout,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                ...PlanoFiadoCodec.linhasTextoPdf(venda).map(
+                  (linha) => CupomPdfLayout.textoCorpo(
+                    linha,
+                    layout,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ],
               CupomPdfLayout.linhaTotal(
                 layout: layout,
                 rotulo: 'Recebido:',

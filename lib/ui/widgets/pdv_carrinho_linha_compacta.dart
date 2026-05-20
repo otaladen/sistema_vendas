@@ -11,6 +11,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     required this.precoUnitarioFormatado,
     required this.subtotalFormatado,
     required this.quantidade,
+    this.detalheQuantidade,
     required this.tipoEntregaItem,
     required this.selecionado,
     this.linhaImpar = false,
@@ -27,6 +28,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final String precoUnitarioFormatado;
   final String subtotalFormatado;
   final int quantidade;
+  final String? detalheQuantidade;
   final String tipoEntregaItem;
   final bool selecionado;
   final bool linhaImpar;
@@ -88,7 +90,9 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          '$quantidade × $precoUnitarioFormatado · $rotuloPreco',
+                          detalheQuantidade != null
+                              ? '$detalheQuantidade · $precoUnitarioFormatado/$rotuloPreco'
+                              : '$quantidade × $precoUnitarioFormatado · $rotuloPreco',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(

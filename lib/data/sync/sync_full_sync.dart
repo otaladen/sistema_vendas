@@ -73,6 +73,15 @@ class SyncFullSync {
     for (final f in _db.funcionarioBox.getAll()) {
       _add(m, 'funcionario', f.id, SyncEntityCodecExtras.funcionarioParaMap(f));
     }
+    for (final l in _db.lancamentoFuncionarioBox.getAll()) {
+      l.funcionario.target;
+      _add(
+        m,
+        'lancamento_funcionario',
+        l.id,
+        SyncEntityCodecExtras.lancamentoFuncionarioParaMap(l),
+      );
+    }
     for (final mo in _db.motoristaBox.getAll()) {
       _add(m, 'motorista', mo.id, SyncEntityCodecExtras.motoristaParaMap(mo));
     }
@@ -94,6 +103,20 @@ class SyncFullSync {
     }
     for (final vend in _vendaRepo.listarTodas()) {
       _add(m, 'venda', vend.id, SyncEntityCodec.vendaParaMap(vend));
+    }
+    for (final t in _db.tituloReceberBox.getAll()) {
+      t.cliente.target;
+      t.venda.target;
+      _add(m, 'titulo_receber', t.id, SyncEntityCodecExtras.tituloReceberParaMap(t));
+    }
+    for (final r in _db.recebimentoFiadoBox.getAll()) {
+      r.cliente.target;
+      _add(
+        m,
+        'recebimento_fiado',
+        r.id,
+        SyncEntityCodecExtras.recebimentoFiadoParaMap(r),
+      );
     }
     for (final h in _db.historicoEntregaBox.getAll()) {
       h.venda.target;
@@ -152,6 +175,11 @@ class SyncFullSync {
       case 'funcionario':
         _db.funcionarioBox.put(SyncEntityCodecExtras.funcionarioDeMap(payload));
         break;
+      case 'lancamento_funcionario':
+        _db.lancamentoFuncionarioBox.put(
+          SyncEntityCodecExtras.lancamentoFuncionarioDeMap(payload),
+        );
+        break;
       case 'motorista':
         _db.motoristaBox.put(SyncEntityCodecExtras.motoristaDeMap(payload));
         break;
@@ -174,6 +202,16 @@ class SyncFullSync {
         break;
       case 'venda':
         await _aplicarVendaPayload(payload);
+        break;
+      case 'titulo_receber':
+        _db.tituloReceberBox.put(
+          SyncEntityCodecExtras.tituloReceberDeMap(payload),
+        );
+        break;
+      case 'recebimento_fiado':
+        _db.recebimentoFiadoBox.put(
+          SyncEntityCodecExtras.recebimentoFiadoDeMap(payload),
+        );
         break;
       case 'historico_entrega':
         await _aplicarHistoricoEntrega(payload);
@@ -207,6 +245,9 @@ class SyncFullSync {
       case 'funcionario':
         _db.funcionarioBox.remove(id);
         break;
+      case 'lancamento_funcionario':
+        _db.lancamentoFuncionarioBox.remove(id);
+        break;
       case 'motorista':
         _db.motoristaBox.remove(id);
         break;
@@ -228,6 +269,12 @@ class SyncFullSync {
         break;
       case 'venda':
         _removerVendaEmCascata(id);
+        break;
+      case 'titulo_receber':
+        _db.tituloReceberBox.remove(id);
+        break;
+      case 'recebimento_fiado':
+        _db.recebimentoFiadoBox.remove(id);
         break;
       case 'historico_entrega':
         _db.historicoEntregaBox.remove(id);
