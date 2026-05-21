@@ -2,8 +2,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../domain/produto_unidade_exibicao.dart';
+import '../domain/promocao_info_vigente.dart';
+import '../domain/promocao_preco_result.dart';
 import '../model/produto.dart';
 import 'produto_detalhe_venda_page.dart';
+import 'widgets/promocao_badge.dart';
 
 /// Tres listas de preco do produto (ativo em destaque).
 class PdvConsultaTresPrecos extends StatelessWidget {
@@ -106,6 +110,8 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
     this.compacto = false,
     this.mostrarDescricaoInline = false,
     this.tituloPainel = 'Selecionado',
+    this.promocaoAtiva,
+    this.campanhaPromo,
   });
 
   final Produto produto;
@@ -118,6 +124,8 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
   final bool compacto;
   final bool mostrarDescricaoInline;
   final String tituloPainel;
+  final PromocaoPrecoResult? promocaoAtiva;
+  final PromocaoInfoVigente? campanhaPromo;
 
   @override
   Widget build(BuildContext context) {
@@ -176,6 +184,14 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
                         color: scheme.onSurfaceVariant,
                       ),
                 ),
+              const SizedBox(height: 2),
+              Text(
+                'Unidade: ${rotuloUnidadeProdutoLista(produto)}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSecondaryContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
               if (produto.codigoBarras.trim().isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Text(
@@ -193,6 +209,10 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
               ),
+              if (campanhaPromo != null) ...[
+                const SizedBox(height: 8),
+                _PainelPromocaoVendedor(campanha: campanhaPromo!),
+              ],
               const SizedBox(height: 6),
               PdvConsultaTresPrecos(
                 produto: produto,
@@ -255,6 +275,89 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Resumo da campanha para o vendedor repassar ao cliente (painel lateral / carrinho).
+class _PainelPromocaoVendedor extends StatelessWidget {
+  const _PainelPromocaoVendedor({required this.campanha});
+
+  final PromocaoInfoVigente campanha;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: PromocaoBadge.corFundo.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: PromocaoBadge.corFundo.withValues(alpha: 0.45),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const PromocaoBadge(),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  campanha.nome.isNotEmpty ? campanha.nome : 'Promocao',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: PromocaoBadge.corFundo,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            campanha.rotuloTipoCampanha,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          Text(
+            campanha.resumoRegra,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            campanha.textoPrecoParaVendedor,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: PromocaoBadge.corFundo,
+                  height: 1.35,
+                ),
+          ),
+          if (campanha.textoPrecoComplementar != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              campanha.textoPrecoComplementar!,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+          if (campanha.margemMinimaPercentual > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Margem minima: ${campanha.margemMinimaPercentual.toStringAsFixed(1)}%',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: scheme.error,
+                  ),
+            ),
+          ],
+        ],
       ),
     );
   }

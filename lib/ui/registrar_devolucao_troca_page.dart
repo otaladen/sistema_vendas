@@ -8,6 +8,7 @@ import '../data/venda_repository.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
+import 'widgets/produto_busca_input.dart';
 
 /// Fluxo de devolucao (estoque de volta) ou troca (devolucao + saida de produtos).
 class RegistrarDevolucaoTrocaPage extends StatefulWidget {
@@ -302,14 +303,20 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
 
   Future<void> _abrirBuscaProdutoTroca() async {
     final busca = TextEditingController();
-    List<Produto> resultados = [];
+    List<Produto> resultados = widget.produtoRepository.pesquisarPadraoPdv(
+      '',
+      limite: 50,
+    );
     await showDialog<void>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setD) {
             void pesquisar() {
-              resultados = widget.produtoRepository.pesquisar(busca.text);
+              resultados = widget.produtoRepository.pesquisarPadraoPdv(
+                busca.text,
+                limite: 50,
+              );
               setD(() {});
             }
 
@@ -322,20 +329,10 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                   children: [
                     TextField(
                       controller: busca,
-                      decoration: const InputDecoration(
-                        labelText: 'Pesquisar',
-                        suffixIcon: Icon(Icons.search),
-                      ),
+                      autofocus: true,
+                      decoration: produtoBuscaInputDecoration(isDense: true),
+                      onChanged: (_) => pesquisar(),
                       onSubmitted: (_) => pesquisar(),
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: pesquisar,
-                        icon: const Icon(Icons.search),
-                        label: const Text('Buscar'),
-                      ),
                     ),
                     Expanded(
                       child: ListView.builder(

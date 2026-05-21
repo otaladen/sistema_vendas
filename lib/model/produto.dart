@@ -17,6 +17,7 @@ class Produto {
     this.fornecedor = '',
     this.fabricante = '',
     this.codigoBarras = '',
+    this.apelidosBusca = '',
     this.fotoPath = '',
     this.localizacao = '',
     this.ncm = '',
@@ -70,6 +71,10 @@ class Produto {
   /// Resolucao por EAN na importacao de NF-e e no PDV.
   @Index()
   String codigoBarras;
+
+  /// Apelidos de balcao, codigo fornecedor e GTIN alternativos (; ou quebra de linha).
+  String apelidosBusca;
+
   String fotoPath;
   String localizacao;
   /// NCM — 8 digitos (obrigatorio para NFC-e).

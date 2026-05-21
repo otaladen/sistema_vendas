@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'pdv_tipo_entrega_item.dart';
+import 'promocao_badge.dart';
 
 /// Linha compacta do carrinho do PDV (~52px).
 class PdvCarrinhoLinhaCompacta extends StatelessWidget {
@@ -12,6 +13,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     required this.subtotalFormatado,
     required this.quantidade,
     this.detalheQuantidade,
+    this.rotuloUnidade,
     required this.tipoEntregaItem,
     required this.selecionado,
     this.linhaImpar = false,
@@ -21,14 +23,17 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     required this.onAumentar,
     required this.onDividir,
     required this.onRemover,
+    this.emPromocao = false,
   });
 
   final String nomeProduto;
+  final bool emPromocao;
   final String rotuloPreco;
   final String precoUnitarioFormatado;
   final String subtotalFormatado;
   final int quantidade;
   final String? detalheQuantidade;
+  final String? rotuloUnidade;
   final String tipoEntregaItem;
   final bool selecionado;
   final bool linhaImpar;
@@ -40,6 +45,14 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final VoidCallback onRemover;
 
   static const double alturaLinha = 52;
+
+  String _linhaQuantidadeUnidade() {
+    final un = rotuloUnidade?.trim();
+    if (un != null && un.isNotEmpty) {
+      return '$quantidade $un × $precoUnitarioFormatado';
+    }
+    return '$quantidade × $precoUnitarioFormatado';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -81,18 +94,28 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          nomeProduto,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                        Row(
+                          children: [
+                            if (emPromocao) ...[
+                              const PromocaoBadge(compacto: true),
+                              const SizedBox(width: 4),
+                            ],
+                            Expanded(
+                              child: Text(
+                                nomeProduto,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         Text(
                           detalheQuantidade != null
                               ? '$detalheQuantidade · $precoUnitarioFormatado/$rotuloPreco'
-                              : '$quantidade × $precoUnitarioFormatado · $rotuloPreco',
+                              : '${_linhaQuantidadeUnidade()} · $rotuloPreco',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(

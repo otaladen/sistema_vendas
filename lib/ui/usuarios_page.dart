@@ -31,6 +31,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
   bool _podeFinanceiro = false;
   bool _podeConfiguracoes = false;
   bool _podeAutorizarSegundaViaCupom = false;
+  bool _podeAutorizarMargemVenda = false;
   String _status = '';
 
   @override
@@ -73,6 +74,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeFinanceiro = false;
       _podeConfiguracoes = false;
       _podeAutorizarSegundaViaCupom = false;
+      _podeAutorizarMargemVenda = false;
     });
   }
 
@@ -127,6 +129,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       podeFinanceiro: _podeFinanceiro,
       podeConfiguracoes: _podeConfiguracoes,
       podeAutorizarSegundaViaCupom: _podeAutorizarSegundaViaCupom,
+      podeAutorizarMargemVenda: _podeAutorizarMargemVenda,
     );
     await widget.usuarioRepository.salvar(usuario);
     await _carregar();
@@ -152,6 +155,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeFinanceiro = u.podeFinanceiro;
       _podeConfiguracoes = u.podeConfiguracoes;
       _podeAutorizarSegundaViaCupom = u.podeAutorizarSegundaViaCupom;
+      _podeAutorizarMargemVenda = u.podeAutorizarMargemVenda;
       _status = 'Editando usuario: ${u.nome}';
     });
   }
@@ -273,6 +277,17 @@ class _UsuariosPageState extends State<UsuariosPage> {
             title: const Text('Autorizar segunda via do cupom'),
             subtitle: const Text(
               'Pode informar login e senha para reimprimir cupom na listagem de vendas ou no caixa.',
+            ),
+            contentPadding: EdgeInsets.zero,
+          ),
+          CheckboxListTile(
+            value: _podeAutorizarMargemVenda,
+            onChanged: _admin
+                ? null
+                : (v) => setState(() => _podeAutorizarMargemVenda = v ?? false),
+            title: const Text('Autorizar margem promocional'),
+            subtitle: const Text(
+              'Libera venda abaixo da margem minima definida na campanha (PDV).',
             ),
             contentPadding: EdgeInsets.zero,
           ),

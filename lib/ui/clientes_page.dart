@@ -5,29 +5,47 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import '../domain/cliente_cadastro.dart';
 import '../main.dart';
 import '../data/cliente_repository.dart';
 import '../data/mensageria_repository.dart';
 import '../data/venda_repository.dart';
+import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
 import '../model/mensagem_log.dart';
+import '../model/vendedor.dart';
 import '../services/brasil_api_cep_service.dart';
 import '../services/brasil_api_cnpj_service.dart';
 import '../model/mensagem_template.dart';
 import '../model/venda.dart';
+import 'widgets/cliente/cliente_cadastro_header.dart';
+import 'widgets/cliente/cliente_cadastro_rodape.dart';
 import 'widgets/extrato_fiado_cliente_card.dart';
+
+class _CadastroClienteSalvarIntent extends Intent {
+  const _CadastroClienteSalvarIntent();
+}
+
+class _CadastroClienteCancelarIntent extends Intent {
+  const _CadastroClienteCancelarIntent();
+}
 
 class ClientesPage extends StatefulWidget {
   const ClientesPage({
     super.key,
     required this.clienteRepository,
     required this.vendaRepository,
+    this.vendedorRepository,
     this.retornarClienteAoSalvar = false,
+    this.clienteIdInicial,
   });
 
   final ClienteRepository clienteRepository;
   final VendaRepository vendaRepository;
+  final VendedorRepository? vendedorRepository;
   final bool retornarClienteAoSalvar;
+  /// Abre direto o cadastro deste cliente (ex.: drill-down de relatorios).
+  final int? clienteIdInicial;
 
   @override
   State<ClientesPage> createState() => _ClientesPageState();
@@ -69,7 +87,6 @@ class _ClientesPageState extends State<ClientesPage>
   static const double _maxLarguraFormulario = 1120;
   static const Color _fundoPainelCadastro = Color(0xFFE8EEF5);
   static const Color _bordaPainelCadastro = Color(0xFFB0BEC5);
-  static const Color _corBotaoSalvar = Color(0xFF2E7D32);
   static const Color _corLimiteDestaque = Color(0xFF1B5E20);
   static const Color _fundoLimiteCredito = Color(0xFFE8F5E9);
   static const Color _bordaLimiteCredito = Color(0xFFC8E6C9);
@@ -92,13 +109,28 @@ class _ClientesPageState extends State<ClientesPage>
   final _observacoesController = TextEditingController();
   final _rgController = TextEditingController();
   final _ocupacaoController = TextEditingController();
+  final _codigoInternoController = TextEditingController();
+  final _inscricaoMunicipalController = TextEditingController();
+  final _contatoPrincipalNomeController = TextEditingController();
+  final _contatoPrincipalCargoController = TextEditingController();
+  final _motivoBloqueioController = TextEditingController();
+  final _prazoPagamentoController = TextEditingController();
   String _sexoCliente = '';
   DateTime? _dataNascimentoCliente;
   final List<_EnderecoFormControllers> _enderecosExtras = [];
+  bool _principalPadraoCarreto = true;
 
   int? _clienteEmEdicaoId;
   String _tipoPessoa = 'fisica';
+  String _segmento = '';
+  String _categoriaComercial = '';
+  String _tabelaPrecoPadrao = 'preco1';
+  String _indicadorIe = '';
+  String _origemCadastro = '';
+  int? _vendedorResponsavelId;
+  bool _bloqueadoFiado = false;
   bool _ativo = true;
+  List<Vendedor> _vendedoresAtivos = [];
   String _status = '';
   late final _cpfCnpjFormatter = _CpfCnpjInputFormatter();
   late final _telefoneFormatter = _TelefoneInputFormatter();
@@ -117,11 +149,11 @@ class _ClientesPageState extends State<ClientesPage>
   bool _consultaCnpjEmAndamento = false;
   bool _consultaCepEmAndamento = false;
   TextEditingController? _cepControllerEmConsulta;
-  final ScrollController _scrollAbaBasicos = ScrollController();
+  final ScrollController _scrollAbaIdentificacao = ScrollController();
   final ScrollController _scrollAbaContato = ScrollController();
   final ScrollController _scrollAbaComercial = ScrollController();
   final ScrollController _scrollAbaEndereco = ScrollController();
-  final ScrollController _scrollAbaHistorico = ScrollController();
+  final ScrollController _scrollAbaRelacionamento = ScrollController();
 
   late final TabController _tabController;
 
@@ -130,6 +162,15 @@ class _ClientesPageState extends State<ClientesPage>
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
     _documentoController.addListener(_onDocumentoChanged);
+    _vendedoresAtivos =
+        widget.vendedorRepository?.listarAtivos() ?? const [];
+    final idInicial = widget.clienteIdInicial;
+    if (idInicial != null && idInicial > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final c = widget.clienteRepository.obterPorId(idInicial);
+        if (c != null && mounted) _editarCliente(c);
+      });
+    }
   }
 
   @override
@@ -156,14 +197,20 @@ class _ClientesPageState extends State<ClientesPage>
     _observacoesController.dispose();
     _rgController.dispose();
     _ocupacaoController.dispose();
+    _codigoInternoController.dispose();
+    _inscricaoMunicipalController.dispose();
+    _contatoPrincipalNomeController.dispose();
+    _contatoPrincipalCargoController.dispose();
+    _motivoBloqueioController.dispose();
+    _prazoPagamentoController.dispose();
     for (final endereco in _enderecosExtras) {
       endereco.dispose();
     }
-    _scrollAbaBasicos.dispose();
+    _scrollAbaIdentificacao.dispose();
     _scrollAbaContato.dispose();
     _scrollAbaComercial.dispose();
     _scrollAbaEndereco.dispose();
-    _scrollAbaHistorico.dispose();
+    _scrollAbaRelacionamento.dispose();
     super.dispose();
   }
 
@@ -466,11 +513,26 @@ class _ClientesPageState extends State<ClientesPage>
       _observacoesController.clear();
       _rgController.clear();
       _ocupacaoController.clear();
+      _codigoInternoController.clear();
+      _inscricaoMunicipalController.clear();
+      _contatoPrincipalNomeController.clear();
+      _contatoPrincipalCargoController.clear();
+      _motivoBloqueioController.clear();
+      _prazoPagamentoController.clear();
       _sexoCliente = '';
       _dataNascimentoCliente = null;
       _tipoPessoa = 'fisica';
+      _segmento = '';
+      _categoriaComercial = '';
+      _tabelaPrecoPadrao = 'preco1';
+      _indicadorIe = '';
+      _origemCadastro = '';
+      _vendedorResponsavelId = null;
+      _bloqueadoFiado = false;
+      _principalPadraoCarreto = true;
       _ativo = true;
       _clienteEmEdicaoId = null;
+      _status = '';
     });
   }
 
@@ -495,9 +557,20 @@ class _ClientesPageState extends State<ClientesPage>
         : widget.clienteRepository.obterPorId(_clienteEmEdicaoId!);
 
     final enderecos = _enderecosDoFormulario();
+    final prazoDias = int.tryParse(_prazoPagamentoController.text.trim()) ?? 0;
+    final agora = DateTime.now().toUtc();
     final cliente = Cliente(
       id: existente?.id ?? 0,
       tipoPessoa: _tipoPessoa,
+      codigoInterno: _codigoInternoController.text.trim(),
+      segmento: _segmento,
+      categoriaComercial: _categoriaComercial,
+      vendedorResponsavelId: _vendedorResponsavelId ?? 0,
+      tabelaPrecoPadrao:
+          ClienteCadastro.normalizarTabelaPreco(_tabelaPrecoPadrao),
+      prazoPagamentoDias: prazoDias < 0 ? 0 : prazoDias,
+      bloqueadoFiado: _bloqueadoFiado,
+      motivoBloqueio: _motivoBloqueioController.text.trim(),
       nomeRazao: nomeRazao,
       nomeFantasia: _nomeFantasiaController.text.trim(),
       documento: _somenteDigitos(_documentoController.text),
@@ -513,9 +586,15 @@ class _ClientesPageState extends State<ClientesPage>
       inscricaoEstadual: _tipoPessoa == 'juridica'
           ? _inscricaoController.text.trim().toUpperCase()
           : '',
+      inscricaoMunicipal: _tipoPessoa == 'juridica'
+          ? _inscricaoMunicipalController.text.trim()
+          : '',
+      indicadorIe: _tipoPessoa == 'juridica' ? _indicadorIe : '',
       telefone: _somenteDigitos(_telefoneController.text),
       whatsapp: _somenteDigitos(_whatsappController.text),
       email: _emailController.text.trim().toLowerCase(),
+      contatoPrincipalNome: _contatoPrincipalNomeController.text.trim(),
+      contatoPrincipalCargo: _contatoPrincipalCargoController.text.trim(),
       cep: '',
       endereco: '',
       numero: '',
@@ -527,8 +606,10 @@ class _ClientesPageState extends State<ClientesPage>
       limiteCredito: limiteCredito,
       observacoes: _observacoesController.text.trim(),
       ocupacao: _ocupacaoController.text.trim(),
+      origemCadastro: _origemCadastro,
       ativo: _ativo,
       criadoEm: existente?.criadoEm,
+      atualizadoEm: agora,
     );
     cliente.definirEnderecos(enderecos);
     final clienteId = widget.clienteRepository.salvar(cliente);
@@ -806,10 +887,20 @@ class _ClientesPageState extends State<ClientesPage>
     _debounceConsultaCep?.cancel();
     _carregandoClienteNoFormulario = true;
     final enderecos = c.listarEnderecos();
-    final principal = enderecos.isEmpty ? EnderecoCliente() : enderecos.first;
-    final extras = enderecos.length > 1
-        ? enderecos.sublist(1)
-        : const <EnderecoCliente>[];
+    EnderecoCliente principal;
+    List<EnderecoCliente> extras;
+    if (enderecos.isEmpty) {
+      principal = EnderecoCliente();
+      extras = const [];
+    } else {
+      final idxPrincipal = enderecos.indexWhere((e) => e.tipo == 'principal');
+      final idx = idxPrincipal >= 0 ? idxPrincipal : 0;
+      principal = enderecos[idx];
+      extras = [
+        for (var i = 0; i < enderecos.length; i++)
+          if (i != idx) enderecos[i],
+      ];
+    }
     for (final endereco in _enderecosExtras) {
       endereco.dispose();
     }
@@ -842,6 +933,24 @@ class _ClientesPageState extends State<ClientesPage>
       _enderecosExtras
         ..clear()
         ..addAll(extras.map(_EnderecoFormControllers.fromEndereco));
+      _codigoInternoController.text = c.codigoInterno;
+      _segmento = c.segmento;
+      _categoriaComercial = c.categoriaComercial;
+      _tabelaPrecoPadrao =
+          ClienteCadastro.normalizarTabelaPreco(c.tabelaPrecoPadrao);
+      _prazoPagamentoController.text = c.prazoPagamentoDias > 0
+          ? '${c.prazoPagamentoDias}'
+          : '';
+      _vendedorResponsavelId =
+          c.vendedorResponsavelId > 0 ? c.vendedorResponsavelId : null;
+      _bloqueadoFiado = c.bloqueadoFiado;
+      _motivoBloqueioController.text = c.motivoBloqueio;
+      _inscricaoMunicipalController.text = c.inscricaoMunicipal;
+      _indicadorIe = c.indicadorIe;
+      _contatoPrincipalNomeController.text = c.contatoPrincipalNome;
+      _contatoPrincipalCargoController.text = c.contatoPrincipalCargo;
+      _origemCadastro = c.origemCadastro;
+      _principalPadraoCarreto = principal.padraoCarreto;
       _limiteController.text = c.limiteCredito
           .toStringAsFixed(2)
           .replaceAll('.', ',');
@@ -967,6 +1076,8 @@ class _ClientesPageState extends State<ClientesPage>
   List<EnderecoCliente> _enderecosDoFormulario() {
     final enderecos = <EnderecoCliente>[
       EnderecoCliente(
+        tipo: 'principal',
+        padraoCarreto: _principalPadraoCarreto,
         cep: _somenteDigitos(_cepController.text),
         endereco: _enderecoController.text.trim(),
         numero: _numeroController.text.trim(),
@@ -978,6 +1089,57 @@ class _ClientesPageState extends State<ClientesPage>
       ..._enderecosExtras.map((e) => e.toEndereco()),
     ];
     return enderecos.where((e) => e.temDados).toList();
+  }
+
+  void _definirUnicoPadraoCarreto({required bool principal, int? indiceExtra}) {
+    setState(() {
+      if (principal) {
+        _principalPadraoCarreto = true;
+        for (final e in _enderecosExtras) {
+          e.padraoCarreto = false;
+        }
+      } else if (indiceExtra != null && indiceExtra >= 0) {
+        _principalPadraoCarreto = false;
+        for (var i = 0; i < _enderecosExtras.length; i++) {
+          _enderecosExtras[i].padraoCarreto = i == indiceExtra;
+        }
+      }
+    });
+  }
+
+  double _fiadoAbertoClienteAtual() {
+    final id = _clienteEmEdicaoId;
+    if (id == null) return 0;
+    return widget.vendaRepository.saldoFiadoEmAbertoCliente(id);
+  }
+
+  Future<void> _confirmarExcluirCliente() async {
+    final id = _clienteEmEdicaoId;
+    if (id == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir cliente'),
+        content: const Text(
+          'Confirma a exclusao deste cadastro? Esta acao nao pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    if (widget.clienteRepository.remover(id)) {
+      _limparFormulario();
+      setState(() => _status = 'Cliente excluido.');
+    }
   }
 
   (DateTime?, DateTime?) _limitesPeriodoHistorico() {
@@ -1478,6 +1640,121 @@ class _ClientesPageState extends State<ClientesPage>
               ),
             ),
             const SizedBox(height: 10),
+            _linhaCamposAdaptativa(
+              larguraMinimaLinha: 720,
+              flexes: const [2, 2, 1, 1],
+              campos: [
+                DropdownButtonFormField<String>(
+                  key: ValueKey<String>(_tabelaPrecoPadrao),
+                  isExpanded: true,
+                  initialValue: _tabelaPrecoPadrao,
+                  decoration: const InputDecoration(
+                    labelText: 'Tabela de preco padrao',
+                    isDense: true,
+                  ),
+                  items: ClienteCadastro.tabelasPreco
+                      .map(
+                        (e) => DropdownMenuItem(
+                          value: e.$1,
+                          child: Text(
+                            e.$2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() => _tabelaPrecoPadrao = v);
+                  },
+                ),
+                DropdownButtonFormField<int?>(
+                  key: ValueKey<int?>(_vendedorResponsavelId),
+                  isExpanded: true,
+                  initialValue: _vendedorResponsavelId,
+                  decoration: const InputDecoration(
+                    labelText: 'Vendedor responsavel',
+                    isDense: true,
+                  ),
+                  items: [
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text('Nenhum'),
+                    ),
+                    ..._vendedoresAtivos.map(
+                      (v) => DropdownMenuItem<int?>(
+                        value: v.id,
+                        child: Text(
+                          v.apelido.trim().isNotEmpty
+                              ? v.apelido
+                              : v.nomeCompleto,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _vendedorResponsavelId = v),
+                ),
+                TextField(
+                  controller: _prazoPagamentoController,
+                  decoration: const InputDecoration(
+                    labelText: 'Prazo (dias)',
+                    isDense: true,
+                  ),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(4),
+                  ],
+                ),
+                DropdownButtonFormField<String>(
+                  key: ValueKey<String>(_categoriaComercial),
+                  isExpanded: true,
+                  initialValue: _categoriaComercial.isEmpty
+                      ? ''
+                      : _categoriaComercial,
+                  decoration: const InputDecoration(
+                    labelText: 'Categoria',
+                    isDense: true,
+                  ),
+                  items: [
+                    const DropdownMenuItem(
+                      value: '',
+                      child: Text('-'),
+                    ),
+                    ...ClienteCadastro.categoriasComerciais.map(
+                      (c) => DropdownMenuItem(value: c, child: Text(c)),
+                    ),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _categoriaComercial = v ?? ''),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              dense: true,
+              value: _bloqueadoFiado,
+              onChanged: (v) => setState(() => _bloqueadoFiado = v),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Bloquear fiado'),
+              subtitle: const Text(
+                'Impede vendas a prazo (fiado) no PDV e caixa.',
+              ),
+            ),
+            if (_bloqueadoFiado) ...[
+              const SizedBox(height: 4),
+              TextField(
+                controller: _motivoBloqueioController,
+                decoration: const InputDecoration(
+                  labelText: 'Motivo do bloqueio',
+                  isDense: true,
+                ),
+                maxLines: 2,
+              ),
+            ],
+            const SizedBox(height: 10),
             TextField(
               controller: _ocupacaoController,
               textCapitalization: TextCapitalization.words,
@@ -1582,11 +1859,11 @@ class _ClientesPageState extends State<ClientesPage>
           tabAlignment: TabAlignment.start,
           labelPadding: const EdgeInsets.symmetric(horizontal: 14),
           tabs: const [
-            Tab(text: 'Basicos'),
+            Tab(text: 'Identificacao'),
             Tab(text: 'Contato'),
             Tab(text: 'Comercial'),
-            Tab(text: 'Endereco'),
-            Tab(text: 'Historico'),
+            Tab(text: 'Enderecos'),
+            Tab(text: 'Relacionamento'),
           ],
         ),
         Expanded(
@@ -1599,8 +1876,8 @@ class _ClientesPageState extends State<ClientesPage>
               controller: _tabController,
               children: [
                 _buildScrollAba(
-                  _buildAbaBasicos(theme, emEdicao, formWide),
-                  _scrollAbaBasicos,
+                  _buildAbaIdentificacao(theme, emEdicao, formWide),
+                  _scrollAbaIdentificacao,
                 ),
                 _buildScrollAba(
                   _buildAbaContato(theme),
@@ -1611,7 +1888,7 @@ class _ClientesPageState extends State<ClientesPage>
                   _scrollAbaComercial,
                 ),
                 _buildScrollAbaEndereco(theme),
-                _buildScrollAbaHistorico(
+                _buildScrollAbaRelacionamento(
                   theme: theme,
                   emEdicao: emEdicao,
                   compras: compras,
@@ -1686,7 +1963,13 @@ class _ClientesPageState extends State<ClientesPage>
                   ),
                   const SizedBox(height: 8),
                   _buildEnderecoForm(
-                    titulo: 'Endereco principal',
+                    titulo: 'Endereco principal / sede',
+                    tipo: 'principal',
+                    nomeObraController: null,
+                    padraoCarreto: _principalPadraoCarreto,
+                    onPadraoCarreto: () => _definirUnicoPadraoCarreto(
+                      principal: true,
+                    ),
                     cepController: _cepController,
                     enderecoController: _enderecoController,
                     numeroController: _numeroController,
@@ -1698,7 +1981,17 @@ class _ClientesPageState extends State<ClientesPage>
                   for (var i = 0; i < _enderecosExtras.length; i++) ...[
                     const SizedBox(height: 8),
                     _buildEnderecoForm(
-                      titulo: 'Endereco adicional ${i + 1}',
+                      titulo: _enderecosExtras[i].tituloExibicao(),
+                      tipo: _enderecosExtras[i].tipo,
+                      onTipoChanged: (v) =>
+                          setState(() => _enderecosExtras[i].tipo = v),
+                      nomeObraController:
+                          _enderecosExtras[i].nomeObraController,
+                      padraoCarreto: _enderecosExtras[i].padraoCarreto,
+                      onPadraoCarreto: () => _definirUnicoPadraoCarreto(
+                        principal: false,
+                        indiceExtra: i,
+                      ),
                       cepController: _enderecosExtras[i].cepController,
                       enderecoController:
                           _enderecosExtras[i].enderecoController,
@@ -1723,7 +2016,7 @@ class _ClientesPageState extends State<ClientesPage>
                       onPressed: () {
                         setState(() {
                           _enderecosExtras.add(
-                            _EnderecoFormControllers.vazio(),
+                            _EnderecoFormControllers.vazio(tipo: 'entrega'),
                           );
                         });
                         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1750,42 +2043,126 @@ class _ClientesPageState extends State<ClientesPage>
     );
   }
 
-  Widget _buildAbaBasicos(ThemeData theme, bool emEdicao, bool formWide) {
-    final codigoTexto = emEdicao && _clienteEmEdicaoId != null
-        ? 'Codigo: $_clienteEmEdicaoId'
-        : 'Codigo: - (novo)';
+  Widget _buildAbaIdentificacao(ThemeData theme, bool emEdicao, bool formWide) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Material(
-          color: theme.colorScheme.surface,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(6),
-            side: BorderSide(color: theme.colorScheme.outlineVariant),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.tag, size: 18, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
-                Text(
-                  codigoTexto,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
         _buildSectionCard(
           context: context,
           title: 'Identificacao',
           icon: Icons.person_outline,
-          children: _dadosPrincipaisChildren(formWide),
+          children: [
+            _linhaCamposAdaptativa(
+              flexes: const [1, 2, 2],
+              campos: [
+                TextField(
+                  controller: _codigoInternoController,
+                  decoration: InputDecoration(
+                    labelText: 'Codigo interno',
+                    isDense: true,
+                    hintText: emEdicao && _clienteEmEdicaoId != null
+                        ? '#$_clienteEmEdicaoId'
+                        : null,
+                  ),
+                ),
+                DropdownButtonFormField<String>(
+                  key: ValueKey<String>(_segmento),
+                  isExpanded: true,
+                  initialValue: _segmento.isEmpty ? '' : _segmento,
+                  decoration: const InputDecoration(
+                    labelText: 'Segmento',
+                    isDense: true,
+                  ),
+                  items: [
+                    const DropdownMenuItem(
+                      value: '',
+                      child: Text('Nao informado'),
+                    ),
+                    ...ClienteCadastro.segmentos.map(
+                      (e) => DropdownMenuItem(
+                        value: e.$1,
+                        child: Text(
+                          e.$2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _segmento = v ?? ''),
+                ),
+                DropdownButtonFormField<String>(
+                  key: ValueKey<String>(_origemCadastro),
+                  isExpanded: true,
+                  initialValue:
+                      _origemCadastro.isEmpty ? '' : _origemCadastro,
+                  decoration: const InputDecoration(
+                    labelText: 'Origem do cadastro',
+                    isDense: true,
+                  ),
+                  items: [
+                    const DropdownMenuItem(
+                      value: '',
+                      child: Text('Nao informado'),
+                    ),
+                    ...ClienteCadastro.origensCadastro.map(
+                      (e) => DropdownMenuItem(
+                        value: e.$1,
+                        child: Text(
+                          e.$2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _origemCadastro = v ?? ''),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ..._dadosPrincipaisChildren(formWide),
+            if (_tipoPessoa == 'juridica') ...[
+              const SizedBox(height: 8),
+              _linhaCamposAdaptativa(
+                larguraMinimaLinha: 480,
+                flexes: const [1, 2],
+                campos: [
+                  TextField(
+                    controller: _inscricaoMunicipalController,
+                    decoration: const InputDecoration(
+                      labelText: 'Inscricao municipal',
+                      isDense: true,
+                    ),
+                  ),
+                  DropdownButtonFormField<String>(
+                    key: ValueKey<String>(_indicadorIe),
+                    isExpanded: true,
+                    initialValue: _indicadorIe.isEmpty ? '' : _indicadorIe,
+                    decoration: const InputDecoration(
+                      labelText: 'Indicador IE',
+                      isDense: true,
+                    ),
+                    items: [
+                      const DropdownMenuItem(
+                        value: '',
+                        child: Text('Nao informado'),
+                      ),
+                      ...ClienteCadastro.indicadoresIe.map(
+                        (e) => DropdownMenuItem(
+                          value: e.$1,
+                          child: Text(
+                            e.$2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
+                    onChanged: (v) => setState(() => _indicadorIe = v ?? ''),
+                  ),
+                ],
+              ),
+            ],
+          ],
         ),
       ],
     );
@@ -1797,6 +2174,28 @@ class _ClientesPageState extends State<ClientesPage>
       title: 'Contato',
       icon: Icons.phone_outlined,
       children: [
+        if (_tipoPessoa == 'juridica') ...[
+          TextField(
+            controller: _contatoPrincipalNomeController,
+            decoration: const InputDecoration(
+              labelText: 'Contato principal (nome)',
+              isDense: true,
+              prefixIcon: Icon(Icons.person_outline, size: 20),
+            ),
+            textCapitalization: TextCapitalization.words,
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _contatoPrincipalCargoController,
+            decoration: const InputDecoration(
+              labelText: 'Cargo / funcao na obra',
+              isDense: true,
+              prefixIcon: Icon(Icons.engineering_outlined, size: 20),
+            ),
+            textCapitalization: TextCapitalization.words,
+          ),
+          const SizedBox(height: 10),
+        ],
         TextField(
           controller: _telefoneController,
           decoration: const InputDecoration(
@@ -1834,7 +2233,7 @@ class _ClientesPageState extends State<ClientesPage>
   /// Historico sem [ExpansionTile]: o corpo do tile usa [Expansible] com
   /// [ClipRect]/[Align.heightFactor], o que pode truncar listas longas dentro
   /// de scroll. Aqui um [ListView] com [ScrollController] ligado ao [Scrollbar].
-  Widget _buildScrollAbaHistorico({
+  Widget _buildScrollAbaRelacionamento({
     required ThemeData theme,
     required bool emEdicao,
     required List<Venda> compras,
@@ -1848,11 +2247,11 @@ class _ClientesPageState extends State<ClientesPage>
       fontWeight: FontWeight.w600,
     );
     return Scrollbar(
-      controller: _scrollAbaHistorico,
+      controller: _scrollAbaRelacionamento,
       thumbVisibility: true,
       trackVisibility: true,
       child: ListView(
-        controller: _scrollAbaHistorico,
+        controller: _scrollAbaRelacionamento,
         primary: false,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(10, 10, 10, 48),
@@ -2158,116 +2557,167 @@ class _ClientesPageState extends State<ClientesPage>
     }
     final topProdutos = topProdutosMap.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    return Scaffold(
-      appBar: AppBar(title: const Text('Cadastro de Clientes')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _salvarCliente,
-        backgroundColor: _corBotaoSalvar,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.save_outlined),
-        label: Text(emEdicao ? 'Salvar edicao' : 'Salvar cliente'),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      body: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: _maxLarguraFormulario),
-            child: LayoutBuilder(
-              builder: (context, box) {
-                final formWide = box.maxWidth >= 680;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: theme.colorScheme.outlineVariant,
+    final limiteDigitado = _limiteCreditoDigitado();
+    final fiadoAberto = emEdicao ? _fiadoAbertoClienteAtual() : 0.0;
+    final creditoDisp = limiteDigitado > 0
+        ? (limiteDigitado - fiadoAberto).clamp(0.0, double.infinity)
+        : 0.0;
+
+    return Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.f5): _CadastroClienteSalvarIntent(),
+        SingleActivator(LogicalKeyboardKey.escape):
+            _CadastroClienteCancelarIntent(),
+      },
+      child: Actions(
+        actions: {
+          _CadastroClienteSalvarIntent: CallbackAction(
+            onInvoke: (_) {
+              _salvarCliente();
+              return null;
+            },
+          ),
+          _CadastroClienteCancelarIntent: CallbackAction(
+            onInvoke: (_) {
+              _limparFormulario();
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            appBar: AppBar(title: const Text('Cadastro de Clientes')),
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: _maxLarguraFormulario,
                         ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.badge_outlined,
-                            color: theme.colorScheme.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                        child: LayoutBuilder(
+                          builder: (context, box) {
+                            final formWide = box.maxWidth >= 680;
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Text(
-                                  'Cadastro de Clientes',
-                                  style: theme.textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.bold,
+                                ClienteCadastroHeader(
+                                  emEdicao: emEdicao,
+                                  clienteId: _clienteEmEdicaoId,
+                                  nomeRazao: _nomeRazaoController.text,
+                                  tipoPessoa: _tipoPessoa,
+                                  documento: _documentoController.text,
+                                  ativo: _ativo,
+                                  segmento: _segmento,
+                                  codigoInterno: _codigoInternoController
+                                          .text
+                                          .trim()
+                                          .isNotEmpty
+                                      ? _codigoInternoController.text.trim()
+                                      : (emEdicao &&
+                                              _clienteEmEdicaoId != null
+                                          ? '#${_clienteEmEdicaoId}'
+                                          : 'Novo'),
+                                  totalGasto: emEdicao
+                                      ? _formatarMoeda(totalGasto)
+                                      : null,
+                                  ultimaCompraTexto: emEdicao
+                                      ? (ultimaCompra == null
+                                          ? 'Sem compras'
+                                          : _dataHora.format(
+                                              ultimaCompra.data.toLocal(),
+                                            ))
+                                      : null,
+                                  fiadoAberto: emEdicao && limiteDigitado > 0
+                                      ? _formatarMoeda(fiadoAberto)
+                                      : null,
+                                  creditoDisponivel:
+                                      emEdicao && limiteDigitado > 0
+                                          ? _formatarMoeda(creditoDisp)
+                                          : null,
+                                  limiteCredito: limiteDigitado,
+                                ),
+                                const SizedBox(height: 6),
+                                _buildBarraFerramentasCadastro(),
+                                if (_status.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  _buildStatusBanner(context, _status),
+                                ],
+                                const SizedBox(height: 6),
+                                Expanded(
+                                  child: _buildPainelComAbas(
+                                    theme: theme,
+                                    emEdicao: emEdicao,
+                                    formWide: formWide,
+                                    compras: compras,
+                                    totalGasto: totalGasto,
+                                    ticketMedio: ticketMedio,
+                                    ultimaCompra: ultimaCompra,
+                                    quantidadeItens: quantidadeItens,
+                                    topProdutos: topProdutos,
                                   ),
                                 ),
-                                Text(
-                                  emEdicao
-                                      ? 'Registro em edicao'
-                                      : 'Novo cliente',
-                                  style: theme.textTheme.bodySmall,
-                                ),
                               ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    _buildBarraFerramentasCadastro(),
-                    const SizedBox(height: 6),
-                    Expanded(
-                      child: _buildPainelComAbas(
-                        theme: theme,
-                        emEdicao: emEdicao,
-                        formWide: formWide,
-                        compras: compras,
-                        totalGasto: totalGasto,
-                        ticketMedio: ticketMedio,
-                        ultimaCompra: ultimaCompra,
-                        quantidadeItens: quantidadeItens,
-                        topProdutos: topProdutos,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: OutlinedButton.icon(
-                        style: _estiloBotaoContornoCompacto,
-                        onPressed: _limparFormulario,
-                        icon: Icon(
-                          emEdicao
-                              ? Icons.close
-                              : Icons.cleaning_services_outlined,
-                          size: 18,
-                        ),
-                        label: Text(
-                          emEdicao
-                              ? 'Cancelar edicao'
-                              : 'Limpar formulario',
+                            );
+                          },
                         ),
                       ),
                     ),
-                    if (_status.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      _buildStatusBanner(context, _status),
-                    ],
-                    const SizedBox(height: 72),
-                  ],
-                );
-              },
+                  ),
+                ),
+                ClienteCadastroRodape(
+                  emEdicao: emEdicao,
+                  onSalvar: _salvarCliente,
+                  onNovo: _limparFormulario,
+                  onLimpar: _limparFormulario,
+                  podeExcluir: emEdicao && _clienteEmEdicaoId != null,
+                  onExcluir: _confirmarExcluirCliente,
+                ),
+              ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// Empilha em coluna em telas estreitas; em telas largas usa [Row] com [Expanded].
+  Widget _linhaCamposAdaptativa({
+    required List<Widget> campos,
+    double larguraMinimaLinha = 620,
+    double espacamento = 10,
+    List<double>? flexes,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth;
+        if (maxW < larguraMinimaLinha) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < campos.length; i++) ...[
+                if (i > 0) SizedBox(height: espacamento),
+                campos[i],
+              ],
+            ],
+          );
+        }
+        final flexList = flexes ?? List<double>.filled(campos.length, 1);
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < campos.length; i++) ...[
+              if (i > 0) SizedBox(width: espacamento),
+              Expanded(flex: flexList[i].round(), child: campos[i]),
+            ],
+          ],
+        );
+      },
     );
   }
 
@@ -2312,6 +2762,11 @@ class _ClientesPageState extends State<ClientesPage>
 
   Widget _buildEnderecoForm({
     required String titulo,
+    required String tipo,
+    TextEditingController? nomeObraController,
+    ValueChanged<String>? onTipoChanged,
+    bool padraoCarreto = false,
+    VoidCallback? onPadraoCarreto,
     required TextEditingController cepController,
     required TextEditingController enderecoController,
     required TextEditingController numeroController,
@@ -2462,6 +2917,61 @@ class _ClientesPageState extends State<ClientesPage>
                   ),
               ],
             ),
+            if (onTipoChanged != null || onPadraoCarreto != null) ...[
+              const SizedBox(height: 6),
+              _linhaCamposAdaptativa(
+                larguraMinimaLinha: 520,
+                campos: [
+                  if (onTipoChanged != null)
+                    DropdownButtonFormField<String>(
+                      key: ValueKey<String>(tipo),
+                      isExpanded: true,
+                      initialValue: tipo,
+                      decoration: const InputDecoration(
+                        labelText: 'Tipo',
+                        isDense: true,
+                      ),
+                      items: ClienteCadastro.tiposEndereco
+                          .map(
+                            (e) => DropdownMenuItem(
+                              value: e.$1,
+                              child: Text(e.$2),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null) onTipoChanged(v);
+                      },
+                    ),
+                  if (nomeObraController != null &&
+                      (tipo == 'obra' || tipo == 'entrega'))
+                    TextField(
+                      controller: nomeObraController,
+                      decoration: const InputDecoration(
+                        labelText: 'Nome da obra / referencia',
+                        isDense: true,
+                      ),
+                      textCapitalization: TextCapitalization.words,
+                    ),
+                  if (onPadraoCarreto != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilterChip(
+                        label: const Text('Padrao para carreto (PDV)'),
+                        selected: padraoCarreto,
+                        onSelected: (_) => onPadraoCarreto(),
+                      ),
+                    ),
+                ],
+              ),
+            ] else if (onPadraoCarreto != null) ...[
+              const SizedBox(height: 4),
+              FilterChip(
+                label: const Text('Padrao para carreto (PDV)'),
+                selected: padraoCarreto,
+                onSelected: (_) => onPadraoCarreto(),
+              ),
+            ],
             const SizedBox(height: 6),
             linhaCepBuscar,
             const SizedBox(height: 6),
@@ -2696,6 +3206,9 @@ class UpperCaseTextFormatter extends TextInputFormatter {
 
 class _EnderecoFormControllers {
   _EnderecoFormControllers({
+    required this.tipo,
+    required this.nomeObraController,
+    this.padraoCarreto = false,
     required this.cepController,
     required this.enderecoController,
     required this.numeroController,
@@ -2705,8 +3218,10 @@ class _EnderecoFormControllers {
     required this.referenciaController,
   });
 
-  factory _EnderecoFormControllers.vazio() {
+  factory _EnderecoFormControllers.vazio({String tipo = 'entrega'}) {
     return _EnderecoFormControllers(
+      tipo: ClienteCadastro.normalizarTipoEndereco(tipo),
+      nomeObraController: TextEditingController(),
       cepController: TextEditingController(),
       enderecoController: TextEditingController(),
       numeroController: TextEditingController(),
@@ -2719,6 +3234,9 @@ class _EnderecoFormControllers {
 
   factory _EnderecoFormControllers.fromEndereco(EnderecoCliente endereco) {
     return _EnderecoFormControllers(
+      tipo: ClienteCadastro.normalizarTipoEndereco(endereco.tipo),
+      nomeObraController: TextEditingController(text: endereco.nomeObra),
+      padraoCarreto: endereco.padraoCarreto,
       cepController: TextEditingController(text: endereco.cep),
       enderecoController: TextEditingController(text: endereco.endereco),
       numeroController: TextEditingController(text: endereco.numero),
@@ -2729,6 +3247,9 @@ class _EnderecoFormControllers {
     );
   }
 
+  String tipo;
+  final TextEditingController nomeObraController;
+  bool padraoCarreto;
   final TextEditingController cepController;
   final TextEditingController enderecoController;
   final TextEditingController numeroController;
@@ -2737,8 +3258,18 @@ class _EnderecoFormControllers {
   final TextEditingController ufController;
   final TextEditingController referenciaController;
 
+  String tituloExibicao() {
+    return EnderecoCliente(
+      tipo: tipo,
+      nomeObra: nomeObraController.text,
+    ).tituloExibicao();
+  }
+
   EnderecoCliente toEndereco() {
     return EnderecoCliente(
+      tipo: ClienteCadastro.normalizarTipoEndereco(tipo),
+      nomeObra: nomeObraController.text.trim(),
+      padraoCarreto: padraoCarreto,
       cep: cepController.text.replaceAll(RegExp(r'\D'), ''),
       endereco: enderecoController.text.trim(),
       numero: numeroController.text.trim(),
@@ -2750,6 +3281,7 @@ class _EnderecoFormControllers {
   }
 
   void dispose() {
+    nomeObraController.dispose();
     cepController.dispose();
     enderecoController.dispose();
     numeroController.dispose();

@@ -3,9 +3,11 @@ import 'package:intl/intl.dart';
 
 import '../data/nfe_entrada_repository.dart';
 import '../data/produto_repository.dart';
+import '../domain/produto_unidade_exibicao.dart';
 import '../domain/produto_embalagem.dart';
 import '../model/item_nota_temporario.dart';
 import '../model/produto.dart';
+import 'widgets/produto_busca_input.dart';
 
 /// Conferencia de itens da NF-e antes de gravar estoque e vinculos.
 class ConferenciaXmlScreen extends StatefulWidget {
@@ -686,7 +688,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
 
   Future<void> _abrirDialogVincularProduto(_LinhaEdicao linha) async {
     final buscaCtrl = TextEditingController();
-    List<Produto> resultados = widget.produtoRepository.pesquisar(
+    List<Produto> resultados = widget.produtoRepository.pesquisarPadraoPdv(
       '',
       limite: 50,
       somenteAtivos: false,
@@ -698,7 +700,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         return StatefulBuilder(
           builder: (ctx, setDlg) {
             void buscar(String t) {
-              resultados = widget.produtoRepository.pesquisar(
+              resultados = widget.produtoRepository.pesquisarPadraoPdv(
                 t,
                 limite: 50,
                 somenteAtivos: false,
@@ -716,11 +718,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                   children: [
                     TextField(
                       controller: buscaCtrl,
-                      decoration: const InputDecoration(
-                        hintText: 'Nome, SKU, codigo de barras...',
-                        prefixIcon: Icon(Icons.search),
-                        isDense: true,
-                      ),
+                      decoration: produtoBuscaInputDecoration(isDense: true),
                       onChanged: buscar,
                       autofocus: true,
                     ),
@@ -742,8 +740,10 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   subtitle: Text(
-                                    '${p.codigoInterno} · EAN ${p.codigoBarras.isEmpty ? "—" : p.codigoBarras} · Fisico ${p.estoqueReal}',
-                                    maxLines: 1,
+                                    '${p.codigoInterno} · Un ${rotuloUnidadeProdutoLista(p)} · '
+                                    'EAN ${p.codigoBarras.isEmpty ? "—" : p.codigoBarras} · '
+                                    'Fisico ${p.estoqueReal}',
+                                    maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   onTap: () {

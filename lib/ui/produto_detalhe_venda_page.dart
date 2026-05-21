@@ -1,13 +1,16 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
+import '../domain/promocao_info_vigente.dart';
 import '../model/produto.dart';
 
 /// Modal compacto com foto e descricao (PDV e demais telas de venda).
 Future<void> mostrarModalDetalheProdutoVenda(
   BuildContext context, {
   required Produto produto,
+  List<PromocaoInfoVigente> campanhasVigentes = const [],
 }) {
   return showDialog<void>(
     context: context,
@@ -22,7 +25,10 @@ Future<void> mostrarModalDetalheProdutoVenda(
             maxWidth: 560,
             maxHeight: alturaMax.clamp(320.0, 640.0),
           ),
-          child: ProdutoDetalheVendaConteudo(produto: produto),
+          child: ProdutoDetalheVendaConteudo(
+            produto: produto,
+            campanhasVigentes: campanhasVigentes,
+          ),
         ),
       );
     },
@@ -31,9 +37,16 @@ Future<void> mostrarModalDetalheProdutoVenda(
 
 /// Conteudo do modal de detalhe do produto na venda.
 class ProdutoDetalheVendaConteudo extends StatelessWidget {
-  const ProdutoDetalheVendaConteudo({super.key, required this.produto});
+  const ProdutoDetalheVendaConteudo({
+    super.key,
+    required this.produto,
+    this.campanhasVigentes = const [],
+  });
 
   final Produto produto;
+  final List<PromocaoInfoVigente> campanhasVigentes;
+
+  static const Color _corPromo = Color(0xFFC62828);
 
   Future<void> _abrirZoomFoto(BuildContext context) async {
     if (produto.fotoPath.trim().isEmpty) return;
@@ -145,6 +158,94 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
     );
   }
 
+  Widget _buildBannerCampanhas(BuildContext context) {
+    if (campanhasVigentes.isEmpty) return const SizedBox.shrink();
+    final fmtData = DateFormat('dd/MM/yyyy');
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: _corPromo.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _corPromo.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.local_offer, color: _corPromo, size: 20),
+              const SizedBox(width: 6),
+              Text(
+                'Campanha promocional ativa',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: _corPromo,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          for (final c in campanhasVigentes)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    c.nome,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  Text(
+                    '${c.rotuloTipoCampanha} · ${c.resumoRegra} · '
+                    'ate ${fmtData.format(c.dataFim.toLocal())}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                  Text(
+                    c.textoPrecoParaVendedor,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: _corPromo,
+                        ),
+                  ),
+                  if (c.textoPrecoComplementar != null)
+                    Text(
+                      c.textoPrecoComplementar!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                    ),
+                  if (c.quantidadeMaximaPorVenda > 0)
+                    Text(
+                      'Max. ${c.quantidadeMaximaPorVenda} un. por venda',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  if (c.quantidadeRestanteGlobal > 0)
+                    Text(
+                      'Restam ${c.quantidadeRestanteGlobal} un. na campanha',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  if (c.margemMinimaPercentual > 0)
+                    Text(
+                      'Margem minima: ${c.margemMinimaPercentual.toStringAsFixed(1)}%',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: scheme.error,
+                          ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -186,6 +287,11 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
           ),
         ),
         const Divider(height: 1),
+        if (campanhasVigentes.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: _buildBannerCampanhas(context),
+          ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),

@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../model/kit_orcamento.dart';
+import '../../model/promocao.dart';
+import '../../model/promocao_combo_item.dart';
+import '../../model/promocao_item.dart';
 import '../app_config_repository.dart';
 import '../mensageria_repository.dart';
 import '../objectbox.dart';
@@ -100,6 +103,10 @@ class SyncFullSync {
     for (final k in _db.kitOrcamentoBox.getAll()) {
       k.itens.length;
       _add(m, 'kit_orcamento', k.id, SyncEntityCodecExtras.kitParaMap(k));
+    }
+    for (final pr in _db.promocaoBox.getAll()) {
+      pr.itens.length;
+      _add(m, 'promocao', pr.id, SyncEntityCodecExtras.promocaoParaMap(pr));
     }
     for (final vend in _vendaRepo.listarTodas()) {
       _add(m, 'venda', vend.id, SyncEntityCodec.vendaParaMap(vend));
@@ -200,6 +207,9 @@ class SyncFullSync {
       case 'kit_orcamento':
         await _aplicarKit(payload);
         break;
+      case 'promocao':
+        await _aplicarPromocao(payload);
+        break;
       case 'venda':
         await _aplicarVendaPayload(payload);
         break;
@@ -266,6 +276,10 @@ class SyncFullSync {
       case 'kit_orcamento':
         _removerItensKit(id);
         _db.kitOrcamentoBox.remove(id);
+        break;
+      case 'promocao':
+        _removerItensPromocao(id);
+        _db.promocaoBox.remove(id);
         break;
       case 'venda':
         _removerVendaEmCascata(id);
@@ -353,6 +367,105 @@ class SyncFullSync {
             if (pr != null) it.produto.target = pr;
           }
           _db.kitOrcamentoItemBox.put(it);
+        }
+      }
+    });
+  }
+
+  void _removerItensPromocao(int promocaoId) {
+    final q = _db.promocaoItemBox
+        .query(PromocaoItem_.promocao.equals(promocaoId))
+        .build();
+    try {
+      for (final id in q.findIds()) {
+        _db.promocaoItemBox.remove(id);
+      }
+    } finally {
+      q.close();
+    }
+  }
+
+  void _removerComboItensPromocao(int promocaoId) {
+    final q = _db.promocaoComboItemBox
+        .query(PromocaoComboItem_.promocao.equals(promocaoId))
+        .build();
+    try {
+      for (final id in q.findIds()) {
+        _db.promocaoComboItemBox.remove(id);
+      }
+    } finally {
+      q.close();
+    }
+  }
+
+  Future<void> _aplicarPromocao(Map<String, dynamic> payload) async {
+    final promo = Promocao(
+      id: (payload['id'] as num?)?.toInt() ?? 0,
+      nome: (payload['nome'] ?? '').toString(),
+      descricao: (payload['descricao'] ?? '').toString(),
+      dataInicio: DateTime.tryParse((payload['dataInicio'] ?? '').toString())
+              ?.toUtc() ??
+          DateTime.now().toUtc(),
+      dataFim: DateTime.tryParse((payload['dataFim'] ?? '').toString())?.toUtc() ??
+          DateTime.now().toUtc(),
+      ativa: payload['ativa'] != false,
+      prioridade: (payload['prioridade'] as num?)?.toInt() ?? 0,
+      tipoRegra: (payload['tipoRegra'] ?? 'preco_fixo').toString(),
+      valorRegra: (payload['valorRegra'] as num?)?.toDouble() ?? 0,
+      segmentoCliente: (payload['segmentoCliente'] ?? '').toString(),
+      tipoCampanha: (payload['tipoCampanha'] ?? 'produto').toString(),
+      margemMinimaPercentual:
+          (payload['margemMinimaPercentual'] as num?)?.toDouble() ?? 0,
+      limiteQuantidadeTotal:
+          (payload['limiteQuantidadeTotal'] as num?)?.toInt() ?? 0,
+      quantidadeVendidaPromo:
+          (payload['quantidadeVendidaPromo'] as num?)?.toInt() ?? 0,
+      leveQuantidade: (payload['leveQuantidade'] as num?)?.toInt() ?? 0,
+      pagueQuantidade: (payload['pagueQuantidade'] as num?)?.toInt() ?? 0,
+      precoCombo: (payload['precoCombo'] as num?)?.toDouble() ?? 0,
+      criadoEm: DateTime.tryParse((payload['criadoEm'] ?? '').toString())?.toUtc(),
+    );
+    _db.store.runInTransaction(TxMode.write, () {
+      if (promo.id != 0) {
+        _removerItensPromocao(promo.id);
+        _removerComboItensPromocao(promo.id);
+      }
+      final promoId = _db.promocaoBox.put(promo);
+      promo.id = promoId;
+      final itensRaw = payload['itens'];
+      if (itensRaw is List) {
+        var ordem = 0;
+        for (final raw in itensRaw) {
+          if (raw is! Map) continue;
+          final im = Map<String, dynamic>.from(raw);
+          final it = PromocaoItem(
+            id: 0,
+            produtoAlvoId: (im['produtoAlvoId'] as num?)?.toInt() ?? 0,
+            categoria: (im['categoria'] ?? '').toString(),
+            subcategoria: (im['subcategoria'] ?? '').toString(),
+            quantidadeMinima: (im['quantidadeMinima'] as num?)?.toInt() ?? 1,
+            quantidadeMaximaPromo:
+                (im['quantidadeMaximaPromo'] as num?)?.toInt() ?? 0,
+            ordem: ordem++,
+          );
+          it.promocao.targetId = promoId;
+          _db.promocaoItemBox.put(it);
+        }
+      }
+      final comboRaw = payload['comboItens'];
+      if (comboRaw is List) {
+        var ordem = 0;
+        for (final raw in comboRaw) {
+          if (raw is! Map) continue;
+          final im = Map<String, dynamic>.from(raw);
+          final c = PromocaoComboItem(
+            id: 0,
+            produtoAlvoId: (im['produtoAlvoId'] as num?)?.toInt() ?? 0,
+            quantidade: (im['quantidade'] as num?)?.toInt() ?? 1,
+            ordem: ordem++,
+          );
+          c.promocao.targetId = promoId;
+          _db.promocaoComboItemBox.put(c);
         }
       }
     });

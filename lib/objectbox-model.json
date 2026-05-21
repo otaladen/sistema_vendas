@@ -5,7 +5,7 @@
   "entities": [
     {
       "id": "1:805574422642691043",
-      "lastPropertyId": "12:7292283824246218916",
+      "lastPropertyId": "14:3971069615921588392",
       "name": "ItemVenda",
       "properties": [
         {
@@ -74,13 +74,23 @@
           "id": "12:7292283824246218916",
           "name": "tipoEntregaItem",
           "type": 9
+        },
+        {
+          "id": "13:5975107102849280372",
+          "name": "promocaoId",
+          "type": 6
+        },
+        {
+          "id": "14:3971069615921588392",
+          "name": "promocaoNomeSnapshot",
+          "type": 9
         }
       ],
       "relations": []
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "39:2186671636523465925",
+      "lastPropertyId": "40:6382696563161980443",
       "name": "Produto",
       "properties": [
         {
@@ -281,6 +291,11 @@
           "id": "39:2186671636523465925",
           "name": "ultimaVendaEm",
           "type": 10
+        },
+        {
+          "id": "40:6382696563161980443",
+          "name": "apelidosBusca",
+          "type": 9
         }
       ],
       "relations": []
@@ -517,7 +532,7 @@
     },
     {
       "id": "4:8923372746033765628",
-      "lastPropertyId": "25:2510086867183108992",
+      "lastPropertyId": "39:2745183792374387108",
       "name": "Cliente",
       "properties": [
         {
@@ -663,6 +678,80 @@
           "indexId": "29:995946862125229322",
           "type": 9,
           "flags": 2048
+        },
+        {
+          "id": "26:2971512068783126428",
+          "name": "codigoInterno",
+          "indexId": "38:4830013373663003548",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "27:3010532820599149310",
+          "name": "segmento",
+          "indexId": "39:642356529753209629",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "28:4960418574570386359",
+          "name": "categoriaComercial",
+          "type": 9
+        },
+        {
+          "id": "29:8003437271698877228",
+          "name": "vendedorResponsavelId",
+          "type": 6
+        },
+        {
+          "id": "30:3274653003929443928",
+          "name": "tabelaPrecoPadrao",
+          "type": 9
+        },
+        {
+          "id": "31:8686618983008231646",
+          "name": "prazoPagamentoDias",
+          "type": 6
+        },
+        {
+          "id": "32:7412758031172239164",
+          "name": "bloqueadoFiado",
+          "type": 1
+        },
+        {
+          "id": "33:7838680241646335371",
+          "name": "motivoBloqueio",
+          "type": 9
+        },
+        {
+          "id": "34:5592460366664595632",
+          "name": "inscricaoMunicipal",
+          "type": 9
+        },
+        {
+          "id": "35:8036393088001591923",
+          "name": "indicadorIe",
+          "type": 9
+        },
+        {
+          "id": "36:8914794344674050040",
+          "name": "contatoPrincipalNome",
+          "type": 9
+        },
+        {
+          "id": "37:6565563825094125362",
+          "name": "contatoPrincipalCargo",
+          "type": 9
+        },
+        {
+          "id": "38:9097032293151480493",
+          "name": "origemCadastro",
+          "type": 9
+        },
+        {
+          "id": "39:2745183792374387108",
+          "name": "atualizadoEm",
+          "type": 10
         }
       ],
       "relations": []
@@ -1665,10 +1754,200 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "22:7189445279000325763",
+      "lastPropertyId": "18:3061810598348876052",
+      "name": "Promocao",
+      "properties": [
+        {
+          "id": "1:4152730998524830938",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:3002918360634746208",
+          "name": "nome",
+          "indexId": "40:7241154195659105314",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "3:5235834659576984424",
+          "name": "descricao",
+          "type": 9
+        },
+        {
+          "id": "4:2712239085937350030",
+          "name": "dataInicio",
+          "type": 10
+        },
+        {
+          "id": "5:365452214133838062",
+          "name": "dataFim",
+          "type": 10
+        },
+        {
+          "id": "6:2084765542316057279",
+          "name": "ativa",
+          "type": 1
+        },
+        {
+          "id": "7:2909264598712975825",
+          "name": "prioridade",
+          "type": 6
+        },
+        {
+          "id": "8:1320380435438289575",
+          "name": "tipoRegra",
+          "type": 9
+        },
+        {
+          "id": "9:5679664800613366335",
+          "name": "valorRegra",
+          "type": 8
+        },
+        {
+          "id": "10:7537939692108229018",
+          "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "11:7867241761051714498",
+          "name": "segmentoCliente",
+          "type": 9
+        },
+        {
+          "id": "12:1375614314495732694",
+          "name": "tipoCampanha",
+          "type": 9
+        },
+        {
+          "id": "13:83336261255247560",
+          "name": "margemMinimaPercentual",
+          "type": 8
+        },
+        {
+          "id": "14:8809075578238674349",
+          "name": "limiteQuantidadeTotal",
+          "type": 6
+        },
+        {
+          "id": "15:1373080389130956569",
+          "name": "quantidadeVendidaPromo",
+          "type": 6
+        },
+        {
+          "id": "16:813667131516798797",
+          "name": "leveQuantidade",
+          "type": 6
+        },
+        {
+          "id": "17:1093712602207839110",
+          "name": "pagueQuantidade",
+          "type": 6
+        },
+        {
+          "id": "18:3061810598348876052",
+          "name": "precoCombo",
+          "type": 8
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "23:3918425010437702369",
+      "lastPropertyId": "8:4268311803884508620",
+      "name": "PromocaoItem",
+      "properties": [
+        {
+          "id": "1:966018518159822602",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:7432499412022598544",
+          "name": "produtoAlvoId",
+          "type": 6
+        },
+        {
+          "id": "3:4906482937399619299",
+          "name": "categoria",
+          "type": 9
+        },
+        {
+          "id": "4:6266850449820699080",
+          "name": "subcategoria",
+          "type": 9
+        },
+        {
+          "id": "5:2544889440643601802",
+          "name": "quantidadeMinima",
+          "type": 6
+        },
+        {
+          "id": "6:8526427277425604743",
+          "name": "ordem",
+          "type": 6
+        },
+        {
+          "id": "7:8270736702580076582",
+          "name": "promocaoId",
+          "indexId": "41:122827850840675585",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Promocao"
+        },
+        {
+          "id": "8:4268311803884508620",
+          "name": "quantidadeMaximaPromo",
+          "type": 6
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "24:4667932850296247372",
+      "lastPropertyId": "5:5884877362803622755",
+      "name": "PromocaoComboItem",
+      "properties": [
+        {
+          "id": "1:4026804578538288033",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:6849939505849915321",
+          "name": "produtoAlvoId",
+          "type": 6
+        },
+        {
+          "id": "3:6125698278913956204",
+          "name": "quantidade",
+          "type": 6
+        },
+        {
+          "id": "4:8580544890264021179",
+          "name": "ordem",
+          "type": 6
+        },
+        {
+          "id": "5:5884877362803622755",
+          "name": "promocaoId",
+          "indexId": "42:1371143627473199472",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Promocao"
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "21:491656429780770622",
-  "lastIndexId": "37:5307829810048413015",
+  "lastEntityId": "24:4667932850296247372",
+  "lastIndexId": "42:1371143627473199472",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

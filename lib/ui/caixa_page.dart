@@ -30,6 +30,7 @@ import '../model/vendedor.dart';
 import '../services/cupom_nao_fiscal_venda_pdf.dart';
 import '../services/fiscal_service.dart';
 import '../services/print_service.dart';
+import 'clientes_page.dart';
 import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
 import 'widgets/receber_fiado_panel.dart';
@@ -99,10 +100,7 @@ class _CaixaPageState extends State<CaixaPage> {
   void initState() {
     super.initState();
     _mensageriaRepository = MensageriaRepository();
-    _clientesAtivos = widget.clienteRepository
-        .listarTodos()
-        .where((c) => c.ativo)
-        .toList();
+    _atualizarListaClientesAtivos();
     _carregarLimiteDivergenciaCaixa();
     _carregarSessaoCaixa();
     _carregarOrcamentos();
@@ -3361,6 +3359,33 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
+  void _atualizarListaClientesAtivos() {
+    _clientesAtivos = widget.clienteRepository
+        .listarTodos()
+        .where((c) => c.ativo)
+        .toList()
+      ..sort(
+        (a, b) => a.nomeRazao.toLowerCase().compareTo(b.nomeRazao.toLowerCase()),
+      );
+  }
+
+  Future<int?> _abrirCadastroNovoCliente() async {
+    final cliente = await Navigator.push<Cliente>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClientesPage(
+          clienteRepository: widget.clienteRepository,
+          vendaRepository: widget.vendaRepository,
+          vendedorRepository: widget.vendedorRepository,
+          retornarClienteAoSalvar: true,
+        ),
+      ),
+    );
+    if (!mounted || cliente == null) return null;
+    setState(_atualizarListaClientesAtivos);
+    return cliente.id;
+  }
+
   Future<void> _vincularClienteAgora() async {
     final venda = _selecionado;
     if (venda == null) return;
@@ -3372,28 +3397,62 @@ class _CaixaPageState extends State<CaixaPage> {
           builder: (context, setDialogState) {
             return AlertDialog(
               title: const Text('Vincular cliente ao orcamento'),
-              content: DropdownButtonFormField<int?>(
-                initialValue: clienteSelecionadoId,
-                decoration: const InputDecoration(
-                  labelText: 'Cliente (opcional)',
-                ),
-                items: [
-                  const DropdownMenuItem<int?>(
-                    value: null,
-                    child: Text('Sem cliente'),
-                  ),
-                  ..._clientesAtivos.map(
-                    (c) => DropdownMenuItem<int?>(
-                      value: c.id,
-                      child: Text(c.nomeRazao),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final novoId = await _abrirCadastroNovoCliente();
+                        if (novoId == null) return;
+                        setDialogState(() {
+                          clienteSelecionadoId = novoId;
+                        });
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Cliente cadastrado. Toque Salvar para vincular ao orcamento.',
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.person_add_alt_1_outlined),
+                      label: const Text('Cadastrar novo cliente'),
                     ),
-                  ),
-                ],
-                onChanged: (value) {
-                  setDialogState(() {
-                    clienteSelecionadoId = value;
-                  });
-                },
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<int?>(
+                      key: ValueKey<int?>(clienteSelecionadoId),
+                      initialValue: clienteSelecionadoId,
+                      decoration: const InputDecoration(
+                        labelText: 'Cliente (opcional)',
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Sem cliente'),
+                        ),
+                        ..._clientesAtivos.map(
+                          (c) => DropdownMenuItem<int?>(
+                            value: c.id,
+                            child: Text(
+                              c.nomeRazao,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        setDialogState(() {
+                          clienteSelecionadoId = value;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(

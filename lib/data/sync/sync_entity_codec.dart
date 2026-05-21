@@ -19,6 +19,7 @@ class SyncEntityCodec {
       'fornecedor': p.fornecedor,
       'fabricante': p.fabricante,
       'codigoBarras': p.codigoBarras,
+      'apelidosBusca': p.apelidosBusca,
       'fotoPath': p.fotoPath,
       'localizacao': p.localizacao,
       'ncm': p.ncm,
@@ -61,6 +62,7 @@ class SyncEntityCodec {
       fornecedor: (m['fornecedor'] ?? '').toString(),
       fabricante: (m['fabricante'] ?? '').toString(),
       codigoBarras: (m['codigoBarras'] ?? '').toString(),
+      apelidosBusca: (m['apelidosBusca'] ?? '').toString(),
       fotoPath: (m['fotoPath'] ?? '').toString(),
       localizacao: (m['localizacao'] ?? '').toString(),
       ncm: (m['ncm'] ?? '').toString(),
@@ -99,6 +101,14 @@ class SyncEntityCodec {
     return {
       'id': c.id,
       'tipoPessoa': c.tipoPessoa,
+      'codigoInterno': c.codigoInterno,
+      'segmento': c.segmento,
+      'categoriaComercial': c.categoriaComercial,
+      'vendedorResponsavelId': c.vendedorResponsavelId,
+      'tabelaPrecoPadrao': c.tabelaPrecoPadrao,
+      'prazoPagamentoDias': c.prazoPagamentoDias,
+      'bloqueadoFiado': c.bloqueadoFiado,
+      'motivoBloqueio': c.motivoBloqueio,
       'nomeRazao': c.nomeRazao,
       'nomeFantasia': c.nomeFantasia,
       'documento': c.documento,
@@ -106,9 +116,13 @@ class SyncEntityCodec {
       'dataNascimento': c.dataNascimento?.toUtc().toIso8601String(),
       'sexo': c.sexo,
       'inscricaoEstadual': c.inscricaoEstadual,
+      'inscricaoMunicipal': c.inscricaoMunicipal,
+      'indicadorIe': c.indicadorIe,
       'telefone': c.telefone,
       'whatsapp': c.whatsapp,
       'email': c.email,
+      'contatoPrincipalNome': c.contatoPrincipalNome,
+      'contatoPrincipalCargo': c.contatoPrincipalCargo,
       'cep': c.cep,
       'endereco': c.endereco,
       'numero': c.numero,
@@ -120,8 +134,10 @@ class SyncEntityCodec {
       'limiteCredito': c.limiteCredito,
       'observacoes': c.observacoes,
       'ocupacao': c.ocupacao,
+      'origemCadastro': c.origemCadastro,
       'ativo': c.ativo,
       'criadoEm': c.criadoEm.toUtc().toIso8601String(),
+      'atualizadoEm': c.atualizadoEm.toUtc().toIso8601String(),
     };
   }
 
@@ -129,6 +145,14 @@ class SyncEntityCodec {
     return Cliente(
       id: (m['id'] as num?)?.toInt() ?? 0,
       tipoPessoa: (m['tipoPessoa'] ?? 'fisica').toString(),
+      codigoInterno: (m['codigoInterno'] ?? '').toString(),
+      segmento: (m['segmento'] ?? '').toString(),
+      categoriaComercial: (m['categoriaComercial'] ?? '').toString(),
+      vendedorResponsavelId: (m['vendedorResponsavelId'] as num?)?.toInt() ?? 0,
+      tabelaPrecoPadrao: (m['tabelaPrecoPadrao'] ?? 'preco1').toString(),
+      prazoPagamentoDias: (m['prazoPagamentoDias'] as num?)?.toInt() ?? 0,
+      bloqueadoFiado: m['bloqueadoFiado'] == true,
+      motivoBloqueio: (m['motivoBloqueio'] ?? '').toString(),
       nomeRazao: (m['nomeRazao'] ?? '').toString(),
       nomeFantasia: (m['nomeFantasia'] ?? '').toString(),
       documento: (m['documento'] ?? '').toString(),
@@ -138,9 +162,13 @@ class SyncEntityCodec {
       )?.toUtc(),
       sexo: (m['sexo'] ?? '').toString(),
       inscricaoEstadual: (m['inscricaoEstadual'] ?? '').toString(),
+      inscricaoMunicipal: (m['inscricaoMunicipal'] ?? '').toString(),
+      indicadorIe: (m['indicadorIe'] ?? '').toString(),
       telefone: (m['telefone'] ?? '').toString(),
       whatsapp: (m['whatsapp'] ?? '').toString(),
       email: (m['email'] ?? '').toString(),
+      contatoPrincipalNome: (m['contatoPrincipalNome'] ?? '').toString(),
+      contatoPrincipalCargo: (m['contatoPrincipalCargo'] ?? '').toString(),
       cep: (m['cep'] ?? '').toString(),
       endereco: (m['endereco'] ?? '').toString(),
       numero: (m['numero'] ?? '').toString(),
@@ -152,8 +180,13 @@ class SyncEntityCodec {
       limiteCredito: (m['limiteCredito'] as num?)?.toDouble() ?? 0,
       observacoes: (m['observacoes'] ?? '').toString(),
       ocupacao: (m['ocupacao'] ?? '').toString(),
-      ativo: m['ativo'] == true,
+      origemCadastro: (m['origemCadastro'] ?? '').toString(),
+      ativo: m['ativo'] != false,
       criadoEm: DateTime.tryParse((m['criadoEm'] ?? '').toString())?.toUtc(),
+      atualizadoEm: DateTime.tryParse(
+            (m['atualizadoEm'] ?? m['criadoEm'] ?? '').toString(),
+          )?.toUtc() ??
+          DateTime.now().toUtc(),
     );
   }
 
@@ -204,6 +237,8 @@ class SyncEntityCodec {
         'precoTipo': i.precoTipo,
         'precoUnitario': i.precoUnitario,
         'precoCustoUnitario': i.precoCustoUnitario,
+        'promocaoId': i.promocaoId,
+        'promocaoNomeSnapshot': i.promocaoNomeSnapshot,
         'produtoId': i.produto.targetId,
       });
     }
@@ -319,6 +354,8 @@ class SyncEntityCodec {
       precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
       precoUnitario: (m['precoUnitario'] as num?)?.toDouble() ?? 0,
       precoCustoUnitario: (m['precoCustoUnitario'] as num?)?.toDouble() ?? 0,
+      promocaoId: (m['promocaoId'] as num?)?.toInt() ?? 0,
+      promocaoNomeSnapshot: (m['promocaoNomeSnapshot'] ?? '').toString(),
     );
   }
 }

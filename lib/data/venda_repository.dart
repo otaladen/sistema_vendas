@@ -3,12 +3,16 @@ import '../domain/entrega_venda_helper.dart';
 import '../domain/limite_credito_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
+import '../domain/promocao_cadastro.dart';
+import '../domain/promocao_preco_service.dart';
+import 'promocao_repository.dart';
 import '../services/compras_preditivas_service.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
 import '../model/linha_devolucao_entrada.dart';
 import '../model/linha_troca_saida.dart';
 import '../model/produto.dart';
+import 'produto_busca_util.dart';
 import '../model/registro_devolucao.dart';
 import '../model/venda.dart';
 import '../objectbox.g.dart';
@@ -92,6 +96,38 @@ class PeriodoFiltro {
 }
 
 /// Linha de saida do produto em vendas finalizadas (relatorio por periodo).
+class VendaPromocaoRelatorioLinha {
+  const VendaPromocaoRelatorioLinha({
+    required this.dataVenda,
+    required this.vendaId,
+    required this.nota,
+    required this.promocaoId,
+    required this.promocaoNome,
+    required this.produtoNome,
+    required this.codigoInterno,
+    required this.quantidade,
+    required this.valorUnitario,
+    required this.total,
+    required this.lucro,
+    required this.clienteNome,
+    required this.itemVendaId,
+  });
+
+  final DateTime dataVenda;
+  final int vendaId;
+  final int nota;
+  final int promocaoId;
+  final String promocaoNome;
+  final String produtoNome;
+  final String codigoInterno;
+  final int quantidade;
+  final double valorUnitario;
+  final double total;
+  final double lucro;
+  final String clienteNome;
+  final int itemVendaId;
+}
+
 class SaidaProdutoRelatorioLinha {
   const SaidaProdutoRelatorioLinha({
     required this.dataVenda,
@@ -125,6 +161,8 @@ class ItemVendaInput {
     required this.precoUnitario,
     this.precoTipo = 'preco1',
     this.tipoEntregaItem = EntregaVendaHelper.tipoRetirada,
+    this.promocaoId = 0,
+    this.promocaoNomeSnapshot = '',
   });
 
   final int produtoId;
@@ -132,6 +170,8 @@ class ItemVendaInput {
   final double precoUnitario;
   final String precoTipo;
   final String tipoEntregaItem;
+  final int promocaoId;
+  final String promocaoNomeSnapshot;
 }
 
 ItemVenda _criarItemVendaFromInput(
@@ -145,6 +185,8 @@ ItemVenda _criarItemVendaFromInput(
     precoUnitario: input.precoUnitario,
     precoCustoUnitario: produto.precoCusto,
     tipoEntregaItem: EntregaVendaHelper.normalizarTipoItem(input.tipoEntregaItem),
+    promocaoId: input.promocaoId,
+    promocaoNomeSnapshot: input.promocaoNomeSnapshot,
   );
 }
 
@@ -714,6 +756,16 @@ class VendaRepository {
         mensagem: 'Cliente nao encontrado para validar limite de credito.',
       );
     }
+    if (cliente.bloqueadoFiado) {
+      final motivo = cliente.motivoBloqueio.trim();
+      return ValidacaoLimiteCredito(
+        permitido: false,
+        mensagem: motivo.isEmpty
+            ? 'Cliente com fiado bloqueado no cadastro.'
+            : 'Cliente com fiado bloqueado: $motivo',
+        nomeCliente: cliente.nomeRazao,
+      );
+    }
     if (cliente.limiteCredito <= 0) {
       return ValidacaoLimiteCredito.semLimiteConfigurado();
     }
@@ -796,6 +848,57 @@ class VendaRepository {
               !venda.data.toUtc().isAfter(fimUtc),
         )
         .toList();
+  }
+
+  /// Linhas de vendas finalizadas com promocao aplicada no periodo.
+  List<VendaPromocaoRelatorioLinha> listarVendasPromocaoPeriodo({
+    required DateTime inicio,
+    required DateTime fim,
+    int? promocaoId,
+  }) {
+    final inicioUtc = inicio.toUtc();
+    final fimUtc = fim.toUtc();
+    final out = <VendaPromocaoRelatorioLinha>[];
+    for (final v in listarTodas()) {
+      if (v.status != 'finalizada' || v.cancelada) continue;
+      final data = v.data.toUtc();
+      if (data.isBefore(inicioUtc) || data.isAfter(fimUtc)) continue;
+      final cli = v.cliente.target;
+      final nomeCli = (cli?.nomeRazao ?? '').trim();
+      final nota = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
+      for (final item in v.itens) {
+        if (item.promocaoId <= 0) continue;
+        if (promocaoId != null && item.promocaoId != promocaoId) continue;
+        final qtd = item.quantidade - item.quantidadeDevolvida;
+        if (qtd <= 0) continue;
+        final nomePromo = item.promocaoNomeSnapshot.trim().isNotEmpty
+            ? item.promocaoNomeSnapshot.trim()
+            : 'Promocao #${item.promocaoId}';
+        out.add(
+          VendaPromocaoRelatorioLinha(
+            dataVenda: v.data.toLocal(),
+            vendaId: v.id,
+            nota: nota,
+            promocaoId: item.promocaoId,
+            promocaoNome: nomePromo,
+            produtoNome: item.nomeProduto,
+            codigoInterno: item.produto.target?.codigoInterno ?? '',
+            quantidade: qtd,
+            valorUnitario: item.precoUnitario,
+            total: qtd * item.precoUnitario,
+            lucro: qtd * (item.precoUnitario - item.precoCustoUnitario),
+            clienteNome: nomeCli.isEmpty ? '-' : nomeCli,
+            itemVendaId: item.id,
+          ),
+        );
+      }
+    }
+    out.sort((a, b) {
+      final c = b.dataVenda.compareTo(a.dataVenda);
+      if (c != 0) return c;
+      return b.vendaId.compareTo(a.vendaId);
+    });
+    return out;
   }
 
   /// Itens de venda finalizada (nao cancelada) com o [produtoId], data da venda no intervalo.
@@ -1040,12 +1143,9 @@ class VendaRepository {
     return novoId;
   }
 
-  static const String _codigoProdutoFreteRetiradaFutura =
-      '__FRETE_RET_FUTURA__';
-
   int _obterOuCriarProdutoFreteRetiradaFutura() {
     final q = _db.produtoBox
-        .query(Produto_.codigoInterno.equals(_codigoProdutoFreteRetiradaFutura))
+        .query(Produto_.codigoInterno.equals(kCodigoInternoFreteRetiradaFutura))
         .build();
     try {
       final existente = q.findFirst();
@@ -1056,7 +1156,7 @@ class VendaRepository {
       q.close();
     }
     final novo = Produto(
-      codigoInterno: _codigoProdutoFreteRetiradaFutura,
+      codigoInterno: kCodigoInternoFreteRetiradaFutura,
       nome: 'Servico: Frete carreto (retirada futura)',
       quantidadeMinima: 0,
       precoCusto: 0,
@@ -1501,6 +1601,53 @@ class VendaRepository {
     _notificarRedeAposEscrita();
   }
 
+  /// Preco promocional na data de fechamento; mantem desconto implicito ja aplicado.
+  void _reaplicarPromocoesAoFecharOrcamento(Venda venda, DateTime dataFechamento) {
+    final promoSvc = PromocaoPrecoService(PromocaoRepository(_db));
+    final descontoMantido = venda.descontoImplicitoTotal;
+    final segmento = venda.cliente.target?.segmento;
+    var somaItens = 0.0;
+    var custo = 0.0;
+    for (final item in venda.itens) {
+      final produto = item.produto.target;
+      if (produto == null) continue;
+      final tipoLista = item.precoTipo == PromocaoCadastro.precoTipoPromo
+          ? 'preco1'
+          : item.precoTipo;
+      final r = promoSvc.resolver(
+        produto,
+        dataReferencia: dataFechamento,
+        quantidade: item.quantidade,
+        precoTipoLista: tipoLista,
+        segmentoCliente: segmento,
+      );
+      var precoUnit = r.precoFinal;
+      if (r.promocaoId > 0) {
+        final promo = PromocaoRepository(_db).obterPorId(r.promocaoId);
+        if (promo != null) {
+          precoUnit = PromocaoCadastro.aplicarLevePagueNoPreco(
+            tipoCampanha: promo.tipoCampanha,
+            precoBasePromo: precoUnit,
+            quantidade: item.quantidade,
+            leveQuantidade: promo.leveQuantidade,
+            pagueQuantidade: promo.pagueQuantidade,
+          );
+        }
+      }
+      item.precoUnitario = precoUnit;
+      item.precoTipo = r.precoTipo;
+      item.promocaoId = r.promocaoId;
+      item.promocaoNomeSnapshot = r.promocaoNome;
+      _db.itemVendaBox.put(item);
+      somaItens += item.subtotal;
+      custo += item.subtotalCusto;
+    }
+    final bruto = somaItens + venda.valorFrete;
+    venda.custoTotal = custo;
+    venda.total = (bruto - descontoMantido).clamp(0, double.infinity);
+    venda.lucroTotal = venda.total - custo;
+  }
+
   void converterOrcamentoParaVenda(
     int vendaId, {
     bool permitirVendaSemEstoque = true,
@@ -1517,6 +1664,7 @@ class VendaRepository {
       final filhoFreteRetirada = venda.vendaOrigemFreteRetiradaId > 0;
 
       if (!filhoFreteRetirada) {
+        _reaplicarPromocoesAoFecharOrcamento(venda, DateTime.now());
         EntregaVendaHelper.aplicarLegadoTipoUnicoNosItensSeNecessario(venda);
         venda.carretoReservaAteSaida = venda.itens.any(
           (i) =>
@@ -1569,7 +1717,25 @@ class VendaRepository {
         _migrarVendaMaeRetiradaFuturaParaCarretoNaTransacao(venda);
       }
     });
+    _registrarContadoresPromocaoAposFinalizar(vendaId);
     _notificarRedeAposEscrita();
+  }
+
+  void _registrarContadoresPromocaoAposFinalizar(int vendaId) {
+    final venda = _db.vendaBox.get(vendaId);
+    if (venda == null) return;
+    final porPromo = <int, int>{};
+    for (final item in venda.itens) {
+      if (item.promocaoId <= 0) continue;
+      final q = item.quantidade - item.quantidadeDevolvida;
+      if (q <= 0) continue;
+      porPromo[item.promocaoId] = (porPromo[item.promocaoId] ?? 0) + q;
+    }
+    if (porPromo.isEmpty) return;
+    final promoRepo = PromocaoRepository(_db);
+    for (final e in porPromo.entries) {
+      promoRepo.registrarVendaPromocao(e.key, e.value);
+    }
   }
 
   /// Unidades do item que ainda seguem no carreto ao marcar "Saiu" (apos retiradas na loja).

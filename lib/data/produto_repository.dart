@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../model/historico_entrada.dart';
 import '../model/produto.dart';
 import 'produto_busca_sinonimos.dart';
+import 'produto_busca_util.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
 import 'sync/sync_write_trigger.dart';
@@ -179,25 +180,50 @@ class ProdutoRepository extends ChangeNotifier {
     int limite = 50,
     bool somenteAtivos = true,
     bool somenteInativos = false,
+    bool excluirProdutosInternos = false,
   }) {
     _migrarCampoAtivoLegadoUmaVez();
     _garantirCachesAtualizados();
     final consultaBruta = termo.trim();
+
+    if (consultaBruta.contains('%')) {
+      final consultaCuringa = normalizarConsultaCuringa(
+        consultaBruta,
+        _normalizarTexto,
+      );
+      if (consultaUsaModoCuringa(consultaCuringa)) {
+        final curinga = parseConsultaCuringa(consultaCuringa);
+        if (curinga == null) return const [];
+        return _pesquisarModoCuringa(
+          segmentos: curinga.segmentos,
+          clienteId: clienteId,
+          limite: limite,
+          somenteAtivos: somenteAtivos,
+          somenteInativos: somenteInativos,
+          excluirProdutosInternos: excluirProdutosInternos,
+        );
+      }
+    }
+
     final consultaNormalizada = _normalizarTexto(consultaBruta);
-    final tokensBase = _tokenizar(consultaNormalizada);
-    final tokens =
-        expandirTokensBuscaComSinonimos(tokensBase).toSet().toList();
+    final parseObra = tokenizarConsultaObra(consultaNormalizada);
+    final tokensSignificativos = parseObra.tokensSignificativos;
+    final tokensExpandidos = {
+      ...tokensSignificativos,
+      ...expandirTokensBuscaComSinonimos(tokensSignificativos),
+      ...expandirTokensMedidasObra(tokensSignificativos),
+    }.toList();
     if (consultaNormalizada.isEmpty) {
       final ordenados = [..._cacheDocs]
         ..sort((a, b) => a.nomeNormalizado.compareTo(b.nomeNormalizado));
-      List<_ProdutoBuscaDoc> docs;
-      if (somenteInativos) {
-        docs = ordenados.where((d) => !d.produto.ativo).toList();
-      } else if (somenteAtivos) {
-        docs = ordenados.where((d) => d.produto.ativo).toList();
-      } else {
-        docs = ordenados;
-      }
+      final docs = ordenados.where(
+        (d) => _incluirDocNaPesquisa(
+          d,
+          somenteAtivos: somenteAtivos,
+          somenteInativos: somenteInativos,
+          excluirProdutosInternos: excluirProdutosInternos,
+        ),
+      );
       return docs.map((d) => d.produto).take(limite).toList();
     }
 
@@ -207,15 +233,24 @@ class ProdutoRepository extends ChangeNotifier {
         : _pontuacaoPorCliente(clienteId);
 
     for (final doc in _cacheDocs) {
-      if (somenteInativos) {
-        if (doc.produto.ativo) continue;
-      } else if (somenteAtivos && !doc.produto.ativo) {
+      if (!_incluirDocNaPesquisa(
+        doc,
+        somenteAtivos: somenteAtivos,
+        somenteInativos: somenteInativos,
+        excluirProdutosInternos: excluirProdutosInternos,
+      )) {
         continue;
       }
       final score = _scoreProduto(
         doc,
         consultaNormalizada: consultaNormalizada,
-        tokens: tokens,
+        consultaCompacta: parseObra.consultaCompacta,
+        frasesConsulta: parseObra.frases,
+        tokensSignificativos: tokensSignificativos,
+        tokensExpandidos: tokensExpandidos,
+        palavrasObrigatorias: palavrasObrigatoriasConsultaObra(
+          tokensSignificativos,
+        ),
         scoreHistoricoVenda: _cacheScoreHistorico[doc.produto.id] ?? 0,
         scoreCliente: scoreCliente[doc.produto.id] ?? 0,
       );
@@ -237,6 +272,207 @@ class ProdutoRepository extends ChangeNotifier {
           });
 
     return resultados.map((d) => d.produto).take(limite).toList();
+  }
+
+  bool _incluirDocNaPesquisa(
+    _ProdutoBuscaDoc doc, {
+    required bool somenteAtivos,
+    required bool somenteInativos,
+    required bool excluirProdutosInternos,
+  }) {
+    if (excluirProdutosInternos &&
+        produtoEhCadastroInternoSistema(doc.produto)) {
+      return false;
+    }
+    if (somenteInativos) return !doc.produto.ativo;
+    if (somenteAtivos) return doc.produto.ativo;
+    return true;
+  }
+
+  List<Produto> _pesquisarModoCuringa({
+    required List<String> segmentos,
+    int? clienteId,
+    required int limite,
+    required bool somenteAtivos,
+    required bool somenteInativos,
+    required bool excluirProdutosInternos,
+  }) {
+    final scorePorProduto = <int, double>{};
+    final scoreCliente = clienteId == null
+        ? const <int, double>{}
+        : _pontuacaoPorCliente(clienteId);
+
+    for (final doc in _cacheDocs) {
+      if (!_incluirDocNaPesquisa(
+        doc,
+        somenteAtivos: somenteAtivos,
+        somenteInativos: somenteInativos,
+        excluirProdutosInternos: excluirProdutosInternos,
+      )) {
+        continue;
+      }
+      final score = _scoreProdutoCuringa(
+        doc,
+        segmentos: segmentos,
+        scoreHistoricoVenda: _cacheScoreHistorico[doc.produto.id] ?? 0,
+        scoreCliente: scoreCliente[doc.produto.id] ?? 0,
+      );
+      if (score > 0) {
+        scorePorProduto[doc.produto.id] = score;
+      }
+    }
+
+    final resultados =
+        _cacheDocs
+            .where((d) => scorePorProduto.containsKey(d.produto.id))
+            .toList()
+          ..sort((a, b) {
+            final scoreA = scorePorProduto[a.produto.id] ?? 0;
+            final scoreB = scorePorProduto[b.produto.id] ?? 0;
+            final byScore = scoreB.compareTo(scoreA);
+            if (byScore != 0) return byScore;
+            return a.nomeNormalizado.compareTo(b.nomeNormalizado);
+          });
+
+    return resultados.map((d) => d.produto).take(limite).toList();
+  }
+
+  double _scoreProdutoCuringa(
+    _ProdutoBuscaDoc doc, {
+    required List<String> segmentos,
+    required double scoreHistoricoVenda,
+    required double scoreCliente,
+  }) {
+    final nome = doc.nomeNormalizado;
+    var match = avaliarMatchCuringa(nome, segmentos);
+    var todosNoNome = match != null;
+
+    if (match == null) {
+      final texto = textoBuscaCuringaProduto(
+        nomeNormalizado: nome,
+        apelidosNormalizados: doc.apelidosNormalizados,
+      );
+      match = avaliarMatchCuringa(texto, segmentos);
+      if (match == null) return 0;
+      todosNoNome = false;
+    }
+
+    var score = 920.0;
+    score += segmentos.length * 200;
+    score += math.max(0, 380 - match.totalSpan);
+    score += math.max(0, 50 - nome.length * 0.12);
+    if (todosNoNome) {
+      score += 300;
+    } else {
+      score -= 80;
+    }
+
+    if (doc.produto.estoqueReal > 0) {
+      score += math.min(35, doc.produto.estoqueReal.toDouble());
+    } else {
+      score -= 60;
+    }
+
+    score += scoreHistoricoVenda * 0.4;
+    score += scoreCliente * 0.4;
+
+    return score;
+  }
+
+  /// Resolucao exata por GTIN (campo [Produto.codigoBarras] ou digitos em [apelidosBusca]).
+  Produto? buscarPorCodigoBarras(
+    String codigo, {
+    bool somenteAtivos = true,
+  }) {
+    _migrarCampoAtivoLegadoUmaVez();
+    final dig = normalizarCodigoBarrasConsulta(codigo);
+    if (dig.isEmpty) return null;
+    _garantirCachesAtualizados();
+    for (final doc in _cacheDocs) {
+      if (!doc.correspondeCodigoBarras(dig)) continue;
+      if (somenteAtivos && !doc.produto.ativo) return null;
+      return doc.produto;
+    }
+    final q = _db.produtoBox
+        .query(Produto_.codigoBarras.equals(dig))
+        .build();
+    try {
+      final lista = q.find();
+      for (final p in lista) {
+        if (somenteAtivos && !p.ativo) continue;
+        return p;
+      }
+    } finally {
+      q.close();
+    }
+    return null;
+  }
+
+  /// Motor de busca do PDV: ranking, curingas `%`, apelidos, EAN; sem produtos `__...__`.
+  List<Produto> pesquisarPadraoPdv(
+    String termo, {
+    int? clienteId,
+    int limite = 50,
+    bool somenteAtivos = true,
+    bool somenteInativos = false,
+  }) {
+    return pesquisar(
+      termo,
+      clienteId: clienteId,
+      limite: limite,
+      somenteAtivos: somenteAtivos,
+      somenteInativos: somenteInativos,
+      excluirProdutosInternos: true,
+    );
+  }
+
+  /// [pesquisarPadraoPdv] restrito a uma lista ja carregada (ex.: estoque).
+  List<Produto> pesquisarNaBasePadraoPdv(
+    String termo,
+    Iterable<Produto> base, {
+    int limite = 500,
+    bool somenteAtivos = false,
+    bool somenteInativos = false,
+  }) {
+    return pesquisarNaBase(
+      termo,
+      base,
+      limite: limite,
+      somenteAtivos: somenteAtivos,
+      somenteInativos: somenteInativos,
+      excluirProdutosInternos: true,
+    );
+  }
+
+  /// Aplica [pesquisar] sobre uma colecao ja carregada (mantem ordem do ranking).
+  List<Produto> pesquisarNaBase(
+    String termo,
+    Iterable<Produto> base, {
+    int limite = 500,
+    bool somenteAtivos = false,
+    bool somenteInativos = false,
+    bool excluirProdutosInternos = true,
+  }) {
+    final listaBase = base is List<Produto> ? base : base.toList();
+    final t = termo.trim();
+    if (t.isEmpty) return listaBase;
+    final idsBase = listaBase.map((p) => p.id).toSet();
+    return pesquisar(
+      t,
+      limite: limite,
+      somenteAtivos: somenteAtivos,
+      somenteInativos: somenteInativos,
+      excluirProdutosInternos: excluirProdutosInternos,
+    ).where((p) => idsBase.contains(p.id)).toList();
+  }
+
+  /// Leitor de barras: retorna produto unico quando a consulta e GTIN completo.
+  Produto? resolverLeitorCodigoBarras(
+    String termo, {
+    bool somenteAtivos = true,
+  }) {
+    if (!consultaPareceCodigoBarras(termo)) return null;
+    return buscarPorCodigoBarras(termo, somenteAtivos: somenteAtivos);
   }
 
   void _garantirCachesAtualizados() {
@@ -269,20 +505,44 @@ class ProdutoRepository extends ChangeNotifier {
 
   _ProdutoBuscaDoc _criarDocBusca(Produto produto) {
     final nome = _normalizarTexto(produto.nome);
+    final descricao = _normalizarTexto(produto.descricao);
     final codigoInterno = _normalizarTexto(produto.codigoInterno);
-    final codigoBarras = _normalizarTexto(produto.codigoBarras);
+    final codigoBarras = normalizarCodigoBarrasConsulta(produto.codigoBarras);
     final categoria = _normalizarTexto(produto.categoria);
+    final subcategoria = _normalizarTexto(produto.subcategoria);
     final marca = _normalizarTexto(produto.marca);
     final fornecedor = _normalizarTexto(produto.fornecedor);
     final fabricante = _normalizarTexto(produto.fabricante);
+    final apelidosBrutos = parseApelidosBusca(produto.apelidosBusca);
+    final apelidosNormalizados = apelidosBrutos
+        .map(_normalizarTexto)
+        .where((a) => a.isNotEmpty)
+        .toList();
+    final codigosBarrasAlternativos = codigosBarrasAlternativosDeApelidos(
+      apelidosBrutos,
+    );
+    final textoMedidas = [
+      nome,
+      descricao,
+      codigoInterno,
+      categoria,
+      subcategoria,
+      marca,
+      ...apelidosNormalizados,
+    ].join(' ');
+    final tokensMedidas = extrairTokensMedidasDeTexto(textoMedidas);
     final textoCompleto = [
       nome,
+      descricao,
       codigoInterno,
       codigoBarras,
       categoria,
+      subcategoria,
       marca,
       fornecedor,
       fabricante,
+      ...apelidosNormalizados,
+      ...tokensMedidas,
     ].join(' ');
     final palavras = textoCompleto
         .split(RegExp(r'\s+'))
@@ -292,12 +552,17 @@ class ProdutoRepository extends ChangeNotifier {
     return _ProdutoBuscaDoc(
       produto: produto,
       nomeNormalizado: nome,
+      nomeCompacto: compactarTextoBuscaObra(nome),
+      descricaoNormalizada: descricao,
       codigoInternoNormalizado: codigoInterno,
       codigoBarrasNormalizado: codigoBarras,
       categoriaNormalizada: categoria,
+      subcategoriaNormalizada: subcategoria,
       marcaNormalizada: marca,
       fornecedorNormalizado: fornecedor,
       fabricanteNormalizado: fabricante,
+      apelidosNormalizados: apelidosNormalizados,
+      codigosBarrasAlternativos: codigosBarrasAlternativos,
       palavrasBusca: palavras,
     );
   }
@@ -354,27 +619,69 @@ class ProdutoRepository extends ChangeNotifier {
   double _scoreProduto(
     _ProdutoBuscaDoc doc, {
     required String consultaNormalizada,
-    required List<String> tokens,
+    required String consultaCompacta,
+    required List<String> frasesConsulta,
+    required List<String> tokensSignificativos,
+    required List<String> tokensExpandidos,
+    required List<String> palavrasObrigatorias,
     required double scoreHistoricoVenda,
     required double scoreCliente,
   }) {
     final nome = doc.nomeNormalizado;
+    final nomeCompacto = doc.nomeCompacto;
+    final descricao = doc.descricaoNormalizada;
+
+    for (final palavra in palavrasObrigatorias) {
+      if (!textoContemTokenObra(nome, palavra)) {
+        return 0;
+      }
+    }
     final codigoInterno = doc.codigoInternoNormalizado;
     final codigoBarras = doc.codigoBarrasNormalizado;
+    final consultaDigitos = somenteDigitosBusca(consultaNormalizada);
     final camposSecundarios = [
       doc.categoriaNormalizada,
+      doc.subcategoriaNormalizada,
       doc.marcaNormalizada,
       doc.fornecedorNormalizado,
       doc.fabricanteNormalizado,
+      descricao,
     ];
 
     double score = 0;
 
-    if (consultaNormalizada == codigoBarras && codigoBarras.isNotEmpty) {
-      score += 1200;
+    if (doc.correspondeCodigoBarras(consultaDigitos) && consultaDigitos.isNotEmpty) {
+      score += 1500;
+    } else if (consultaDigitos.length >= 6 &&
+        codigoBarras.isNotEmpty &&
+        codigoBarras.endsWith(consultaDigitos)) {
+      score += 900;
     }
     if (consultaNormalizada == codigoInterno && codigoInterno.isNotEmpty) {
       score += 1000;
+    }
+    for (final apelido in doc.apelidosNormalizados) {
+      if (apelido == consultaNormalizada) {
+        score += 980;
+      } else if (apelido.contains(consultaNormalizada) &&
+          consultaNormalizada.length >= 3) {
+        score += 520;
+      }
+    }
+    if (consultaCompacta.length >= 5 &&
+        nomeCompacto.contains(consultaCompacta)) {
+      score += 1400;
+    }
+    for (final frase in frasesConsulta) {
+      if (frase.length < 4) continue;
+      if (nome.contains(frase)) {
+        score += 620;
+      } else {
+        final fc = compactarTextoBuscaObra(frase);
+        if (fc.length >= 4 && nomeCompacto.contains(fc)) {
+          score += 580;
+        }
+      }
     }
     if (nome.startsWith(consultaNormalizada)) {
       score += 700;
@@ -382,52 +689,98 @@ class ProdutoRepository extends ChangeNotifier {
     if (nome.contains(consultaNormalizada)) {
       score += 450;
     }
+    if (descricao.contains(consultaNormalizada) && consultaNormalizada.length >= 3) {
+      score += 280;
+    }
     if (doc.categoriaNormalizada.contains(consultaNormalizada) ||
         doc.marcaNormalizada.contains(consultaNormalizada)) {
       score += 200;
     }
 
-    var tokensComMatchForte = 0;
-    for (final token in tokens) {
+    var tokensSigMatchNome = 0;
+    var tokensSigMatch = 0;
+    for (final token in tokensSignificativos) {
+      if (token.isEmpty) continue;
+      final noNome = textoContemTokenObra(nome, token);
+      final noDescricao = textoContemTokenObra(descricao, token);
+      if (noNome || noDescricao) {
+        tokensSigMatch++;
+        if (noNome) {
+          tokensSigMatchNome++;
+          score += token.contains('/') || token.contains('x') ? 240 : 180;
+        } else {
+          score += 70;
+        }
+      }
+    }
+
+    if (tokensSignificativos.length >= 2) {
+      if (tokensSigMatchNome == tokensSignificativos.length) {
+        score += 520;
+      } else {
+        final faltam = tokensSignificativos.length - tokensSigMatchNome;
+        score -= 120.0 * faltam;
+      }
+      if (sequenciaTokensNoTexto(nome, tokensSignificativos)) {
+        score += 380;
+      }
+    }
+
+    var tokensExpMatch = 0;
+    for (final token in tokensExpandidos) {
       var tokenMatched = false;
       if (token.isEmpty) continue;
-      if (codigoBarras == token || codigoInterno == token) {
+      final tokenDigitos = somenteDigitosBusca(token);
+      if (doc.correspondeCodigoBarras(tokenDigitos) && tokenDigitos.isNotEmpty) {
+        score += 380;
+        tokenMatched = true;
+      } else if (codigoInterno == token) {
         score += 320;
         tokenMatched = true;
-      } else if (nome.startsWith(token)) {
-        score += 190;
+      } else if (doc.apelidosNormalizados.any(
+        (a) => a == token || (a.contains(token) && token.length >= 3),
+      )) {
+        score += 260;
         tokenMatched = true;
-      } else if (nome.contains(token)) {
-        score += 120;
+      } else if (textoContemTokenObra(nome, token)) {
+        score += token.length >= 4 || token.contains('/') ? 150 : 60;
         tokenMatched = true;
-      } else if (camposSecundarios.any((c) => c.contains(token))) {
-        score += 80;
+      } else if (camposSecundarios.any((c) => textoContemTokenObra(c, token))) {
+        score += 50;
         tokenMatched = true;
-      } else {
+      } else if (token.length >= 4) {
         final typo = _melhorDistanciaToken(token, doc.palavrasBusca);
         if (typo <= _limiteDistanciaTypos(token)) {
-          score += 45;
+          score += 35;
           tokenMatched = true;
         }
       }
       if (tokenMatched) {
-        tokensComMatchForte++;
+        tokensExpMatch++;
       }
     }
 
-    if (tokens.isNotEmpty && tokensComMatchForte == tokens.length) {
-      score += 90;
-    } else if (tokensComMatchForte == 0) {
+    if (tokensSignificativos.isNotEmpty &&
+        tokensSigMatch == tokensSignificativos.length) {
+      score += 120;
+    } else if (tokensExpMatch == 0 && tokensSigMatch == 0) {
       return 0;
     }
+
+    // Historico nao deve ultrapassar match forte de dimensao no nome.
+    final bonusHistorico = score >= 900
+        ? scoreHistoricoVenda * 0.35
+        : scoreHistoricoVenda;
+    final bonusCliente =
+        score >= 900 ? scoreCliente * 0.35 : scoreCliente;
 
     if (doc.produto.estoqueReal > 0) {
       score += math.min(40, doc.produto.estoqueReal.toDouble());
     } else {
       score -= 80;
     }
-    score += scoreHistoricoVenda;
-    score += scoreCliente;
+    score += bonusHistorico;
+    score += bonusCliente;
 
     return score;
   }
@@ -466,14 +819,6 @@ class ProdutoRepository extends ChangeNotifier {
       prev = curr;
     }
     return prev[b.length];
-  }
-
-  List<String> _tokenizar(String texto) {
-    return texto
-        .split(RegExp(r'\s+'))
-        .map((t) => t.trim())
-        .where((t) => t.isNotEmpty)
-        .toList();
   }
 
   String _normalizarTexto(String texto) {
@@ -620,22 +965,38 @@ class _ProdutoBuscaDoc {
   const _ProdutoBuscaDoc({
     required this.produto,
     required this.nomeNormalizado,
+    required this.nomeCompacto,
+    required this.descricaoNormalizada,
     required this.codigoInternoNormalizado,
     required this.codigoBarrasNormalizado,
     required this.categoriaNormalizada,
+    required this.subcategoriaNormalizada,
     required this.marcaNormalizada,
     required this.fornecedorNormalizado,
     required this.fabricanteNormalizado,
+    required this.apelidosNormalizados,
+    required this.codigosBarrasAlternativos,
     required this.palavrasBusca,
   });
 
   final Produto produto;
   final String nomeNormalizado;
+  final String nomeCompacto;
+  final String descricaoNormalizada;
   final String codigoInternoNormalizado;
   final String codigoBarrasNormalizado;
   final String categoriaNormalizada;
+  final String subcategoriaNormalizada;
   final String marcaNormalizada;
   final String fornecedorNormalizado;
   final String fabricanteNormalizado;
+  final List<String> apelidosNormalizados;
+  final List<String> codigosBarrasAlternativos;
   final List<String> palavrasBusca;
+
+  bool correspondeCodigoBarras(String digitos) {
+    if (digitos.isEmpty) return false;
+    if (codigoBarrasNormalizado == digitos) return true;
+    return codigosBarrasAlternativos.contains(digitos);
+  }
 }

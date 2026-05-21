@@ -4,6 +4,7 @@ import '../data/kit_orcamento_repository.dart';
 import '../data/produto_repository.dart';
 import '../model/kit_orcamento.dart';
 import '../model/produto.dart';
+import 'widgets/produto_busca_input.dart';
 
 /// Lista e edicao de kits para orcamento (cadastro).
 class KitsOrcamentoPage extends StatefulWidget {
@@ -174,7 +175,7 @@ class _KitOrcamentoEditPageState extends State<KitOrcamentoEditPage> {
 
   Future<void> _adicionarProduto() async {
     final buscaCtrl = TextEditingController();
-    List<Produto> resultados = widget.produtoRepository.pesquisar(
+    List<Produto> resultados = widget.produtoRepository.pesquisarPadraoPdv(
       '',
       limite: 50,
       somenteAtivos: false,
@@ -186,7 +187,7 @@ class _KitOrcamentoEditPageState extends State<KitOrcamentoEditPage> {
         return StatefulBuilder(
           builder: (ctx, setDlg) {
             void buscar(String t) {
-              resultados = widget.produtoRepository.pesquisar(
+              resultados = widget.produtoRepository.pesquisarPadraoPdv(
                 t,
                 limite: 50,
                 somenteAtivos: false,
@@ -204,11 +205,7 @@ class _KitOrcamentoEditPageState extends State<KitOrcamentoEditPage> {
                   children: [
                     TextField(
                       controller: buscaCtrl,
-                      decoration: const InputDecoration(
-                        hintText: 'Nome, SKU, codigo de barras...',
-                        prefixIcon: Icon(Icons.search),
-                        isDense: true,
-                      ),
+                      decoration: produtoBuscaInputDecoration(isDense: true),
                       onChanged: buscar,
                       autofocus: true,
                     ),

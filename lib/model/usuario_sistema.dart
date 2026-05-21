@@ -16,6 +16,7 @@ class UsuarioSistema {
     this.podeFinanceiro = false,
     this.podeConfiguracoes = false,
     this.podeAutorizarSegundaViaCupom = false,
+    this.podeAutorizarMargemVenda = false,
   });
 
   final String id;
@@ -36,6 +37,9 @@ class UsuarioSistema {
   /// Autoriza informar login/senha para emitir segunda via do cupom (caixa / listagem).
   final bool podeAutorizarSegundaViaCupom;
 
+  /// Autoriza venda abaixo da margem minima de campanha promocional.
+  final bool podeAutorizarMargemVenda;
+
   UsuarioSistema copyWith({
     String? id,
     String? nome,
@@ -53,6 +57,7 @@ class UsuarioSistema {
     bool? podeFinanceiro,
     bool? podeConfiguracoes,
     bool? podeAutorizarSegundaViaCupom,
+    bool? podeAutorizarMargemVenda,
   }) {
     return UsuarioSistema(
       id: id ?? this.id,
@@ -74,6 +79,8 @@ class UsuarioSistema {
       podeConfiguracoes: podeConfiguracoes ?? this.podeConfiguracoes,
       podeAutorizarSegundaViaCupom:
           podeAutorizarSegundaViaCupom ?? this.podeAutorizarSegundaViaCupom,
+      podeAutorizarMargemVenda:
+          podeAutorizarMargemVenda ?? this.podeAutorizarMargemVenda,
     );
   }
 
@@ -95,6 +102,7 @@ class UsuarioSistema {
       'podeFinanceiro': podeFinanceiro,
       'podeConfiguracoes': podeConfiguracoes,
       'podeAutorizarSegundaViaCupom': podeAutorizarSegundaViaCupom,
+      'podeAutorizarMargemVenda': podeAutorizarMargemVenda,
     };
   }
 
@@ -124,6 +132,7 @@ class UsuarioSistema {
         }
         return false;
       }(),
+      podeAutorizarMargemVenda: map['podeAutorizarMargemVenda'] == true,
     );
   }
 }

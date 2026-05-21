@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../main.dart';
 import '../data/produto_repository.dart';
+import '../domain/produto_unidade_exibicao.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../domain/produto_precificacao.dart';
@@ -23,6 +24,7 @@ import '../services/compras_preditivas_service.dart';
 import '../services/produto_imagem_busca_service.dart';
 import '../services/produto_imagem_service.dart';
 import 'widgets/abas_historico_produto_widget.dart';
+import 'widgets/produto_busca_input.dart';
 
 class _CadastroProdutoSalvarIntent extends Intent {
   const _CadastroProdutoSalvarIntent();
@@ -218,6 +220,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   final _fornecedorController = TextEditingController();
   final _fabricanteController = TextEditingController();
   final _codigoBarrasController = TextEditingController();
+  final _apelidosBuscaController = TextEditingController();
   final _ncmController = TextEditingController();
   final _cestController = TextEditingController();
   final _cfopVendaController = TextEditingController();
@@ -337,6 +340,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     _fornecedorController.dispose();
     _fabricanteController.dispose();
     _codigoBarrasController.dispose();
+    _apelidosBuscaController.dispose();
     _ncmController.dispose();
     _cestController.dispose();
     _cfopVendaController.dispose();
@@ -390,6 +394,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       _fornecedorController,
       _fabricanteController,
       _codigoBarrasController,
+      _apelidosBuscaController,
       _ncmController,
       _cestController,
       _cfopVendaController,
@@ -939,6 +944,20 @@ class _ProdutosPageState extends State<ProdutosPage>
                   ),
               ],
             ),
+            const SizedBox(height: _erpGap8),
+            _erpFieldLabel('Apelidos e codigos de busca', context),
+            TextField(
+              controller: _apelidosBuscaController,
+              minLines: 1,
+              maxLines: 3,
+              textInputAction: TextInputAction.next,
+              decoration: _erpInputDecoration(
+                context,
+                hint: 'Ex.: bacia sabara; cod fornecedor 8821; 7891234567890',
+                helper:
+                    'Nomes de balcao, SKU fornecedor ou EAN alternativo. Separe com ; ou quebra de linha.',
+              ),
+            ),
           ],
         ),
       ),
@@ -1249,6 +1268,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       _fornecedorController.clear();
       _fabricanteController.clear();
       _codigoBarrasController.clear();
+      _apelidosBuscaController.clear();
       _ncmController.clear();
       _cestController.clear();
       _cfopVendaController.clear();
@@ -2781,6 +2801,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     final fornecedor = _fornecedorController.text.trim();
     final fabricante = _fabricanteController.text.trim();
     final codigoBarras = _codigoBarrasController.text.trim();
+    final apelidosBusca = _apelidosBuscaController.text.trim();
     final ncm = _ncmController.text.replaceAll(RegExp(r'\D'), '');
     final cest = _cestController.text.replaceAll(RegExp(r'\D'), '');
     final cfopVenda = _cfopVendaController.text.trim();
@@ -2853,6 +2874,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       fornecedor: fornecedor,
       fabricante: fabricante,
       codigoBarras: codigoBarras,
+      apelidosBusca: apelidosBusca,
       fotoPath: fotoPathFinal,
       localizacao: localizacao,
       ncm: ncm,
@@ -2935,6 +2957,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       _fornecedorController.text = produto.fornecedor;
       _fabricanteController.text = produto.fabricante;
       _codigoBarrasController.text = produto.codigoBarras;
+      _apelidosBuscaController.text = produto.apelidosBusca;
       _fotoPathAtual = produto.fotoPath;
       _fotoOrigemLocalPath = null;
       _fotoFoiRemovida = false;
@@ -3655,7 +3678,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     final resultadosScrollController = ScrollController();
     final pesquisaFocusNode = FocusNode();
     var somenteInativosLista = false;
-    List<Produto> resultados = widget.produtoRepository.pesquisar(
+    List<Produto> resultados = widget.produtoRepository.pesquisarPadraoPdv(
       '',
       limite: 80,
       somenteAtivos: !somenteInativosLista,
@@ -3787,7 +3810,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                   setDialogState(() {
                                     somenteInativosLista = v;
                                     resultados = widget.produtoRepository
-                                        .pesquisar(
+                                        .pesquisarPadraoPdv(
                                           pesquisaController.text,
                                           limite: 80,
                                           somenteAtivos: !somenteInativosLista,
@@ -3821,13 +3844,10 @@ class _ProdutosPageState extends State<ProdutosPage>
                         controller: pesquisaController,
                         focusNode: pesquisaFocusNode,
                         autofocus: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Nome, SKU, marca, fornecedor...',
-                          prefixIcon: Icon(Icons.search),
-                        ),
+                        decoration: produtoBuscaInputDecoration(),
                         onChanged: (value) {
                           setDialogState(() {
-                            resultados = widget.produtoRepository.pesquisar(
+                            resultados = widget.produtoRepository.pesquisarPadraoPdv(
                               value,
                               limite: 80,
                               somenteAtivos: !somenteInativosLista,
@@ -3916,7 +3936,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                                       ),
                                       subtitle: RichText(
                                         text: spanComDestaque(
-                                          'SKU: ${produto.codigoInterno} | Categoria: ${produto.categoria.isEmpty ? '-' : produto.categoria}'
+                                          'SKU: ${produto.codigoInterno} | '
+                                          'Un: ${rotuloUnidadeProdutoLista(produto)} | '
+                                          'Categoria: ${produto.categoria.isEmpty ? '-' : produto.categoria}'
                                           '${produto.ativo ? '' : ' · Inativo'}',
                                           consulta,
                                           estiloSubtitulo,

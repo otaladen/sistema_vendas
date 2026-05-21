@@ -169,6 +169,44 @@ class VendasPage extends StatelessWidget {
                       clienteRepository: clienteRepository,
                       vendedorRepository: vendedorRepository,
                       produtoRepository: produtoRepository,
+                      onAbrirModuloEntregas: podeGerenciarEntregas
+                          ? () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => EntregasPage(
+                                    vendaRepository: vendaRepository,
+                                    produtoRepository: produtoRepository,
+                                    motoristaRepository: motoristaRepository,
+                                    usuarioAtual: usuarioAtual,
+                                    podeGerenciarStatusEntrega:
+                                        podeGerenciarEntregas,
+                                    podeRegistrarDevolucaoTrocaSemSenha:
+                                        podeManutencaoAuditoriaCaixa,
+                                  ),
+                                ),
+                              );
+                            }
+                          : null,
+                      onAbrirModuloCaixa: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CaixaPage(
+                              clienteRepository: clienteRepository,
+                              produtoRepository: produtoRepository,
+                              vendaRepository: vendaRepository,
+                              vendedorRepository: vendedorRepository,
+                              appConfigRepository: appConfigRepository,
+                              printService: printService,
+                              usuarioAtual: usuarioAtual,
+                              podeLeituraParcialCaixa: podeLeituraParcialCaixa,
+                              podeManutencaoAuditoriaCaixa:
+                                  podeManutencaoAuditoriaCaixa,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 );

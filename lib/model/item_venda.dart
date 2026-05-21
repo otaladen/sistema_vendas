@@ -17,6 +17,8 @@ class ItemVenda {
     this.precoTipo = 'preco1',
     required this.precoUnitario,
     required this.precoCustoUnitario,
+    this.promocaoId = 0,
+    this.promocaoNomeSnapshot = '',
   });
 
   @Id()
@@ -41,6 +43,12 @@ class ItemVenda {
   String precoTipo;
   double precoUnitario;
   double precoCustoUnitario;
+
+  /// Campanha aplicada na linha (0 = sem promocao).
+  int promocaoId;
+
+  /// Nome da campanha no momento da venda (relatorios).
+  String promocaoNomeSnapshot;
 
   final produto = ToOne<Produto>();
   final venda = ToOne<Venda>();

@@ -4,6 +4,8 @@ import '../../model/lancamento_funcionario.dart';
 import '../../model/historico_entrada.dart';
 import '../../model/historico_entrega.dart';
 import '../../model/kit_orcamento.dart';
+import '../../model/promocao.dart';
+import '../../model/promocao_item.dart';
 import '../../model/linha_devolucao_entrada.dart';
 import '../../model/linha_troca_saida.dart';
 import '../../model/mensagem_template.dart';
@@ -265,6 +267,53 @@ class SyncEntityCodecExtras {
       'ativo': k.ativo,
       'criadoEm': _dt(k.criadoEm),
       'itens': itens,
+    };
+  }
+
+  // --- Promocao (com itens embutidos) ---
+  static Map<String, dynamic> promocaoParaMap(Promocao p) {
+    final itens = <Map<String, dynamic>>[];
+    for (final it in p.itens) {
+      itens.add({
+        'id': it.id,
+        'produtoAlvoId': it.produtoAlvoId,
+        'categoria': it.categoria,
+        'subcategoria': it.subcategoria,
+        'quantidadeMinima': it.quantidadeMinima,
+        'quantidadeMaximaPromo': it.quantidadeMaximaPromo,
+        'ordem': it.ordem,
+      });
+    }
+    final comboItens = <Map<String, dynamic>>[];
+    for (final c in p.comboItens) {
+      comboItens.add({
+        'id': c.id,
+        'produtoAlvoId': c.produtoAlvoId,
+        'quantidade': c.quantidade,
+        'ordem': c.ordem,
+      });
+    }
+    return {
+      'id': p.id,
+      'nome': p.nome,
+      'descricao': p.descricao,
+      'dataInicio': _dt(p.dataInicio),
+      'dataFim': _dt(p.dataFim),
+      'ativa': p.ativa,
+      'prioridade': p.prioridade,
+      'tipoRegra': p.tipoRegra,
+      'valorRegra': p.valorRegra,
+      'segmentoCliente': p.segmentoCliente,
+      'tipoCampanha': p.tipoCampanha,
+      'margemMinimaPercentual': p.margemMinimaPercentual,
+      'limiteQuantidadeTotal': p.limiteQuantidadeTotal,
+      'quantidadeVendidaPromo': p.quantidadeVendidaPromo,
+      'leveQuantidade': p.leveQuantidade,
+      'pagueQuantidade': p.pagueQuantidade,
+      'precoCombo': p.precoCombo,
+      'criadoEm': _dt(p.criadoEm),
+      'itens': itens,
+      'comboItens': comboItens,
     };
   }
 

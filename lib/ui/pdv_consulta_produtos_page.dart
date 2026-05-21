@@ -3,13 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/produto_busca_util.dart';
 import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
+import '../domain/promocao_info_vigente.dart';
+import '../domain/promocao_preco_result.dart';
 import '../model/produto.dart';
 import 'pdv_consulta_preview_panel.dart';
 import 'pdv_pesquisa_comando.dart';
-import 'pdv_texto_destaque_busca.dart';
 import 'produto_detalhe_venda_page.dart';
+import 'widgets/pdv_consulta_linha_produto.dart';
 
 /// Resultado ao escolher (ou atalho rapido) na consulta de produtos do PDV.
 class PdvConsultaProdutoResult {
@@ -41,6 +44,8 @@ class PdvConsultaProdutosPage extends StatefulWidget {
     required this.formatarMoeda,
     required this.rotuloPreco,
     required this.precoUnitarioDe,
+    this.resolverPromocao,
+    this.campanhasVigentesDe,
   });
 
   final ProdutoRepository produtoRepository;
@@ -52,6 +57,10 @@ class PdvConsultaProdutosPage extends StatefulWidget {
   final String Function(double) formatarMoeda;
   final String Function(String) rotuloPreco;
   final double Function(Produto produto, String precoTipo) precoUnitarioDe;
+  final PromocaoPrecoResult Function(Produto produto, String precoTipo)?
+      resolverPromocao;
+  final List<PromocaoInfoVigente> Function(Produto produto)?
+      campanhasVigentesDe;
 
   @override
   State<PdvConsultaProdutosPage> createState() =>
@@ -59,7 +68,7 @@ class PdvConsultaProdutosPage extends StatefulWidget {
 }
 
 class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
-  static const double _alturaLinha = 60;
+  static const double _alturaLinha = PdvConsultaLinhaProduto.alturaLinha;
   static const double _larguraPainelPreview = 280;
   static const double _breakpointPainelLateral = 720;
 
@@ -111,6 +120,18 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
 
   void _agendarBuscaDigitacao() {
     _debounce?.cancel();
+    final comando = PdvPesquisaComando.parse(_pesquisaController.text);
+    final termo = comando.termoBusca;
+    if (consultaEanProvavelCompleto(termo)) {
+      _debounce = Timer(const Duration(milliseconds: 120), () {
+        if (!mounted) return;
+        _atualizarLista(
+          confirmarSeUmResultado: true,
+          manterFocoNaPesquisa: true,
+        );
+      });
+      return;
+    }
     _debounce = Timer(const Duration(milliseconds: 220), () {
       if (!mounted) return;
       _atualizarLista(manterFocoNaPesquisa: true);
@@ -134,12 +155,20 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           ? 'Nenhum produto ativo cadastrado'
           : 'Recentes e mais vendidos (30 dias)';
     } else {
-      lista = widget.produtoRepository.pesquisar(
+      final porBarras = widget.produtoRepository.resolverLeitorCodigoBarras(
         termo,
-        clienteId: widget.clienteId,
-        limite: 50,
       );
-      subtitulo = '${lista.length} resultado(s) para "$termo"';
+      if (porBarras != null) {
+        lista = [porBarras];
+        subtitulo = 'Codigo de barras: $termo';
+      } else {
+        lista = widget.produtoRepository.pesquisarPadraoPdv(
+          termo,
+          clienteId: widget.clienteId,
+          limite: 50,
+        );
+        subtitulo = '${lista.length} resultado(s) para "$termo"';
+      }
     }
 
     if (confirmarSeUmResultado && lista.length == 1) {
@@ -178,7 +207,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     void addId(int id) {
       if (id <= 0 || vistos.contains(id)) return;
       final p = widget.produtoRepository.obterPorId(id);
-      if (p == null || !p.ativo) return;
+      if (p == null || !p.ativo || produtoEhCadastroInternoSistema(p)) return;
       vistos.add(id);
       out.add(p);
     }
@@ -265,7 +294,11 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   Future<void> _abrirDetalhesProduto() async {
     final p = _produtoSelecionado;
     if (p == null) return;
-    await mostrarModalDetalheProdutoVenda(context, produto: p);
+    await mostrarModalDetalheProdutoVenda(
+      context,
+      produto: p,
+      campanhasVigentes: widget.campanhasVigentesDe?.call(p) ?? const [],
+    );
     if (!mounted) return;
     _listaFocus.requestFocus();
   }
@@ -368,12 +401,15 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   }
 
   Widget _buildPainelPreview(Produto produto, {required bool compacto}) {
+    final campanhas = widget.campanhasVigentesDe?.call(produto) ?? const [];
     return PdvConsultaPreviewPanel(
       produto: produto,
       precoListaAtivo: _precoListaAtivo,
       precoUnitarioDe: widget.precoUnitarioDe,
       rotuloPreco: widget.rotuloPreco,
       formatarMoeda: widget.formatarMoeda,
+      campanhaPromo: campanhas.isNotEmpty ? campanhas.first : null,
+      promocaoAtiva: widget.resolverPromocao?.call(produto, _precoListaAtivo),
       estoqueCritico: _estoqueCritico(produto),
       compacto: compacto,
       onDetalhes: _abrirDetalhesProduto,
@@ -395,10 +431,14 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           final item = _produtos[index];
           final selecionado = _indiceSelecionado == index;
           final scheme = Theme.of(context).colorScheme;
-          final preco = widget.precoUnitarioDe(item, _precoListaAtivo);
+          final res = widget.resolverPromocao?.call(item, _precoListaAtivo);
+          final preco = res?.precoFinal ??
+              widget.precoUnitarioDe(item, _precoListaAtivo);
+          final emPromo = res?.emPromocao ?? false;
+          final precoDe = emPromo
+              ? widget.formatarMoeda(res!.precoBasePreco1)
+              : null;
           final critico = _estoqueCritico(item);
-          final estiloNome =
-              Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
           return Material(
             color: selecionado
                 ? scheme.primaryContainer.withValues(alpha: 0.55)
@@ -414,74 +454,25 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                     ),
                   ),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: RichText(
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          text: pdvTextoDestaqueBusca(
-                            context: context,
-                            texto: item.nome,
-                            termoBusca: _termoBuscaAtual,
-                            estiloBase: estiloNome.copyWith(
-                              fontWeight: FontWeight.normal,
-                            ),
-                          ),
-                        ),
+                child: PdvConsultaLinhaProduto(
+                  produto: item,
+                  termoBusca: _termoBuscaAtual,
+                  precoFormatado: widget.formatarMoeda(preco),
+                  emPromocao: emPromo,
+                  precoDeFormatado: precoDe,
+                  estoqueCritico: critico,
+                  tooltipAdicionar:
+                      'Adicionar 1 (${widget.rotuloPreco(_precoListaAtivo)})',
+                  onAdicionar: () {
+                    Navigator.of(context).pop(
+                      PdvConsultaProdutoResult(
+                        produto: item,
+                        precoListaAtivo: _precoListaAtivo,
+                        adicaoDireta: true,
+                        abrirDialogoAdicionar: false,
                       ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            widget.formatarMoeda(preco),
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            'Livre: ${item.estoqueLivreParaVenda} · '
-                            'Fis: ${item.estoqueReal} · '
-                            'Res: ${item.estoqueReservado}',
-                            style: Theme.of(context).textTheme.labelMedium
-                                ?.copyWith(
-                                  color: critico
-                                      ? scheme.error
-                                      : scheme.tertiary,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        tooltip:
-                            'Adicionar 1 (${widget.rotuloPreco(_precoListaAtivo)})',
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 36,
-                          minHeight: 36,
-                        ),
-                        icon: const Icon(Icons.add_shopping_cart_outlined),
-                        onPressed: () {
-                          Navigator.of(context).pop(
-                            PdvConsultaProdutoResult(
-                              produto: item,
-                              precoListaAtivo: _precoListaAtivo,
-                              adicaoDireta: true,
-                              abrirDialogoAdicionar: false,
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -584,6 +575,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                       textInputAction: TextInputAction.search,
                       decoration: InputDecoration(
                         labelText: 'Filtrar na consulta',
+                        helperText:
+                            'Palavras: tubo sod 25 · Trechos: tub%sod%25',
                         hintText: 'Nome, codigo ou codigo de barras',
                         suffixIcon: IconButton(
                           icon: const Icon(Icons.search),

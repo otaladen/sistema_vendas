@@ -13,6 +13,8 @@ import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'funcionarios_page.dart';
 import 'kits_orcamento_page.dart';
+import 'promocoes_page.dart';
+import '../data/promocao_repository.dart';
 import 'motoristas_page.dart';
 import 'produtos_page.dart';
 import 'usuarios_page.dart';
@@ -26,6 +28,7 @@ const Color _corClientes = Color(0xFF1565C0);
 const Color _corVendedores = Color(0xFF2E7D32);
 const Color _corUsuarios = Color(0xFF6A1B9A);
 const Color _corKitsOrcamento = Color(0xFF5D4037);
+const Color _corPromocoes = Color(0xFFC62828);
 
 class CadastrosPage extends StatelessWidget {
   const CadastrosPage({
@@ -101,6 +104,26 @@ class CadastrosPage extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             HubNavButton(
+              icon: Icons.local_offer_outlined,
+              corDestaque: _corPromocoes,
+              titulo: 'Promocoes',
+              habilitado: _podeCadastros,
+              onTap: () {
+                final promoRepo =
+                    PromocaoRepository(produtoRepository.objectBox);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PromocoesPage(
+                      promocaoRepository: promoRepo,
+                      produtoRepository: produtoRepository,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            HubNavButton(
               icon: Icons.local_shipping_outlined,
               corDestaque: _corMotoristas,
               titulo: 'Motoristas',
@@ -148,6 +171,7 @@ class CadastrosPage extends StatelessWidget {
                     builder: (_) => ClientesPage(
                       clienteRepository: clienteRepository,
                       vendaRepository: vendaRepository,
+                      vendedorRepository: vendedorRepository,
                     ),
                   ),
                 );

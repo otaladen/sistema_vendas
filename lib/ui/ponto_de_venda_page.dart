@@ -13,14 +13,23 @@ import '../domain/limite_credito_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/produto_embalagem.dart';
+import '../domain/produto_unidade_exibicao.dart';
 import '../data/app_config_repository.dart';
 import '../data/cliente_repository.dart';
 import '../data/kit_orcamento_repository.dart';
+import '../data/promocao_repository.dart';
+import '../data/usuario_repository.dart';
+import '../domain/promocao_cadastro.dart';
+import '../domain/promocao_carrinho_service.dart';
+import '../domain/promocao_preco_result.dart';
+import '../domain/promocao_preco_service.dart';
+import '../data/produto_busca_util.dart';
 import '../data/produto_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
+import '../domain/cliente_cadastro.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/kit_orcamento.dart';
@@ -32,7 +41,9 @@ import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'pdv_consulta_preview_panel.dart';
 import 'pdv_consulta_produtos_page.dart';
+import 'pdv_pesquisa_comando.dart';
 import 'produto_detalhe_venda_page.dart';
+import 'promocao_margem_autorizacao.dart';
 import 'widgets/pdv_carrinho_linha_compacta.dart';
 import 'widgets/pdv_tipo_entrega_item.dart';
 import 'widgets/plano_fiado_pdv_panel.dart';
@@ -109,6 +120,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   /// Produtos usados recentemente nesta sessao (consulta vazia).
   final List<int> _produtosRecentesPdv = [];
 
+  Timer? _debounceLeitorBarrasPdv;
+  bool _processandoLeitorBarrasPdv = false;
+
   /// Ancora o painel direito para saber se o foco realmente esta no checkout (hasFocus dos nos falha).
   final GlobalKey _keyPainelCheckoutPdV = GlobalKey();
   final _valorFreteController = TextEditingController();
@@ -117,6 +131,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   late final KitOrcamentoRepository _kitOrcamentoRepo =
       KitOrcamentoRepository(widget.produtoRepository.objectBox);
+  late final PromocaoRepository _promoRepo = PromocaoRepository(
+    widget.produtoRepository.objectBox,
+  );
+  late final PromocaoPrecoService _promoPreco = PromocaoPrecoService(_promoRepo);
+  late final PromocaoCarrinhoService _promoCarrinho =
+      PromocaoCarrinhoService(_promoRepo);
+  final _usuarioRepository = UsuarioRepository();
   List<Cliente> _clientes = [];
   List<Vendedor> _vendedoresAtivos = [];
   final List<_OrcamentoItemDraft> _carrinho = [];
@@ -450,6 +471,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
     _carregarDadosIniciais();
     _carregarConfiguracaoVendaSemEstoque();
+    _pesquisaController.addListener(_onPesquisaPdvTextoChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _pesquisaFocus.requestFocus();
@@ -518,6 +540,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _focusPagamentoMistoSwitchPdV.dispose();
     _focusCheckoutAcaoPrimaria.dispose();
     _descontoPdVController.dispose();
+    _debounceLeitorBarrasPdv?.cancel();
+    _pesquisaController.removeListener(_onPesquisaPdvTextoChanged);
     _pesquisaFocus.dispose();
     _pesquisaController.dispose();
     _valorFreteController.dispose();
@@ -606,6 +630,70 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
   }
 
+  void _onPesquisaPdvTextoChanged() {
+    if (!_pesquisaFocus.hasFocus || _processandoLeitorBarrasPdv) return;
+    final texto = _pesquisaController.text;
+    if (!consultaEanProvavelCompleto(texto)) return;
+    _debounceLeitorBarrasPdv?.cancel();
+    _debounceLeitorBarrasPdv = Timer(const Duration(milliseconds: 100), () {
+      if (!mounted) return;
+      unawaited(_tentarLeitorBarrasAutomaticoPdv());
+    });
+  }
+
+  Future<void> _tentarLeitorBarrasAutomaticoPdv() async {
+    if (!mounted || _processandoLeitorBarrasPdv) return;
+    final texto = _pesquisaController.text.trim();
+    if (!consultaEanProvavelCompleto(texto)) return;
+    _processandoLeitorBarrasPdv = true;
+    try {
+      final comando = PdvPesquisaComando.parse(texto);
+      final produto = widget.produtoRepository.resolverLeitorCodigoBarras(
+        comando.termoBusca,
+      );
+      if (produto == null) return;
+      _pesquisaController.clear();
+      _registrarProdutoRecente(produto);
+      final qtd = comando.quantidadeDireta ?? 1;
+      await _adicionarComQuantidade(
+        produto,
+        qtd,
+        precoTipo: _precoListaAtivo,
+      );
+      _voltarFocoParaPesquisa();
+    } finally {
+      _processandoLeitorBarrasPdv = false;
+    }
+  }
+
+  Future<void> _processarEntradaPesquisaPdv() async {
+    if (!mounted) return;
+    final comando = PdvPesquisaComando.parse(_pesquisaController.text);
+    final termo = comando.termoBusca;
+    if (termo.isNotEmpty) {
+      final porBarras = widget.produtoRepository.resolverLeitorCodigoBarras(
+        termo,
+      );
+      if (porBarras != null) {
+        _pesquisaController.clear();
+        _registrarProdutoRecente(porBarras);
+        final qtd = comando.quantidadeDireta ?? 1;
+        if (comando.adicaoDireta || comando.quantidadeDireta != null) {
+          await _adicionarComQuantidade(
+            porBarras,
+            qtd,
+            precoTipo: _precoListaAtivo,
+          );
+        } else {
+          await _adicionarAoOrcamento(porBarras);
+        }
+        _voltarFocoParaPesquisa();
+        return;
+      }
+    }
+    await _abrirConsultaProdutos();
+  }
+
   Future<void> _abrirConsultaProdutos() async {
     if (!mounted) return;
     final texto = _pesquisaController.text;
@@ -622,7 +710,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           produtosRecentesIds: List<int>.from(_produtosRecentesPdv),
           formatarMoeda: _formatarMoeda,
           rotuloPreco: _rotuloPreco,
-          precoUnitarioDe: _precoPorTipo,
+          precoUnitarioDe: _precoExibicaoConsulta,
+          resolverPromocao: (p, t) =>
+              _resolverPrecoProduto(p, precoTipoLista: t),
+          campanhasVigentesDe: (p) => _promoPreco.listarCampanhasVigentesParaProduto(
+            p,
+            dataReferencia: DateTime.now(),
+            segmentoCliente: _segmentoClienteAtivo,
+          ),
         ),
       ),
     );
@@ -637,7 +732,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _registrarProdutoRecente(result.produto);
 
     if (result.adicaoDireta) {
-      _adicionarComQuantidade(
+      await _adicionarComQuantidade(
         result.produto,
         1,
         precoTipo: result.precoListaAtivo,
@@ -645,7 +740,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       return;
     }
     if (result.quantidadeDireta != null) {
-      _adicionarComQuantidade(
+      await _adicionarComQuantidade(
         result.produto,
         result.quantidadeDireta!,
         precoTipo: result.precoListaAtivo,
@@ -829,16 +924,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _irParaPesquisaProdutos();
   }
 
-  void _adicionarComQuantidade(
+  Future<void> _adicionarComQuantidade(
     Produto produto,
     int quantidade, {
     String? precoTipo,
     String? tipoEntregaItem,
     bool quantidadeEmUnidadeCompra = false,
-  }) {
+  }) async {
     if (quantidade <= 0) return;
-    final preco = precoTipo ?? _precoListaAtivo;
-    final unit = _precoPorTipo(produto, preco);
+    final precoLista = precoTipo ?? _precoListaAtivo;
     final emEmbalagem = quantidadeEmUnidadeCompra &&
         produto.pdvPodeVenderEmUnidadeCompra;
     final qEstoque = ProdutoEmbalagem.quantidadeVendaParaEstoque(
@@ -847,6 +941,57 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       emUnidadeCompra: emEmbalagem,
     );
     if (qEstoque <= 0) return;
+    final resPreco = _resolverPrecoProduto(
+      produto,
+      precoTipoLista: precoLista,
+      quantidade: qEstoque,
+    );
+    if (resPreco.emPromocao) {
+      if (resPreco.quantidadeMaximaPorVenda > 0 &&
+          qEstoque > resPreco.quantidadeMaximaPorVenda) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Limite da promocao: max. ${resPreco.quantidadeMaximaPorVenda} '
+              'un. por venda para ${produto.nome}.',
+            ),
+          ),
+        );
+        return;
+      }
+      if (resPreco.quantidadeRestanteGlobal > 0 &&
+          qEstoque > resPreco.quantidadeRestanteGlobal) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Restam apenas ${resPreco.quantidadeRestanteGlobal} un. '
+              'nesta campanha.',
+            ),
+          ),
+        );
+        return;
+      }
+      if (resPreco.margemMinimaPercentual > 0) {
+        final margem = PromocaoCadastro.margemSobrePrecoVenda(
+          precoCusto: produto.precoCusto,
+          precoVenda: resPreco.precoFinal,
+        );
+        if (margem + 0.05 < resPreco.margemMinimaPercentual) {
+          final ok = await solicitarAutorizacaoMargemPromocao(
+            context,
+            _usuarioRepository,
+            margemAtual: margem,
+            margemMinima: resPreco.margemMinimaPercentual,
+            nomeProduto: produto.nome,
+          );
+          if (!ok) return;
+        }
+      }
+    }
+    final preco = resPreco.precoTipo;
+    final unit = resPreco.precoFinal;
     if (!_permitirVendaSemEstoque) {
       final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
       final disp = fresh.estoqueLivreParaVenda;
@@ -892,10 +1037,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             precoUnitario: unit,
             tipoEntregaItem: tipoNovo,
             quantidadeEmUnidadeCompra: emEmbalagem,
+            promocaoId: resPreco.promocaoId,
+            promocaoNome: resPreco.promocaoNome,
           ),
         );
         _indiceLinhaCarrinho = _carrinho.length - 1;
       }
+      _recalcularPromocoesCarrinho();
     });
     _registrarProdutoRecente(produto);
     _voltarFocoParaPesquisa();
@@ -1014,7 +1162,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         continue;
       }
       final q = it.quantidade * mult;
-      _adicionarComQuantidade(p, q);
+      await _adicionarComQuantidade(p, q);
     }
 
     if (!mounted) return;
@@ -1219,10 +1367,41 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
     final cliente = _clientes.where((c) => c.id == value).firstOrNull;
     if (cliente == null) return;
+    final tabela = ClienteCadastro.normalizarTabelaPreco(
+      cliente.tabelaPrecoPadrao,
+    );
     setState(() {
       _clienteSelecionadoId = value;
-      _aplicarEnderecoSelecionadoDoCliente(cliente, 0);
+      _precoListaAtivo = tabela;
+      if (cliente.vendedorResponsavelId > 0) {
+        _vendedorSelecionadoId = cliente.vendedorResponsavelId;
+      }
+      _aplicarEnderecoSelecionadoDoCliente(
+        cliente,
+        cliente.indiceEnderecoPadraoEntrega(),
+      );
     });
+    if (!cliente.ativo && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cliente "${cliente.nomeRazao}" esta inativo no cadastro.',
+          ),
+        ),
+      );
+    }
+    if (cliente.bloqueadoFiado && mounted) {
+      final motivo = cliente.motivoBloqueio.trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            motivo.isEmpty
+                ? 'Fiado bloqueado para este cliente.'
+                : 'Fiado bloqueado: $motivo',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _abrirCadastroNovoClienteNoPdv({
@@ -1234,6 +1413,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         builder: (_) => ClientesPage(
           clienteRepository: widget.clienteRepository,
           vendaRepository: widget.vendaRepository,
+          vendedorRepository: widget.vendedorRepository,
           retornarClienteAoSalvar: true,
         ),
       ),
@@ -1463,7 +1643,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   Future<void> _abrirDetalhesProdutoCarrinho() async {
     final linha = _linhaCarrinhoSelecionada;
     if (linha == null) return;
-    await mostrarModalDetalheProdutoVenda(context, produto: linha.produto);
+    final campanhas = _promoPreco.listarCampanhasVigentesParaProduto(
+      linha.produto,
+      dataReferencia: DateTime.now(),
+      segmentoCliente: _segmentoClienteAtivo,
+      quantidade: linha.quantidadeEstoque,
+    );
+    await mostrarModalDetalheProdutoVenda(
+      context,
+      produto: linha.produto,
+      campanhasVigentes: campanhas,
+    );
     if (!mounted) return;
     _carrinhoFocus.requestFocus();
   }
@@ -1471,16 +1661,28 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   Widget _buildPreviewCarrinhoPdv({required bool compacto}) {
     final linha = _linhaCarrinhoSelecionada;
     if (linha == null) return const SizedBox.shrink();
+    final campanhas = _promoPreco.listarCampanhasVigentesParaProduto(
+      linha.produto,
+      dataReferencia: DateTime.now(),
+      segmentoCliente: _segmentoClienteAtivo,
+      quantidade: linha.quantidadeEstoque,
+    );
     return PdvConsultaPreviewPanel(
       produto: linha.produto,
       precoListaAtivo: linha.precoTipo,
-      precoUnitarioDe: _precoPorTipo,
+      precoUnitarioDe: _precoExibicaoConsulta,
       rotuloPreco: _rotuloPreco,
       formatarMoeda: _formatarMoeda,
       estoqueCritico: _estoqueCriticoPdv(linha.produto),
       compacto: compacto,
       mostrarDescricaoInline: true,
       tituloPainel: 'Item no carrinho',
+      campanhaPromo: campanhas.isNotEmpty ? campanhas.first : null,
+      promocaoAtiva: _resolverPrecoProduto(
+        linha.produto,
+        precoTipoLista: linha.precoTipo,
+        quantidade: linha.quantidadeEstoque,
+      ),
       onDetalhes: () => unawaited(_abrirDetalhesProdutoCarrinho()),
     );
   }
@@ -1576,20 +1778,60 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
   }
 
-  double _precoPorTipo(Produto produto, String precoTipo) {
-    switch (precoTipo) {
-      case 'preco2':
-        return produto.preco2 > 0 ? produto.preco2 : produto.precoVenda;
-      case 'preco3':
-        return produto.preco3 > 0 ? produto.preco3 : produto.precoVenda;
-      case 'preco1':
-      default:
-        return produto.preco1 > 0 ? produto.preco1 : produto.precoVenda;
+  String? get _segmentoClienteAtivo {
+    final id = _clienteSelecionadoId;
+    if (id == null || id <= 0) return null;
+    return widget.clienteRepository.obterPorId(id)?.segmento;
+  }
+
+  void _recalcularPromocoesCarrinho() {
+    if (_carrinho.isEmpty) return;
+    for (final linha in _carrinho) {
+      final r = _resolverPrecoProduto(
+        linha.produto,
+        precoTipoLista: linha.precoTipo == PromocaoCadastro.precoTipoPromo
+            ? 'preco1'
+            : linha.precoTipo,
+        quantidade: linha.quantidadeEstoque,
+      );
+      linha.precoUnitario = r.precoFinal;
+      linha.precoTipo = r.precoTipo;
+      linha.promocaoId = r.promocaoId;
+      linha.promocaoNome = r.promocaoNome;
     }
+    _promoCarrinho.aplicarRegrasCarrinho(
+      _carrinho,
+      dataReferencia: DateTime.now(),
+      segmentoCliente: _segmentoClienteAtivo,
+    );
+  }
+
+  PromocaoPrecoResult _resolverPrecoProduto(
+    Produto produto, {
+    String? precoTipoLista,
+    int quantidade = 1,
+    DateTime? dataReferencia,
+  }) {
+    return _promoPreco.resolver(
+      produto,
+      dataReferencia: dataReferencia ?? DateTime.now(),
+      quantidade: quantidade,
+      precoTipoLista: precoTipoLista ?? _precoListaAtivo,
+      segmentoCliente: _segmentoClienteAtivo,
+    );
+  }
+
+  double _precoExibicaoConsulta(Produto produto, String precoTipo) {
+    return _resolverPrecoProduto(
+      produto,
+      precoTipoLista: precoTipo,
+    ).precoFinal;
   }
 
   String _rotuloPreco(String precoTipo) {
     switch (precoTipo) {
+      case PromocaoCadastro.precoTipoPromo:
+        return 'Promocao';
       case 'preco2':
         return 'À Vista';
       case 'preco3':
@@ -1607,7 +1849,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         produto: produto,
         precoTipoInicial: _precoListaAtivo,
         tipoEntregaInicial: _tipoEntregaSelecionada,
-        precoUnitarioDe: (t) => _precoPorTipo(produto, t),
+        precoUnitarioDe: (t) =>
+            _resolverPrecoProduto(produto, precoTipoLista: t).precoFinal,
         formatarMoeda: _formatarMoeda,
       ),
     );
@@ -1625,7 +1868,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       return;
     }
 
-    _adicionarComQuantidade(
+    await _adicionarComQuantidade(
       produto,
       result.quantidade,
       precoTipo: result.precoTipo,
@@ -2788,12 +3031,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 final enderecos = _enderecosClienteSelecionado();
                 return List.generate(enderecos.length, (index) {
                   final endereco = enderecos[index];
-                  final rotulo = endereco.rotulo.trim().isNotEmpty
-                      ? endereco.rotulo.trim()
-                      : 'Endereco ${index + 1}';
+                  final rotulo = endereco.tituloExibicao();
                   final resumo = endereco.resumo();
                   final texto =
-                      resumo.isEmpty ? rotulo : '$rotulo - $resumo';
+                      resumo.isEmpty ? rotulo : '$rotulo — $resumo';
                   return Tooltip(
                     message: texto,
                     waitDuration: const Duration(milliseconds: 400),
@@ -2813,14 +3054,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 index,
               ) {
                 final endereco = _enderecosClienteSelecionado()[index];
-                final rotulo = endereco.rotulo.trim().isNotEmpty
-                    ? endereco.rotulo.trim()
-                    : 'Endereco ${index + 1}';
+                final rotulo = endereco.tituloExibicao();
                 final resumo = endereco.resumo();
                 return DropdownMenuItem<int>(
                   value: index,
                   child: Text(
-                    resumo.isEmpty ? rotulo : '$rotulo - $resumo',
+                    resumo.isEmpty ? rotulo : '$rotulo — $resumo',
                     overflow: TextOverflow.ellipsis,
                     maxLines: 2,
                   ),
@@ -3601,6 +3840,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               precoUnitario: item.precoUnitario,
               precoTipo: item.precoTipo,
               tipoEntregaItem: item.tipoEntregaItem,
+              promocaoId: item.promocaoId,
+              promocaoNomeSnapshot: item.promocaoNome,
             ),
           )
           .toList();
@@ -3989,6 +4230,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           precoTipo: item.precoTipo,
           precoUnitario: item.precoUnitario,
           tipoEntregaItem: tipoItem,
+          promocaoId: item.promocaoId,
+          promocaoNome: item.promocaoNomeSnapshot,
         ),
       );
     }
@@ -4549,10 +4792,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   double get _totalGeralComFrete => _totalOrcamento + _valorFreteAtual;
 
+  /// Subtotal de linhas sem promocao (desconto PDV nao incide em promo).
+  double get _subtotalElegivelDescontoPdV => _carrinho
+      .where((i) => i.promocaoId <= 0)
+      .fold(0.0, (s, i) => s + i.subtotal);
+
   /// Valor maximo de desconto em reais permitido neste pedido (config % x subtotal).
   double _valorMaximoDescontoReaisPdV() {
     if (_maxDescontoPercentualPdv <= 0) return 0;
-    final sub = _totalOrcamento;
+    final sub = _subtotalElegivelDescontoPdV;
     return (sub * _maxDescontoPercentualPdv / 100).clamp(0.0, sub);
   }
 
@@ -4598,7 +4846,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   /// Desconto apenas sobre o subtotal; frete entra inteiro no total a pagar.
   double _valorDescontoReaisPdV() {
     if (_maxDescontoPercentualPdv <= 0) return 0;
-    final sub = _totalOrcamento;
+    final sub = _subtotalElegivelDescontoPdV;
     if (sub <= 0) return 0;
     final maxReais = _valorMaximoDescontoReaisPdV();
     if (_tipoDescontoPdV == 'percentual') {
@@ -4610,7 +4858,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   double _percentualEfetivoSobreSubtotalPdV() {
-    final sub = _totalOrcamento;
+    final sub = _subtotalElegivelDescontoPdV;
     if (sub <= 0.004) return 0;
     return _valorDescontoReaisPdV() / sub * 100;
   }
@@ -4779,6 +5027,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                   precoListaRotulo: _rotuloPreco(_precoListaAtivo),
                   onLimparBusca: _limparPesquisaAtalho,
                   onAbrirConsulta: () => unawaited(_abrirConsultaProdutos()),
+                  onSubmitEntrada: () => unawaited(_processarEntradaPesquisaPdv()),
                   onRecarregarProdutos: _carregarDadosIniciais,
                   onToggleAjudaAtalhos: () {
                     setState(() {
@@ -4809,6 +5058,7 @@ class _PdvHeaderPesquisa extends StatelessWidget {
     required this.precoListaRotulo,
     required this.onLimparBusca,
     required this.onAbrirConsulta,
+    required this.onSubmitEntrada,
     required this.onRecarregarProdutos,
     required this.onToggleAjudaAtalhos,
   });
@@ -4820,6 +5070,7 @@ class _PdvHeaderPesquisa extends StatelessWidget {
   final String precoListaRotulo;
   final VoidCallback onLimparBusca;
   final VoidCallback onAbrirConsulta;
+  final VoidCallback onSubmitEntrada;
   final VoidCallback onRecarregarProdutos;
   final VoidCallback onToggleAjudaAtalhos;
 
@@ -4863,7 +5114,7 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                     ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
                     : null,
                 hintText: modoBarraCarrinho
-                    ? 'Pesquisar · $precoListaRotulo · Enter/F4 consulta'
+                    ? 'Pesquisar · $precoListaRotulo · Leitor EAN · Enter/F4 consulta'
                     : null,
                 labelText: modoBarraCarrinho
                     ? null
@@ -4895,7 +5146,7 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                   ],
                 ),
               ),
-              onSubmitted: (_) => onAbrirConsulta(),
+              onSubmitted: (_) => onSubmitEntrada(),
             ),
             if (!modoBarraCarrinho) ...[
               const SizedBox(height: 8),
@@ -5107,10 +5358,12 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
                 '${item.produto.nome}, ${widget.rotuloPreco(item.precoTipo)}, quantidade ${item.quantidade}',
             child: PdvCarrinhoLinhaCompacta(
               nomeProduto: item.produto.nome,
+              emPromocao: item.promocaoId > 0,
               rotuloPreco: widget.rotuloPreco(item.precoTipo),
               precoUnitarioFormatado: widget.formatarMoeda(item.precoUnitario),
               subtotalFormatado: widget.formatarMoeda(item.subtotal),
               quantidade: item.quantidade,
+              rotuloUnidade: rotuloUnidadeProdutoLista(item.produto),
               detalheQuantidade: item.quantidadeEmUnidadeCompra
                   ? item.rotuloQuantidadeCarrinho
                   : null,
@@ -6099,7 +6352,7 @@ class PdvLimparPesquisaIntent extends Intent {
   const PdvLimparPesquisaIntent();
 }
 
-class _OrcamentoItemDraft {
+class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
   _OrcamentoItemDraft({
     required this.produto,
     required this.quantidade,
@@ -6107,15 +6360,25 @@ class _OrcamentoItemDraft {
     required this.precoUnitario,
     this.tipoEntregaItem = EntregaVendaHelper.tipoRetirada,
     this.quantidadeEmUnidadeCompra = false,
+    this.promocaoId = 0,
+    this.promocaoNome = '',
   });
 
+  @override
   final Produto produto;
   int quantidade;
-  final String precoTipo;
-  final double precoUnitario;
+  @override
+  String precoTipo;
+  @override
+  double precoUnitario;
   String tipoEntregaItem;
   final bool quantidadeEmUnidadeCompra;
+  @override
+  int promocaoId;
+  @override
+  String promocaoNome;
 
+  @override
   int get quantidadeEstoque => ProdutoEmbalagem.quantidadeVendaParaEstoque(
         produto: produto,
         quantidadeDigitada: quantidade,

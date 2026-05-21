@@ -9,10 +9,12 @@ import 'package:path/path.dart' as p;
 import '../data/produto_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../main.dart';
+import '../domain/produto_unidade_exibicao.dart';
 import '../model/produto.dart';
 import '../services/compras_preditivas_service.dart';
 import '../services/pdf_tabela_produtos_texto.dart';
 import 'sugestao_compra_page.dart';
+import 'widgets/produto_busca_input.dart';
 
 final NumberFormat _moedaBRL = NumberFormat('#,##0.00', 'pt_BR');
 
@@ -247,19 +249,28 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final produtos = _produtos;
-    final termo = _filtroBusca.trim().toLowerCase();
-    final produtosFiltrados = produtos.where((p) {
+  List<Produto> _aplicarFiltrosLista(List<Produto> produtos) {
+    final termo = _filtroBusca.trim();
+    final porBusca = termo.isEmpty
+        ? produtos
+        : widget.produtoRepository.pesquisarNaBasePadraoPdv(
+            termo,
+            produtos,
+            limite: 500,
+            somenteAtivos: false,
+          );
+    return porBusca.where((p) {
       if (_somenteCriticosPp && !(_criticoPpPorProdutoId[p.id] ?? false)) {
         return false;
       }
-      if (termo.isEmpty) return true;
-      return p.nome.toLowerCase().contains(termo) ||
-          p.codigoInterno.toLowerCase().contains(termo) ||
-          p.categoria.toLowerCase().contains(termo);
+      return true;
     }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final produtos = _produtos;
+    final produtosFiltrados = _aplicarFiltrosLista(produtos);
     final totalAbaixoMinimo = produtos
         .where((p) => p.ativo && p.estoque <= p.quantidadeMinima)
         .length;
@@ -363,9 +374,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
               children: [
                 TextField(
                   controller: _buscaController,
-                  decoration: InputDecoration(
-                    labelText: 'Pesquisar por nome, SKU ou categoria',
-                    prefixIcon: const Icon(Icons.search),
+                  decoration: produtoBuscaInputDecoration(
                     suffixIcon: _filtroBusca.isEmpty
                         ? null
                         : IconButton(
@@ -473,10 +482,18 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '${produto.nome} (${produto.unidade})',
+                              produto.nome,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Un: ${rotuloUnidadeProdutoLista(produto)}',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: theme.colorScheme.secondary,
+                              ),
                             ),
                             const SizedBox(height: 2),
                             Text(

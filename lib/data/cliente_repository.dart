@@ -43,7 +43,9 @@ class ClienteRepository {
         .or(Cliente_.telefone.contains(lower, caseSensitive: false))
         .or(Cliente_.whatsapp.contains(lower, caseSensitive: false))
         .or(Cliente_.email.contains(lower, caseSensitive: false))
-        .or(Cliente_.cidade.contains(lower, caseSensitive: false));
+        .or(Cliente_.cidade.contains(lower, caseSensitive: false))
+        .or(Cliente_.codigoInterno.contains(lower, caseSensitive: false))
+        .or(Cliente_.segmento.contains(lower, caseSensitive: false));
   }
 
   int salvar(Cliente cliente) {
