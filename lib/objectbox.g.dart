@@ -15,6 +15,7 @@ import 'package:objectbox/objectbox.dart' as obx;
 import 'package:objectbox_flutter_libs/objectbox_flutter_libs.dart';
 
 import 'data/models/conta_pagar.dart';
+import 'model/auditoria_evento.dart';
 import 'model/cliente.dart';
 import 'model/fornecedor_nfe.dart';
 import 'model/funcionario.dart';
@@ -2597,6 +2598,70 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(27, 3463820139052098940),
+    name: 'AuditoriaEvento',
+    lastPropertyId: const obx_int.IdUid(9, 7458166227502791115),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 8937463353850954377),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 9076494333508968551),
+        name: 'dataHora',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 5407055659855695534),
+        name: 'usuarioLogin',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 8638775923593055728),
+        name: 'modulo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 2892429749402290712),
+        name: 'acao',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 1896279760873357218),
+        name: 'entidade',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 4427763620154413103),
+        name: 'entidadeId',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 4725940589559881644),
+        name: 'resumo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 7458166227502791115),
+        name: 'detalhesJson',
+        type: 9,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -2642,7 +2707,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(26, 4717411579528104336),
+    lastEntityId: const obx_int.IdUid(27, 3463820139052098940),
     lastIndexId: const obx_int.IdUid(43, 5553602522747990903),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
@@ -5933,6 +5998,84 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    AuditoriaEvento: obx_int.EntityDefinition<AuditoriaEvento>(
+      model: _entities[26],
+      toOneRelations: (AuditoriaEvento object) => [],
+      toManyRelations: (AuditoriaEvento object) => {},
+      getId: (AuditoriaEvento object) => object.id,
+      setId: (AuditoriaEvento object, int id) {
+        object.id = id;
+      },
+      objectToFB: (AuditoriaEvento object, fb.Builder fbb) {
+        final usuarioLoginOffset = fbb.writeString(object.usuarioLogin);
+        final moduloOffset = fbb.writeString(object.modulo);
+        final acaoOffset = fbb.writeString(object.acao);
+        final entidadeOffset = fbb.writeString(object.entidade);
+        final entidadeIdOffset = fbb.writeString(object.entidadeId);
+        final resumoOffset = fbb.writeString(object.resumo);
+        final detalhesJsonOffset = fbb.writeString(object.detalhesJson);
+        fbb.startTable(10);
+        fbb.addInt64(0, object.id);
+        fbb.addInt64(1, object.dataHora.millisecondsSinceEpoch);
+        fbb.addOffset(2, usuarioLoginOffset);
+        fbb.addOffset(3, moduloOffset);
+        fbb.addOffset(4, acaoOffset);
+        fbb.addOffset(5, entidadeOffset);
+        fbb.addOffset(6, entidadeIdOffset);
+        fbb.addOffset(7, resumoOffset);
+        fbb.addOffset(8, detalhesJsonOffset);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final usuarioLoginParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final moduloParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final acaoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 12, '');
+        final entidadeParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 14, '');
+        final entidadeIdParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 16, '');
+        final resumoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 18, '');
+        final detalhesJsonParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 20, '');
+        final dataHoraParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 6, 0),
+          isUtc: true,
+        );
+        final object = AuditoriaEvento(
+          id: idParam,
+          usuarioLogin: usuarioLoginParam,
+          modulo: moduloParam,
+          acao: acaoParam,
+          entidade: entidadeParam,
+          entidadeId: entidadeIdParam,
+          resumo: resumoParam,
+          detalhesJson: detalhesJsonParam,
+          dataHora: dataHoraParam,
+        );
+
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -7860,4 +8003,52 @@ class ReajustePrecoItem_ {
       obx.QueryRelationToOne<ReajustePrecoItem, ReajustePreco>(
         _entities[25].properties[13],
       );
+}
+
+/// [AuditoriaEvento] entity fields to define ObjectBox queries.
+class AuditoriaEvento_ {
+  /// See [AuditoriaEvento.id].
+  static final id = obx.QueryIntegerProperty<AuditoriaEvento>(
+    _entities[26].properties[0],
+  );
+
+  /// See [AuditoriaEvento.dataHora].
+  static final dataHora = obx.QueryDateProperty<AuditoriaEvento>(
+    _entities[26].properties[1],
+  );
+
+  /// See [AuditoriaEvento.usuarioLogin].
+  static final usuarioLogin = obx.QueryStringProperty<AuditoriaEvento>(
+    _entities[26].properties[2],
+  );
+
+  /// See [AuditoriaEvento.modulo].
+  static final modulo = obx.QueryStringProperty<AuditoriaEvento>(
+    _entities[26].properties[3],
+  );
+
+  /// See [AuditoriaEvento.acao].
+  static final acao = obx.QueryStringProperty<AuditoriaEvento>(
+    _entities[26].properties[4],
+  );
+
+  /// See [AuditoriaEvento.entidade].
+  static final entidade = obx.QueryStringProperty<AuditoriaEvento>(
+    _entities[26].properties[5],
+  );
+
+  /// See [AuditoriaEvento.entidadeId].
+  static final entidadeId = obx.QueryStringProperty<AuditoriaEvento>(
+    _entities[26].properties[6],
+  );
+
+  /// See [AuditoriaEvento.resumo].
+  static final resumo = obx.QueryStringProperty<AuditoriaEvento>(
+    _entities[26].properties[7],
+  );
+
+  /// See [AuditoriaEvento.detalhesJson].
+  static final detalhesJson = obx.QueryStringProperty<AuditoriaEvento>(
+    _entities[26].properties[8],
+  );
 }

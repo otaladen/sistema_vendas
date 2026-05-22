@@ -9,6 +9,7 @@ const String kProdutoBuscaHelper =
 InputDecoration produtoBuscaInputDecoration({
   String? labelText,
   String? hintText,
+  String? helperText,
   bool isDense = false,
   Widget? prefixIcon,
   Widget? suffixIcon,
@@ -16,7 +17,7 @@ InputDecoration produtoBuscaInputDecoration({
   return InputDecoration(
     labelText: labelText ?? kProdutoBuscaLabel,
     hintText: hintText,
-    helperText: kProdutoBuscaHelper,
+    helperText: helperText ?? kProdutoBuscaHelper,
     helperMaxLines: 2,
     prefixIcon: prefixIcon ?? const Icon(Icons.search),
     suffixIcon: suffixIcon,

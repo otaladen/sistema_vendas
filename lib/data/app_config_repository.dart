@@ -1,5 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../domain/auditoria_retencao.dart';
 import '../model/config_layout_impressao.dart';
 import 'sync/sync_write_trigger.dart';
 
@@ -33,6 +34,7 @@ class EmpresaConfig {
     this.backupAutomaticoIntervaloMinutos = 1440,
     this.ultimoBackupAutomaticoMs = 0,
     this.layoutImpressaoJson = '',
+    this.auditoriaRetencaoDias = 90,
   });
 
   final String nomeLoja;
@@ -84,6 +86,9 @@ class EmpresaConfig {
   /// JSON com layout de cupom e orcamento ([LayoutImpressaoEmpresa]).
   final String layoutImpressaoJson;
 
+  /// Retencao do log do sistema: 0 = sem auto-limpeza; 90 ou 180 dias.
+  final int auditoriaRetencaoDias;
+
   LayoutImpressaoEmpresa get layoutImpressao =>
       LayoutImpressaoEmpresa.fromJsonString(layoutImpressaoJson);
 
@@ -115,6 +120,7 @@ class EmpresaConfig {
     int? ultimoBackupAutomaticoMs,
     String? layoutImpressaoJson,
     LayoutImpressaoEmpresa? layoutImpressao,
+    int? auditoriaRetencaoDias,
   }) {
     return EmpresaConfig(
       nomeLoja: nomeLoja ?? this.nomeLoja,
@@ -156,6 +162,8 @@ class EmpresaConfig {
       layoutImpressaoJson: layoutImpressao != null
           ? layoutImpressao.toJsonString()
           : (layoutImpressaoJson ?? this.layoutImpressaoJson),
+      auditoriaRetencaoDias:
+          auditoriaRetencaoDias ?? this.auditoriaRetencaoDias,
     );
   }
 }
@@ -194,6 +202,7 @@ class AppConfigRepository {
   static const _kMigracaoMotoristaEntregaConcluida =
       'config_migracao_motorista_entrega_concluida';
   static const _kLayoutImpressaoJson = 'config_layout_impressao_json';
+  static const _kAuditoriaRetencaoDias = 'config_auditoria_retencao_dias';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -242,6 +251,13 @@ class AppConfigRepository {
       }(),
       ultimoBackupAutomaticoMs: prefs.getInt(_kBackupAutomaticoUltimoMs) ?? 0,
       layoutImpressaoJson: prefs.getString(_kLayoutImpressaoJson) ?? '',
+      auditoriaRetencaoDias: () {
+        final d = prefs.getInt(_kAuditoriaRetencaoDias);
+        if (d == null) return 90;
+        if (d <= 0) return 0;
+        if (d <= 120) return 90;
+        return 180;
+      }(),
     );
   }
 
@@ -335,6 +351,10 @@ class AppConfigRepository {
       config.ultimoBackupAutomaticoMs < 0 ? 0 : config.ultimoBackupAutomaticoMs,
     );
     await prefs.setString(_kLayoutImpressaoJson, config.layoutImpressaoJson);
+    await prefs.setInt(
+      _kAuditoriaRetencaoDias,
+      AuditoriaRetencaoOpcoes.normalizar(config.auditoriaRetencaoDias),
+    );
     if (propagarRede) {
       notificarAlteracaoParaRede();
     }

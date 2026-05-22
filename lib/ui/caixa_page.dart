@@ -19,6 +19,7 @@ import '../data/usuario_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
+import '../domain/auditoria_catalogo.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/fiscal/fiscal_pedido_nfce.dart';
 import '../domain/pagamento_orcamento.dart';
@@ -27,6 +28,7 @@ import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import '../services/auditoria_registrar.dart';
 import '../services/cupom_nao_fiscal_venda_pdf.dart';
 import '../services/fiscal_service.dart';
 import '../services/print_service.dart';
@@ -325,6 +327,37 @@ class _CaixaPageState extends State<CaixaPage> {
       lista = lista.sublist(lista.length - 300);
     }
     await prefs.setString(_kCaixaAuditoriaKey, jsonEncode(lista));
+    _espelharAuditoriaNoLogCentral(evento, detalhes ?? <String, dynamic>{});
+  }
+
+  void _espelharAuditoriaNoLogCentral(
+    String evento,
+    Map<String, dynamic> detalhes,
+  ) {
+    switch (evento) {
+      case 'fechamento_caixa':
+        final operador = detalhes['operador']?.toString() ?? _operadorCaixa;
+        final dif = detalhes['diferencaTotal'];
+        AuditoriaRegistrar.registrar(
+          modulo: AuditoriaModulo.caixa,
+          acao: AuditoriaAcao.fechamentoCaixa,
+          usuarioLogin: widget.usuarioAtual,
+          entidade: 'caixa',
+          resumo:
+              'Fechamento de caixa — operador $operador'
+              '${dif is num ? ' (dif. ${_formatarMoeda(dif.toDouble())})' : ''}',
+          detalhes: detalhes,
+        );
+      case 'fechamento_negado_divergencia':
+        AuditoriaRegistrar.registrar(
+          modulo: AuditoriaModulo.caixa,
+          acao: AuditoriaAcao.fechamentoNegado,
+          usuarioLogin: widget.usuarioAtual,
+          entidade: 'caixa',
+          resumo: 'Fechamento negado por divergencia',
+          detalhes: detalhes,
+        );
+    }
   }
 
   Future<void> _salvarAuditoriaCaixa(List<Map<String, dynamic>> registros) async {

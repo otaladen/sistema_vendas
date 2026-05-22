@@ -15,8 +15,11 @@ void configurarHttpOverridesPlataforma() {
 class _TrustedHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
-    final ctx = SecurityContext(withTrustedRoots: true);
-    final client = HttpClient(context: ctx);
+    // Nao usar HttpClient() aqui: com HttpOverrides.global ativo isso chama
+    // createHttpClient de novo e causa StackOverflow.
+    final client = super.createHttpClient(
+      context ?? SecurityContext(withTrustedRoots: true),
+    );
     client.connectionTimeout = const Duration(seconds: 30);
     client.idleTimeout = const Duration(seconds: 30);
     return client;
@@ -25,7 +28,10 @@ class _TrustedHttpOverrides extends HttpOverrides {
 
 /// Cliente HTTP com certificados raiz do sistema operacional.
 http.Client createTrustedHttpClient() {
-  final io = HttpClient(context: SecurityContext(withTrustedRoots: true));
+  final overrides = HttpOverrides.current;
+  final io = overrides != null
+      ? overrides.createHttpClient(SecurityContext(withTrustedRoots: true))
+      : HttpClient(context: SecurityContext(withTrustedRoots: true));
   io.connectionTimeout = const Duration(seconds: 25);
   io.idleTimeout = const Duration(seconds: 25);
   return IOClient(io);

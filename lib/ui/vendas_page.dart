@@ -36,6 +36,7 @@ class VendasPage extends StatelessWidget {
     required this.podeManutencaoAuditoriaCaixa,
     required this.podeCancelarVendas,
     required this.podeGerenciarEntregas,
+    required this.usuarioAdmin,
   });
 
   final ProdutoRepository produtoRepository;
@@ -51,6 +52,7 @@ class VendasPage extends StatelessWidget {
   final bool podeManutencaoAuditoriaCaixa;
   final bool podeCancelarVendas;
   final bool podeGerenciarEntregas;
+  final bool usuarioAdmin;
 
   @override
   Widget build(BuildContext context) {
@@ -169,6 +171,9 @@ class VendasPage extends StatelessWidget {
                       clienteRepository: clienteRepository,
                       vendedorRepository: vendedorRepository,
                       produtoRepository: produtoRepository,
+                      appConfigRepository: appConfigRepository,
+                      usuarioAdmin: usuarioAdmin,
+                      usuarioLogin: usuarioAtual,
                       onAbrirModuloEntregas: podeGerenciarEntregas
                           ? () {
                               Navigator.push(

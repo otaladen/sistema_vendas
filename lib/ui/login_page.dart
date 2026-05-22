@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../data/usuario_repository.dart';
+import '../domain/auditoria_catalogo.dart';
 import '../model/usuario_sistema.dart';
+import '../services/auditoria_registrar.dart';
 import 'layout/app_layout.dart';
 
 class LoginPage extends StatefulWidget {
@@ -109,6 +111,13 @@ class _LoginPageState extends State<LoginPage> {
         podeAutorizarReajustePreco: true,
       );
       await widget.usuarioRepository.salvar(admin);
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.autenticacao,
+        acao: AuditoriaAcao.adminCriado,
+        usuarioLogin: login,
+        resumo: 'Primeiro administrador criado: $nome',
+        detalhes: {'login': login},
+      );
       if (!mounted) return;
       widget.onLoginSuccess(admin);
     } finally {
@@ -135,11 +144,23 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final usuario = await widget.usuarioRepository.autenticar(login, senha);
       if (usuario == null) {
+        AuditoriaRegistrar.registrar(
+          modulo: AuditoriaModulo.autenticacao,
+          acao: AuditoriaAcao.loginFalha,
+          usuarioLogin: login,
+          resumo: 'Tentativa de login falhou: $login',
+        );
         if (!mounted) return;
         setState(() => _erro = 'Usuario ou senha invalidos.');
         return;
       }
       if (!usuario.ativo) {
+        AuditoriaRegistrar.registrar(
+          modulo: AuditoriaModulo.autenticacao,
+          acao: AuditoriaAcao.loginFalha,
+          usuarioLogin: login,
+          resumo: 'Login bloqueado (usuario inativo): $login',
+        );
         if (!mounted) return;
         setState(() => _erro = 'Usuario inativo. Procure o administrador.');
         return;

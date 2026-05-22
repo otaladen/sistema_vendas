@@ -2140,9 +2140,63 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "27:3463820139052098940",
+      "lastPropertyId": "9:7458166227502791115",
+      "name": "AuditoriaEvento",
+      "properties": [
+        {
+          "id": "1:8937463353850954377",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:9076494333508968551",
+          "name": "dataHora",
+          "type": 10
+        },
+        {
+          "id": "3:5407055659855695534",
+          "name": "usuarioLogin",
+          "type": 9
+        },
+        {
+          "id": "4:8638775923593055728",
+          "name": "modulo",
+          "type": 9
+        },
+        {
+          "id": "5:2892429749402290712",
+          "name": "acao",
+          "type": 9
+        },
+        {
+          "id": "6:1896279760873357218",
+          "name": "entidade",
+          "type": 9
+        },
+        {
+          "id": "7:4427763620154413103",
+          "name": "entidadeId",
+          "type": 9
+        },
+        {
+          "id": "8:4725940589559881644",
+          "name": "resumo",
+          "type": 9
+        },
+        {
+          "id": "9:7458166227502791115",
+          "name": "detalhesJson",
+          "type": 9
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "26:4717411579528104336",
+  "lastEntityId": "27:3463820139052098940",
   "lastIndexId": "43:5553602522747990903",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",

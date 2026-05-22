@@ -1,3 +1,4 @@
+import '../domain/auditoria_catalogo.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/limite_credito_helper.dart';
@@ -6,6 +7,7 @@ import '../domain/plano_fiado.dart';
 import '../domain/promocao_cadastro.dart';
 import '../domain/promocao_preco_service.dart';
 import 'promocao_repository.dart';
+import '../services/auditoria_registrar.dart';
 import '../services/compras_preditivas_service.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
@@ -665,7 +667,49 @@ class VendaRepository {
   Venda? obterPorId(int id) => _db.vendaBox.get(id);
 
   List<Venda> listarOrcamentosPendentes() {
-    return listarTodas().where((venda) => venda.status == 'orcamento').toList();
+    return listarTodas()
+        .where((venda) => venda.status == 'orcamento' && !venda.cancelada)
+        .toList();
+  }
+
+  /// Cancela orcamentos pendentes com data de criacao ate o fim do dia [ate] (inclusive).
+  int cancelarOrcamentosPendentesAte(
+    DateTime ate, {
+    String motivo = '',
+    String canceladaPor = '',
+  }) {
+    final fimDia = DateTime(ate.year, ate.month, ate.day, 23, 59, 59, 999);
+    final alvo = listarOrcamentosPendentes()
+        .where((v) => !v.data.toLocal().isAfter(fimDia))
+        .toList();
+    final motivoPadrao = motivo.trim().isEmpty
+        ? 'Manutencao: limpeza de orcamentos em aberto'
+        : motivo.trim();
+    for (final v in alvo) {
+      cancelarVenda(
+        v.id,
+        motivo: motivoPadrao,
+        canceladaPor: canceladaPor,
+        omitirAuditoriaIndividual: true,
+      );
+    }
+    if (alvo.isNotEmpty) {
+      final dataFmt =
+          '${ate.day.toString().padLeft(2, '0')}/${ate.month.toString().padLeft(2, '0')}/${ate.year}';
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.orcamento,
+        acao: AuditoriaAcao.cancelarLote,
+        usuarioLogin: canceladaPor,
+        entidade: 'orcamento',
+        resumo: '${alvo.length} orcamento(s) apagados ate $dataFmt',
+        detalhes: {
+          'ateData': dataFmt,
+          'quantidade': alvo.length,
+          'motivo': motivoPadrao,
+        },
+      );
+    }
+    return alvo.length;
   }
 
   List<Venda> listarComprasFinalizadasPorCliente(
@@ -2708,14 +2752,19 @@ class VendaRepository {
     int vendaId, {
     String motivo = '',
     String canceladaPor = '',
+    bool omitirAuditoriaIndividual = false,
   }) {
     final motivoLimpo = motivo.trim();
     final usuarioCancelamento = canceladaPor.trim();
+    var statusAntes = '';
+    var numeroOrcamento = 0;
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
       if (venda == null) {
         throw StateError('Venda $vendaId nao encontrada.');
       }
+      statusAntes = venda.status;
+      numeroOrcamento = venda.numeroOrcamento;
       if (venda.cancelada) {
         throw StateError('Venda $vendaId ja esta cancelada.');
       }
@@ -2787,6 +2836,51 @@ class VendaRepository {
       }
     });
     _notificarRedeAposEscrita();
+    if (!omitirAuditoriaIndividual) {
+      _registrarAuditoriaCancelamentoVenda(
+        vendaId: vendaId,
+        status: statusAntes,
+        numeroOrcamento: numeroOrcamento,
+        motivo: motivoLimpo,
+        canceladaPor: usuarioCancelamento,
+      );
+    }
+  }
+
+  void _registrarAuditoriaCancelamentoVenda({
+    required int vendaId,
+    required String status,
+    required int numeroOrcamento,
+    required String motivo,
+    required String canceladaPor,
+  }) {
+    if (status == 'orcamento') {
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.orcamento,
+        acao: AuditoriaAcao.cancelar,
+        usuarioLogin: canceladaPor,
+        entidade: 'orcamento',
+        entidadeId: '$vendaId',
+        resumo: 'Orcamento #$numeroOrcamento cancelado',
+        detalhes: {
+          if (motivo.isNotEmpty) 'motivo': motivo,
+          'numeroOrcamento': numeroOrcamento,
+        },
+      );
+      return;
+    }
+    AuditoriaRegistrar.registrar(
+      modulo: AuditoriaModulo.venda,
+      acao: AuditoriaAcao.cancelar,
+      usuarioLogin: canceladaPor,
+      entidade: 'venda',
+      entidadeId: '$vendaId',
+      resumo: 'Venda cancelada (status: $status)',
+      detalhes: {
+        if (motivo.isNotEmpty) 'motivo': motivo,
+        'status': status,
+      },
+    );
   }
 
   /// Devolucao (estoque de volta) ou troca (devolucao + saida de novos itens).

@@ -184,6 +184,7 @@ class _MainMenuPageState extends State<MainMenuPage> {
                       podeGerenciarEntregas:
                           widget.usuarioLogado.admin ||
                           widget.usuarioLogado.podeEntregas,
+                      usuarioAdmin: widget.usuarioLogado.admin,
                     ),
                   ),
                 );

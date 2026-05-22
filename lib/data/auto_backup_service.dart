@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
+import '../domain/auditoria_catalogo.dart';
+import '../services/auditoria_registrar.dart';
 import 'app_config_repository.dart';
 import 'local_app_data_paths.dart';
 import 'local_backup_copy.dart';
@@ -59,6 +61,13 @@ class AutoBackupService {
 
       await repository.atualizarUltimoBackupAutomaticoMs(
         DateTime.now().millisecondsSinceEpoch,
+      );
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.backup,
+        acao: AuditoriaAcao.backupAutomatico,
+        usuarioLogin: 'sistema',
+        resumo: 'Backup automatico executado',
+        detalhes: {'caminho': pastaBackup.path},
       );
     } catch (_) {
       // Silencioso: disco cheio/rede indisponivel; usuario ve status em Configuracoes.

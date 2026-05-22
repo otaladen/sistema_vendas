@@ -16,6 +16,7 @@ import '../../model/nfe_importada_registro.dart';
 import '../../model/registro_devolucao.dart';
 import '../../model/usuario_sistema.dart';
 import '../../model/vinculo_fornecedor_produto.dart';
+import '../../domain/auditoria_retencao.dart';
 import '../app_config_repository.dart';
 
 /// Codecs adicionais para sync LAN (entidades alem de produto/cliente/venda/vendedor).
@@ -432,6 +433,7 @@ class SyncEntityCodecExtras {
         'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
         'ultimoBackupAutomaticoMs': c.ultimoBackupAutomaticoMs,
         'layoutImpressaoJson': c.layoutImpressaoJson,
+        'auditoriaRetencaoDias': c.auditoriaRetencaoDias,
       };
 
   static EmpresaConfig empresaConfigDeMap(
@@ -485,6 +487,10 @@ class SyncEntityCodecExtras {
               base.ultimoBackupAutomaticoMs,
       layoutImpressaoJson:
           (m['layoutImpressaoJson'] ?? base.layoutImpressaoJson).toString(),
+      auditoriaRetencaoDias: AuditoriaRetencaoOpcoes.normalizar(
+        (m['auditoriaRetencaoDias'] as num?)?.toInt() ??
+            base.auditoriaRetencaoDias,
+      ),
     );
   }
 

@@ -1,5 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 
+import '../../data/app_config_repository.dart';
+import '../../data/auditoria_repository.dart';
 import '../../data/cliente_repository.dart';
 import '../../data/produto_repository.dart';
 import '../../data/venda_repository.dart';
@@ -14,6 +16,7 @@ import 'relatorio_dashboard_executivo_page.dart';
 import 'relatorio_entregas_resumo_page.dart';
 import 'relatorio_estoque_minimo_page.dart';
 import 'relatorio_historico_fechamento_page.dart';
+import 'relatorio_log_sistema_page.dart';
 import 'relatorio_orcamentos_abertos_page.dart';
 import 'relatorio_produtos_mais_vendidos_page.dart';
 import 'relatorio_saidas_produto_page.dart';
@@ -57,6 +60,9 @@ class RelatoriosPage extends StatefulWidget {
     required this.clienteRepository,
     required this.vendedorRepository,
     required this.produtoRepository,
+    required this.appConfigRepository,
+    required this.usuarioAdmin,
+    this.usuarioLogin = '',
     this.onAbrirModuloEntregas,
     this.onAbrirModuloCaixa,
   });
@@ -65,6 +71,9 @@ class RelatoriosPage extends StatefulWidget {
   final ClienteRepository clienteRepository;
   final VendedorRepository vendedorRepository;
   final ProdutoRepository produtoRepository;
+  final AppConfigRepository appConfigRepository;
+  final bool usuarioAdmin;
+  final String usuarioLogin;
   final VoidCallback? onAbrirModuloEntregas;
   final VoidCallback? onAbrirModuloCaixa;
 
@@ -440,6 +449,38 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
             ),
           ),
         ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'operacional',
+        categoriaTitulo: 'Operacional',
+        categoriaIcone: Icons.settings_suggest_outlined,
+        icon: Icons.fact_check_outlined,
+        cor: corRelLogSistema,
+        titulo: 'Log do sistema',
+        subtitulo:
+            'Auditoria central: login, orcamentos, backup, fechamento de caixa e mais.',
+        palavrasChave: const [
+          'log',
+          'auditoria',
+          'historico',
+          'sistema',
+          'rastreio',
+          'evento',
+        ],
+        onTap: () {
+          final auditoriaRepo = AuditoriaRepository(p.objectBox);
+          Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => RelatorioLogSistemaPage(
+                auditoriaRepository: auditoriaRepo,
+                appConfigRepository: widget.appConfigRepository,
+                usuarioAdmin: widget.usuarioAdmin,
+                usuarioLogin: widget.usuarioLogin,
+              ),
+            ),
+          );
+        },
       ),
       _RelatorioHubItem(
         categoriaId: 'operacional',

@@ -32,16 +32,9 @@ class _RelatorioSaidasProdutoPageState extends State<RelatorioSaidasProdutoPage>
   LimitesPeriodo? _limites;
   Produto? _produto;
   List<SaidaProdutoRelatorioLinha> _linhas = [];
-  final _buscaProdutoController = TextEditingController();
 
   final NumberFormat _nfMoeda = NumberFormat('#,##0.00', 'pt_BR');
   final NumberFormat _nfInt = NumberFormat('#,##0', 'pt_BR');
-
-  @override
-  void dispose() {
-    _buscaProdutoController.dispose();
-    super.dispose();
-  }
 
   Produto? _resolverProdutoPorTexto(String texto) {
     final t = texto.trim();
@@ -80,25 +73,18 @@ class _RelatorioSaidasProdutoPageState extends State<RelatorioSaidasProdutoPage>
     );
   }
 
-  void _aplicarProduto(Produto? p, {String? textoBusca}) {
-    setState(() {
-      _produto = p;
-      if (p != null) {
-        _buscaProdutoController.text = '${p.codigoInterno} · ${p.nome}';
-      } else if (textoBusca != null) {
-        _buscaProdutoController.text = textoBusca;
-      }
-    });
+  void _aplicarProduto(Produto? p) {
+    setState(() => _produto = p);
     _carregar();
   }
 
-  void _buscarProdutoPorCampo() {
-    final p = _resolverProdutoPorTexto(_buscaProdutoController.text);
+  void _confirmarBuscaProduto(String texto) {
+    final p = _resolverProdutoPorTexto(texto);
     if (p == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Produto nao encontrado. Use codigo exato ou escolha na lista.',
+            'Produto nao encontrado. Escolha na lista ou informe o codigo.',
           ),
         ),
       );
@@ -286,43 +272,24 @@ class _RelatorioSaidasProdutoPageState extends State<RelatorioSaidasProdutoPage>
             },
             onAtualizar: _carregar,
             filtrosExtras: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _buscaProdutoController,
-                      decoration: produtoBuscaInputDecoration(
-                        labelText: 'Codigo ou nome do produto',
-                        isDense: true,
-                      ),
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: (_) => _buscarProdutoPorCampo(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    tooltip: 'Buscar produto',
-                    onPressed: _buscarProdutoPorCampo,
-                    icon: const Icon(Icons.search),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
               Autocomplete<Produto>(
                 displayStringForOption: (p) => '${p.codigoInterno} · ${p.nome}',
-                optionsBuilder: (TextEditingValue te) => _sugestoesProduto(te.text),
-                onSelected: (p) => _aplicarProduto(p),
+                optionsBuilder: (te) => _sugestoesProduto(te.text),
+                onSelected: _aplicarProduto,
                 fieldViewBuilder:
                     (context, controller, focusNode, onFieldSubmitted) {
                   return TextField(
                     controller: controller,
                     focusNode: focusNode,
-                    decoration: const InputDecoration(
-                      labelText: 'Ou escolha na lista (2+ letras)',
-                      border: OutlineInputBorder(),
+                    decoration: produtoBuscaInputDecoration(
+                      labelText: 'Codigo ou nome do produto',
+                      hintText: 'Escolha na lista ou pressione Enter',
+                      helperText:
+                          'Mesma busca do PDV: codigo, nome, EAN ou medidas',
                       isDense: true,
                     ),
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _confirmarBuscaProduto(controller.text),
                     onEditingComplete: onFieldSubmitted,
                   );
                 },

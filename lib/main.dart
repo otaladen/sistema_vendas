@@ -4,7 +4,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
+import 'domain/auditoria_catalogo.dart';
+
 import 'data/app_config_repository.dart';
+import 'data/auditoria_repository.dart';
 import 'data/auto_backup_service.dart';
 import 'data/cliente_repository.dart';
 import 'data/funcionario_repository.dart';
@@ -17,6 +20,8 @@ import 'data/usuario_repository.dart';
 import 'data/venda_repository.dart';
 import 'data/vendedor_repository.dart';
 import 'model/usuario_sistema.dart';
+import 'services/auditoria_registrar.dart';
+import 'services/auditoria_retencao_service.dart';
 import 'services/print_service.dart';
 import 'services/trusted_http_client.dart';
 import 'ui/layout/app_layout.dart';
@@ -29,7 +34,13 @@ Future<void> main() async {
   await initializeDateFormatting('pt_BR');
   await _tentarSincronizarHorarioSistemaNoInicio();
   final objectBox = await ObjectBox.create();
+  final auditoriaRepository = AuditoriaRepository(objectBox);
+  AuditoriaRegistrar.inicializar(auditoriaRepository);
   final appConfigRepository = AppConfigRepository();
+  await AuditoriaRetencaoService.aplicarSeConfigurado(
+    configRepository: appConfigRepository,
+    auditoriaRepository: auditoriaRepository,
+  );
   await _executarMigracaoMotoristaEntrega(
     objectBox: objectBox,
     configRepository: appConfigRepository,
@@ -118,12 +129,29 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _entrar(UsuarioSistema usuario) {
+    AuditoriaRegistrar.definirUsuarioSessao(usuario.login);
+    AuditoriaRegistrar.registrar(
+      modulo: AuditoriaModulo.autenticacao,
+      acao: AuditoriaAcao.login,
+      usuarioLogin: usuario.login,
+      resumo: 'Login: ${usuario.nome} (${usuario.login})',
+    );
     setState(() {
       _usuarioLogado = usuario;
     });
   }
 
   void _sair() {
+    final login = _usuarioLogado?.login ?? AuditoriaRegistrar.usuarioSessao;
+    if (login.isNotEmpty) {
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.autenticacao,
+        acao: AuditoriaAcao.logout,
+        usuarioLogin: login,
+        resumo: 'Logout: $login',
+      );
+    }
+    AuditoriaRegistrar.limparUsuarioSessao();
     widget.lanSyncScheduler.parar();
     setState(() {
       _usuarioLogado = null;

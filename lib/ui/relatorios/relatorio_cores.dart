@@ -16,3 +16,4 @@ const Color corRelDashboard = Color(0xFF283593);
 const Color corRelAbc = Color(0xFFAD1457);
 const Color corRelFechamentoHist = Color(0xFF00695C);
 const Color corRelEntregasResumo = Color(0xFF0288D1);
+const Color corRelLogSistema = Color(0xFF5E35B1);

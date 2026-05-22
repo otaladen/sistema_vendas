@@ -11,6 +11,8 @@ import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
 import '../data/auto_backup_service.dart';
+import '../domain/auditoria_catalogo.dart';
+import '../services/auditoria_registrar.dart';
 import '../data/local_app_data_paths.dart';
 import '../data/local_backup_copy.dart';
 import '../data/mensageria_repository.dart';
@@ -829,6 +831,12 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       setState(() {
         _ultimoBackupPath = pastaBackup.path;
       });
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.backup,
+        acao: AuditoriaAcao.backupCriar,
+        resumo: 'Backup manual criado',
+        detalhes: {'caminho': pastaBackup.path},
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 10),
@@ -1068,6 +1076,12 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       widget.objectBox.store.close();
       await _limparDiretorio(baseDir);
       await copiarDiretorioRecursivo(origem: origemRestore, destino: baseDir);
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.backup,
+        acao: AuditoriaAcao.backupRestaurar,
+        resumo: 'Backup restaurado (app sera fechado)',
+        detalhes: {'origem': origemRestore.path},
+      );
 
       if (!mounted) {
         exit(0);
