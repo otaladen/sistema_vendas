@@ -17,6 +17,8 @@ class UsuarioSistema {
     this.podeConfiguracoes = false,
     this.podeAutorizarSegundaViaCupom = false,
     this.podeAutorizarMargemVenda = false,
+    this.podeReajustePrecoLote = false,
+    this.podeAutorizarReajustePreco = false,
   });
 
   final String id;
@@ -40,6 +42,12 @@ class UsuarioSistema {
   /// Autoriza venda abaixo da margem minima de campanha promocional.
   final bool podeAutorizarMargemVenda;
 
+  /// Executa reajuste de precos em lote (Estoque / cadastro).
+  final bool podeReajustePrecoLote;
+
+  /// Autoriza aplicar reajuste com alertas (margem, variacao, abaixo do custo).
+  final bool podeAutorizarReajustePreco;
+
   UsuarioSistema copyWith({
     String? id,
     String? nome,
@@ -58,6 +66,8 @@ class UsuarioSistema {
     bool? podeConfiguracoes,
     bool? podeAutorizarSegundaViaCupom,
     bool? podeAutorizarMargemVenda,
+    bool? podeReajustePrecoLote,
+    bool? podeAutorizarReajustePreco,
   }) {
     return UsuarioSistema(
       id: id ?? this.id,
@@ -81,6 +91,10 @@ class UsuarioSistema {
           podeAutorizarSegundaViaCupom ?? this.podeAutorizarSegundaViaCupom,
       podeAutorizarMargemVenda:
           podeAutorizarMargemVenda ?? this.podeAutorizarMargemVenda,
+      podeReajustePrecoLote:
+          podeReajustePrecoLote ?? this.podeReajustePrecoLote,
+      podeAutorizarReajustePreco:
+          podeAutorizarReajustePreco ?? this.podeAutorizarReajustePreco,
     );
   }
 
@@ -103,6 +117,8 @@ class UsuarioSistema {
       'podeConfiguracoes': podeConfiguracoes,
       'podeAutorizarSegundaViaCupom': podeAutorizarSegundaViaCupom,
       'podeAutorizarMargemVenda': podeAutorizarMargemVenda,
+      'podeReajustePrecoLote': podeReajustePrecoLote,
+      'podeAutorizarReajustePreco': podeAutorizarReajustePreco,
     };
   }
 
@@ -133,6 +149,8 @@ class UsuarioSistema {
         return false;
       }(),
       podeAutorizarMargemVenda: map['podeAutorizarMargemVenda'] == true,
+      podeReajustePrecoLote: map['podeReajustePrecoLote'] == true,
+      podeAutorizarReajustePreco: map['podeAutorizarReajustePreco'] == true,
     );
   }
 }

@@ -32,6 +32,8 @@ class _UsuariosPageState extends State<UsuariosPage> {
   bool _podeConfiguracoes = false;
   bool _podeAutorizarSegundaViaCupom = false;
   bool _podeAutorizarMargemVenda = false;
+  bool _podeReajustePrecoLote = false;
+  bool _podeAutorizarReajustePreco = false;
   String _status = '';
 
   @override
@@ -75,6 +77,8 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeConfiguracoes = false;
       _podeAutorizarSegundaViaCupom = false;
       _podeAutorizarMargemVenda = false;
+      _podeReajustePrecoLote = false;
+      _podeAutorizarReajustePreco = false;
     });
   }
 
@@ -91,6 +95,8 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeFinanceiro = true;
       _podeConfiguracoes = true;
       _podeAutorizarSegundaViaCupom = true;
+      _podeReajustePrecoLote = true;
+      _podeAutorizarReajustePreco = true;
     }
   }
 
@@ -130,6 +136,8 @@ class _UsuariosPageState extends State<UsuariosPage> {
       podeConfiguracoes: _podeConfiguracoes,
       podeAutorizarSegundaViaCupom: _podeAutorizarSegundaViaCupom,
       podeAutorizarMargemVenda: _podeAutorizarMargemVenda,
+      podeReajustePrecoLote: _podeReajustePrecoLote,
+      podeAutorizarReajustePreco: _podeAutorizarReajustePreco,
     );
     await widget.usuarioRepository.salvar(usuario);
     await _carregar();
@@ -156,6 +164,8 @@ class _UsuariosPageState extends State<UsuariosPage> {
       _podeConfiguracoes = u.podeConfiguracoes;
       _podeAutorizarSegundaViaCupom = u.podeAutorizarSegundaViaCupom;
       _podeAutorizarMargemVenda = u.podeAutorizarMargemVenda;
+      _podeReajustePrecoLote = u.podeReajustePrecoLote;
+      _podeAutorizarReajustePreco = u.podeAutorizarReajustePreco;
       _status = 'Editando usuario: ${u.nome}';
     });
   }
@@ -288,6 +298,26 @@ class _UsuariosPageState extends State<UsuariosPage> {
             title: const Text('Autorizar margem promocional'),
             subtitle: const Text(
               'Libera venda abaixo da margem minima definida na campanha (PDV).',
+            ),
+            contentPadding: EdgeInsets.zero,
+          ),
+          CheckboxListTile(
+            value: _podeReajustePrecoLote,
+            onChanged: _admin
+                ? null
+                : (v) => setState(() => _podeReajustePrecoLote = v ?? false),
+            title: const Text('Reajuste de precos em lote'),
+            subtitle: const Text('Executa o assistente de reajuste na tela de Estoque.'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          CheckboxListTile(
+            value: _podeAutorizarReajustePreco,
+            onChanged: _admin
+                ? null
+                : (v) => setState(() => _podeAutorizarReajustePreco = v ?? false),
+            title: const Text('Autorizar reajuste de precos'),
+            subtitle: const Text(
+              'Libera aplicar reajuste com alertas (margem, variacao, abaixo do custo).',
             ),
             contentPadding: EdgeInsets.zero,
           ),

@@ -23,6 +23,8 @@ import '../model/kit_orcamento.dart';
 import '../model/promocao.dart';
 import '../model/promocao_combo_item.dart';
 import '../model/promocao_item.dart';
+import '../model/reajuste_preco.dart';
+import '../model/reajuste_preco_item.dart';
 import '../model/nfe_importada_registro.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
@@ -54,6 +56,8 @@ class ObjectBox {
     contaPagarBox = Box<ContaPagar>(store);
     tituloReceberBox = Box<TituloReceber>(store);
     recebimentoFiadoBox = Box<RecebimentoFiado>(store);
+    reajustePrecoBox = Box<ReajustePreco>(store);
+    reajustePrecoItemBox = Box<ReajustePrecoItem>(store);
   }
 
   late final Store store;
@@ -81,6 +85,8 @@ class ObjectBox {
   late final Box<ContaPagar> contaPagarBox;
   late final Box<TituloReceber> tituloReceberBox;
   late final Box<RecebimentoFiado> recebimentoFiadoBox;
+  late final Box<ReajustePreco> reajustePrecoBox;
+  late final Box<ReajustePrecoItem> reajustePrecoItemBox;
   late final Directory productImagesDir;
   late final String storeDirectoryPath;
 

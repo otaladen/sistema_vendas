@@ -31,6 +31,8 @@ import 'model/produto.dart';
 import 'model/promocao.dart';
 import 'model/promocao_combo_item.dart';
 import 'model/promocao_item.dart';
+import 'model/reajuste_preco.dart';
+import 'model/reajuste_preco_item.dart';
 import 'model/recebimento_fiado.dart';
 import 'model/registro_devolucao.dart';
 import 'model/titulo_receber.dart';
@@ -2356,6 +2358,245 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(25, 2859735199240536487),
+    name: 'ReajustePreco',
+    lastPropertyId: const obx_int.IdUid(21, 8362132318843210512),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 6590985335993289439),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 1283978725364575098),
+        name: 'criadoEm',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 4211299268592643036),
+        name: 'usuarioLogin',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 7824389317327311156),
+        name: 'usuarioNome',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 4631479708836592348),
+        name: 'motivo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 4612029028002365962),
+        name: 'modo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 4664397013425902468),
+        name: 'percentualSobrePreco',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 1707293960946961374),
+        name: 'margemPercentual',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 7221513136262470120),
+        name: 'baseCusto',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 6999773080489029232),
+        name: 'arredondamento',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 1265311364475893799),
+        name: 'tabelasCsv',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 896435131864152248),
+        name: 'somenteAtivos',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(13, 6493452386256183398),
+        name: 'protegerAbaixoCusto',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(14, 522880692390826724),
+        name: 'margemMinimaPercentual',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(15, 875987700348715081),
+        name: 'totalEscopo',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(16, 8433709371822137732),
+        name: 'totalAlterados',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(17, 5614336356297388250),
+        name: 'totalIgnorados',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(18, 8526096777808487104),
+        name: 'estornado',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(19, 4748016054132659974),
+        name: 'estornadoEm',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(20, 271196075683607423),
+        name: 'estornadoPorLogin',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(21, 8362132318843210512),
+        name: 'reajusteOrigemId',
+        type: 6,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[
+      obx_int.ModelBacklink(
+        name: 'itens',
+        srcEntity: 'ReajustePrecoItem',
+        srcField: 'reajuste',
+      ),
+    ],
+  ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(26, 4717411579528104336),
+    name: 'ReajustePrecoItem',
+    lastPropertyId: const obx_int.IdUid(14, 4567629764351347136),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 4522265553171645979),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 461418009140313017),
+        name: 'produtoId',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 5609622498113398280),
+        name: 'codigoInterno',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 1283627190090152730),
+        name: 'nome',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 3716244586048996565),
+        name: 'preco1Antes',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 1944687511951194278),
+        name: 'preco2Antes',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 6542658903087191008),
+        name: 'preco3Antes',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 8557508343040689673),
+        name: 'preco1Depois',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 8329155348626781024),
+        name: 'preco2Depois',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 7563987804064312805),
+        name: 'preco3Depois',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 4482702325715227961),
+        name: 'alterouPreco1',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 5600767956359832721),
+        name: 'alterouPreco2',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(13, 2433847810339116174),
+        name: 'alterouPreco3',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(14, 4567629764351347136),
+        name: 'reajusteId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(43, 5553602522747990903),
+        relationField: 'reajuste',
+        relationTarget: 'ReajustePreco',
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -2401,8 +2642,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(24, 4667932850296247372),
-    lastIndexId: const obx_int.IdUid(42, 1371143627473199472),
+    lastEntityId: const obx_int.IdUid(26, 4717411579528104336),
+    lastIndexId: const obx_int.IdUid(43, 5553602522747990903),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -5370,6 +5611,328 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    ReajustePreco: obx_int.EntityDefinition<ReajustePreco>(
+      model: _entities[24],
+      toOneRelations: (ReajustePreco object) => [],
+      toManyRelations: (ReajustePreco object) => {
+        obx_int.RelInfo<ReajustePrecoItem>.toOneBacklink(
+          14,
+          object.id,
+          (ReajustePrecoItem srcObject) => srcObject.reajuste,
+        ): object.itens,
+      },
+      getId: (ReajustePreco object) => object.id,
+      setId: (ReajustePreco object, int id) {
+        object.id = id;
+      },
+      objectToFB: (ReajustePreco object, fb.Builder fbb) {
+        final usuarioLoginOffset = fbb.writeString(object.usuarioLogin);
+        final usuarioNomeOffset = fbb.writeString(object.usuarioNome);
+        final motivoOffset = fbb.writeString(object.motivo);
+        final modoOffset = fbb.writeString(object.modo);
+        final baseCustoOffset = fbb.writeString(object.baseCusto);
+        final arredondamentoOffset = fbb.writeString(object.arredondamento);
+        final tabelasCsvOffset = fbb.writeString(object.tabelasCsv);
+        final estornadoPorLoginOffset = fbb.writeString(
+          object.estornadoPorLogin,
+        );
+        fbb.startTable(22);
+        fbb.addInt64(0, object.id);
+        fbb.addInt64(1, object.criadoEm.millisecondsSinceEpoch);
+        fbb.addOffset(2, usuarioLoginOffset);
+        fbb.addOffset(3, usuarioNomeOffset);
+        fbb.addOffset(4, motivoOffset);
+        fbb.addOffset(5, modoOffset);
+        fbb.addFloat64(6, object.percentualSobrePreco);
+        fbb.addFloat64(7, object.margemPercentual);
+        fbb.addOffset(8, baseCustoOffset);
+        fbb.addOffset(9, arredondamentoOffset);
+        fbb.addOffset(10, tabelasCsvOffset);
+        fbb.addBool(11, object.somenteAtivos);
+        fbb.addBool(12, object.protegerAbaixoCusto);
+        fbb.addFloat64(13, object.margemMinimaPercentual);
+        fbb.addInt64(14, object.totalEscopo);
+        fbb.addInt64(15, object.totalAlterados);
+        fbb.addInt64(16, object.totalIgnorados);
+        fbb.addBool(17, object.estornado);
+        fbb.addInt64(18, object.estornadoEm?.millisecondsSinceEpoch);
+        fbb.addOffset(19, estornadoPorLoginOffset);
+        fbb.addInt64(20, object.reajusteOrigemId);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final estornadoEmValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          40,
+        );
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final usuarioLoginParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final usuarioNomeParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final motivoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 12, '');
+        final modoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 14, '');
+        final percentualSobrePrecoParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        final margemPercentualParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          18,
+          0,
+        );
+        final baseCustoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 20, '');
+        final arredondamentoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 22, '');
+        final tabelasCsvParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 24, '');
+        final somenteAtivosParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          26,
+          false,
+        );
+        final protegerAbaixoCustoParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          28,
+          false,
+        );
+        final margemMinimaPercentualParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          30,
+          0,
+        );
+        final totalEscopoParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          32,
+          0,
+        );
+        final totalAlteradosParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          34,
+          0,
+        );
+        final totalIgnoradosParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          36,
+          0,
+        );
+        final estornadoParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          38,
+          false,
+        );
+        final estornadoPorLoginParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 42, '');
+        final reajusteOrigemIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          44,
+          0,
+        );
+        final criadoEmParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 6, 0),
+          isUtc: true,
+        );
+        final estornadoEmParam = estornadoEmValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                estornadoEmValue,
+                isUtc: true,
+              );
+        final object = ReajustePreco(
+          id: idParam,
+          usuarioLogin: usuarioLoginParam,
+          usuarioNome: usuarioNomeParam,
+          motivo: motivoParam,
+          modo: modoParam,
+          percentualSobrePreco: percentualSobrePrecoParam,
+          margemPercentual: margemPercentualParam,
+          baseCusto: baseCustoParam,
+          arredondamento: arredondamentoParam,
+          tabelasCsv: tabelasCsvParam,
+          somenteAtivos: somenteAtivosParam,
+          protegerAbaixoCusto: protegerAbaixoCustoParam,
+          margemMinimaPercentual: margemMinimaPercentualParam,
+          totalEscopo: totalEscopoParam,
+          totalAlterados: totalAlteradosParam,
+          totalIgnorados: totalIgnoradosParam,
+          estornado: estornadoParam,
+          estornadoPorLogin: estornadoPorLoginParam,
+          reajusteOrigemId: reajusteOrigemIdParam,
+          criadoEm: criadoEmParam,
+          estornadoEm: estornadoEmParam,
+        );
+        obx_int.InternalToManyAccess.setRelInfo<ReajustePreco>(
+          object.itens,
+          store,
+          obx_int.RelInfo<ReajustePrecoItem>.toOneBacklink(
+            14,
+            object.id,
+            (ReajustePrecoItem srcObject) => srcObject.reajuste,
+          ),
+        );
+        return object;
+      },
+    ),
+    ReajustePrecoItem: obx_int.EntityDefinition<ReajustePrecoItem>(
+      model: _entities[25],
+      toOneRelations: (ReajustePrecoItem object) => [object.reajuste],
+      toManyRelations: (ReajustePrecoItem object) => {},
+      getId: (ReajustePrecoItem object) => object.id,
+      setId: (ReajustePrecoItem object, int id) {
+        object.id = id;
+      },
+      objectToFB: (ReajustePrecoItem object, fb.Builder fbb) {
+        final codigoInternoOffset = fbb.writeString(object.codigoInterno);
+        final nomeOffset = fbb.writeString(object.nome);
+        fbb.startTable(15);
+        fbb.addInt64(0, object.id);
+        fbb.addInt64(1, object.produtoId);
+        fbb.addOffset(2, codigoInternoOffset);
+        fbb.addOffset(3, nomeOffset);
+        fbb.addFloat64(4, object.preco1Antes);
+        fbb.addFloat64(5, object.preco2Antes);
+        fbb.addFloat64(6, object.preco3Antes);
+        fbb.addFloat64(7, object.preco1Depois);
+        fbb.addFloat64(8, object.preco2Depois);
+        fbb.addFloat64(9, object.preco3Depois);
+        fbb.addBool(10, object.alterouPreco1);
+        fbb.addBool(11, object.alterouPreco2);
+        fbb.addBool(12, object.alterouPreco3);
+        fbb.addInt64(13, object.reajuste.targetId);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final produtoIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          6,
+          0,
+        );
+        final codigoInternoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final nomeParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final preco1AntesParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          12,
+          0,
+        );
+        final preco2AntesParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          14,
+          0,
+        );
+        final preco3AntesParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        final preco1DepoisParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          18,
+          0,
+        );
+        final preco2DepoisParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          20,
+          0,
+        );
+        final preco3DepoisParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          22,
+          0,
+        );
+        final alterouPreco1Param = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          24,
+          false,
+        );
+        final alterouPreco2Param = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          26,
+          false,
+        );
+        final alterouPreco3Param = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          28,
+          false,
+        );
+        final object = ReajustePrecoItem(
+          id: idParam,
+          produtoId: produtoIdParam,
+          codigoInterno: codigoInternoParam,
+          nome: nomeParam,
+          preco1Antes: preco1AntesParam,
+          preco2Antes: preco2AntesParam,
+          preco3Antes: preco3AntesParam,
+          preco1Depois: preco1DepoisParam,
+          preco2Depois: preco2DepoisParam,
+          preco3Depois: preco3DepoisParam,
+          alterouPreco1: alterouPreco1Param,
+          alterouPreco2: alterouPreco2Param,
+          alterouPreco3: alterouPreco3Param,
+        );
+        object.reajuste.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          30,
+          0,
+        );
+        object.reajuste.attach(store);
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -7109,4 +7672,192 @@ class PromocaoComboItem_ {
   static final promocao = obx.QueryRelationToOne<PromocaoComboItem, Promocao>(
     _entities[23].properties[4],
   );
+}
+
+/// [ReajustePreco] entity fields to define ObjectBox queries.
+class ReajustePreco_ {
+  /// See [ReajustePreco.id].
+  static final id = obx.QueryIntegerProperty<ReajustePreco>(
+    _entities[24].properties[0],
+  );
+
+  /// See [ReajustePreco.criadoEm].
+  static final criadoEm = obx.QueryDateProperty<ReajustePreco>(
+    _entities[24].properties[1],
+  );
+
+  /// See [ReajustePreco.usuarioLogin].
+  static final usuarioLogin = obx.QueryStringProperty<ReajustePreco>(
+    _entities[24].properties[2],
+  );
+
+  /// See [ReajustePreco.usuarioNome].
+  static final usuarioNome = obx.QueryStringProperty<ReajustePreco>(
+    _entities[24].properties[3],
+  );
+
+  /// See [ReajustePreco.motivo].
+  static final motivo = obx.QueryStringProperty<ReajustePreco>(
+    _entities[24].properties[4],
+  );
+
+  /// See [ReajustePreco.modo].
+  static final modo = obx.QueryStringProperty<ReajustePreco>(
+    _entities[24].properties[5],
+  );
+
+  /// See [ReajustePreco.percentualSobrePreco].
+  static final percentualSobrePreco = obx.QueryDoubleProperty<ReajustePreco>(
+    _entities[24].properties[6],
+  );
+
+  /// See [ReajustePreco.margemPercentual].
+  static final margemPercentual = obx.QueryDoubleProperty<ReajustePreco>(
+    _entities[24].properties[7],
+  );
+
+  /// See [ReajustePreco.baseCusto].
+  static final baseCusto = obx.QueryStringProperty<ReajustePreco>(
+    _entities[24].properties[8],
+  );
+
+  /// See [ReajustePreco.arredondamento].
+  static final arredondamento = obx.QueryStringProperty<ReajustePreco>(
+    _entities[24].properties[9],
+  );
+
+  /// See [ReajustePreco.tabelasCsv].
+  static final tabelasCsv = obx.QueryStringProperty<ReajustePreco>(
+    _entities[24].properties[10],
+  );
+
+  /// See [ReajustePreco.somenteAtivos].
+  static final somenteAtivos = obx.QueryBooleanProperty<ReajustePreco>(
+    _entities[24].properties[11],
+  );
+
+  /// See [ReajustePreco.protegerAbaixoCusto].
+  static final protegerAbaixoCusto = obx.QueryBooleanProperty<ReajustePreco>(
+    _entities[24].properties[12],
+  );
+
+  /// See [ReajustePreco.margemMinimaPercentual].
+  static final margemMinimaPercentual = obx.QueryDoubleProperty<ReajustePreco>(
+    _entities[24].properties[13],
+  );
+
+  /// See [ReajustePreco.totalEscopo].
+  static final totalEscopo = obx.QueryIntegerProperty<ReajustePreco>(
+    _entities[24].properties[14],
+  );
+
+  /// See [ReajustePreco.totalAlterados].
+  static final totalAlterados = obx.QueryIntegerProperty<ReajustePreco>(
+    _entities[24].properties[15],
+  );
+
+  /// See [ReajustePreco.totalIgnorados].
+  static final totalIgnorados = obx.QueryIntegerProperty<ReajustePreco>(
+    _entities[24].properties[16],
+  );
+
+  /// See [ReajustePreco.estornado].
+  static final estornado = obx.QueryBooleanProperty<ReajustePreco>(
+    _entities[24].properties[17],
+  );
+
+  /// See [ReajustePreco.estornadoEm].
+  static final estornadoEm = obx.QueryDateProperty<ReajustePreco>(
+    _entities[24].properties[18],
+  );
+
+  /// See [ReajustePreco.estornadoPorLogin].
+  static final estornadoPorLogin = obx.QueryStringProperty<ReajustePreco>(
+    _entities[24].properties[19],
+  );
+
+  /// See [ReajustePreco.reajusteOrigemId].
+  static final reajusteOrigemId = obx.QueryIntegerProperty<ReajustePreco>(
+    _entities[24].properties[20],
+  );
+
+  /// see [ReajustePreco.itens]
+  static final itens =
+      obx.QueryBacklinkToMany<ReajustePrecoItem, ReajustePreco>(
+        ReajustePrecoItem_.reajuste,
+      );
+}
+
+/// [ReajustePrecoItem] entity fields to define ObjectBox queries.
+class ReajustePrecoItem_ {
+  /// See [ReajustePrecoItem.id].
+  static final id = obx.QueryIntegerProperty<ReajustePrecoItem>(
+    _entities[25].properties[0],
+  );
+
+  /// See [ReajustePrecoItem.produtoId].
+  static final produtoId = obx.QueryIntegerProperty<ReajustePrecoItem>(
+    _entities[25].properties[1],
+  );
+
+  /// See [ReajustePrecoItem.codigoInterno].
+  static final codigoInterno = obx.QueryStringProperty<ReajustePrecoItem>(
+    _entities[25].properties[2],
+  );
+
+  /// See [ReajustePrecoItem.nome].
+  static final nome = obx.QueryStringProperty<ReajustePrecoItem>(
+    _entities[25].properties[3],
+  );
+
+  /// See [ReajustePrecoItem.preco1Antes].
+  static final preco1Antes = obx.QueryDoubleProperty<ReajustePrecoItem>(
+    _entities[25].properties[4],
+  );
+
+  /// See [ReajustePrecoItem.preco2Antes].
+  static final preco2Antes = obx.QueryDoubleProperty<ReajustePrecoItem>(
+    _entities[25].properties[5],
+  );
+
+  /// See [ReajustePrecoItem.preco3Antes].
+  static final preco3Antes = obx.QueryDoubleProperty<ReajustePrecoItem>(
+    _entities[25].properties[6],
+  );
+
+  /// See [ReajustePrecoItem.preco1Depois].
+  static final preco1Depois = obx.QueryDoubleProperty<ReajustePrecoItem>(
+    _entities[25].properties[7],
+  );
+
+  /// See [ReajustePrecoItem.preco2Depois].
+  static final preco2Depois = obx.QueryDoubleProperty<ReajustePrecoItem>(
+    _entities[25].properties[8],
+  );
+
+  /// See [ReajustePrecoItem.preco3Depois].
+  static final preco3Depois = obx.QueryDoubleProperty<ReajustePrecoItem>(
+    _entities[25].properties[9],
+  );
+
+  /// See [ReajustePrecoItem.alterouPreco1].
+  static final alterouPreco1 = obx.QueryBooleanProperty<ReajustePrecoItem>(
+    _entities[25].properties[10],
+  );
+
+  /// See [ReajustePrecoItem.alterouPreco2].
+  static final alterouPreco2 = obx.QueryBooleanProperty<ReajustePrecoItem>(
+    _entities[25].properties[11],
+  );
+
+  /// See [ReajustePrecoItem.alterouPreco3].
+  static final alterouPreco3 = obx.QueryBooleanProperty<ReajustePrecoItem>(
+    _entities[25].properties[12],
+  );
+
+  /// See [ReajustePrecoItem.reajuste].
+  static final reajuste =
+      obx.QueryRelationToOne<ReajustePrecoItem, ReajustePreco>(
+        _entities[25].properties[13],
+      );
 }

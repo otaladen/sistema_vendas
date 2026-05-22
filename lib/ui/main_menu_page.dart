@@ -130,6 +130,7 @@ class _MainMenuPageState extends State<MainMenuPage> {
                   MaterialPageRoute(
                     builder: (_) => EstoquePage(
                       produtoRepository: widget.produtoRepository,
+                      usuarioLogado: widget.usuarioLogado,
                     ),
                   ),
                 );

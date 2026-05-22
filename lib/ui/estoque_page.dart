@@ -7,27 +7,45 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../data/produto_repository.dart';
+import '../data/reajuste_preco_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
+import '../data/usuario_repository.dart';
 import '../main.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../model/produto.dart';
+import '../model/usuario_sistema.dart';
 import '../services/compras_preditivas_service.dart';
 import '../services/pdf_tabela_produtos_texto.dart';
+import 'reajuste_preco_autorizacao.dart';
+import 'reajuste_preco_historico_page.dart';
+import 'reajuste_preco_lote_page.dart';
 import 'sugestao_compra_page.dart';
 import 'widgets/produto_busca_input.dart';
 
 final NumberFormat _moedaBRL = NumberFormat('#,##0.00', 'pt_BR');
 
 class EstoquePage extends StatefulWidget {
-  const EstoquePage({super.key, required this.produtoRepository});
+  const EstoquePage({
+    super.key,
+    required this.produtoRepository,
+    required this.usuarioLogado,
+  });
 
   final ProdutoRepository produtoRepository;
+  final UsuarioSistema usuarioLogado;
 
   @override
   State<EstoquePage> createState() => _EstoquePageState();
 }
 
 class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
+  final _usuarioRepository = UsuarioRepository();
+
+  ReajustePrecoRepository get _reajusteRepo => ReajustePrecoRepository(
+        widget.produtoRepository.objectBox,
+        widget.produtoRepository,
+      );
+
   final TextEditingController _buscaController = TextEditingController();
   String _filtroBusca = '';
   bool _somenteCriticosPp = false;
@@ -81,6 +99,59 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       ),
     );
     if (mounted) _recarregarProdutos();
+  }
+
+  Future<void> _abrirReajustePrecos(List<Produto> escopo) async {
+    if (!usuarioPodeReajustePrecoLote(widget.usuarioLogado)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Sem permissao para reajuste em lote. Ative em Cadastros > Usuarios.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (escopo.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nenhum item na lista filtrada.')),
+      );
+      return;
+    }
+    final filtros = <String>[];
+    if (_filtroBusca.trim().isNotEmpty) {
+      filtros.add('busca "${_filtroBusca.trim()}"');
+    }
+    if (_somenteCriticosPp) filtros.add('PP critico');
+    final tituloEscopo = filtros.isEmpty
+        ? 'Todos os itens visiveis na Estoque (${escopo.length}).'
+        : 'Filtros: ${filtros.join(' · ')} (${escopo.length} itens).';
+
+    final aplicou = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => ReajustePrecoLotePage(
+          produtoRepository: widget.produtoRepository,
+          reajusteRepository: _reajusteRepo,
+          usuarioRepository: _usuarioRepository,
+          usuarioLogado: widget.usuarioLogado,
+          escopoInicial: escopo,
+          tituloEscopo: tituloEscopo,
+        ),
+      ),
+    );
+    if (aplicou == true && mounted) _recarregarProdutos();
+  }
+
+  void _abrirHistoricoReajustes() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ReajustePrecoHistoricoPage(
+          reajusteRepository: _reajusteRepo,
+          usuarioRepository: _usuarioRepository,
+          usuarioLogado: widget.usuarioLogado,
+        ),
+      ),
+    );
   }
 
   void _snackbarDadosAtualizados({required bool daRede}) {
@@ -281,6 +352,21 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       appBar: AppBar(
         title: const Text('Estoque'),
         actions: [
+          if (usuarioPodeReajustePrecoLote(widget.usuarioLogado)) ...[
+            IconButton(
+              tooltip: 'Historico de reajustes',
+              icon: const Icon(Icons.history),
+              onPressed: _abrirHistoricoReajustes,
+            ),
+            IconButton(
+              tooltip: 'Reajuste de precos em lote',
+              icon: const Icon(Icons.price_change_outlined),
+              onPressed: () {
+                final escopo = _aplicarFiltrosLista(_produtos);
+                _abrirReajustePrecos(escopo);
+              },
+            ),
+          ],
           IconButton(
             tooltip: 'Sugestao de compra',
             icon: const Icon(Icons.shopping_cart_outlined),

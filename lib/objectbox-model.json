@@ -1944,10 +1944,206 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "25:2859735199240536487",
+      "lastPropertyId": "21:8362132318843210512",
+      "name": "ReajustePreco",
+      "properties": [
+        {
+          "id": "1:6590985335993289439",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:1283978725364575098",
+          "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "3:4211299268592643036",
+          "name": "usuarioLogin",
+          "type": 9
+        },
+        {
+          "id": "4:7824389317327311156",
+          "name": "usuarioNome",
+          "type": 9
+        },
+        {
+          "id": "5:4631479708836592348",
+          "name": "motivo",
+          "type": 9
+        },
+        {
+          "id": "6:4612029028002365962",
+          "name": "modo",
+          "type": 9
+        },
+        {
+          "id": "7:4664397013425902468",
+          "name": "percentualSobrePreco",
+          "type": 8
+        },
+        {
+          "id": "8:1707293960946961374",
+          "name": "margemPercentual",
+          "type": 8
+        },
+        {
+          "id": "9:7221513136262470120",
+          "name": "baseCusto",
+          "type": 9
+        },
+        {
+          "id": "10:6999773080489029232",
+          "name": "arredondamento",
+          "type": 9
+        },
+        {
+          "id": "11:1265311364475893799",
+          "name": "tabelasCsv",
+          "type": 9
+        },
+        {
+          "id": "12:896435131864152248",
+          "name": "somenteAtivos",
+          "type": 1
+        },
+        {
+          "id": "13:6493452386256183398",
+          "name": "protegerAbaixoCusto",
+          "type": 1
+        },
+        {
+          "id": "14:522880692390826724",
+          "name": "margemMinimaPercentual",
+          "type": 8
+        },
+        {
+          "id": "15:875987700348715081",
+          "name": "totalEscopo",
+          "type": 6
+        },
+        {
+          "id": "16:8433709371822137732",
+          "name": "totalAlterados",
+          "type": 6
+        },
+        {
+          "id": "17:5614336356297388250",
+          "name": "totalIgnorados",
+          "type": 6
+        },
+        {
+          "id": "18:8526096777808487104",
+          "name": "estornado",
+          "type": 1
+        },
+        {
+          "id": "19:4748016054132659974",
+          "name": "estornadoEm",
+          "type": 10
+        },
+        {
+          "id": "20:271196075683607423",
+          "name": "estornadoPorLogin",
+          "type": 9
+        },
+        {
+          "id": "21:8362132318843210512",
+          "name": "reajusteOrigemId",
+          "type": 6
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "26:4717411579528104336",
+      "lastPropertyId": "14:4567629764351347136",
+      "name": "ReajustePrecoItem",
+      "properties": [
+        {
+          "id": "1:4522265553171645979",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:461418009140313017",
+          "name": "produtoId",
+          "type": 6
+        },
+        {
+          "id": "3:5609622498113398280",
+          "name": "codigoInterno",
+          "type": 9
+        },
+        {
+          "id": "4:1283627190090152730",
+          "name": "nome",
+          "type": 9
+        },
+        {
+          "id": "5:3716244586048996565",
+          "name": "preco1Antes",
+          "type": 8
+        },
+        {
+          "id": "6:1944687511951194278",
+          "name": "preco2Antes",
+          "type": 8
+        },
+        {
+          "id": "7:6542658903087191008",
+          "name": "preco3Antes",
+          "type": 8
+        },
+        {
+          "id": "8:8557508343040689673",
+          "name": "preco1Depois",
+          "type": 8
+        },
+        {
+          "id": "9:8329155348626781024",
+          "name": "preco2Depois",
+          "type": 8
+        },
+        {
+          "id": "10:7563987804064312805",
+          "name": "preco3Depois",
+          "type": 8
+        },
+        {
+          "id": "11:4482702325715227961",
+          "name": "alterouPreco1",
+          "type": 1
+        },
+        {
+          "id": "12:5600767956359832721",
+          "name": "alterouPreco2",
+          "type": 1
+        },
+        {
+          "id": "13:2433847810339116174",
+          "name": "alterouPreco3",
+          "type": 1
+        },
+        {
+          "id": "14:4567629764351347136",
+          "name": "reajusteId",
+          "indexId": "43:5553602522747990903",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "ReajustePreco"
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "24:4667932850296247372",
-  "lastIndexId": "42:1371143627473199472",
+  "lastEntityId": "26:4717411579528104336",
+  "lastIndexId": "43:5553602522747990903",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,
