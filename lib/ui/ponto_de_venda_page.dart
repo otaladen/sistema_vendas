@@ -43,6 +43,7 @@ import 'pdv_consulta_preview_panel.dart';
 import 'pdv_consulta_produtos_page.dart';
 import 'pdv_pesquisa_comando.dart';
 import 'produto_detalhe_venda_page.dart';
+import 'layout/app_layout.dart';
 import 'promocao_margem_autorizacao.dart';
 import 'widgets/pdv_carrinho_linha_compacta.dart';
 import 'widgets/pdv_tipo_entrega_item.dart';
@@ -1073,8 +1074,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           builder: (ctx, setDlg) {
             return AlertDialog(
               title: const Text('Inserir kit no orcamento'),
-              content: SizedBox(
-                width: 380,
+              content: AdaptiveDialogPane(
+                desktopWidth: 380,
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -1441,8 +1442,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           builder: (context, setDialogState) {
             return AlertDialog(
               title: const Text('Selecionar cliente'),
-              content: SizedBox(
-                width: 680,
+              content: AdaptiveDialogPane(
+                desktopWidth: 680,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1513,7 +1514,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                     const Divider(height: 12),
                     ConstrainedBox(
                       constraints: BoxConstraints(
-                        maxHeight: MediaQuery.of(context).size.height * 0.45,
+                        maxHeight: adaptiveDialogListMaxHeight(
+                          context,
+                          desktopFactor: 0.45,
+                          mobileFactor: 0.38,
+                        ),
                       ),
                       child: filtrados.isEmpty
                           ? const Center(
@@ -2543,9 +2548,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                     ? 'Concluir atualizacao da venda'
                     : 'Dados para enviar ao caixa',
               ),
-              content: SizedBox(
-                width: 560,
-                height: (MediaQuery.sizeOf(context).height * 0.78)
+              content: AdaptiveDialogPane(
+                desktopWidth: 560,
+                desktopHeight: (MediaQuery.sizeOf(context).height * 0.78)
                     .clamp(480.0, 680.0),
                 child: Theme(
                   data: Theme.of(context).copyWith(
@@ -4125,8 +4130,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           builder: (context, setDialogState) {
             return AlertDialog(
               title: const Text('Ler orcamento'),
-              content: SizedBox(
-                width: 760,
+              content: AdaptiveDialogPane(
+                desktopWidth: 760,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -4158,8 +4163,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                     const SizedBox(height: 10),
                     ConstrainedBox(
                       constraints: BoxConstraints(
-                        minHeight: 220,
-                        maxHeight: MediaQuery.of(context).size.height * 0.58,
+                        minHeight: context.isCompactLayout ? 120 : 220,
+                        maxHeight: adaptiveDialogListMaxHeight(context),
                       ),
                       child: resultados.isEmpty
                           ? const Center(
@@ -5841,8 +5846,8 @@ class _DividirLinhaCarrinhoDialogState extends State<_DividirLinhaCarrinhoDialog
         (int.tryParse(_qtdController.text.trim()) ?? 0);
     return AlertDialog(
       title: const Text('Dividir Item'),
-      content: SizedBox(
-        width: 400,
+      content: AdaptiveDialogPane(
+        desktopWidth: 400,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5999,8 +6004,8 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
       },
       child: AlertDialog(
         title: Text('Entrega de ${widget.clienteNome}'),
-        content: SizedBox(
-          width: 460,
+        content: AdaptiveDialogPane(
+          desktopWidth: 460,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -6214,8 +6219,8 @@ class _AdicionarAoOrcamentoDialogState
     final previewEstoque = _previewConversaoEstoque();
     return AlertDialog(
       title: Text('Adicionar: ${widget.produto.nome}'),
-      content: SizedBox(
-        width: 380,
+      content: AdaptiveDialogPane(
+        desktopWidth: 380,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

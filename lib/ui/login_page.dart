@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/usuario_repository.dart';
 import '../model/usuario_sistema.dart';
+import 'layout/app_layout.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
@@ -186,19 +187,25 @@ class _LoginPageState extends State<LoginPage> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1080),
               child: Card(
-                margin: const EdgeInsets.all(24),
+                margin: EdgeInsets.all(
+                  context.isCompactLayout ? 12 : 24,
+                ),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    return Row(
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.all(28),
+                    final formulario = Padding(
+                            padding: EdgeInsets.all(
+                              context.isCompactLayout ? 16 : 28,
+                            ),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 ConstrainedBox(
-                                  constraints: const BoxConstraints(maxWidth: 430),
+                                  constraints: BoxConstraints(
+                                    maxWidth: context.isCompactLayout
+                                        ? constraints.maxWidth
+                                        : 430,
+                                  ),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.stretch,
                                     children: [
@@ -428,9 +435,16 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                               ],
                             ),
-                          ),
-                        ),
-                      ],
+                          );
+                    if (context.isDesktopLayout) {
+                      return Row(
+                        children: [
+                          Expanded(child: formulario),
+                        ],
+                      );
+                    }
+                    return SingleChildScrollView(
+                      child: formulario,
                     );
                   },
                 ),

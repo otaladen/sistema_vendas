@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../config/busca_imagem_config.dart';
+import 'trusted_http_client.dart';
 
 /// Metadado de uma imagem encontrada na busca.
 class ImagemProdutoEncontrada {
@@ -57,7 +58,7 @@ class BuscaImagemException implements Exception {
 /// Busca imagens de produto na web (DuckDuckGo gratuito por padrao).
 class ProdutoImagemBuscaService {
   ProdutoImagemBuscaService({http.Client? httpClient})
-      : _http = httpClient ?? http.Client();
+      : _http = httpClient ?? createTrustedHttpClient();
 
   final http.Client _http;
   static const Duration _timeout = Duration(seconds: 25);
@@ -117,13 +118,27 @@ class ProdutoImagemBuscaService {
       );
     }
 
-    switch (BuscaImagemConfig.provedor) {
-      case ProvedorBuscaImagem.duckduckgo:
-        return _buscarImagensDuckDuckGo(q, limite: limite);
-      case ProvedorBuscaImagem.brave:
-        return _buscarImagensBrave(q, limite: limite);
-      case ProvedorBuscaImagem.google:
-        return _buscarImagensGoogle(q, limite: limite);
+    try {
+      switch (BuscaImagemConfig.provedor) {
+        case ProvedorBuscaImagem.duckduckgo:
+          return await _buscarImagensDuckDuckGo(q, limite: limite);
+        case ProvedorBuscaImagem.brave:
+          return await _buscarImagensBrave(q, limite: limite);
+        case ProvedorBuscaImagem.google:
+          return await _buscarImagensGoogle(q, limite: limite);
+      }
+    } on HandshakeException catch (e) {
+      throw BuscaImagemException(
+        mensagemErroSslAmigavel(),
+        cause: e,
+        codigoErro: 'SSL_HANDSHAKE',
+      );
+    } on TlsException catch (e) {
+      throw BuscaImagemException(
+        mensagemErroSslAmigavel(),
+        cause: e,
+        codigoErro: 'SSL_HANDSHAKE',
+      );
     }
   }
 
@@ -367,29 +382,37 @@ class ProdutoImagemBuscaService {
       return null;
     }
 
-    final response = await _http
-        .get(
-          uri,
-          headers: {
-            'User-Agent': _userAgent,
-            'Accept': 'image/*,*/*',
-          },
-        )
-        .timeout(_timeout);
-    if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
-      return null;
-    }
+    try {
+      final response = await _http
+          .get(
+            uri,
+            headers: {
+              'User-Agent': _userAgent,
+              'Accept': 'image/*,*/*',
+            },
+          )
+          .timeout(_timeout);
+      if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
+        return null;
+      }
 
     final contentType = response.headers['content-type']?.toLowerCase() ?? '';
     if (contentType.contains('text/html')) {
       return null;
     }
 
-    final dir = await getTemporaryDirectory();
-    final nome = 'busca_foto_${DateTime.now().millisecondsSinceEpoch}.jpg';
-    final path = p.join(dir.path, nome);
-    await File(path).writeAsBytes(response.bodyBytes, flush: true);
-    return path;
+      final dir = await getTemporaryDirectory();
+      final nome = 'busca_foto_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final path = p.join(dir.path, nome);
+      await File(path).writeAsBytes(response.bodyBytes, flush: true);
+      return path;
+    } on HandshakeException {
+      return null;
+    } on TlsException {
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   static final RegExp _regexProjectId = RegExp(r'project[=\s]+(\d+)');

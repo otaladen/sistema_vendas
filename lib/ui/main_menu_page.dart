@@ -20,6 +20,7 @@ import 'estoque_page.dart';
 import 'financeiro/contas_pagar_page.dart';
 import 'notas_fiscais_page.dart';
 import 'vendas_page.dart';
+import 'layout/app_layout.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
 
@@ -86,11 +87,8 @@ class _MainMenuPageState extends State<MainMenuPage> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: AdaptiveHubBody(
+        children: [
             HubNavButton(
               icon: Icons.app_registration_outlined,
               corDestaque: HubNavColors.menuCadastros,
@@ -116,7 +114,6 @@ class _MainMenuPageState extends State<MainMenuPage> {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.inventory_2_outlined,
               corDestaque: HubNavColors.menuEstoque,
@@ -136,7 +133,6 @@ class _MainMenuPageState extends State<MainMenuPage> {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.receipt_long_outlined,
               corDestaque: HubNavColors.menuNotasFiscais,
@@ -155,7 +151,6 @@ class _MainMenuPageState extends State<MainMenuPage> {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.point_of_sale_outlined,
               corDestaque: HubNavColors.menuVendas,
@@ -194,7 +189,6 @@ class _MainMenuPageState extends State<MainMenuPage> {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.payments_outlined,
               corDestaque: HubNavColors.menuFinanceiro,
@@ -213,7 +207,6 @@ class _MainMenuPageState extends State<MainMenuPage> {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.settings_outlined,
               corDestaque: HubNavColors.menuConfig,
@@ -236,8 +229,7 @@ class _MainMenuPageState extends State<MainMenuPage> {
                 );
               },
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

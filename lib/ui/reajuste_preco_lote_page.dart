@@ -7,6 +7,7 @@ import '../data/usuario_repository.dart';
 import '../domain/reajuste_preco_lote.dart';
 import '../model/produto.dart';
 import '../model/usuario_sistema.dart';
+import 'layout/app_layout.dart';
 import 'reajuste_preco_autorizacao.dart';
 import 'reajuste_preco_historico_page.dart';
 
@@ -312,14 +313,26 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Row(
-              children: [
-                _chipPasso(0, 'Escopo'),
-                _chipPasso(1, 'Regra'),
-                _chipPasso(2, 'Simulacao'),
-                _chipPasso(3, 'Confirmar'),
-              ],
-            ),
+            child: context.isCompactLayout
+                ? Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      _chipPasso(0, 'Escopo'),
+                      _chipPasso(1, 'Regra'),
+                      _chipPasso(2, 'Simulacao'),
+                      _chipPasso(3, 'Confirmar'),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      _chipPasso(0, 'Escopo'),
+                      _chipPasso(1, 'Regra'),
+                      _chipPasso(2, 'Simulacao'),
+                      _chipPasso(3, 'Confirmar'),
+                    ],
+                  ),
           ),
           Expanded(
             child: _aplicando
@@ -343,24 +356,20 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                TextButton(
-                  onPressed: _aplicando || _simulando ? null : _voltar,
-                  child: Text(_passo == 0 ? 'Cancelar' : 'Voltar'),
-                ),
-                const Spacer(),
-                if (_passo < 3)
-                  FilledButton(
-                    onPressed: _aplicando || _simulando ? null : _avancar,
-                    child: Text(_passo == 1 ? 'Simular' : 'Avancar'),
-                  ),
-                if (_passo == 3)
-                  FilledButton(
-                    onPressed: _aplicando ? null : _confirmarAplicacao,
-                    child: const Text('Aplicar reajuste'),
-                  ),
-              ],
+            child: AdaptiveBottomActions(
+              leading: TextButton(
+                onPressed: _aplicando || _simulando ? null : _voltar,
+                child: Text(_passo == 0 ? 'Cancelar' : 'Voltar'),
+              ),
+              primary: _passo == 3
+                  ? FilledButton(
+                      onPressed: _aplicando ? null : _confirmarAplicacao,
+                      child: const Text('Aplicar reajuste'),
+                    )
+                  : FilledButton(
+                      onPressed: _aplicando || _simulando ? null : _avancar,
+                      child: Text(_passo == 1 ? 'Simular' : 'Avancar'),
+                    ),
             ),
           ),
         ],

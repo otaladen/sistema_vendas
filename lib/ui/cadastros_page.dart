@@ -19,6 +19,7 @@ import 'motoristas_page.dart';
 import 'produtos_page.dart';
 import 'usuarios_page.dart';
 import 'vendedores_page.dart';
+import 'layout/app_layout.dart';
 import 'widgets/hub_nav_button.dart';
 
 const Color _corProdutos = Color(0xFFE65100);
@@ -59,11 +60,8 @@ class CadastrosPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Cadastros')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: AdaptiveHubBody(
+        children: [
             HubNavButton(
               icon: Icons.inventory_2_outlined,
               corDestaque: _corProdutos,
@@ -82,7 +80,6 @@ class CadastrosPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.widgets_outlined,
               corDestaque: _corKitsOrcamento,
@@ -102,7 +99,6 @@ class CadastrosPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.local_offer_outlined,
               corDestaque: _corPromocoes,
@@ -122,7 +118,6 @@ class CadastrosPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.local_shipping_outlined,
               corDestaque: _corMotoristas,
@@ -139,7 +134,6 @@ class CadastrosPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.badge_outlined,
               corDestaque: _corFuncionarios,
@@ -158,7 +152,6 @@ class CadastrosPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.people_outline,
               corDestaque: _corClientes,
@@ -177,7 +170,6 @@ class CadastrosPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.storefront_outlined,
               corDestaque: _corVendedores,
@@ -194,7 +186,6 @@ class CadastrosPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.manage_accounts_outlined,
               corDestaque: _corUsuarios,
@@ -211,8 +202,7 @@ class CadastrosPage extends StatelessWidget {
                 );
               },
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

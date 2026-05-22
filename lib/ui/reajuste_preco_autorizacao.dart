@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/usuario_repository.dart';
 import '../model/usuario_sistema.dart';
+import 'layout/app_layout.dart';
 
 bool usuarioPodeReajustePrecoLote(UsuarioSistema u) {
   return u.ativo && (u.admin || u.podeReajustePrecoLote || u.podeCadastros);
@@ -101,8 +102,8 @@ class _DialogoAutorizacaoReajusteState extends State<_DialogoAutorizacaoReajuste
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Autorizacao de gerente'),
-      content: SizedBox(
-        width: 420,
+      content: AdaptiveDialogContent(
+        desktopWidth: 420,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

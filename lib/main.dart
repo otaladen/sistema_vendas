@@ -18,11 +18,14 @@ import 'data/venda_repository.dart';
 import 'data/vendedor_repository.dart';
 import 'model/usuario_sistema.dart';
 import 'services/print_service.dart';
+import 'services/trusted_http_client.dart';
+import 'ui/layout/app_layout.dart';
 import 'ui/login_page.dart';
 import 'ui/main_menu_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  configurarHttpOverridesPlataforma();
   await initializeDateFormatting('pt_BR');
   await _tentarSincronizarHorarioSistemaNoInicio();
   final objectBox = await ObjectBox.create();
@@ -141,6 +144,7 @@ class _MyAppState extends State<MyApp> {
 
     return MaterialApp(
       title: 'Sistema de Vendas',
+      builder: buildAdaptiveAppShell,
       theme: baseTheme.copyWith(
         scaffoldBackgroundColor: baseTheme.colorScheme.surface,
         textTheme: baseTheme.textTheme.copyWith(

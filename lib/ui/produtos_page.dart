@@ -22,7 +22,9 @@ import '../services/gemini_service.dart';
 import '../services/print_service.dart';
 import '../services/compras_preditivas_service.dart';
 import '../services/produto_imagem_busca_service.dart';
+import '../services/trusted_http_client.dart';
 import '../services/produto_imagem_service.dart';
+import 'layout/app_layout.dart';
 import 'widgets/abas_historico_produto_widget.dart';
 import 'widgets/produto_busca_input.dart';
 
@@ -1537,7 +1539,10 @@ class _ProdutosPageState extends State<ProdutosPage>
         _snackbarBrasilApi(e.message, erro: true);
       }
     } catch (e) {
-      _snackbarBrasilApi('Erro ao buscar foto: $e', erro: true);
+      final msg = isFalhaSslHandshake(e)
+          ? mensagemErroSslAmigavel()
+          : 'Erro ao buscar foto: $e';
+      _snackbarBrasilApi(msg, erro: true);
     } finally {
       if (mounted) setState(() => _buscandoFoto = false);
     }
@@ -3787,8 +3792,8 @@ class _ProdutosPageState extends State<ProdutosPage>
               },
               child: AlertDialog(
                 title: const Text('Pesquisar produto'),
-                content: SizedBox(
-                  width: 760,
+                content: AdaptiveDialogPane(
+                  desktopWidth: 760,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -3878,7 +3883,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                       ConstrainedBox(
                         constraints: BoxConstraints(
                           minHeight: 220,
-                          maxHeight: MediaQuery.of(context).size.height * 0.58,
+                          maxHeight: adaptiveDialogListMaxHeight(context),
                         ),
                         child: resultados.isEmpty
                             ? const Center(
@@ -4096,69 +4101,151 @@ class _ProdutosPageState extends State<ProdutosPage>
                                             children: [
                                               Material(
                                                 color: Colors.transparent,
-                                                child: Row(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.center,
-                                                  children: [
-                                                    Expanded(
-                                                      child: OutlinedButton.icon(
-                                                        style: OutlinedButton.styleFrom(
-                                                          padding:
-                                                              const EdgeInsets.symmetric(
+                                                child: context.isCompactLayout
+                                                    ? Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .stretch,
+                                                        children: [
+                                                          OutlinedButton.icon(
+                                                            style: OutlinedButton
+                                                                .styleFrom(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .symmetric(
                                                                 horizontal:
                                                                     _erpGap16,
                                                                 vertical: 12,
                                                               ),
-                                                        ),
-                                                        onPressed:
-                                                            _abrirPesquisaProduto,
-                                                        icon: const Icon(
-                                                          Icons.search,
-                                                          size: 20,
-                                                        ),
-                                                        label: const Text(
-                                                          'Pesquisar produto',
-                                                        ),
+                                                            ),
+                                                            onPressed:
+                                                                _abrirPesquisaProduto,
+                                                            icon: const Icon(
+                                                              Icons.search,
+                                                              size: 20,
+                                                            ),
+                                                            label: const Text(
+                                                              'Pesquisar produto',
+                                                            ),
+                                                          ),
+                                                          const SizedBox(
+                                                            height: _erpGap8,
+                                                          ),
+                                                          Row(
+                                                            mainAxisAlignment:
+                                                                MainAxisAlignment
+                                                                    .center,
+                                                            children: [
+                                                              IconButton(
+                                                                tooltip:
+                                                                    'Primeiro',
+                                                                onPressed:
+                                                                    _irParaPrimeiroProduto,
+                                                                icon: const Icon(
+                                                                  Icons
+                                                                      .first_page_outlined,
+                                                                ),
+                                                              ),
+                                                              IconButton(
+                                                                tooltip:
+                                                                    'Anterior',
+                                                                onPressed:
+                                                                    _irParaProdutoAnterior,
+                                                                icon: const Icon(
+                                                                  Icons
+                                                                      .navigate_before_outlined,
+                                                                ),
+                                                              ),
+                                                              IconButton(
+                                                                tooltip:
+                                                                    'Proximo',
+                                                                onPressed:
+                                                                    _irParaProximoProduto,
+                                                                icon: const Icon(
+                                                                  Icons
+                                                                      .navigate_next_outlined,
+                                                                ),
+                                                              ),
+                                                              IconButton(
+                                                                tooltip: 'Ultimo',
+                                                                onPressed:
+                                                                    _irParaUltimoProduto,
+                                                                icon: const Icon(
+                                                                  Icons
+                                                                      .last_page_outlined,
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ],
+                                                      )
+                                                    : Row(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .center,
+                                                        children: [
+                                                          Expanded(
+                                                            child: OutlinedButton
+                                                                .icon(
+                                                              style: OutlinedButton
+                                                                  .styleFrom(
+                                                                padding:
+                                                                    const EdgeInsets
+                                                                        .symmetric(
+                                                                  horizontal:
+                                                                      _erpGap16,
+                                                                  vertical: 12,
+                                                                ),
+                                                              ),
+                                                              onPressed:
+                                                                  _abrirPesquisaProduto,
+                                                              icon: const Icon(
+                                                                Icons.search,
+                                                                size: 20,
+                                                              ),
+                                                              label: const Text(
+                                                                'Pesquisar produto',
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          IconButton(
+                                                            tooltip: 'Primeiro',
+                                                            onPressed:
+                                                                _irParaPrimeiroProduto,
+                                                            icon: const Icon(
+                                                              Icons
+                                                                  .first_page_outlined,
+                                                            ),
+                                                          ),
+                                                          IconButton(
+                                                            tooltip: 'Anterior',
+                                                            onPressed:
+                                                                _irParaProdutoAnterior,
+                                                            icon: const Icon(
+                                                              Icons
+                                                                  .navigate_before_outlined,
+                                                            ),
+                                                          ),
+                                                          IconButton(
+                                                            tooltip: 'Proximo',
+                                                            onPressed:
+                                                                _irParaProximoProduto,
+                                                            icon: const Icon(
+                                                              Icons
+                                                                  .navigate_next_outlined,
+                                                            ),
+                                                          ),
+                                                          IconButton(
+                                                            tooltip: 'Ultimo',
+                                                            onPressed:
+                                                                _irParaUltimoProduto,
+                                                            icon: const Icon(
+                                                              Icons
+                                                                  .last_page_outlined,
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
-                                                    ),
-                                                    IconButton(
-                                                      tooltip: 'Primeiro',
-                                                      onPressed:
-                                                          _irParaPrimeiroProduto,
-                                                      icon: const Icon(
-                                                        Icons
-                                                            .first_page_outlined,
-                                                      ),
-                                                    ),
-                                                    IconButton(
-                                                      tooltip: 'Anterior',
-                                                      onPressed:
-                                                          _irParaProdutoAnterior,
-                                                      icon: const Icon(
-                                                        Icons
-                                                            .navigate_before_outlined,
-                                                      ),
-                                                    ),
-                                                    IconButton(
-                                                      tooltip: 'Proximo',
-                                                      onPressed:
-                                                          _irParaProximoProduto,
-                                                      icon: const Icon(
-                                                        Icons
-                                                            .navigate_next_outlined,
-                                                      ),
-                                                    ),
-                                                    IconButton(
-                                                      tooltip: 'Ultimo',
-                                                      onPressed:
-                                                          _irParaUltimoProduto,
-                                                      icon: const Icon(
-                                                        Icons
-                                                            .last_page_outlined,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
                                               ),
                                               const SizedBox(height: _erpGap16),
                                               Text(

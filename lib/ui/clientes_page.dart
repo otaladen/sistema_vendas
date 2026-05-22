@@ -18,6 +18,7 @@ import '../services/brasil_api_cep_service.dart';
 import '../services/brasil_api_cnpj_service.dart';
 import '../model/mensagem_template.dart';
 import '../model/venda.dart';
+import 'layout/app_layout.dart';
 import 'widgets/cliente/cliente_cadastro_header.dart';
 import 'widgets/cliente/cliente_cadastro_rodape.dart';
 import 'widgets/extrato_fiado_cliente_card.dart';
@@ -323,8 +324,8 @@ class _ClientesPageState extends State<ClientesPage>
               },
               child: AlertDialog(
                 title: const Text('Pesquisar cliente'),
-                content: SizedBox(
-                  width: 760,
+                content: AdaptiveDialogPane(
+                  desktopWidth: 760,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -390,8 +391,8 @@ class _ClientesPageState extends State<ClientesPage>
                       const SizedBox(height: 12),
                       ConstrainedBox(
                         constraints: BoxConstraints(
-                          minHeight: 220,
-                          maxHeight: MediaQuery.of(context).size.height * 0.58,
+                          minHeight: context.isCompactLayout ? 120 : 220,
+                          maxHeight: adaptiveDialogListMaxHeight(context),
                         ),
                         child: resultados.isEmpty
                             ? const Center(
@@ -646,18 +647,24 @@ class _ClientesPageState extends State<ClientesPage>
   List<Widget> _camposPessoaFisicaIdentificacao() {
     if (_tipoPessoa != 'fisica') return const [];
     final theme = Theme.of(context);
+    final compact = context.isCompactLayout;
     final textoNasc = _dataNascimentoCliente == null
         ? 'Nao informado'
         : _dataNascimentoFmt.format(_dataNascimentoCliente!);
     return [
       const SizedBox(height: 8),
-      Wrap(
+      LayoutBuilder(
+        builder: (context, box) {
+          final wRg = compact ? box.maxWidth : 168.0;
+          final wNasc = compact ? box.maxWidth : 212.0;
+          final wSexo = compact ? box.maxWidth : 200.0;
+          return Wrap(
         spacing: 10,
         runSpacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           SizedBox(
-            width: 168,
+            width: wRg,
             child: TextField(
               controller: _rgController,
               decoration: const InputDecoration(
@@ -672,7 +679,7 @@ class _ClientesPageState extends State<ClientesPage>
             ),
           ),
           SizedBox(
-            width: 212,
+            width: wNasc,
             child: InputDecorator(
               decoration: InputDecoration(
                 labelText: 'Nascimento',
@@ -709,7 +716,7 @@ class _ClientesPageState extends State<ClientesPage>
             ),
           ),
           SizedBox(
-            width: 200,
+            width: wSexo,
             child: DropdownButtonFormField<String>(
               key: ValueKey<String>(_sexoCliente),
               initialValue: _sexoCliente,
@@ -730,6 +737,8 @@ class _ClientesPageState extends State<ClientesPage>
             ),
           ),
         ],
+      );
+        },
       ),
     ];
   }
@@ -1238,8 +1247,8 @@ class _ClientesPageState extends State<ClientesPage>
           builder: (context, setDialogState) {
             return AlertDialog(
               title: const Text('Enviar mensagem ao cliente'),
-              content: SizedBox(
-                width: 520,
+              content: AdaptiveDialogPane(
+                desktopWidth: 520,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1312,8 +1321,8 @@ class _ClientesPageState extends State<ClientesPage>
       builder: (context) {
         return AlertDialog(
           title: const Text('Erro detalhado do envio'),
-          content: SizedBox(
-            width: 700,
+          content: AdaptiveDialogPane(
+            desktopWidth: 700,
             child: SingleChildScrollView(
               child: SelectableText(
                 log.responseJson.trim().isEmpty
@@ -2593,7 +2602,12 @@ class _ClientesPageState extends State<ClientesPage>
               children: [
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    padding: EdgeInsets.fromLTRB(
+                      context.isCompactLayout ? 8 : 12,
+                      8,
+                      context.isCompactLayout ? 8 : 12,
+                      0,
+                    ),
                     child: Align(
                       alignment: Alignment.topCenter,
                       child: ConstrainedBox(
