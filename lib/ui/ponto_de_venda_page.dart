@@ -2615,7 +2615,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         Focus(
           focusNode: _focusPagamentoPdV,
           onFocusChange: (hasFocus) {
-            if (hasFocus) _sincronizarIndiceChipPagamentoComSelecao();
+            if (!hasFocus) return;
+            final idx = _indiceFormaPagamentoSelecionadaPdV();
+            if (_indiceChipPagamentoFocado == idx) return;
+            _indiceChipPagamentoFocado = idx;
             _checkoutDialogSetState?.call(() {});
           },
           onKeyEvent: (node, event) =>
