@@ -2194,10 +2194,53 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "28:798716117790928223",
+      "lastPropertyId": "6:4754466822669748417",
+      "name": "ConferenciaCargaRomaneio",
+      "properties": [
+        {
+          "id": "1:2021353450784145394",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:2093090190032671715",
+          "name": "escopoViagem",
+          "indexId": "44:4785261073518112966",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "3:6919486268980118375",
+          "name": "chaveProduto",
+          "indexId": "45:3226659383948146918",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "4:7186530827525510773",
+          "name": "conferido",
+          "type": 1
+        },
+        {
+          "id": "5:610315963026596858",
+          "name": "usuarioLogin",
+          "type": 9
+        },
+        {
+          "id": "6:4754466822669748417",
+          "name": "atualizadoEm",
+          "type": 10
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "27:3463820139052098940",
-  "lastIndexId": "43:5553602522747990903",
+  "lastEntityId": "28:798716117790928223",
+  "lastIndexId": "45:3226659383948146918",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

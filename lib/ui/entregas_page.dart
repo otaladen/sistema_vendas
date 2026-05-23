@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/conferencia_carga_repository.dart';
 import '../data/motorista_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
@@ -19,6 +20,9 @@ import 'entregas/entregas_barra_compacta.dart';
 import 'entregas/filtros_entrega_sheet.dart';
 import 'entregas/logistica_entregas.dart';
 import 'entregas/planejamento_entrega_dia.dart';
+import 'entregas/agrupar_viagem_dialog.dart';
+import 'entregas/entregas_montagem_callbacks.dart';
+import 'entregas/painel_montagem_entregas.dart';
 import 'entregas/romaneio_carga_consolidada.dart';
 import 'entregas/romaneio_pdf.dart';
 import 'entregas/romaneio_relatorios.dart';
@@ -26,9 +30,6 @@ import 'registrar_devolucao_troca_page.dart';
 
 /// Filtro rapido pelos contadores de resumo (atrasadas / pendentes hoje).
 enum _FiltroResumoEntregas { nenhum, atrasadas, pendentesHoje }
-
-/// Lista detalhada vs quadro Kanban por status operacional.
-enum _ModoVisualizacaoEntregas { lista, kanban }
 
 const _kMenuMarcarDataEntrega = '__acao_marcar_data_entrega__';
 const _kMenuLimparDataEntrega = '__acao_limpar_data_entrega__';
@@ -59,6 +60,9 @@ class EntregasPage extends StatefulWidget {
 }
 
 class _EntregasPageState extends State<EntregasPage> {
+  late final ConferenciaCargaRepository _conferenciaCargaRepository =
+      ConferenciaCargaRepository(widget.vendaRepository.objectBox);
+
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   final _bairroController = TextEditingController();
   final _numeroNotaController = TextEditingController();
@@ -88,8 +92,6 @@ class _EntregasPageState extends State<EntregasPage> {
   /// Incrementado ao usar "Limpar tudo" para remontar dropdowns (initialValue vale apenas no primeiro build).
   int _filtrosDropdownNonce = 0;
   _FiltroResumoEntregas _filtroResumoLista = _FiltroResumoEntregas.nenhum;
-
-  _ModoVisualizacaoEntregas _modoVisualizacao = _ModoVisualizacaoEntregas.lista;
 
   /// Chave igual a [resumoPorDia] (`dd/MM/yyyy` ou `Sem data marcada`); filtra so a lista.
   String? _chaveDiaPlanejamentoSelecionado;
@@ -204,6 +206,8 @@ class _EntregasPageState extends State<EntregasPage> {
     super.initState();
     _inicio = null;
     _fim = null;
+    _chaveDiaPlanejamentoSelecionado =
+        PlanejamentoEntregaDia.chaveDeDateTime(DateTime.now());
     _carregarEntregas();
   }
 
@@ -536,7 +540,11 @@ class _EntregasPageState extends State<EntregasPage> {
   }
 
   Future<void> _confirmarAgrupamentoMesmoCarro() async {
-    if (_idsEntregasSelecionadas.length < 2) {
+    await _confirmarAgrupamentoIds(Set<int>.from(_idsEntregasSelecionadas));
+  }
+
+  Future<void> _confirmarAgrupamentoIds(Set<int> ids) async {
+    if (ids.length < 2) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -545,75 +553,24 @@ class _EntregasPageState extends State<EntregasPage> {
       );
       return;
     }
-    final motoristas = widget.motoristaRepository.listarAtivos();
-    final selecionadas = _entregas
-        .where((v) => _idsEntregasSelecionadas.contains(v.id))
-        .toList();
+    final selecionadas = _entregas.where((v) => ids.contains(v.id)).toList();
     final nomesNasSelecionadas = selecionadas
         .map(nomeMotoristaEntrega)
         .where((n) => n != 'Nao definido')
         .toSet();
-    var motoristaEscolhido = nomesNasSelecionadas.length == 1
+    final motoristaSugerido = nomesNasSelecionadas.length == 1
         ? nomesNasSelecionadas.first
-        : (motoristas.isNotEmpty ? motoristas.first.nome : null);
+        : null;
     if (!mounted) return;
-    final motorista = await showDialog<String>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setLocal) {
-          return AlertDialog(
-            title: const Text('Agrupar viagem (mesmo carro)'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Cada confirmacao = uma viagem (ex.: 1a saida do dia). '
-                  'Informe o motorista — na loja, cada motorista usa sempre o mesmo caminhao.',
-                ),
-                const SizedBox(height: 12),
-                if (motoristas.isEmpty)
-                  const Text(
-                    'Nenhum motorista ativo. Cadastre em Cadastros > Motoristas.',
-                  )
-                else
-                  DropdownButtonFormField<String>(
-                    initialValue: motoristaEscolhido,
-                    decoration: const InputDecoration(
-                      labelText: 'Motorista',
-                    ),
-                    items: motoristas
-                        .map(
-                          (m) => DropdownMenuItem(
-                            value: m.nome,
-                            child: Text(m.nome),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) => setLocal(() => motoristaEscolhido = v),
-                  ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancelar'),
-              ),
-              ElevatedButton(
-                onPressed: motoristas.isEmpty || motoristaEscolhido == null
-                    ? null
-                    : () => Navigator.pop(ctx, motoristaEscolhido),
-                child: const Text('Confirmar agrupamento'),
-              ),
-            ],
-          );
-        },
-      ),
+    final motorista = await showAgruparViagemMotoristaDialog(
+      context,
+      widget.motoristaRepository,
+      motoristaSugerido: motoristaSugerido,
     );
     if (motorista == null || motorista.isEmpty || !mounted) return;
     try {
       widget.vendaRepository.definirGrupoEntregaLogistica(
-        Set<int>.from(_idsEntregasSelecionadas),
+        ids,
         motoristaEntrega: motorista,
       );
       await _carregarEntregasSyncState();
@@ -636,7 +593,11 @@ class _EntregasPageState extends State<EntregasPage> {
   }
 
   Future<void> _removerAgrupamentoSelecionadas() async {
-    if (_idsEntregasSelecionadas.isEmpty) {
+    await _removerAgrupamentoIds(Set<int>.from(_idsEntregasSelecionadas));
+  }
+
+  Future<void> _removerAgrupamentoIds(Set<int> ids) async {
+    if (ids.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -646,9 +607,7 @@ class _EntregasPageState extends State<EntregasPage> {
       return;
     }
     try {
-      widget.vendaRepository.limparGrupoEntregaLogisticaEm(
-        Set<int>.from(_idsEntregasSelecionadas),
-      );
+      widget.vendaRepository.limparGrupoEntregaLogisticaEm(ids);
       await _carregarEntregasSyncState();
       if (!mounted) return;
       setState(() => _idsEntregasSelecionadas.clear());
@@ -3229,18 +3188,6 @@ class _EntregasPageState extends State<EntregasPage> {
     );
   }
 
-  void _alternarModoVisualizacao() {
-    setState(() {
-      if (_modoVisualizacao == _ModoVisualizacaoEntregas.lista) {
-        _modoVisualizacao = _ModoVisualizacaoEntregas.kanban;
-        _modoAgruparMesmoCarro = false;
-        _idsEntregasSelecionadas.clear();
-      } else {
-        _modoVisualizacao = _ModoVisualizacaoEntregas.lista;
-      }
-    });
-  }
-
   List<Venda> _listaEntregasPlanejadasExibicao() {
     final dataMarcadaFmt = DateFormat('dd/MM/yyyy');
     if (_chaveDiaPlanejamentoSelecionado == null) {
@@ -3660,6 +3607,141 @@ class _EntregasPageState extends State<EntregasPage> {
     );
   }
 
+  EntregasMontagemCallbacks get _callbacksMontagem => EntregasMontagemCallbacks(
+        atualizarChecklist: (v, {separado, carregado, saiu}) =>
+            _atualizarChecklistCarga(
+          v,
+          separado: separado,
+          carregado: carregado,
+          saiu: saiu,
+        ),
+        atualizarStatus: _atualizarStatusEntrega,
+        emitirRelatorio: ({
+          required tipo,
+          motorista,
+          viagem,
+          required salvarPdf,
+        }) =>
+            _emitirRelatorioEntrega(
+          tipo: tipo,
+          motorista: motorista,
+          viagem: viagem,
+          salvarPdf: salvarPdf,
+        ),
+        trocarParada: _swapParadasMesmoCarro,
+        editarMotoristaGrupo: _editarMotoristaGrupo,
+        abrirDetalheItens: _abrirDetalhesItensVenda,
+        abrirNavegacao: _abrirNavegacaoParaEntrega,
+        recarregar: _carregarEntregas,
+        confirmarAgrupamento: _confirmarAgrupamentoIds,
+        removerAgrupamento: _removerAgrupamentoIds,
+      );
+
+  Widget _buildAbaMontagem(List<Venda> listaExibicao) {
+    return PainelMontagemEntregas(
+      entregas: listaExibicao,
+      quantidadeItemEntrega: _quantidadeExibicaoEntrega,
+      callbacks: _callbacksMontagem,
+      podeGerenciarStatus: widget.podeGerenciarStatusEntrega,
+      conferenciaRepository: _conferenciaCargaRepository,
+      usuarioAtual: widget.usuarioAtual,
+    );
+  }
+
+  Widget _buildAbaLista(
+    List<Venda> listaExibicao,
+    DateFormat dateFormat,
+    DateFormat dataMarcadaFmt,
+    List<String> gruposLista,
+    Map<String, List<Venda>> groupedLista,
+  ) {
+    return Column(
+      children: [
+        if (_modoAgruparMesmoCarro) ...[
+          EntregasBarraAgrupamentoMesmoCarro(
+            selecionadas: _idsEntregasSelecionadas.length,
+            onConfirmar: _idsEntregasSelecionadas.length >= 2
+                ? _confirmarAgrupamentoMesmoCarro
+                : null,
+            onLimparSelecao: () => setState(_idsEntregasSelecionadas.clear),
+            onRemoverAgrupamento: _removerAgrupamentoSelecionadas,
+          ),
+          const SizedBox(height: 6),
+        ],
+        Expanded(
+          child: listaExibicao.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    SizedBox(height: 48),
+                    Center(
+                      child: Text(
+                        _chaveDiaPlanejamentoSelecionado == null
+                            ? 'Nenhuma entrega encontrada para os filtros.'
+                            : 'Nenhuma entrega para o dia selecionado no planejamento.',
+                      ),
+                    ),
+                  ],
+                )
+              : ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  itemCount: gruposLista.length,
+                  itemBuilder: (context, bairroIndex) {
+                    final grupo = gruposLista[bairroIndex];
+                    final vendasBairro =
+                        groupedLista[grupo] ?? const <Venda>[];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
+                          child: Text(
+                            '${_agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}: $grupo (${vendasBairro.length})',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
+                        for (final bloco
+                            in blocosEntregaComCarretoAgrupado(vendasBairro))
+                          if (bloco.length >= 2 &&
+                              bloco.first.grupoEntregaFreteId > 0)
+                            _buildPainelGrupoCarretoLista(
+                              bloco,
+                              dateFormat,
+                              dataMarcadaFmt,
+                            )
+                          else
+                            ...bloco.map(
+                              (v) => _buildCardEntrega(
+                                v,
+                                dateFormat,
+                                dataMarcadaFmt,
+                                modoSelecao: _modoAgruparMesmoCarro,
+                                selecionada:
+                                    _idsEntregasSelecionadas.contains(v.id),
+                              ),
+                            ),
+                      ],
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAbaKanban(
+    List<Venda> listaExibicao,
+    DateFormat dataMarcadaFmt,
+    double alturaKanban,
+  ) {
+    return _corpoQuadroKanban(
+      context,
+      listaVisivel: listaExibicao,
+      dataMarcadaFmt: dataMarcadaFmt,
+      altura: alturaKanban,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
@@ -3679,55 +3761,41 @@ class _EntregasPageState extends State<EntregasPage> {
     }
     final gruposLista = groupedLista.keys.toList()
       ..sort((a, b) => a.compareTo(b));
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Entregas'),
-        actions: [
-          if (_modoVisualizacao == _ModoVisualizacaoEntregas.lista)
-            IconButton(
-              tooltip: _modoAgruparMesmoCarro
-                  ? 'Sair do modo agrupar mesmo carro'
-                  : 'Agrupar mesmo carro',
-              icon: Icon(
-                Icons.merge_type_outlined,
-                color: _modoAgruparMesmoCarro
-                    ? Theme.of(context).colorScheme.primary
-                    : null,
+    return DefaultTabController(
+      length: 3,
+      initialIndex: 0,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Entregas'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(
+                icon: Icon(Icons.local_shipping_outlined),
+                text: 'Montagem',
               ),
-              onPressed: () {
-                setState(() {
-                  _modoAgruparMesmoCarro = !_modoAgruparMesmoCarro;
-                  if (!_modoAgruparMesmoCarro) {
-                    _idsEntregasSelecionadas.clear();
-                  }
-                });
-              },
-            ),
-          IconButton(
-            tooltip: _modoVisualizacao == _ModoVisualizacaoEntregas.lista
-                ? 'Quadro Kanban'
-                : 'Lista detalhada',
-            icon: Icon(
-              _modoVisualizacao == _ModoVisualizacaoEntregas.lista
-                  ? Icons.view_kanban_outlined
-                  : Icons.view_list_outlined,
-            ),
-            onPressed: _alternarModoVisualizacao,
+              Tab(
+                icon: Icon(Icons.view_list_outlined),
+                text: 'Lista',
+              ),
+              Tab(
+                icon: Icon(Icons.view_kanban_outlined),
+                text: 'Kanban',
+              ),
+            ],
           ),
-          IconButton(
-            tooltip: 'Atualizar lista',
-            icon: const Icon(Icons.refresh),
-            onPressed: () async {
-              await _atualizarListaEntregas();
-            },
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-        child: Column(
-          children: [
-            EntregasBarraCompacta(
+          actions: [
+            IconButton(
+              tooltip: 'Atualizar',
+              icon: const Icon(Icons.refresh),
+              onPressed: _atualizarListaEntregas,
+            ),
+          ],
+        ),
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+          child: Column(
+            children: [
+              EntregasBarraCompacta(
               atrasadas: atrasadas,
               pendentesHoje: pendentesHoje,
               filtroAtrasadasAtivo:
@@ -3768,19 +3836,6 @@ class _EntregasPageState extends State<EntregasPage> {
                 });
               },
             ),
-            if (_modoVisualizacao == _ModoVisualizacaoEntregas.lista &&
-                _modoAgruparMesmoCarro) ...[
-              const SizedBox(height: 6),
-              EntregasBarraAgrupamentoMesmoCarro(
-                selecionadas: _idsEntregasSelecionadas.length,
-                onConfirmar: _idsEntregasSelecionadas.length >= 2
-                    ? _confirmarAgrupamentoMesmoCarro
-                    : null,
-                onLimparSelecao: () =>
-                    setState(_idsEntregasSelecionadas.clear),
-                onRemoverAgrupamento: _removerAgrupamentoSelecionadas,
-              ),
-            ],
             const SizedBox(height: 6),
             Expanded(
               child: LayoutBuilder(
@@ -3801,86 +3856,64 @@ class _EntregasPageState extends State<EntregasPage> {
                               ),
                             ],
                           )
-                        : listaExibicao.isEmpty
-                        ? ListView(
-                            physics: const AlwaysScrollableScrollPhysics(),
+                        : TabBarView(
                             children: [
-                              const SizedBox(height: 48),
-                              Center(
-                                child: Text(
-                                  _chaveDiaPlanejamentoSelecionado == null
-                                      ? 'Nenhuma entrega encontrada para os filtros.'
-                                      : 'Nenhuma entrega para o dia selecionado no planejamento.',
-                                ),
-                              ),
-                            ],
-                          )
-                        : _modoVisualizacao ==
-                              _ModoVisualizacaoEntregas.kanban
-                          ? _corpoQuadroKanban(
-                              context,
-                              listaVisivel: listaExibicao,
-                              dataMarcadaFmt: dataMarcadaFmt,
-                              altura: alturaKanban,
-                            )
-                          : ListView.builder(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              itemCount: gruposLista.length,
-                              itemBuilder: (context, bairroIndex) {
-                                final grupo = gruposLista[bairroIndex];
-                                final vendasBairro =
-                                    groupedLista[grupo] ?? const <Venda>[];
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        4,
-                                        10,
-                                        4,
-                                        6,
+                              _buildAbaMontagem(listaExibicao),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton.icon(
+                                      onPressed: () {
+                                        setState(() {
+                                          _modoAgruparMesmoCarro =
+                                              !_modoAgruparMesmoCarro;
+                                          if (!_modoAgruparMesmoCarro) {
+                                            _idsEntregasSelecionadas.clear();
+                                          }
+                                        });
+                                      },
+                                      icon: Icon(
+                                        Icons.merge_type_outlined,
+                                        color: _modoAgruparMesmoCarro
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                            : null,
                                       ),
-                                      child: Text(
-                                        '${_agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}: $grupo (${vendasBairro.length})',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleSmall,
+                                      label: Text(
+                                        _modoAgruparMesmoCarro
+                                            ? 'Sair do modo agrupar viagens'
+                                            : 'Agrupar mesmo carro (lista)',
                                       ),
                                     ),
-                                    for (final bloco
-                                        in blocosEntregaComCarretoAgrupado(
-                                          vendasBairro,
-                                        ))
-                                      if (bloco.length >= 2 &&
-                                          bloco.first.grupoEntregaFreteId > 0)
-                                        _buildPainelGrupoCarretoLista(
-                                          bloco,
-                                          dateFormat,
-                                          dataMarcadaFmt,
-                                        )
-                                      else
-                                        ...bloco.map(
-                                          (v) => _buildCardEntrega(
-                                            v,
-                                            dateFormat,
-                                            dataMarcadaFmt,
-                                            modoSelecao:
-                                                _modoAgruparMesmoCarro,
-                                            selecionada:
-                                                _idsEntregasSelecionadas
-                                                    .contains(v.id),
-                                          ),
-                                        ),
-                                  ],
-                                );
-                              },
-                            ),
+                                  ),
+                                  Expanded(
+                                    child: _buildAbaLista(
+                                      listaExibicao,
+                                      dateFormat,
+                                      dataMarcadaFmt,
+                                      gruposLista,
+                                      groupedLista,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              _buildAbaKanban(
+                                listaExibicao,
+                                dataMarcadaFmt,
+                                alturaKanban,
+                              ),
+                            ],
+                          ),
                   );
                 },
               ),
             ),
           ],
         ),
+      ),
       ),
     );
   }

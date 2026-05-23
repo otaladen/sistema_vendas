@@ -17,6 +17,7 @@ import 'package:objectbox_flutter_libs/objectbox_flutter_libs.dart';
 import 'data/models/conta_pagar.dart';
 import 'model/auditoria_evento.dart';
 import 'model/cliente.dart';
+import 'model/conferencia_carga_romaneio.dart';
 import 'model/fornecedor_nfe.dart';
 import 'model/funcionario.dart';
 import 'model/historico_entrada.dart';
@@ -2662,6 +2663,54 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(28, 798716117790928223),
+    name: 'ConferenciaCargaRomaneio',
+    lastPropertyId: const obx_int.IdUid(6, 4754466822669748417),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 2021353450784145394),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 2093090190032671715),
+        name: 'escopoViagem',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(44, 4785261073518112966),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 6919486268980118375),
+        name: 'chaveProduto',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(45, 3226659383948146918),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 7186530827525510773),
+        name: 'conferido',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 610315963026596858),
+        name: 'usuarioLogin',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 4754466822669748417),
+        name: 'atualizadoEm',
+        type: 10,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -2707,8 +2756,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(27, 3463820139052098940),
-    lastIndexId: const obx_int.IdUid(43, 5553602522747990903),
+    lastEntityId: const obx_int.IdUid(28, 798716117790928223),
+    lastIndexId: const obx_int.IdUid(45, 3226659383948146918),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -6076,6 +6125,69 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    ConferenciaCargaRomaneio:
+        obx_int.EntityDefinition<ConferenciaCargaRomaneio>(
+          model: _entities[27],
+          toOneRelations: (ConferenciaCargaRomaneio object) => [],
+          toManyRelations: (ConferenciaCargaRomaneio object) => {},
+          getId: (ConferenciaCargaRomaneio object) => object.id,
+          setId: (ConferenciaCargaRomaneio object, int id) {
+            object.id = id;
+          },
+          objectToFB: (ConferenciaCargaRomaneio object, fb.Builder fbb) {
+            final escopoViagemOffset = fbb.writeString(object.escopoViagem);
+            final chaveProdutoOffset = fbb.writeString(object.chaveProduto);
+            final usuarioLoginOffset = fbb.writeString(object.usuarioLogin);
+            fbb.startTable(7);
+            fbb.addInt64(0, object.id);
+            fbb.addOffset(1, escopoViagemOffset);
+            fbb.addOffset(2, chaveProdutoOffset);
+            fbb.addBool(3, object.conferido);
+            fbb.addOffset(4, usuarioLoginOffset);
+            fbb.addInt64(5, object.atualizadoEm.millisecondsSinceEpoch);
+            fbb.finish(fbb.endTable());
+            return object.id;
+          },
+          objectFromFB: (obx.Store store, ByteData fbData) {
+            final buffer = fb.BufferContext(fbData);
+            final rootOffset = buffer.derefObject(0);
+            final idParam = const fb.Int64Reader().vTableGet(
+              buffer,
+              rootOffset,
+              4,
+              0,
+            );
+            final escopoViagemParam = const fb.StringReader(
+              asciiOptimization: true,
+            ).vTableGet(buffer, rootOffset, 6, '');
+            final chaveProdutoParam = const fb.StringReader(
+              asciiOptimization: true,
+            ).vTableGet(buffer, rootOffset, 8, '');
+            final conferidoParam = const fb.BoolReader().vTableGet(
+              buffer,
+              rootOffset,
+              10,
+              false,
+            );
+            final usuarioLoginParam = const fb.StringReader(
+              asciiOptimization: true,
+            ).vTableGet(buffer, rootOffset, 12, '');
+            final atualizadoEmParam = DateTime.fromMillisecondsSinceEpoch(
+              const fb.Int64Reader().vTableGet(buffer, rootOffset, 14, 0),
+              isUtc: true,
+            );
+            final object = ConferenciaCargaRomaneio(
+              id: idParam,
+              escopoViagem: escopoViagemParam,
+              chaveProduto: chaveProdutoParam,
+              conferido: conferidoParam,
+              usuarioLogin: usuarioLoginParam,
+              atualizadoEm: atualizadoEmParam,
+            );
+
+            return object;
+          },
+        ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -8050,5 +8162,38 @@ class AuditoriaEvento_ {
   /// See [AuditoriaEvento.detalhesJson].
   static final detalhesJson = obx.QueryStringProperty<AuditoriaEvento>(
     _entities[26].properties[8],
+  );
+}
+
+/// [ConferenciaCargaRomaneio] entity fields to define ObjectBox queries.
+class ConferenciaCargaRomaneio_ {
+  /// See [ConferenciaCargaRomaneio.id].
+  static final id = obx.QueryIntegerProperty<ConferenciaCargaRomaneio>(
+    _entities[27].properties[0],
+  );
+
+  /// See [ConferenciaCargaRomaneio.escopoViagem].
+  static final escopoViagem = obx.QueryStringProperty<ConferenciaCargaRomaneio>(
+    _entities[27].properties[1],
+  );
+
+  /// See [ConferenciaCargaRomaneio.chaveProduto].
+  static final chaveProduto = obx.QueryStringProperty<ConferenciaCargaRomaneio>(
+    _entities[27].properties[2],
+  );
+
+  /// See [ConferenciaCargaRomaneio.conferido].
+  static final conferido = obx.QueryBooleanProperty<ConferenciaCargaRomaneio>(
+    _entities[27].properties[3],
+  );
+
+  /// See [ConferenciaCargaRomaneio.usuarioLogin].
+  static final usuarioLogin = obx.QueryStringProperty<ConferenciaCargaRomaneio>(
+    _entities[27].properties[4],
+  );
+
+  /// See [ConferenciaCargaRomaneio.atualizadoEm].
+  static final atualizadoEm = obx.QueryDateProperty<ConferenciaCargaRomaneio>(
+    _entities[27].properties[5],
   );
 }

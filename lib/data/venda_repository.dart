@@ -408,6 +408,9 @@ class VendaRepository {
   final void Function()? _onAposEscrita;
   late final TituloReceberRepository titulos;
   late final RecebimentoFiadoRepository recebimentos;
+
+  ObjectBox get objectBox => _db;
+
   void _processarComprasPreditivasAposBaixaEstoque(
     Produto produto,
     int quantidadeVendida, {
