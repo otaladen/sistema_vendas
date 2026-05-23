@@ -113,6 +113,7 @@ class _MainMenuPageState extends State<MainMenuPage> {
                       motoristaRepository: widget.motoristaRepository,
                       usuarioLogado: widget.usuarioLogado,
                       printService: widget.printService,
+                      onLogout: widget.onLogout,
                     ),
                   ),
                 );

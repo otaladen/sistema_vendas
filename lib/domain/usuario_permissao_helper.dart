@@ -71,15 +71,20 @@ class UsuarioPermissaoHelper {
         return u.podeVendas ||
             u.podeAcessarPdv ||
             u.podeAcessarCaixa ||
+            u.podeAcessarListagemVendas ||
             u.podeAcessarRelatorios;
       case PermissaoUsuario.acessarPdv:
         return u.podeAcessarPdv;
       case PermissaoUsuario.acessarCaixa:
         return u.podeAcessarCaixa || u.podeCaixa;
+      case PermissaoUsuario.acessarListagemVendas:
+        return u.podeAcessarListagemVendas;
       case PermissaoUsuario.acessarRelatorios:
         return u.podeAcessarRelatorios;
       case PermissaoUsuario.leituraParcialCaixa:
         return u.podeLeituraParcialCaixa;
+      case PermissaoUsuario.visualizarAuditoriaCaixa:
+        return u.podeVisualizarAuditoriaCaixa;
       case PermissaoUsuario.manutencaoAuditoriaCaixa:
         return u.podeManutencaoAuditoriaCaixa;
       case PermissaoUsuario.visualizarEntregas:
@@ -186,10 +191,14 @@ class UsuarioPermissaoHelper {
         return u.podeAcessarPdv;
       case PermissaoUsuario.acessarCaixa:
         return u.podeAcessarCaixa || u.podeCaixa;
+      case PermissaoUsuario.acessarListagemVendas:
+        return u.podeAcessarListagemVendas;
       case PermissaoUsuario.acessarRelatorios:
         return u.podeAcessarRelatorios;
       case PermissaoUsuario.leituraParcialCaixa:
         return u.podeLeituraParcialCaixa;
+      case PermissaoUsuario.visualizarAuditoriaCaixa:
+        return u.podeVisualizarAuditoriaCaixa;
       case PermissaoUsuario.manutencaoAuditoriaCaixa:
         return u.podeManutencaoAuditoriaCaixa;
       case PermissaoUsuario.visualizarEntregas:
@@ -249,12 +258,24 @@ class UsuarioPermissaoHelper {
         return r.copyWith(podeAcessarPdv: valor);
       case PermissaoUsuario.acessarCaixa:
         return r.copyWith(podeAcessarCaixa: valor, podeCaixa: valor);
+      case PermissaoUsuario.acessarListagemVendas:
+        return r.copyWith(podeAcessarListagemVendas: valor);
       case PermissaoUsuario.acessarRelatorios:
         return r.copyWith(podeAcessarRelatorios: valor);
       case PermissaoUsuario.leituraParcialCaixa:
         return r.copyWith(podeLeituraParcialCaixa: valor);
+      case PermissaoUsuario.visualizarAuditoriaCaixa:
+        return r.copyWith(
+          podeVisualizarAuditoriaCaixa: valor,
+          podeManutencaoAuditoriaCaixa:
+              valor ? r.podeManutencaoAuditoriaCaixa : false,
+        );
       case PermissaoUsuario.manutencaoAuditoriaCaixa:
-        return r.copyWith(podeManutencaoAuditoriaCaixa: valor);
+        return r.copyWith(
+          podeManutencaoAuditoriaCaixa: valor,
+          podeVisualizarAuditoriaCaixa:
+              valor ? true : r.podeVisualizarAuditoriaCaixa,
+        );
       case PermissaoUsuario.visualizarEntregas:
         return r.copyWith(
           podeVisualizarEntregas: valor,
@@ -326,6 +347,15 @@ class UsuarioPermissaoHelper {
     }
     if (tem(u, PermissaoUsuario.acessarPdv)) chips.add('PDV');
     if (tem(u, PermissaoUsuario.acessarCaixa)) chips.add('Caixa');
+    if (tem(u, PermissaoUsuario.leituraParcialCaixa)) {
+      chips.add('Leitura parcial');
+    }
+    if (tem(u, PermissaoUsuario.visualizarAuditoriaCaixa)) {
+      chips.add('Auditoria caixa');
+    }
+    if (tem(u, PermissaoUsuario.acessarListagemVendas)) {
+      chips.add('Listagem');
+    }
     if (podeVisualizarEntregas(u)) chips.add('Entregas');
     if (tem(u, PermissaoUsuario.estoque)) chips.add('Estoque');
     if (tem(u, PermissaoUsuario.reajustePrecoLote)) chips.add('Reajuste');

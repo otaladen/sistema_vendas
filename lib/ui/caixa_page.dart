@@ -49,6 +49,7 @@ class CaixaPage extends StatefulWidget {
     required this.printService,
     required this.usuarioAtual,
     required this.podeLeituraParcialCaixa,
+    required this.podeVisualizarAuditoriaCaixa,
     required this.podeManutencaoAuditoriaCaixa,
   });
 
@@ -60,6 +61,7 @@ class CaixaPage extends StatefulWidget {
   final PrintService printService;
   final String usuarioAtual;
   final bool podeLeituraParcialCaixa;
+  final bool podeVisualizarAuditoriaCaixa;
   final bool podeManutencaoAuditoriaCaixa;
 
   @override
@@ -790,7 +792,9 @@ class _CaixaPageState extends State<CaixaPage> {
               label: const Text('Leitura parcial'),
             ),
             OutlinedButton.icon(
-              onPressed: _abrirHistoricoAuditoria,
+              onPressed: widget.podeVisualizarAuditoriaCaixa
+                  ? _abrirHistoricoAuditoria
+                  : null,
               icon: const Icon(Icons.fact_check_outlined),
               label: const Text('Auditoria'),
             ),
@@ -4688,7 +4692,9 @@ class _CaixaPageState extends State<CaixaPage> {
                   ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: _abrirHistoricoAuditoria,
+                  onPressed: widget.podeVisualizarAuditoriaCaixa
+                      ? _abrirHistoricoAuditoria
+                      : null,
                   icon: const Icon(Icons.fact_check_outlined),
                   label: const Text('Auditoria'),
                   style: OutlinedButton.styleFrom(

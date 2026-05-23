@@ -22,6 +22,7 @@ import 'produtos_page.dart';
 import 'usuarios_page.dart';
 import 'vendedores_page.dart';
 import 'layout/app_layout.dart';
+import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
 
 const Color _corProdutos = Color(0xFFE65100);
@@ -44,6 +45,7 @@ class CadastrosPage extends StatelessWidget {
     required this.motoristaRepository,
     required this.usuarioLogado,
     required this.printService,
+    required this.onLogout,
   });
 
   final ProdutoRepository produtoRepository;
@@ -54,6 +56,7 @@ class CadastrosPage extends StatelessWidget {
   final MotoristaRepository motoristaRepository;
   final UsuarioSistema usuarioLogado;
   final PrintService printService;
+  final VoidCallback onLogout;
 
   bool get _podeCadastros =>
       UsuarioPermissaoHelper.tem(usuarioLogado, PermissaoUsuario.cadastros);
@@ -67,7 +70,15 @@ class CadastrosPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Cadastros')),
+      appBar: AppBar(
+        title: const Text('Cadastros'),
+        actions: [
+          ContaSessaoAppBarActions(
+            login: usuarioLogado.login,
+            onLogout: onLogout,
+          ),
+        ],
+      ),
       body: AdaptiveHubBody(
         children: [
             HubNavButton(

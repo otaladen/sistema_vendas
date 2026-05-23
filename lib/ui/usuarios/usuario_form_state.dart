@@ -81,6 +81,19 @@ class UsuarioFormState {
     if (p == PermissaoUsuario.acessarCaixa && valor) {
       _usuario = _usuario.copyWith(podeVendas: true);
     }
+    if (p == PermissaoUsuario.acessarListagemVendas && valor) {
+      _usuario = _usuario.copyWith(podeVendas: true);
+    }
+    if ((p == PermissaoUsuario.leituraParcialCaixa ||
+            p == PermissaoUsuario.visualizarAuditoriaCaixa ||
+            p == PermissaoUsuario.manutencaoAuditoriaCaixa) &&
+        valor) {
+      _usuario = _usuario.copyWith(
+        podeVendas: true,
+        podeAcessarCaixa: true,
+        podeCaixa: true,
+      );
+    }
     if (p == PermissaoUsuario.gerenciarEntregas && valor) {
       _usuario = _usuario.copyWith(podeVisualizarEntregas: true);
     }

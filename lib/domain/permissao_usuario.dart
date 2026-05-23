@@ -7,8 +7,10 @@ enum PermissaoUsuario {
   vendasHub,
   acessarPdv,
   acessarCaixa,
+  acessarListagemVendas,
   acessarRelatorios,
   leituraParcialCaixa,
+  visualizarAuditoriaCaixa,
   manutencaoAuditoriaCaixa,
   visualizarEntregas,
   gerenciarEntregas,
@@ -134,6 +136,14 @@ class PermissaoUsuarioCatalogo {
       dependeDe: PermissaoUsuario.vendasHub,
     ),
     PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.acessarListagemVendas,
+      titulo: 'Listagem de vendas',
+      descricao:
+          'Consulta historico de pedidos, filtros e reimpressao (independente do caixa).',
+      grupo: PermissaoGrupo.vendasCaixa,
+      dependeDe: PermissaoUsuario.vendasHub,
+    ),
+    PermissaoUsuarioInfo(
       chave: PermissaoUsuario.acessarRelatorios,
       titulo: 'Relatorios de vendas',
       descricao: 'Relatorios gerenciais dentro do modulo Vendas.',
@@ -143,16 +153,26 @@ class PermissaoUsuarioCatalogo {
     PermissaoUsuarioInfo(
       chave: PermissaoUsuario.leituraParcialCaixa,
       titulo: 'Leitura parcial do caixa',
-      descricao: 'Ver totais por forma de pagamento sem fechar o caixa.',
+      descricao:
+          'Botao "Leitura parcial" na tela de caixa (totais por forma de pagamento).',
+      grupo: PermissaoGrupo.vendasCaixa,
+      dependeDe: PermissaoUsuario.acessarCaixa,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.visualizarAuditoriaCaixa,
+      titulo: 'Auditoria do caixa (consultar)',
+      descricao:
+          'Botao "Auditoria" na tela de caixa: ver historico, filtrar e exportar.',
       grupo: PermissaoGrupo.vendasCaixa,
       dependeDe: PermissaoUsuario.acessarCaixa,
     ),
     PermissaoUsuarioInfo(
       chave: PermissaoUsuario.manutencaoAuditoriaCaixa,
-      titulo: 'Manutencao da auditoria do caixa',
-      descricao: 'Limpar registros antigos da auditoria do caixa.',
+      titulo: 'Auditoria do caixa (manutencao)',
+      descricao:
+          'Dentro da auditoria: limpar registros antigos e executar manutencao.',
       grupo: PermissaoGrupo.vendasCaixa,
-      dependeDe: PermissaoUsuario.acessarCaixa,
+      dependeDe: PermissaoUsuario.visualizarAuditoriaCaixa,
     ),
     PermissaoUsuarioInfo(
       chave: PermissaoUsuario.visualizarEntregas,

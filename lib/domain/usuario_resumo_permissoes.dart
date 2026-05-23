@@ -30,6 +30,22 @@ class UsuarioResumoPermissoes {
     add(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarPdv), 'Ponto de venda (PDV)');
     add(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarCaixa), 'Caixa');
     add(
+      UsuarioPermissaoHelper.tem(u, PermissaoUsuario.leituraParcialCaixa),
+      'Leitura parcial do caixa',
+    );
+    add(
+      UsuarioPermissaoHelper.tem(u, PermissaoUsuario.visualizarAuditoriaCaixa),
+      'Auditoria do caixa (consultar)',
+    );
+    add(
+      UsuarioPermissaoHelper.tem(u, PermissaoUsuario.manutencaoAuditoriaCaixa),
+      'Auditoria do caixa (manutencao)',
+    );
+    add(
+      UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarListagemVendas),
+      'Listagem de vendas',
+    );
+    add(
       UsuarioPermissaoHelper.podeVisualizarEntregas(u),
       'Ver entregas / romaneio',
     );

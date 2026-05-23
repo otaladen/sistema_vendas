@@ -60,7 +60,10 @@ class VendasPage extends StatelessWidget {
     final podeCancelar = UsuarioPermissaoHelper.podeCancelarVendas(u);
     final podeRelatorios =
         UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarRelatorios);
-    final podeListagem = podePdv || podeCaixa || podeRelatorios;
+    final podeListagem = UsuarioPermissaoHelper.tem(
+      u,
+      PermissaoUsuario.acessarListagemVendas,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -122,6 +125,10 @@ class VendasPage extends StatelessWidget {
                       podeLeituraParcialCaixa: UsuarioPermissaoHelper.tem(
                         u,
                         PermissaoUsuario.leituraParcialCaixa,
+                      ),
+                      podeVisualizarAuditoriaCaixa: UsuarioPermissaoHelper.tem(
+                        u,
+                        PermissaoUsuario.visualizarAuditoriaCaixa,
                       ),
                       podeManutencaoAuditoriaCaixa: UsuarioPermissaoHelper.tem(
                         u,
@@ -235,6 +242,11 @@ class VendasPage extends StatelessWidget {
                               podeLeituraParcialCaixa: UsuarioPermissaoHelper.tem(
                                 u,
                                 PermissaoUsuario.leituraParcialCaixa,
+                              ),
+                              podeVisualizarAuditoriaCaixa:
+                                  UsuarioPermissaoHelper.tem(
+                                u,
+                                PermissaoUsuario.visualizarAuditoriaCaixa,
                               ),
                               podeManutencaoAuditoriaCaixa:
                                   UsuarioPermissaoHelper.tem(

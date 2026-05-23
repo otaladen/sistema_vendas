@@ -13,8 +13,10 @@ class UsuarioSistema {
     this.podeCaixa = false,
     this.podeAcessarPdv = false,
     this.podeAcessarCaixa = false,
+    this.podeAcessarListagemVendas = false,
     this.podeAcessarRelatorios = false,
     this.podeLeituraParcialCaixa = false,
+    this.podeVisualizarAuditoriaCaixa = false,
     this.podeManutencaoAuditoriaCaixa = false,
     this.podeEntregas = false,
     this.podeVisualizarEntregas = false,
@@ -56,8 +58,10 @@ class UsuarioSistema {
   final bool podeCaixa;
   final bool podeAcessarPdv;
   final bool podeAcessarCaixa;
+  final bool podeAcessarListagemVendas;
   final bool podeAcessarRelatorios;
   final bool podeLeituraParcialCaixa;
+  final bool podeVisualizarAuditoriaCaixa;
   final bool podeManutencaoAuditoriaCaixa;
 
   /// Legado — migrado para visualizar/gerenciar.
@@ -120,8 +124,10 @@ class UsuarioSistema {
     bool? podeCaixa,
     bool? podeAcessarPdv,
     bool? podeAcessarCaixa,
+    bool? podeAcessarListagemVendas,
     bool? podeAcessarRelatorios,
     bool? podeLeituraParcialCaixa,
+    bool? podeVisualizarAuditoriaCaixa,
     bool? podeManutencaoAuditoriaCaixa,
     bool? podeEntregas,
     bool? podeVisualizarEntregas,
@@ -163,9 +169,13 @@ class UsuarioSistema {
       podeCaixa: caixa,
       podeAcessarPdv: podeAcessarPdv ?? this.podeAcessarPdv,
       podeAcessarCaixa: caixa,
+      podeAcessarListagemVendas:
+          podeAcessarListagemVendas ?? this.podeAcessarListagemVendas,
       podeAcessarRelatorios: podeAcessarRelatorios ?? this.podeAcessarRelatorios,
       podeLeituraParcialCaixa:
           podeLeituraParcialCaixa ?? this.podeLeituraParcialCaixa,
+      podeVisualizarAuditoriaCaixa:
+          podeVisualizarAuditoriaCaixa ?? this.podeVisualizarAuditoriaCaixa,
       podeManutencaoAuditoriaCaixa:
           podeManutencaoAuditoriaCaixa ?? this.podeManutencaoAuditoriaCaixa,
       podeEntregas: podeEntregas ?? (visualizar || gerenciar),
@@ -220,8 +230,10 @@ class UsuarioSistema {
       'podeCaixa': caixa,
       'podeAcessarPdv': podeAcessarPdv,
       'podeAcessarCaixa': caixa,
+      'podeAcessarListagemVendas': podeAcessarListagemVendas,
       'podeAcessarRelatorios': podeAcessarRelatorios,
       'podeLeituraParcialCaixa': podeLeituraParcialCaixa,
+      'podeVisualizarAuditoriaCaixa': podeVisualizarAuditoriaCaixa,
       'podeManutencaoAuditoriaCaixa': podeManutencaoAuditoriaCaixa,
       'podeEntregas': entregas,
       'podeVisualizarEntregas': podeVisualizarEntregas || podeGerenciarEntregas || podeEntregas,
@@ -260,6 +272,20 @@ class UsuarioSistema {
     final caixaLegado = map['podeCaixa'] == true;
     final caixa = map['podeAcessarCaixa'] == true || caixaLegado;
 
+    final pdvLegado = map['podeAcessarPdv'] == true ||
+        (map['podeVendas'] == true && map.containsKey('podeAcessarPdv') == false);
+    final relatorios = map['podeAcessarRelatorios'] == true;
+    final listagemExplicita = map.containsKey('podeAcessarListagemVendas');
+    final listagem = listagemExplicita
+        ? map['podeAcessarListagemVendas'] == true
+        : pdvLegado || relatorios;
+
+    final visualizarAuditoriaExplicita =
+        map.containsKey('podeVisualizarAuditoriaCaixa');
+    final visualizarAuditoria = visualizarAuditoriaExplicita
+        ? map['podeVisualizarAuditoriaCaixa'] == true
+        : map['podeManutencaoAuditoriaCaixa'] == true || caixa;
+
     final admin = map['admin'] == true;
     final legadoCancelarSemFlag = map['podeFinanceiro'] == true &&
         !map.containsKey('podeCancelarVendas');
@@ -279,11 +305,12 @@ class UsuarioSistema {
       podeEstoque: map['podeEstoque'] == true,
       podeVendas: map['podeVendas'] == true,
       podeCaixa: caixa,
-      podeAcessarPdv: map['podeAcessarPdv'] == true ||
-          (map['podeVendas'] == true && map.containsKey('podeAcessarPdv') == false),
+      podeAcessarPdv: pdvLegado,
       podeAcessarCaixa: caixa,
-      podeAcessarRelatorios: map['podeAcessarRelatorios'] == true,
+      podeAcessarListagemVendas: listagem,
+      podeAcessarRelatorios: relatorios,
       podeLeituraParcialCaixa: map['podeLeituraParcialCaixa'] == true,
+      podeVisualizarAuditoriaCaixa: visualizarAuditoria,
       podeManutencaoAuditoriaCaixa:
           map['podeManutencaoAuditoriaCaixa'] == true,
       podeEntregas: legadoEntregas,

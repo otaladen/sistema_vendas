@@ -38,6 +38,30 @@ void main() {
     expect(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.venderFiado), isTrue);
   });
 
+  test('caixa: so caixa basico sem listagem nem auditoria', () {
+    final u = PerfilUsuarioPresetAplicador.aplicar(
+      UsuarioSistema(id: '4', nome: 'C', login: 'c', senha: 'x'),
+      PerfilUsuarioPreset.caixa,
+    );
+    expect(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarCaixa), isTrue);
+    expect(
+      UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarListagemVendas),
+      isFalse,
+    );
+    expect(
+      UsuarioPermissaoHelper.tem(u, PermissaoUsuario.leituraParcialCaixa),
+      isFalse,
+    );
+    expect(
+      UsuarioPermissaoHelper.tem(u, PermissaoUsuario.visualizarAuditoriaCaixa),
+      isFalse,
+    );
+    expect(
+      UsuarioPermissaoHelper.tem(u, PermissaoUsuario.manutencaoAuditoriaCaixa),
+      isFalse,
+    );
+  });
+
   test('senha hash verifica e rejeita errada', () {
     final hash = UsuarioSenhaCodec.gerarHash('1234');
     expect(UsuarioSenhaCodec.verificar('1234', hash), isTrue);

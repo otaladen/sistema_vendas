@@ -79,8 +79,10 @@ class PerfilUsuarioPresetAplicador {
       podeCaixa: flags.podeCaixa,
       podeAcessarPdv: flags.podeAcessarPdv,
       podeAcessarCaixa: flags.podeAcessarCaixa,
+      podeAcessarListagemVendas: flags.podeAcessarListagemVendas,
       podeAcessarRelatorios: flags.podeAcessarRelatorios,
       podeLeituraParcialCaixa: flags.podeLeituraParcialCaixa,
+      podeVisualizarAuditoriaCaixa: flags.podeVisualizarAuditoriaCaixa,
       podeManutencaoAuditoriaCaixa: flags.podeManutencaoAuditoriaCaixa,
       podeEntregas: flags.podeEntregas,
       podeVisualizarEntregas: flags.podeVisualizarEntregas,
@@ -117,8 +119,10 @@ class PerfilUsuarioPresetAplicador {
           podeCaixa: true,
           podeAcessarPdv: true,
           podeAcessarCaixa: true,
+          podeAcessarListagemVendas: true,
           podeAcessarRelatorios: true,
           podeLeituraParcialCaixa: true,
+          podeVisualizarAuditoriaCaixa: true,
           podeManutencaoAuditoriaCaixa: true,
           podeEntregas: true,
           podeVisualizarEntregas: true,
@@ -148,8 +152,10 @@ class PerfilUsuarioPresetAplicador {
           podeCaixa: true,
           podeAcessarPdv: true,
           podeAcessarCaixa: true,
+          podeAcessarListagemVendas: true,
           podeAcessarRelatorios: true,
           podeLeituraParcialCaixa: true,
+          podeVisualizarAuditoriaCaixa: true,
           podeManutencaoAuditoriaCaixa: true,
           podeEntregas: true,
           podeVisualizarEntregas: true,
@@ -174,6 +180,7 @@ class PerfilUsuarioPresetAplicador {
         return const _FlagsPerfil(
           podeVendas: true,
           podeAcessarPdv: true,
+          podeAcessarListagemVendas: true,
           descontoMaximoPercentualPdv: 8,
         );
       case PerfilUsuarioPreset.caixa:
@@ -181,7 +188,6 @@ class PerfilUsuarioPresetAplicador {
           podeVendas: true,
           podeCaixa: true,
           podeAcessarCaixa: true,
-          podeLeituraParcialCaixa: true,
         );
       case PerfilUsuarioPreset.separador:
         return const _FlagsPerfil(
@@ -215,8 +221,10 @@ class _FlagsPerfil {
     this.podeCaixa = false,
     this.podeAcessarPdv = false,
     this.podeAcessarCaixa = false,
+    this.podeAcessarListagemVendas = false,
     this.podeAcessarRelatorios = false,
     this.podeLeituraParcialCaixa = false,
+    this.podeVisualizarAuditoriaCaixa = false,
     this.podeManutencaoAuditoriaCaixa = false,
     this.podeEntregas = false,
     this.podeVisualizarEntregas = false,
@@ -247,8 +255,10 @@ class _FlagsPerfil {
   final bool podeCaixa;
   final bool podeAcessarPdv;
   final bool podeAcessarCaixa;
+  final bool podeAcessarListagemVendas;
   final bool podeAcessarRelatorios;
   final bool podeLeituraParcialCaixa;
+  final bool podeVisualizarAuditoriaCaixa;
   final bool podeManutencaoAuditoriaCaixa;
   final bool podeEntregas;
   final bool podeVisualizarEntregas;
