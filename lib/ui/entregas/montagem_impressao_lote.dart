@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'entregas_montagem_callbacks.dart';
+import 'logistica_entregas.dart';
 import 'montagem_entrega_viagem.dart';
 import 'romaneio_relatorios.dart';
 
@@ -12,6 +13,17 @@ Future<void> showMontagemImpressaoLoteSheet({
   required List<MontagemEntregaViagem> viagens,
   required MontagemEntregaViagem? viagemAtual,
 }) {
+  if (!motoristaLogisticaDefinido(motorista)) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Defina o motorista antes de usar impressao em lote '
+          '(relatorios por motorista).',
+        ),
+      ),
+    );
+    return Future.value();
+  }
   return showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,

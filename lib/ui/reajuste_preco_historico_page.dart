@@ -5,6 +5,7 @@ import '../data/reajuste_preco_repository.dart';
 import '../data/usuario_repository.dart';
 import '../model/reajuste_preco.dart';
 import '../model/usuario_sistema.dart';
+import 'reajuste_preco_autorizacao.dart';
 
 final _dataFmt = DateFormat('dd/MM/yyyy HH:mm', 'pt_BR');
 final _moeda = NumberFormat('#,##0.00', 'pt_BR');
@@ -145,9 +146,8 @@ class _ReajustePrecoHistoricoPageState extends State<ReajustePrecoHistoricoPage>
 
   @override
   Widget build(BuildContext context) {
-    final podeEstornar = widget.usuarioLogado.admin ||
-        widget.usuarioLogado.podeReajustePrecoLote ||
-        widget.usuarioLogado.podeCadastros;
+    final podeEstornar =
+        usuarioPodeReajustePrecoLote(widget.usuarioLogado);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Historico de reajustes')),

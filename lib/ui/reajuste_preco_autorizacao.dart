@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../data/usuario_repository.dart';
+import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import 'layout/app_layout.dart';
 
 bool usuarioPodeReajustePrecoLote(UsuarioSistema u) {
-  return u.ativo && (u.admin || u.podeReajustePrecoLote || u.podeCadastros);
+  return UsuarioPermissaoHelper.podeReajustePrecoLote(u);
 }
 
 bool usuarioPodeAutorizarReajustePreco(UsuarioSistema u) {
-  return u.ativo &&
-      (u.admin || u.podeAutorizarReajustePreco || u.podeAutorizarMargemVenda);
+  return UsuarioPermissaoHelper.podeAutorizarReajustePreco(u);
 }
 
 /// Login/senha de gerente para aplicar reajuste com alertas (margem, variacao, custo).
@@ -46,8 +46,8 @@ Future<bool> solicitarAutorizacaoReajustePreco(
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
-          'Sem permissao. Ative "Autorizar reajuste de precos" no cadastro de '
-          'usuarios ou use um administrador.',
+          'Sem permissao. Use um usuario Gerente/Dono com '
+          '"Autorizar reajuste de precos" ou "Reajuste em lote".',
         ),
       ),
     );

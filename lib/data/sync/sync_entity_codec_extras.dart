@@ -2,6 +2,7 @@ import '../../model/fornecedor_nfe.dart';
 import '../../model/funcionario.dart';
 import '../../model/lancamento_funcionario.dart';
 import '../../model/historico_entrada.dart';
+import '../../model/conferencia_carga_romaneio.dart';
 import '../../model/historico_entrega.dart';
 import '../../model/kit_orcamento.dart';
 import '../../model/promocao.dart';
@@ -317,6 +318,31 @@ class SyncEntityCodecExtras {
       'comboItens': comboItens,
     };
   }
+
+  // --- Conferencia carga romaneio (montagem / patio) ---
+  static Map<String, dynamic> conferenciaCargaRomaneioParaMap(
+    ConferenciaCargaRomaneio c,
+  ) =>
+      {
+        'id': c.id,
+        'escopoViagem': c.escopoViagem,
+        'chaveProduto': c.chaveProduto,
+        'conferido': c.conferido,
+        'usuarioLogin': c.usuarioLogin,
+        'atualizadoEm': _dt(c.atualizadoEm),
+      };
+
+  static ConferenciaCargaRomaneio conferenciaCargaRomaneioDeMap(
+    Map<String, dynamic> m,
+  ) =>
+      ConferenciaCargaRomaneio(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        escopoViagem: (m['escopoViagem'] ?? '').toString(),
+        chaveProduto: (m['chaveProduto'] ?? '').toString(),
+        conferido: m['conferido'] == true,
+        usuarioLogin: (m['usuarioLogin'] ?? '').toString(),
+        atualizadoEm: _parseDt((m['atualizadoEm'] ?? '').toString()),
+      );
 
   // --- Historico entrega ---
   static Map<String, dynamic> historicoEntregaParaMap(HistoricoEntrega h) => {

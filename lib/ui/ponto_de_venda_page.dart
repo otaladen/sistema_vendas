@@ -12,6 +12,9 @@ import '../domain/entrega_venda_helper.dart';
 import '../domain/limite_credito_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
+import '../domain/usuario_permissao_helper.dart';
+import '../domain/permissao_usuario.dart';
+import '../model/usuario_sistema.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../data/app_config_repository.dart';
@@ -72,6 +75,7 @@ class PontoDeVendaPage extends StatefulWidget {
     required this.vendedorRepository,
     required this.appConfigRepository,
     required this.printService,
+    required this.usuarioLogado,
   });
 
   final ProdutoRepository produtoRepository;
@@ -80,12 +84,23 @@ class PontoDeVendaPage extends StatefulWidget {
   final VendedorRepository vendedorRepository;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
+  final UsuarioSistema usuarioLogado;
 
   @override
   State<PontoDeVendaPage> createState() => _PontoDeVendaPageState();
 }
 
 class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefreshMixin {
+  bool get _podeVenderFiado => UsuarioPermissaoHelper.tem(
+        widget.usuarioLogado,
+        PermissaoUsuario.venderFiado,
+      );
+
+  bool get _podeDescontoManualPdv => UsuarioPermissaoHelper.tem(
+        widget.usuarioLogado,
+        PermissaoUsuario.alterarPrecoPdv,
+      );
+
   static const int _validadeOrcamentoDias = 7;
   static const int _selecaoSemClienteValor = -1;
   static const int _selecaoNovoClienteValor = -2;
@@ -426,7 +441,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
     setState(() {
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
-      _maxDescontoPercentualPdv = config.maxDescontoPercentualPdv;
+      _maxDescontoPercentualPdv = widget.usuarioLogado.tetoDescontoPercentualPdv(
+        config.maxDescontoPercentualPdv,
+      );
     });
   }
 
@@ -2562,6 +2579,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     required String meio,
     required StateSetter setDialogState,
   }) {
+    if (meio == 'fiado' && !_podeVenderFiado) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sem permissao para vender a prazo (fiado).'),
+        ),
+      );
+      return;
+    }
     if (meio == 'fiado' && !_podeSelecionarMeioMistoFiado(linha.meio)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -2713,8 +2738,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             icone: op.icone,
             selecionado: linha.meio == op.id,
             destacadoTeclado: false,
-            onTap: op.id == 'fiado' &&
-                    !_podeSelecionarMeioMistoFiado(linha.meio)
+            onTap: (op.id == 'fiado' && !_podeVenderFiado) ||
+                    (op.id == 'fiado' &&
+                        !_podeSelecionarMeioMistoFiado(linha.meio))
                 ? null
                 : () => _selecionarMeioPagamentoMisto(
                       linha: linha,
@@ -2935,6 +2961,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   ) {
     if (index < 0 || index >= _opcoesFormaPagamentoPdV.length) return;
     final op = _opcoesFormaPagamentoPdV[index];
+    if (op.id == 'fiado' && !_podeVenderFiado) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sem permissao para vender a prazo (fiado).'),
+        ),
+      );
+      return;
+    }
     _atualizarCheckoutFechamento(setDialogState, () {
       _formaPagamentoSelecionada = op.id;
       _indiceChipPagamentoFocado = index;
@@ -3847,6 +3881,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   Widget _buildCheckoutCampoDesconto(StateSetter setDialogState) {
+    if (!_podeDescontoManualPdv) {
+      return Text(
+        'Desconto manual: somente Gerente/Dono.',
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

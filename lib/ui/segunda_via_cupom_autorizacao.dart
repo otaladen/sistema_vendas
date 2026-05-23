@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/usuario_repository.dart';
+import '../domain/usuario_permissao_helper.dart';
 
 /// Credenciais informadas no dialogo de autorizacao.
 class CredenciaisSegundaVia {
@@ -38,8 +39,8 @@ Future<bool> solicitarSenhaAutorizacaoSegundaViaCupom(
     credenciais.login,
     credenciais.senha,
   );
-  final ok =
-      usuario != null && usuario.ativo && usuario.podeAutorizarSegundaViaCupom;
+  final ok = usuario != null &&
+      UsuarioPermissaoHelper.podeAutorizarSegundaViaCupom(usuario);
 
   if (!context.mounted) return false;
 

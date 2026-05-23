@@ -22,7 +22,10 @@ import 'entregas/logistica_entregas.dart';
 import 'entregas/planejamento_entrega_dia.dart';
 import 'entregas/agrupar_viagem_dialog.dart';
 import 'entregas/entregas_montagem_callbacks.dart';
+import 'entregas/montagem_entrega_viagem.dart';
 import 'entregas/painel_montagem_entregas.dart';
+import 'entregas/selecionar_motorista_dialog.dart';
+import 'entregas/conferencia_carga_consolidada_lista.dart';
 import 'entregas/romaneio_carga_consolidada.dart';
 import 'entregas/romaneio_pdf.dart';
 import 'entregas/romaneio_relatorios.dart';
@@ -783,6 +786,9 @@ class _EntregasPageState extends State<EntregasPage> {
         setDialogStateRomaneio: setDialogState,
         quantidadeItemEntrega: _quantidadeExibicaoEntrega,
         conteudoRomaneioUmaVenda: _conteudoRomaneioUmaVenda,
+        escopoViagem: escopoViagemLogistica(bloco),
+        conferenciaRepository: _conferenciaCargaRepository,
+        usuarioAtual: widget.usuarioAtual,
       );
     }
     return _conteudoRomaneioUmaVenda(context, bloco.single, setDialogState);
@@ -1585,6 +1591,41 @@ class _EntregasPageState extends State<EntregasPage> {
   Future<void> _atualizarPrioridade(Venda venda, String novaPrioridade) async {
     widget.vendaRepository.atualizarPrioridadeEntrega(venda.id, novaPrioridade);
     _carregarEntregas();
+  }
+
+  Future<void> _definirMotoristaEmLoteIds(Set<int> ids) async {
+    if (ids.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nenhuma entrega selecionada.')),
+      );
+      return;
+    }
+    final motorista = await showSelecionarMotoristaDialog(
+      context,
+      widget.motoristaRepository,
+      titulo: 'Motorista das entregas',
+      rotuloConfirmar: 'Aplicar',
+      textoAuxiliar:
+          'O mesmo motorista sera gravado em ${ids.length} pedido(s).',
+    );
+    if (motorista == null || motorista.isEmpty || !mounted) return;
+    try {
+      final n = widget.vendaRepository.atualizarMotoristaEntregaEmLote(
+        ids,
+        motorista,
+      );
+      await _carregarEntregasSyncState();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Motorista definido em $n entrega(s).')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao definir motorista: $e')),
+      );
+    }
   }
 
   Future<void> _editarMotoristaEntrega(Venda venda) async {
@@ -3635,6 +3676,8 @@ class _EntregasPageState extends State<EntregasPage> {
         recarregar: _carregarEntregas,
         confirmarAgrupamento: _confirmarAgrupamentoIds,
         removerAgrupamento: _removerAgrupamentoIds,
+        editarMotoristaPedido: _editarMotoristaEntrega,
+        definirMotoristaEmLote: _definirMotoristaEmLoteIds,
       );
 
   Widget _buildAbaMontagem(List<Venda> listaExibicao) {
@@ -3836,6 +3879,18 @@ class _EntregasPageState extends State<EntregasPage> {
                 });
               },
             ),
+            if (!widget.podeGerenciarStatusEntrega) ...[
+              const SizedBox(height: 8),
+              MaterialBanner(
+                padding: const EdgeInsets.all(12),
+                leading: const Icon(Icons.visibility_outlined),
+                content: const Text(
+                  'Modo somente leitura — voce pode acompanhar entregas, '
+                  'mas nao alterar status, motorista ou montagem de carga.',
+                ),
+                actions: const [SizedBox.shrink()],
+              ),
+            ],
             const SizedBox(height: 6),
             Expanded(
               child: LayoutBuilder(
@@ -3926,6 +3981,9 @@ class _PainelRomaneioGrupoMesmoCarro extends StatefulWidget {
     required this.setDialogStateRomaneio,
     required this.quantidadeItemEntrega,
     required this.conteudoRomaneioUmaVenda,
+    required this.escopoViagem,
+    required this.conferenciaRepository,
+    required this.usuarioAtual,
   });
 
   final List<Venda> bloco;
@@ -3936,6 +3994,9 @@ class _PainelRomaneioGrupoMesmoCarro extends StatefulWidget {
     Venda venda,
     StateSetter setDialogStateRomaneio,
   ) conteudoRomaneioUmaVenda;
+  final String escopoViagem;
+  final ConferenciaCargaRepository conferenciaRepository;
+  final String usuarioAtual;
 
   @override
   State<_PainelRomaneioGrupoMesmoCarro> createState() =>
@@ -3948,7 +4009,6 @@ class _PainelRomaneioGrupoMesmoCarroState
   static const int _abaConsolidada = 1;
 
   int _abaRomaneioGrupo = _abaPorPedido;
-  final Map<String, bool> _conferenciaCargaConsolidada = {};
 
   @override
   Widget build(BuildContext context) {
@@ -4018,30 +4078,14 @@ class _PainelRomaneioGrupoMesmoCarroState
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 6),
-                if (linhas.isEmpty)
-                  const Text('Nenhum item com quantidade para este grupo.')
-                else
-                  ...linhas.map(
-                    (l) => CheckboxListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      value: _conferenciaCargaConsolidada[l.chaveMerge] ?? false,
-                      onChanged: (marcado) {
-                        setState(() {
-                          _conferenciaCargaConsolidada[l.chaveMerge] =
-                              marcado ?? false;
-                        });
-                      },
-                      title: Text(
-                        l.nomeProduto,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: Text(
-                        'SKU ${l.codigoSku} · ${l.unidade} · Qtd total: ${l.quantidadeTotal}',
-                      ),
-                    ),
-                  ),
+                ConferenciaCargaConsolidadaLista(
+                  linhas: linhas,
+                  escopoViagem: widget.escopoViagem,
+                  conferenciaRepository: widget.conferenciaRepository,
+                  usuarioAtual: widget.usuarioAtual,
+                  vendasGrupo: widget.bloco,
+                  quantidadeEntrega: widget.quantidadeItemEntrega,
+                ),
               ],
             ),
         ],

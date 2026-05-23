@@ -54,6 +54,16 @@ String nomeMotoristaEntrega(Venda venda) {
   return 'Nao definido';
 }
 
+/// Motorista informado no pedido (nao e o placeholder da UI).
+bool motoristaLogisticaDefinido(String nomeMotorista) {
+  final n = nomeMotorista.trim();
+  return n.isNotEmpty && n != 'Nao definido';
+}
+
+int contarEntregasSemMotorista(List<Venda> entregas) => entregas
+    .where((v) => !motoristaLogisticaDefinido(nomeMotoristaEntrega(v)))
+    .length;
+
 String rotuloGrupoLogistica(List<Venda> bloco) {
   final nums = bloco.map((v) {
     if (v.numeroOrcamento > 0) return '${v.numeroOrcamento}';

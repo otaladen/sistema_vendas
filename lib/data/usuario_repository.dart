@@ -2,7 +2,13 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../domain/auditoria_catalogo.dart';
+import '../domain/usuario_auditoria_diff.dart';
+import '../domain/usuario_migracao_service.dart';
+import '../domain/usuario_permissao_helper.dart';
+import '../domain/usuario_senha_codec.dart';
 import '../model/usuario_sistema.dart';
+import '../services/auditoria_registrar.dart';
 import 'sync/sync_write_trigger.dart';
 
 class UsuarioRepository {
@@ -20,23 +26,110 @@ class UsuarioRepository {
         .toList();
   }
 
-  Future<void> salvar(UsuarioSistema usuario) async {
+  /// Normaliza perfil/senha de todos os usuarios (legado).
+  Future<int> migrarTodosLegado({UsuarioSistema? alteradoPor}) async {
     final lista = await listarTodos();
-    final idx = lista.indexWhere((u) => u.id == usuario.id);
+    var n = 0;
+    for (var i = 0; i < lista.length; i++) {
+      final norm = UsuarioMigracaoService.normalizarLegado(lista[i]);
+      if (norm.perfil != lista[i].perfil ||
+          norm.senha != lista[i].senha ||
+          norm.podeCancelarVendas != lista[i].podeCancelarVendas ||
+          norm.podeAcessarPdv != lista[i].podeAcessarPdv) {
+        await salvar(
+          norm,
+          alteradoPor: alteradoPor,
+          anterior: lista[i],
+          resumoExtra: 'Migracao legado',
+        );
+        n++;
+      }
+      lista[i] = norm;
+    }
+    return n;
+  }
+
+  Future<void> salvar(
+    UsuarioSistema usuario, {
+    UsuarioSistema? alteradoPor,
+    UsuarioSistema? anterior,
+    String? senhaPlainNova,
+    String resumoExtra = '',
+  }) async {
+    final criacao = anterior == null;
+    if (senhaPlainNova != null && senhaPlainNova.isNotEmpty) {
+      final erro = PoliticaSenhaUsuario.validar(senhaPlainNova);
+      if (erro != null) throw StateError(erro);
+    } else if (criacao) {
+      throw StateError('Informe a senha do novo usuario.');
+    }
+
+    var salvo = usuario;
+    if (senhaPlainNova != null && senhaPlainNova.isNotEmpty) {
+      salvo = salvo.copyWith(
+        senha: UsuarioSenhaCodec.gerarHash(senhaPlainNova.trim()),
+      );
+    } else if (criacao) {
+      salvo = salvo.copyWith(senha: UsuarioSenhaCodec.gerarHash(usuario.senha));
+    }
+
+    final lista = await listarTodos();
+    final idx = lista.indexWhere((u) => u.id == salvo.id);
     if (idx >= 0) {
-      lista[idx] = usuario;
+      lista[idx] = salvo;
     } else {
-      lista.add(usuario);
+      lista.add(salvo);
     }
     await _persistir(lista);
     notificarAlteracaoParaRede();
+
+    final loginAutor = alteradoPor?.login ?? AuditoriaRegistrar.usuarioSessao;
+    final diff = UsuarioAuditoriaDiff.diffPermissoes(anterior, salvo);
+    AuditoriaRegistrar.registrar(
+      modulo: AuditoriaModulo.sistema,
+      acao: criacao ? AuditoriaAcao.usuarioCriado : AuditoriaAcao.usuarioAlterado,
+      usuarioLogin: loginAutor,
+      entidade: 'usuario',
+      entidadeId: salvo.id,
+      resumo: [
+        if (criacao)
+          'Usuario criado: ${salvo.nome} (${salvo.login})'
+        else
+          'Usuario alterado: ${salvo.nome} (${salvo.login})',
+        if (resumoExtra.isNotEmpty) resumoExtra,
+      ].join(' — '),
+      detalhes: diff,
+    );
   }
 
-  Future<void> remover(String id) async {
+  Future<void> remover({
+    required String id,
+    UsuarioSistema? removidoPor,
+  }) async {
     final lista = await listarTodos();
+    UsuarioSistema? alvo;
+    for (final u in lista) {
+      if (u.id == id) {
+        alvo = u;
+        break;
+      }
+    }
     lista.removeWhere((u) => u.id == id);
     await _persistir(lista);
     notificarAlteracaoParaRede();
+
+    if (alvo != null) {
+      final loginAutor = removidoPor?.login ?? AuditoriaRegistrar.usuarioSessao;
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.sistema,
+        acao: AuditoriaAcao.usuarioRemovido,
+        usuarioLogin: loginAutor,
+        entidade: 'usuario',
+        entidadeId: id,
+        resumo: 'Usuario removido: ${alvo.nome} (${alvo.login})',
+        detalhes: {'perfil': alvo.perfil, 'ativo': alvo.ativo},
+      );
+    }
   }
 
   Future<bool> loginJaExiste(String login, {String? ignorarId}) async {
@@ -50,13 +143,26 @@ class UsuarioRepository {
 
   Future<UsuarioSistema?> autenticar(String login, String senha) async {
     final l = login.trim().toLowerCase();
-    final s = senha.trim();
+    final s = senha;
     if (l.isEmpty || s.isEmpty) return null;
     final lista = await listarTodos();
     for (final usuario in lista) {
-      if (usuario.login.trim().toLowerCase() == l && usuario.senha == s) {
-        return usuario;
+      if (!usuario.ativo) continue;
+      if (usuario.login.trim().toLowerCase() != l) continue;
+      if (!UsuarioSenhaCodec.verificar(s, usuario.senha)) continue;
+
+      if (!UsuarioSenhaCodec.isHashArmazenado(usuario.senha)) {
+        final atualizado = usuario.copyWith(
+          senha: UsuarioSenhaCodec.gerarHash(s),
+        );
+        await salvar(
+          atualizado,
+          anterior: usuario,
+          resumoExtra: 'Senha migrada para hash',
+        );
+        return atualizado;
       }
+      return usuario;
     }
     return null;
   }

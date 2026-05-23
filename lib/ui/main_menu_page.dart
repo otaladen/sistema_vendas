@@ -12,10 +12,13 @@ import '../data/produto_repository.dart';
 import '../services/lan_sync_server_manager.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
+import '../domain/permissao_usuario.dart';
+import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../services/print_service.dart';
 import 'cadastros_page.dart';
 import 'configuracoes_page.dart';
+import 'entregas_page.dart';
 import 'estoque_page.dart';
 import 'financeiro/contas_pagar_page.dart';
 import 'notas_fiscais_page.dart';
@@ -93,9 +96,10 @@ class _MainMenuPageState extends State<MainMenuPage> {
               icon: Icons.app_registration_outlined,
               corDestaque: HubNavColors.menuCadastros,
               titulo: 'Cadastros',
-              habilitado:
-                  widget.usuarioLogado.admin ||
-                  widget.usuarioLogado.podeCadastros,
+              habilitado: UsuarioPermissaoHelper.tem(
+                widget.usuarioLogado,
+                PermissaoUsuario.cadastros,
+              ),
               onTap: () {
                 Navigator.push(
                   context,
@@ -118,9 +122,10 @@ class _MainMenuPageState extends State<MainMenuPage> {
               icon: Icons.inventory_2_outlined,
               corDestaque: HubNavColors.menuEstoque,
               titulo: 'Estoque',
-              habilitado:
-                  widget.usuarioLogado.admin ||
-                  widget.usuarioLogado.podeEstoque,
+              habilitado: UsuarioPermissaoHelper.tem(
+                widget.usuarioLogado,
+                PermissaoUsuario.estoque,
+              ),
               onTap: () {
                 Navigator.push(
                   context,
@@ -137,9 +142,10 @@ class _MainMenuPageState extends State<MainMenuPage> {
               icon: Icons.receipt_long_outlined,
               corDestaque: HubNavColors.menuNotasFiscais,
               titulo: 'Notas Fiscais',
-              habilitado:
-                  widget.usuarioLogado.admin ||
-                  widget.usuarioLogado.podeEstoque,
+              habilitado: UsuarioPermissaoHelper.tem(
+                widget.usuarioLogado,
+                PermissaoUsuario.estoque,
+              ),
               onTap: () {
                 Navigator.push(
                   context,
@@ -155,8 +161,10 @@ class _MainMenuPageState extends State<MainMenuPage> {
               icon: Icons.point_of_sale_outlined,
               corDestaque: HubNavColors.menuVendas,
               titulo: 'Vendas',
-              habilitado:
-                  widget.usuarioLogado.admin || widget.usuarioLogado.podeVendas,
+              habilitado: UsuarioPermissaoHelper.tem(
+                widget.usuarioLogado,
+                PermissaoUsuario.vendasHub,
+              ),
               onTap: () {
                 Navigator.push(
                   context,
@@ -168,23 +176,38 @@ class _MainMenuPageState extends State<MainMenuPage> {
                       vendedorRepository: widget.vendedorRepository,
                       appConfigRepository: widget.appConfigRepository,
                       printService: widget.printService,
-                      usuarioAtual: widget.usuarioLogado.login,
+                      usuarioLogado: widget.usuarioLogado,
                       onLogout: widget.onLogout,
-                      podeLeituraParcialCaixa:
-                          widget.usuarioLogado.admin ||
-                          widget.usuarioLogado.podeLeituraParcialCaixa,
-                      podeManutencaoAuditoriaCaixa:
-                          widget.usuarioLogado.admin ||
-                          widget.usuarioLogado.podeManutencaoAuditoriaCaixa,
-                      podeCancelarVendas:
-                          widget.usuarioLogado.admin ||
-                          widget.usuarioLogado.podeFinanceiro ||
-                          widget.usuarioLogado.podeManutencaoAuditoriaCaixa,
                       motoristaRepository: widget.motoristaRepository,
-                      podeGerenciarEntregas:
-                          widget.usuarioLogado.admin ||
-                          widget.usuarioLogado.podeEntregas,
-                      usuarioAdmin: widget.usuarioLogado.admin,
+                    ),
+                  ),
+                );
+              },
+            ),
+            HubNavButton(
+              icon: Icons.local_shipping_outlined,
+              corDestaque: const Color(0xFF0277BD),
+              titulo: 'Entregas',
+              habilitado: UsuarioPermissaoHelper.podeVisualizarEntregas(
+                widget.usuarioLogado,
+              ),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EntregasPage(
+                      vendaRepository: widget.vendaRepository,
+                      produtoRepository: widget.produtoRepository,
+                      motoristaRepository: widget.motoristaRepository,
+                      usuarioAtual: widget.usuarioLogado.login,
+                      podeGerenciarStatusEntrega:
+                          UsuarioPermissaoHelper.podeGerenciarEntregas(
+                        widget.usuarioLogado,
+                      ),
+                      podeRegistrarDevolucaoTrocaSemSenha:
+                          UsuarioPermissaoHelper.podeCancelarVendas(
+                        widget.usuarioLogado,
+                      ),
                     ),
                   ),
                 );
@@ -194,9 +217,10 @@ class _MainMenuPageState extends State<MainMenuPage> {
               icon: Icons.payments_outlined,
               corDestaque: HubNavColors.menuFinanceiro,
               titulo: 'Financeiro',
-              habilitado:
-                  widget.usuarioLogado.admin ||
-                  widget.usuarioLogado.podeFinanceiro,
+              habilitado: UsuarioPermissaoHelper.tem(
+                widget.usuarioLogado,
+                PermissaoUsuario.financeiro,
+              ),
               onTap: () {
                 Navigator.push(
                   context,
@@ -212,9 +236,10 @@ class _MainMenuPageState extends State<MainMenuPage> {
               icon: Icons.settings_outlined,
               corDestaque: HubNavColors.menuConfig,
               titulo: 'Configurações',
-              habilitado:
-                  widget.usuarioLogado.admin ||
-                  widget.usuarioLogado.podeConfiguracoes,
+              habilitado: UsuarioPermissaoHelper.tem(
+                widget.usuarioLogado,
+                PermissaoUsuario.configuracoes,
+              ),
               onTap: () {
                 Navigator.push(
                   context,

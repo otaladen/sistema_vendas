@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/usuario_repository.dart';
+import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 
 class CredenciaisMargemPromocao {
@@ -11,7 +12,7 @@ class CredenciaisMargemPromocao {
 }
 
 bool usuarioPodeAutorizarMargemPromocao(UsuarioSistema u) {
-  return u.ativo && (u.admin || u.podeAutorizarMargemVenda);
+  return UsuarioPermissaoHelper.podeAutorizarMargemPromocao(u);
 }
 
 /// Login/senha de gerente para venda abaixo da margem minima da promocao.

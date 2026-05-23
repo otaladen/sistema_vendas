@@ -1,6 +1,7 @@
 import '../model/conferencia_carga_romaneio.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'sync/sync_write_trigger.dart';
 
 class ConferenciaCargaRepository {
   ConferenciaCargaRepository(this._db);
@@ -63,6 +64,7 @@ class ConferenciaCargaRepository {
     } finally {
       q.close();
     }
+    notificarAlteracaoParaRede();
   }
 
   int contarConferidos(String escopoViagem, Iterable<String> chavesProduto) {

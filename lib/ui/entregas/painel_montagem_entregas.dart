@@ -5,6 +5,7 @@ import '../../data/conferencia_carga_repository.dart';
 import '../../domain/entrega_venda_helper.dart';
 import '../../model/item_venda.dart';
 import '../../model/venda.dart';
+import 'conferencia_carga_consolidada_lista.dart';
 import 'entregas_barra_compacta.dart';
 import 'entregas_montagem_callbacks.dart';
 import 'logistica_entregas.dart';
@@ -40,7 +41,6 @@ class PainelMontagemEntregas extends StatefulWidget {
 class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
   String? _motoristaSelecionado;
   String? _viagemChaveSelecionada;
-  final Map<String, bool> _conferenciaCarga = {};
   bool _modoAgrupar = false;
   final Set<int> _idsSelecionadas = {};
 
@@ -81,30 +81,6 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
         !viagens.any((v) => v.chave == _viagemChaveSelecionada)) {
       _viagemChaveSelecionada = viagens.first.chave;
     }
-    _carregarConferenciaViagem(_viagemAtual);
-  }
-
-  void _carregarConferenciaViagem(MontagemEntregaViagem? viagem) {
-    _conferenciaCarga.clear();
-    if (viagem == null) return;
-    _conferenciaCarga.addAll(
-      widget.conferenciaRepository.mapaPorEscopo(viagem.chave),
-    );
-  }
-
-  void _marcarConferenciaCarga(
-    MontagemEntregaViagem viagem,
-    String chaveProduto,
-    bool? marcado,
-  ) {
-    final valor = marcado ?? false;
-    setState(() => _conferenciaCarga[chaveProduto] = valor);
-    widget.conferenciaRepository.salvarConferencia(
-      escopoViagem: viagem.chave,
-      chaveProduto: chaveProduto,
-      conferido: valor,
-      usuarioLogin: widget.usuarioAtual,
-    );
   }
 
   List<Venda> _entregasAgrupaveisMotorista(String motorista) {
@@ -139,6 +115,28 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
       _idsSelecionadas.clear();
       _modoAgrupar = false;
     });
+  }
+
+  void _avisarMotoristaIndefinido() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Defina o motorista nos pedidos antes de usar mapa/impressao '
+          'por motorista.',
+        ),
+      ),
+    );
+  }
+
+  Set<int> _idsEntregasSemMotorista() => widget.entregas
+      .where((v) => !motoristaLogisticaDefinido(nomeMotoristaEntrega(v)))
+      .map((v) => v.id)
+      .toSet();
+
+  Future<void> _definirMotoristaEmLoteSemMotorista() async {
+    final ids = _idsEntregasSemMotorista();
+    if (ids.isEmpty) return;
+    await widget.callbacks.definirMotoristaEmLote(ids);
   }
 
   Future<void> _abrirMapaRota(List<Venda> paradas) async {
@@ -249,6 +247,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
             : const BoxConstraints(maxWidth: 280, minWidth: 240);
 
         final seletorMotorista = _faixaMotoristas(motoristas);
+        final alertaSemMotorista = _faixaAlertaSemMotorista();
         final barraAcoes = _barraAcoesMontagem(
           motorista: _motoristaSelecionado!,
           viagens: viagens,
@@ -266,6 +265,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               seletorMotorista,
+              alertaSemMotorista,
               barraAcoes,
               if (_modoAgrupar) ...[
                 EntregasBarraAgrupamentoMesmoCarro(
@@ -295,6 +295,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             seletorMotorista,
+            alertaSemMotorista,
             barraAcoes,
             if (_modoAgrupar) ...[
               EntregasBarraAgrupamentoMesmoCarro(
@@ -334,6 +335,42 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
     );
   }
 
+  Widget _faixaAlertaSemMotorista() {
+    final qtd = contarEntregasSemMotorista(widget.entregas);
+    if (qtd == 0) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Material(
+        color: scheme.errorContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Icon(Icons.warning_amber_rounded, color: scheme.error, size: 20),
+              Text(
+                '$qtd entrega(s) sem motorista neste dia.',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onErrorContainer,
+                ),
+              ),
+              if (widget.podeGerenciarStatus)
+                FilledButton.tonal(
+                  onPressed: _definirMotoristaEmLoteSemMotorista,
+                  child: Text('Definir motorista ($qtd)'),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _faixaMotoristas(List<String> motoristas) {
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerHighest
@@ -366,7 +403,6 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                           );
                           _viagemChaveSelecionada =
                               v.isEmpty ? null : v.first.chave;
-                          _carregarConferenciaViagem(_viagemAtual);
                         });
                       },
                     ),
@@ -387,6 +423,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
     required MontagemEntregaViagem? viagem,
   }) {
     final paradasMotorista = _paradasMotoristaNoDia(motorista);
+    final motIndef = !motoristaLogisticaDefinido(motorista);
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Wrap(
@@ -418,14 +455,18 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
             label: const Text('Mapa — viagem'),
           ),
           OutlinedButton.icon(
-            onPressed: paradasMotorista.isEmpty
-                ? null
-                : () => _abrirMapaRota(paradasMotorista),
+            onPressed: motIndef
+                ? () => _avisarMotoristaIndefinido()
+                : paradasMotorista.isEmpty
+                    ? null
+                    : () => _abrirMapaRota(paradasMotorista),
             icon: const Icon(Icons.alt_route, size: 18),
             label: const Text('Mapa — motorista'),
           ),
           OutlinedButton.icon(
-            onPressed: () => showMontagemImpressaoLoteSheet(
+            onPressed: motIndef
+                ? () => _avisarMotoristaIndefinido()
+                : () => showMontagemImpressaoLoteSheet(
               context: context,
               callbacks: widget.callbacks,
               motorista: motorista,
@@ -522,10 +563,8 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                           radius: 14,
                           child: Text('${i + 1}'),
                         ),
-                        onTap: () => setState(() {
-                          _viagemChaveSelecionada = v.chave;
-                          _carregarConferenciaViagem(v);
-                        }),
+                        onTap: () =>
+                            setState(() => _viagemChaveSelecionada = v.chave),
                       );
                     },
                   ),
@@ -543,11 +582,6 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
     final ordenadas = viagem.vendasOrdenadas;
     final prog = montagemProgressoCargaViagem(ordenadas);
     final checklistOk = montagemChecklistViagemCompleto(ordenadas);
-    final conferidos = widget.conferenciaRepository.contarConferidos(
-      viagem.chave,
-      linhas.map((l) => l.chaveMerge),
-    );
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -628,12 +662,14 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                       label: const Text('Separacao (PDF)'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: () => widget.callbacks.emitirRelatorio(
-                        tipo: RelatorioEntregaTipo.romaneioMotoristaDia,
-                        motorista: viagem.motorista,
-                        viagem: ordenadas,
-                        salvarPdf: false,
-                      ),
+                      onPressed: motoristaLogisticaDefinido(viagem.motorista)
+                          ? () => widget.callbacks.emitirRelatorio(
+                                tipo: RelatorioEntregaTipo.romaneioMotoristaDia,
+                                motorista: viagem.motorista,
+                                viagem: ordenadas,
+                                salvarPdf: false,
+                              )
+                          : _avisarMotoristaIndefinido,
                       icon: const Icon(Icons.assignment_outlined, size: 18),
                       label: const Text('Romaneio'),
                     ),
@@ -642,12 +678,20 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                       icon: const Icon(Icons.map_outlined, size: 18),
                       label: const Text('Mapa rota'),
                     ),
-                    if (viagem.ehGrupo)
+                    if (widget.podeGerenciarStatus)
                       OutlinedButton.icon(
-                        onPressed: () => widget.callbacks.editarMotoristaGrupo(
-                          viagem.grupoId,
-                          viagem.motorista,
-                        ),
+                        onPressed: () {
+                          if (viagem.ehGrupo) {
+                            widget.callbacks.editarMotoristaGrupo(
+                              viagem.grupoId,
+                              viagem.motorista,
+                            );
+                          } else {
+                            widget.callbacks.editarMotoristaPedido(
+                              ordenadas.first,
+                            );
+                          }
+                        },
                         icon: const Icon(Icons.person_outline, size: 18),
                         label: const Text('Motorista'),
                       ),
@@ -688,44 +732,26 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Text(
-                    linhas.isEmpty
-                        ? 'Marque ao separar. Quantidades somadas de todos os pedidos desta viagem.'
-                        : 'Marque ao separar. $conferidos/${linhas.length} conferidos (gravado).',
+                    'Marque ao separar. Quantidades somadas de todos os pedidos desta viagem.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
                 const Divider(height: 1),
                 Expanded(
-                  child: linhas.isEmpty
-                      ? const Center(
-                          child: Text('Nenhum item de carreto nesta viagem.'),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          itemCount: linhas.length,
-                          itemBuilder: (context, i) {
-                            final l = linhas[i];
-                            return CheckboxListTile(
-                              dense: true,
-                              value: _conferenciaCarga[l.chaveMerge] ?? false,
-                              onChanged: (marcado) => _marcarConferenciaCarga(
-                                viagem,
-                                l.chaveMerge,
-                                marcado,
-                              ),
-                              title: Text(
-                                l.nomeProduto,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              subtitle: Text(
-                                'SKU ${l.codigoSku} · ${l.unidade} · '
-                                'Qtd ${l.quantidadeTotal}',
-                              ),
-                            );
-                          },
-                        ),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    child: ConferenciaCargaConsolidadaLista(
+                      linhas: linhas,
+                      escopoViagem: viagem.chave,
+                      conferenciaRepository: widget.conferenciaRepository,
+                      usuarioAtual: widget.usuarioAtual,
+                      vendasGrupo: viagem.vendas,
+                      quantidadeEntrega: widget.quantidadeItemEntrega,
+                    ),
+                  ),
                 ),
               ],
             ),

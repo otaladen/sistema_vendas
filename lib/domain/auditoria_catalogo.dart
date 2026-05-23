@@ -35,6 +35,9 @@ class AuditoriaAcao {
   static const fechamentoNegado = 'fechamento_negado';
   static const limparManual = 'limpar_manual';
   static const retencaoAutomatica = 'retencao_automatica';
+  static const usuarioCriado = 'usuario_criado';
+  static const usuarioAlterado = 'usuario_alterado';
+  static const usuarioRemovido = 'usuario_removido';
 }
 
 String auditoriaRotuloModulo(String modulo) {
@@ -84,6 +87,12 @@ String auditoriaRotuloAcao(String acao) {
       return 'Limpeza de log';
     case AuditoriaAcao.retencaoAutomatica:
       return 'Retencao automatica';
+    case AuditoriaAcao.usuarioCriado:
+      return 'Usuario criado';
+    case AuditoriaAcao.usuarioAlterado:
+      return 'Usuario alterado';
+    case AuditoriaAcao.usuarioRemovido:
+      return 'Usuario removido';
     default:
       return acao;
   }

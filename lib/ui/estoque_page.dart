@@ -11,7 +11,9 @@ import '../data/reajuste_preco_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../data/usuario_repository.dart';
 import '../main.dart';
+import '../domain/permissao_usuario.dart';
 import '../domain/produto_unidade_exibicao.dart';
+import '../domain/usuario_permissao_helper.dart';
 import '../model/produto.dart';
 import '../model/usuario_sistema.dart';
 import '../services/compras_preditivas_service.dart';
@@ -386,41 +388,50 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                 await _exportarTabelaProdutosPdf(context, incluirCustos: true);
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem<String>(
-                value: 'precos',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.sell_outlined),
-                  title: Text('Exportar tabela de precos'),
+            itemBuilder: (context) {
+              final verCusto = UsuarioPermissaoHelper.tem(
+                widget.usuarioLogado,
+                PermissaoUsuario.verCustoMargem,
+              );
+              return [
+                const PopupMenuItem<String>(
+                  value: 'precos',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.sell_outlined),
+                    title: Text('Exportar tabela de precos'),
+                  ),
                 ),
-              ),
-              PopupMenuItem<String>(
-                value: 'preco_custo',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.price_change_outlined),
-                  title: Text('Exportar tabela de preco e custo'),
+                if (verCusto) ...[
+                  const PopupMenuItem<String>(
+                    value: 'preco_custo',
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(Icons.price_change_outlined),
+                      title: Text('Exportar tabela de preco e custo'),
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                ],
+                const PopupMenuItem<String>(
+                  value: 'precos_pdf',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.picture_as_pdf_outlined),
+                    title: Text('Exportar tabela de precos (PDF)'),
+                  ),
                 ),
-              ),
-              PopupMenuDivider(),
-              PopupMenuItem<String>(
-                value: 'precos_pdf',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.picture_as_pdf_outlined),
-                  title: Text('Exportar tabela de precos (PDF)'),
-                ),
-              ),
-              PopupMenuItem<String>(
-                value: 'preco_custo_pdf',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.request_quote_outlined),
-                  title: Text('Exportar tabela de preco e custo (PDF)'),
-                ),
-              ),
-            ],
+                if (verCusto)
+                  const PopupMenuItem<String>(
+                    value: 'preco_custo_pdf',
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(Icons.request_quote_outlined),
+                      title: Text('Exportar tabela de preco e custo (PDF)'),
+                    ),
+                  ),
+              ];
+            },
           ),
         ],
       ),
@@ -601,9 +612,14 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | '
-                              'Medio: ${_formatarMoedaBRL(produto.custoMedio)} | '
-                              'Venda: ${_formatarMoedaBRL(produto.precoVenda)}',
+                              UsuarioPermissaoHelper.tem(
+                                widget.usuarioLogado,
+                                PermissaoUsuario.verCustoMargem,
+                              )
+                                  ? 'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | '
+                                        'Medio: ${_formatarMoedaBRL(produto.custoMedio)} | '
+                                        'Venda: ${_formatarMoedaBRL(produto.precoVenda)}'
+                                  : 'Venda: ${_formatarMoedaBRL(produto.precoVenda)}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall,

@@ -6,6 +6,9 @@ import '../../data/cliente_repository.dart';
 import '../../data/produto_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
+import '../../domain/permissao_usuario.dart';
+import '../../domain/usuario_permissao_helper.dart';
+import '../../model/usuario_sistema.dart';
 import '../relatorio_fiados_page.dart';
 import '../widgets/hub_nav_button.dart';
 import '../widgets/relatorios/relatorio_hub_secao.dart';
@@ -61,6 +64,7 @@ class RelatoriosPage extends StatefulWidget {
     required this.vendedorRepository,
     required this.produtoRepository,
     required this.appConfigRepository,
+    required this.usuarioLogado,
     required this.usuarioAdmin,
     this.usuarioLogin = '',
     this.onAbrirModuloEntregas,
@@ -72,6 +76,7 @@ class RelatoriosPage extends StatefulWidget {
   final VendedorRepository vendedorRepository;
   final ProdutoRepository produtoRepository;
   final AppConfigRepository appConfigRepository;
+  final UsuarioSistema usuarioLogado;
   final bool usuarioAdmin;
   final String usuarioLogin;
   final VoidCallback? onAbrirModuloEntregas;
@@ -535,9 +540,29 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
     ];
   }
 
+  bool _entradaPermitida(_RelatorioHubItem item) {
+    final u = widget.usuarioLogado;
+    switch (item.titulo) {
+      case 'Comissao de vendedores':
+        return UsuarioPermissaoHelper.tem(
+          u,
+          PermissaoUsuario.relatoriosComissao,
+        );
+      case 'Fiados em aberto':
+        return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.relatoriosFiado);
+      case 'Log do sistema':
+        return UsuarioPermissaoHelper.tem(
+          u,
+          PermissaoUsuario.relatoriosLogSistema,
+        );
+      default:
+        return true;
+    }
+  }
+
   List<_RelatorioHubItem> _entradasFiltradas() {
     final termo = _buscaController.text.trim().toLowerCase();
-    final todas = _todasEntradas();
+    final todas = _todasEntradas().where(_entradaPermitida).toList();
     if (termo.isEmpty) return todas;
     return todas.where((item) {
       final blob = [

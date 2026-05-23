@@ -1,52 +1,77 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/usuario_repository.dart';
+import '../domain/perfil_usuario_preset.dart';
+import '../domain/permissao_usuario.dart';
+import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
+import 'usuarios/usuario_form_state.dart';
+import 'usuarios/usuarios_permissoes_panel.dart';
+import 'usuarios/usuarios_resumo_panel.dart';
+
+enum _FiltroAtivoLista { todos, ativos, inativos }
 
 class UsuariosPage extends StatefulWidget {
-  const UsuariosPage({super.key, required this.usuarioRepository});
+  const UsuariosPage({
+    super.key,
+    required this.usuarioRepository,
+    required this.usuarioLogado,
+  });
 
   final UsuarioRepository usuarioRepository;
+  final UsuarioSistema usuarioLogado;
 
   @override
   State<UsuariosPage> createState() => _UsuariosPageState();
 }
 
-class _UsuariosPageState extends State<UsuariosPage> {
+class _UsuariosPageState extends State<UsuariosPage>
+    with SingleTickerProviderStateMixin {
   final _nomeController = TextEditingController();
   final _loginController = TextEditingController();
   final _senhaController = TextEditingController();
+  final _descontoMaxController = TextEditingController();
+  final _buscaController = TextEditingController();
 
+  late TabController _tabController;
+  UsuarioFormState _form = UsuarioFormState.novo();
   List<UsuarioSistema> _usuarios = [];
-  String? _editandoId;
-  bool _ativo = true;
-  bool _admin = false;
-  bool _podeCadastros = false;
-  bool _podeEstoque = false;
-  bool _podeVendas = false;
-  bool _podeCaixa = false;
-  bool _podeLeituraParcialCaixa = false;
-  bool _podeManutencaoAuditoriaCaixa = false;
-  bool _podeEntregas = false;
-  bool _podeFinanceiro = false;
-  bool _podeConfiguracoes = false;
-  bool _podeAutorizarSegundaViaCupom = false;
-  bool _podeAutorizarMargemVenda = false;
-  bool _podeReajustePrecoLote = false;
-  bool _podeAutorizarReajustePreco = false;
-  String _status = '';
+  String _busca = '';
+  _FiltroAtivoLista _filtroAtivo = _FiltroAtivoLista.todos;
+  String? _filtroPerfilId;
+  bool _senhaVisivel = false;
+  int? _abaAtual;
+
+  bool get _podeGerenciarUsuarios =>
+      UsuarioPermissaoHelper.tem(
+        widget.usuarioLogado,
+        PermissaoUsuario.gerenciarUsuarios,
+      );
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() => _abaAtual = _tabController.index);
+      }
+    });
+    _abaAtual = 0;
     _carregar();
   }
 
   @override
   void dispose() {
+    _tabController.dispose();
     _nomeController.dispose();
     _loginController.dispose();
     _senhaController.dispose();
+    _descontoMaxController.dispose();
+    _buscaController.dispose();
     super.dispose();
   }
 
@@ -54,329 +79,694 @@ class _UsuariosPageState extends State<UsuariosPage> {
     final lista = await widget.usuarioRepository.listarTodos();
     if (!mounted) return;
     setState(() {
-      _usuarios = lista;
+      _usuarios = lista..sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
     });
   }
 
-  void _limparFormulario() {
-    setState(() {
-      _editandoId = null;
-      _nomeController.clear();
-      _loginController.clear();
-      _senhaController.clear();
-      _ativo = true;
-      _admin = false;
-      _podeCadastros = false;
-      _podeEstoque = false;
-      _podeVendas = false;
-      _podeCaixa = false;
-      _podeLeituraParcialCaixa = false;
-      _podeManutencaoAuditoriaCaixa = false;
-      _podeEntregas = false;
-      _podeFinanceiro = false;
-      _podeConfiguracoes = false;
-      _podeAutorizarSegundaViaCupom = false;
-      _podeAutorizarMargemVenda = false;
-      _podeReajustePrecoLote = false;
-      _podeAutorizarReajustePreco = false;
-    });
-  }
-
-  void _aplicarAdmin(bool valor) {
-    _admin = valor;
-    if (valor) {
-      _podeCadastros = true;
-      _podeEstoque = true;
-      _podeVendas = true;
-      _podeCaixa = true;
-      _podeLeituraParcialCaixa = true;
-      _podeManutencaoAuditoriaCaixa = true;
-      _podeEntregas = true;
-      _podeFinanceiro = true;
-      _podeConfiguracoes = true;
-      _podeAutorizarSegundaViaCupom = true;
-      _podeReajustePrecoLote = true;
-      _podeAutorizarReajustePreco = true;
+  List<UsuarioSistema> get _usuariosFiltrados {
+    var lista = List<UsuarioSistema>.from(_usuarios);
+    switch (_filtroAtivo) {
+      case _FiltroAtivoLista.ativos:
+        lista = lista.where((u) => u.ativo).toList();
+      case _FiltroAtivoLista.inativos:
+        lista = lista.where((u) => !u.ativo).toList();
+      case _FiltroAtivoLista.todos:
+        break;
     }
+    if (_filtroPerfilId != null && _filtroPerfilId!.isNotEmpty) {
+      lista = lista.where((u) => u.perfil == _filtroPerfilId).toList();
+    }
+    final t = _busca.trim().toLowerCase();
+    if (t.isNotEmpty) {
+      lista = lista.where((u) {
+        return u.nome.toLowerCase().contains(t) ||
+            u.login.toLowerCase().contains(t) ||
+            u.perfil.toLowerCase().contains(t);
+      }).toList();
+    }
+    return lista;
+  }
+
+  void _mostrarSnack(String msg, {bool erro = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: erro ? Theme.of(context).colorScheme.error : null,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _sincronizarControllers() {
+    _nomeController.text = _form.nome;
+    _loginController.text = _form.login;
+    _senhaController.text = '';
+    _descontoMaxController.text = _form.descontoMaximoTexto;
+  }
+
+  void _novoUsuario() {
+    setState(() {
+      _form.limpar();
+      _sincronizarControllers();
+      _tabController.index = 1;
+    });
+  }
+
+  void _editar(UsuarioSistema u) {
+    setState(() {
+      _form.carregar(u);
+      _sincronizarControllers();
+      _tabController.index = 1;
+    });
+    _mostrarSnack('Editando: ${u.nome}');
   }
 
   Future<void> _salvar() async {
     final nome = _nomeController.text.trim();
     final login = _loginController.text.trim();
-    final senha = _senhaController.text.trim();
-    if (nome.isEmpty || login.isEmpty || senha.isEmpty) {
-      setState(() => _status = 'Preencha nome, login e senha.');
+    final senha = _senhaController.text;
+    if (nome.isEmpty || login.isEmpty) {
+      _mostrarSnack('Preencha nome e login.', erro: true);
       return;
     }
+    final erroLogin = PoliticaSenhaUsuario.validarLogin(login);
+    if (erroLogin != null) {
+      _mostrarSnack(erroLogin, erro: true);
+      return;
+    }
+    final criacao = _form.editandoId == null;
+    final erroSenha = PoliticaSenhaUsuario.validarParaSalvar(
+      criacao: criacao,
+      senhaDigitada: senha,
+    );
+    if (erroSenha != null) {
+      _mostrarSnack(erroSenha, erro: true);
+      return;
+    }
+
+    _form.definirNome(nome);
+    _form.definirLogin(login);
+    _form.definirDescontoMaximoTexto(_descontoMaxController.text);
+
     final existe = await widget.usuarioRepository.loginJaExiste(
       login,
-      ignorarId: _editandoId,
+      ignorarId: _form.editandoId,
     );
     if (existe) {
-      setState(() => _status = 'Ja existe um usuario com este login.');
+      _mostrarSnack('Ja existe um usuario com este login.', erro: true);
       return;
     }
 
-    final id = _editandoId ?? DateTime.now().millisecondsSinceEpoch.toString();
-    final usuario = UsuarioSistema(
-      id: id,
-      nome: nome,
-      login: login,
-      senha: senha,
-      ativo: _ativo,
-      admin: _admin,
-      podeCadastros: _podeCadastros,
-      podeEstoque: _podeEstoque,
-      podeVendas: _podeVendas,
-      podeCaixa: _podeCaixa,
-      podeLeituraParcialCaixa: _podeLeituraParcialCaixa,
-      podeManutencaoAuditoriaCaixa: _podeManutencaoAuditoriaCaixa,
-      podeEntregas: _podeEntregas,
-      podeFinanceiro: _podeFinanceiro,
-      podeConfiguracoes: _podeConfiguracoes,
-      podeAutorizarSegundaViaCupom: _podeAutorizarSegundaViaCupom,
-      podeAutorizarMargemVenda: _podeAutorizarMargemVenda,
-      podeReajustePrecoLote: _podeReajustePrecoLote,
-      podeAutorizarReajustePreco: _podeAutorizarReajustePreco,
-    );
-    await widget.usuarioRepository.salvar(usuario);
+    final id = _form.editandoId ??
+        DateTime.now().millisecondsSinceEpoch.toString();
+    UsuarioSistema? anterior;
+    if (_form.editandoId != null) {
+      for (final u in _usuarios) {
+        if (u.id == _form.editandoId) {
+          anterior = u;
+          break;
+        }
+      }
+    }
+    var usuario = _form.montarParaSalvar(id);
+    if (!criacao && senha.isEmpty && anterior != null) {
+      usuario = usuario.copyWith(senha: anterior.senha);
+    }
+
+    try {
+      await widget.usuarioRepository.salvar(
+        usuario,
+        alteradoPor: widget.usuarioLogado,
+        anterior: anterior,
+        senhaPlainNova: senha.isEmpty ? null : senha,
+      );
+    } catch (e) {
+      _mostrarSnack(e.toString(), erro: true);
+      return;
+    }
+
     await _carregar();
-    _limparFormulario();
-    setState(() => _status = 'Usuario salvo com sucesso.');
-  }
-
-  void _editar(UsuarioSistema u) {
     setState(() {
-      _editandoId = u.id;
-      _nomeController.text = u.nome;
-      _loginController.text = u.login;
-      _senhaController.text = u.senha;
-      _ativo = u.ativo;
-      _admin = u.admin;
-      _podeCadastros = u.podeCadastros;
-      _podeEstoque = u.podeEstoque;
-      _podeVendas = u.podeVendas;
-      _podeCaixa = u.podeCaixa;
-      _podeLeituraParcialCaixa = u.podeLeituraParcialCaixa;
-      _podeManutencaoAuditoriaCaixa = u.podeManutencaoAuditoriaCaixa;
-      _podeEntregas = u.podeEntregas;
-      _podeFinanceiro = u.podeFinanceiro;
-      _podeConfiguracoes = u.podeConfiguracoes;
-      _podeAutorizarSegundaViaCupom = u.podeAutorizarSegundaViaCupom;
-      _podeAutorizarMargemVenda = u.podeAutorizarMargemVenda;
-      _podeReajustePrecoLote = u.podeReajustePrecoLote;
-      _podeAutorizarReajustePreco = u.podeAutorizarReajustePreco;
-      _status = 'Editando usuario: ${u.nome}';
+      _form.limpar();
+      _sincronizarControllers();
+      _tabController.index = 0;
     });
+    _mostrarSnack('Usuario salvo com sucesso.');
   }
 
-  Future<void> _remover(UsuarioSistema u) async {
-    await widget.usuarioRepository.remover(u.id);
+  Future<void> _alternarAtivo(UsuarioSistema u) async {
+    final novo = !u.ativo;
+    try {
+      await widget.usuarioRepository.salvar(
+        u.copyWith(ativo: novo),
+        alteradoPor: widget.usuarioLogado,
+        anterior: u,
+      );
+    } catch (e) {
+      _mostrarSnack(e.toString(), erro: true);
+      return;
+    }
+    await _carregar();
+    _mostrarSnack(novo ? '${u.nome} ativado.' : '${u.nome} desativado.');
+  }
+
+  String _gerarSenhaTemporaria() {
+    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    final r = Random.secure();
+    return List.generate(10, (_) => chars[r.nextInt(chars.length)]).join();
+  }
+
+  Future<void> _redefinirSenha(UsuarioSistema u) async {
+    if (!_podeGerenciarUsuarios) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Redefinir senha'),
+        content: Text(
+          'Gerar uma nova senha temporaria para "${u.nome}" (${u.login})? '
+          'O usuario devera usar essa senha no proximo login.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Gerar senha'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final nova = _gerarSenhaTemporaria();
+    try {
+      await widget.usuarioRepository.salvar(
+        u,
+        alteradoPor: widget.usuarioLogado,
+        anterior: u,
+        senhaPlainNova: nova,
+        resumoExtra: 'Senha redefinida',
+      );
+    } catch (e) {
+      _mostrarSnack(e.toString(), erro: true);
+      return;
+    }
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Senha temporaria'),
+        content: SelectableText(
+          'Nova senha para ${u.login}:\n\n$nova\n\n'
+          'Anote e entregue ao usuario. Ela nao sera exibida novamente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: nova));
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(content: Text('Senha copiada.')),
+              );
+            },
+            child: const Text('Copiar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
+    _mostrarSnack('Senha de ${u.nome} redefinida.');
+  }
+
+  Future<void> _migrarUsuariosLegado() async {
+    final n = await widget.usuarioRepository.migrarTodosLegado(
+      alteradoPor: widget.usuarioLogado,
+    );
+    await _carregar();
+    _mostrarSnack('Migracao concluida: $n usuario(s) atualizado(s).');
+  }
+
+  void _duplicar(UsuarioSistema u) {
+    setState(() {
+      _form.carregar(
+        u.copyWith(
+          id: '',
+          nome: '${u.nome} (copia)',
+          login: '${u.login}_2',
+          senha: '',
+        ),
+      );
+      _form.editandoId = null;
+      _sincronizarControllers();
+      _tabController.index = 1;
+    });
+    _mostrarSnack('Duplicando usuario — ajuste login e senha.');
+  }
+
+  Future<void> _confirmarRemover(UsuarioSistema u) async {
+    if (u.id == widget.usuarioLogado.id) {
+      _mostrarSnack('Voce nao pode remover o proprio usuario.', erro: true);
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover usuario'),
+        content: Text('Remover "${u.nome}" (${u.login})?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await widget.usuarioRepository.remover(
+      id: u.id,
+      removidoPor: widget.usuarioLogado,
+    );
     await _carregar();
     if (!mounted) return;
-    setState(() => _status = 'Usuario removido: ${u.nome}');
-    if (_editandoId == u.id) {
-      _limparFormulario();
+    if (_form.editandoId == u.id) {
+      setState(() {
+        _form.limpar();
+        _sincronizarControllers();
+      });
     }
+    _mostrarSnack('Usuario removido: ${u.nome}');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Cadastro de Usuarios')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          TextField(
-            controller: _nomeController,
-            decoration: const InputDecoration(labelText: 'Nome do usuario'),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _loginController,
-            decoration: const InputDecoration(labelText: 'Login'),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _senhaController,
-            decoration: const InputDecoration(labelText: 'Senha'),
-            obscureText: true,
-          ),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            value: _ativo,
-            onChanged: (v) => setState(() => _ativo = v),
-            title: const Text('Usuario ativo'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          SwitchListTile(
-            value: _admin,
-            onChanged: (v) => setState(() => _aplicarAdmin(v)),
-            title: const Text('Administrador (acesso total)'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          const SizedBox(height: 8),
-          Text('Permissoes de acesso', style: Theme.of(context).textTheme.titleMedium),
-          CheckboxListTile(
-            value: _podeCadastros,
-            onChanged: _admin ? null : (v) => setState(() => _podeCadastros = v ?? false),
-            title: const Text('Cadastros'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeEstoque,
-            onChanged: _admin ? null : (v) => setState(() => _podeEstoque = v ?? false),
-            title: const Text('Estoque'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeVendas,
-            onChanged: _admin ? null : (v) => setState(() => _podeVendas = v ?? false),
-            title: const Text('Vendas'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeCaixa,
-            onChanged: _admin ? null : (v) => setState(() => _podeCaixa = v ?? false),
-            title: const Text('Caixa'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeLeituraParcialCaixa,
-            onChanged: _admin
-                ? null
-                : (v) => setState(() => _podeLeituraParcialCaixa = v ?? false),
-            title: const Text('Leitura parcial do caixa'),
-            subtitle: const Text(
-              'Ver totais por forma de pagamento e vendas sem fechar o caixa',
-            ),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeManutencaoAuditoriaCaixa,
-            onChanged: _admin
-                ? null
-                : (v) => setState(() => _podeManutencaoAuditoriaCaixa = v ?? false),
-            title: const Text('Manutencao da auditoria do caixa'),
-            subtitle: const Text('Pode limpar registros antigos/filtrados da auditoria'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeEntregas,
-            onChanged: _admin ? null : (v) => setState(() => _podeEntregas = v ?? false),
-            title: const Text('Entregas'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeFinanceiro,
-            onChanged: _admin ? null : (v) => setState(() => _podeFinanceiro = v ?? false),
-            title: const Text('Financeiro'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeConfiguracoes,
-            onChanged: _admin ? null : (v) => setState(() => _podeConfiguracoes = v ?? false),
-            title: const Text('Configuracoes'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeAutorizarSegundaViaCupom,
-            onChanged: _admin
-                ? null
-                : (v) => setState(() => _podeAutorizarSegundaViaCupom = v ?? false),
-            title: const Text('Autorizar segunda via do cupom'),
-            subtitle: const Text(
-              'Pode informar login e senha para reimprimir cupom na listagem de vendas ou no caixa.',
-            ),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeAutorizarMargemVenda,
-            onChanged: _admin
-                ? null
-                : (v) => setState(() => _podeAutorizarMargemVenda = v ?? false),
-            title: const Text('Autorizar margem promocional'),
-            subtitle: const Text(
-              'Libera venda abaixo da margem minima definida na campanha (PDV).',
-            ),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeReajustePrecoLote,
-            onChanged: _admin
-                ? null
-                : (v) => setState(() => _podeReajustePrecoLote = v ?? false),
-            title: const Text('Reajuste de precos em lote'),
-            subtitle: const Text('Executa o assistente de reajuste na tela de Estoque.'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          CheckboxListTile(
-            value: _podeAutorizarReajustePreco,
-            onChanged: _admin
-                ? null
-                : (v) => setState(() => _podeAutorizarReajustePreco = v ?? false),
-            title: const Text('Autorizar reajuste de precos'),
-            subtitle: const Text(
-              'Libera aplicar reajuste com alertas (margem, variacao, abaixo do custo).',
-            ),
-            contentPadding: EdgeInsets.zero,
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _salvar,
-                  icon: const Icon(Icons.save_outlined),
-                  label: Text(_editandoId == null ? 'Salvar usuario' : 'Salvar edicao'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _limparFormulario,
-                  icon: Icon(_editandoId == null ? Icons.cleaning_services_outlined : Icons.close),
-                  label: Text(_editandoId == null ? 'Limpar' : 'Cancelar edicao'),
-                ),
-              ),
-            ],
-          ),
-          if (_status.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(_status),
-          ],
-          const SizedBox(height: 12),
-          Text('Usuarios cadastrados', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          if (_usuarios.isEmpty) const Text('Nenhum usuario cadastrado.')
-          else
-            ..._usuarios.map(
-              (u) => Card(
-                child: ListTile(
-                  title: Text('${u.nome} (${u.login})'),
-                  subtitle: Text(
-                    '${u.admin ? 'Admin' : 'Perfil customizado'} | ${u.ativo ? 'Ativo' : 'Inativo'}',
-                  ),
-                  trailing: Wrap(
-                    spacing: 4,
-                    children: [
-                      IconButton(
-                        tooltip: 'Editar',
-                        onPressed: () => _editar(u),
-                        icon: const Icon(Icons.edit_outlined),
-                      ),
-                      IconButton(
-                        tooltip: 'Remover',
-                        onPressed: () => _remover(u),
-                        icon: const Icon(Icons.delete_outline),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+      appBar: AppBar(
+        title: const Text('Cadastro de Usuarios'),
+        actions: [
+          if (_podeGerenciarUsuarios)
+            IconButton(
+              tooltip: 'Migrar usuarios antigos (perfil + senha)',
+              icon: const Icon(Icons.upgrade_outlined),
+              onPressed: _migrarUsuariosLegado,
             ),
         ],
+        bottom: MediaQuery.sizeOf(context).width >= 960
+            ? null
+            : TabBar(
+                controller: _tabController,
+                tabs: const [
+                  Tab(text: 'Usuarios', icon: Icon(Icons.people_outline)),
+                  Tab(text: 'Dados e permissoes', icon: Icon(Icons.tune_outlined)),
+                ],
+              ),
       ),
+      floatingActionButton: (_abaAtual == 0 || MediaQuery.sizeOf(context).width >= 960)
+          ? FloatingActionButton.extended(
+              onPressed: _novoUsuario,
+              icon: const Icon(Icons.person_add_outlined),
+              label: const Text('Novo usuario'),
+            )
+          : null,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final largo = constraints.maxWidth >= 960;
+          if (largo) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(width: 400, child: _buildLista()),
+                const VerticalDivider(width: 1),
+                Expanded(child: _buildFormulario()),
+              ],
+            );
+          }
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              _buildLista(),
+              _buildFormulario(),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildFiltrosLista() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SegmentedButton<_FiltroAtivoLista>(
+            segments: const [
+              ButtonSegment(value: _FiltroAtivoLista.todos, label: Text('Todos')),
+              ButtonSegment(value: _FiltroAtivoLista.ativos, label: Text('Ativos')),
+              ButtonSegment(
+                value: _FiltroAtivoLista.inativos,
+                label: Text('Inativos'),
+              ),
+            ],
+            selected: {_filtroAtivo},
+            onSelectionChanged: (s) => setState(() => _filtroAtivo = s.first),
+          ),
+          SizedBox(
+            width: 200,
+            child: DropdownButtonFormField<String?>(
+              value: _filtroPerfilId,
+              decoration: const InputDecoration(
+                labelText: 'Perfil',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('Todos perfis')),
+                ...PerfilUsuarioPreset.values
+                    .where((p) => p != PerfilUsuarioPreset.customizado)
+                    .map(
+                      (p) => DropdownMenuItem(
+                        value: p.id,
+                        child: Text(p.rotulo),
+                      ),
+                    ),
+                const DropdownMenuItem(
+                  value: 'customizado',
+                  child: Text('Personalizado'),
+                ),
+              ],
+              onChanged: (v) => setState(() => _filtroPerfilId = v),
+            ),
+          ),
+          Text(
+            '${_usuariosFiltrados.length} usuario(s)',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLista() {
+    final lista = _usuariosFiltrados;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: TextField(
+            controller: _buscaController,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              labelText: 'Buscar por nome ou login',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (v) => setState(() => _busca = v),
+          ),
+        ),
+        _buildFiltrosLista(),
+        Expanded(
+          child: lista.isEmpty
+              ? const Center(child: Text('Nenhum usuario encontrado.'))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: lista.length,
+                  itemBuilder: (context, i) {
+                    final u = lista[i];
+                    final chips = UsuarioPermissaoHelper.resumoChips(u);
+                    final selecionado = _form.editandoId == u.id;
+                    return Card(
+                      color: selecionado
+                          ? Theme.of(context)
+                              .colorScheme
+                              .primaryContainer
+                              .withValues(alpha: 0.35)
+                          : null,
+                      child: ListTile(
+                        onTap: () => _editar(u),
+                        title: Text('${u.nome} (${u.login})'),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${u.ativo ? 'Ativo' : 'Inativo'} · '
+                              '${perfilUsuarioFromId(u.perfil).rotulo}',
+                            ),
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
+                              children: chips
+                                  .map(
+                                    (c) => Chip(
+                                      label: Text(c),
+                                      visualDensity: VisualDensity.compact,
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ],
+                        ),
+                        isThreeLine: true,
+                        trailing: SizedBox(
+                          width: 168,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Switch(
+                                value: u.ativo,
+                                onChanged: (_) => _alternarAtivo(u),
+                              ),
+                              PopupMenuButton<String>(
+                                onSelected: (v) {
+                                  switch (v) {
+                                    case 'editar':
+                                      _editar(u);
+                                    case 'senha':
+                                      _redefinirSenha(u);
+                                    case 'dup':
+                                      _duplicar(u);
+                                    case 'del':
+                                      _confirmarRemover(u);
+                                  }
+                                },
+                                itemBuilder: (_) => [
+                                  const PopupMenuItem(
+                                    value: 'editar',
+                                    child: Text('Editar'),
+                                  ),
+                                  if (_podeGerenciarUsuarios)
+                                    const PopupMenuItem(
+                                      value: 'senha',
+                                      child: Text('Redefinir senha'),
+                                    ),
+                                  const PopupMenuItem(
+                                    value: 'dup',
+                                    child: Text('Duplicar'),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'del',
+                                    child: Text('Remover'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFormulario() {
+    final editando = _form.editandoId != null;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (editando)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Editando usuario',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                if (_podeGerenciarUsuarios)
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      UsuarioSistema? alvo;
+                      for (final x in _usuarios) {
+                        if (x.id == _form.editandoId) {
+                          alvo = x;
+                          break;
+                        }
+                      }
+                      if (alvo != null) _redefinirSenha(alvo);
+                    },
+                    icon: const Icon(Icons.lock_reset_outlined),
+                    label: const Text('Redefinir senha'),
+                  ),
+              ],
+            ),
+          ),
+        Text('Dados do usuario', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _nomeController,
+          decoration: const InputDecoration(
+            labelText: 'Nome completo',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: _form.definirNome,
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _loginController,
+          decoration: const InputDecoration(
+            labelText: 'Login',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: _form.definirLogin,
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _senhaController,
+          obscureText: !_senhaVisivel,
+          decoration: InputDecoration(
+            labelText: editando ? 'Nova senha' : 'Senha',
+            helperText: editando
+                ? 'Deixe em branco para manter a senha atual.'
+                : 'Minimo ${PoliticaSenhaUsuario.tamanhoMinimo} caracteres.',
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _senhaVisivel ? Icons.visibility_off : Icons.visibility,
+              ),
+              onPressed: () => setState(() => _senhaVisivel = !_senhaVisivel),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _descontoMaxController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+          ],
+          decoration: const InputDecoration(
+            labelText: 'Teto de desconto no PDV (%)',
+            helperText:
+                'Vazio = usa o limite das configuracoes da empresa. '
+                'Gerente/dono com desconto manual ignora o teto.',
+            border: OutlineInputBorder(),
+            suffixText: '%',
+          ),
+          onChanged: (v) {
+            _form.definirDescontoMaximoTexto(v);
+            setState(() {});
+          },
+        ),
+        SwitchListTile(
+          value: _form.ativo,
+          onChanged: (v) => setState(() => _form.definirAtivo(v)),
+          title: const Text('Usuario ativo'),
+          contentPadding: EdgeInsets.zero,
+        ),
+        SwitchListTile(
+          value: _form.admin,
+          onChanged: (v) => setState(() => _form.definirAdmin(v)),
+          title: const Text('Acesso total (Dono / Administrador)'),
+          contentPadding: EdgeInsets.zero,
+        ),
+        const SizedBox(height: 12),
+        Text('Perfil da loja', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(
+          'Escolha um perfil pronto e ajuste as permissoes abaixo se precisar.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final p in PerfilUsuarioPreset.values)
+              if (p != PerfilUsuarioPreset.customizado)
+                ChoiceChip(
+                  label: Text(p.rotulo),
+                  selected: _form.perfilSelecionado == p,
+                  onSelected: _form.admin && p != PerfilUsuarioPreset.dono
+                      ? null
+                      : (_) => setState(() {
+                            _form.aplicarPerfil(p);
+                            _descontoMaxController.text =
+                                _form.descontoMaximoTexto;
+                          }),
+                ),
+            ChoiceChip(
+              label: const Text('Personalizado'),
+              selected:
+                  _form.perfilSelecionado == PerfilUsuarioPreset.customizado,
+              onSelected: _form.admin
+                  ? null
+                  : (_) => setState(
+                        () => _form.aplicarPerfil(PerfilUsuarioPreset.customizado),
+                      ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        UsuariosResumoPanel(form: _form),
+        const SizedBox(height: 16),
+        Text('Permissoes', style: Theme.of(context).textTheme.titleMedium),
+        UsuariosPermissoesPanel(
+          form: _form,
+          onChanged: () => setState(() {}),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _salvar,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(editando ? 'Salvar edicao' : 'Salvar usuario'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => setState(() {
+                  _form.limpar();
+                  _sincronizarControllers();
+                }),
+                icon: Icon(editando ? Icons.close : Icons.cleaning_services_outlined),
+                label: Text(editando ? 'Cancelar edicao' : 'Limpar'),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

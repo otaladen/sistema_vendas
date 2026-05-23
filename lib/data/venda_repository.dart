@@ -23,6 +23,24 @@ import 'recebimento_fiado_repository.dart';
 import 'sync/sync_write_trigger.dart';
 import 'titulo_receber_repository.dart';
 
+/// Resultado de [VendaRepository.limparAbaEntregasCancelandoVendas].
+class ResultadoLimpezaAbaEntregas {
+  const ResultadoLimpezaAbaEntregas({
+    required this.canceladas,
+    required this.forcadas,
+    required this.falhas,
+    required this.conferenciasRemovidas,
+    required this.historicosRemovidos,
+  });
+
+  final int canceladas;
+  /// Canceladas apenas com flag (sem estorno de estoque) quando o cancelamento normal falhou.
+  final int forcadas;
+  final List<String> falhas;
+  final int conferenciasRemovidas;
+  final int historicosRemovidos;
+}
+
 void _marcarUltimaVendaNosProdutos(ObjectBox db, Venda venda) {
   final agora = DateTime.now().toUtc();
   for (final item in venda.itens) {
@@ -2167,7 +2185,7 @@ class VendaRepository {
     final inicioUtc = inicio?.toUtc();
     final fimUtc = fim?.toUtc();
     return listarTodas().where((venda) {
-      if (venda.status != 'finalizada') return false;
+      if (venda.cancelada || venda.status != 'finalizada') return false;
       if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) return false;
       if (statusEntrega != null &&
           statusEntrega != 'todos' &&
@@ -2183,6 +2201,111 @@ class VendaRepository {
       }
       return true;
     }).toList();
+  }
+
+  /// Cancela todas as vendas de carreto da aba Entregas e limpa conferencia/historico.
+  /// As vendas permanecem no sistema (canceladas), mas somem da aba Entregas.
+  ///
+  /// Com [forcarQuandoBloqueado], pedidos que nao passam em [cancelarVenda] (ex. retirada
+  /// parcial ou devolucao) sao marcados cancelados sem estorno — apenas para limpeza de teste.
+  ResultadoLimpezaAbaEntregas limparAbaEntregasCancelandoVendas({
+    String motivo = 'Limpeza da aba Entregas',
+    String canceladaPor = 'manutencao',
+    bool forcarQuandoBloqueado = false,
+  }) {
+    final vendas = listarTodas()
+        .where(
+          (v) =>
+              v.status == 'finalizada' &&
+              !v.cancelada &&
+              EntregaVendaHelper.vendaTemItensCarreto(v),
+        )
+        .toList();
+
+    final falhas = <String>[];
+    var canceladas = 0;
+    var forcadas = 0;
+    for (final v in vendas) {
+      try {
+        cancelarVenda(
+          v.id,
+          motivo: motivo,
+          canceladaPor: canceladaPor,
+          omitirAuditoriaIndividual: true,
+        );
+        canceladas++;
+      } catch (e) {
+        if (forcarQuandoBloqueado) {
+          try {
+            _cancelarVendaSomenteFlagLimpezaTeste(
+              v.id,
+              motivo: '$motivo (forcado — sem estorno)',
+              canceladaPor: canceladaPor,
+            );
+            forcadas++;
+          } catch (e2) {
+            falhas.add('Pedido ${v.numeroOrcamento} (id ${v.id}): $e2');
+          }
+        } else {
+          falhas.add('Pedido ${v.numeroOrcamento} (id ${v.id}): $e');
+        }
+      }
+    }
+
+    var historicosRemovidos = 0;
+    final conferenciasRemovidas = _db.conferenciaCargaRomaneioBox.removeAll();
+
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final v in vendas) {
+        final q = _db.historicoEntregaBox
+            .query(HistoricoEntrega_.venda.equals(v.id))
+            .build();
+        try {
+          for (final h in q.find()) {
+            _db.historicoEntregaBox.remove(h.id);
+            historicosRemovidos++;
+          }
+        } finally {
+          q.close();
+        }
+      }
+    });
+
+    if (canceladas > 0 ||
+        forcadas > 0 ||
+        conferenciasRemovidas > 0 ||
+        historicosRemovidos > 0) {
+      _notificarRedeAposEscrita();
+    }
+
+    return ResultadoLimpezaAbaEntregas(
+      canceladas: canceladas,
+      forcadas: forcadas,
+      falhas: falhas,
+      conferenciasRemovidas: conferenciasRemovidas,
+      historicosRemovidos: historicosRemovidos,
+    );
+  }
+
+  /// Marca venda cancelada sem estorno (uso exclusivo em limpeza de teste da aba Entregas).
+  void _cancelarVendaSomenteFlagLimpezaTeste(
+    int vendaId, {
+    required String motivo,
+    required String canceladaPor,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      if (venda.cancelada) return;
+      venda.cancelada = true;
+      venda.motivoCancelamento = motivo.trim();
+      venda.canceladaPor = canceladaPor.trim();
+      venda.canceladaEm = DateTime.now();
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita();
   }
 
   void atualizarStatusEntrega(
@@ -2297,6 +2420,31 @@ class VendaRepository {
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita();
+  }
+
+  /// Define o mesmo motorista em varias entregas de carreto (ex.: lote sem motorista).
+  int atualizarMotoristaEntregaEmLote(
+    Iterable<int> vendaIds,
+    String motorista,
+  ) {
+    final nome = motorista.trim();
+    if (nome.isEmpty) {
+      throw StateError('Informe o motorista.');
+    }
+    var alteradas = 0;
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final id in vendaIds) {
+        if (id <= 0) continue;
+        final venda = _db.vendaBox.get(id);
+        if (venda == null) continue;
+        if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) continue;
+        venda.motoristaEntrega = nome;
+        _db.vendaBox.put(venda);
+        alteradas++;
+      }
+    });
+    if (alteradas > 0) _notificarRedeAposEscrita();
+    return alteradas;
   }
 
   /// Define ou remove a data de entrega agendada (somente dia local; hora ignorada).

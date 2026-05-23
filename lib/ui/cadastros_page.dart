@@ -8,6 +8,8 @@ import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
+import '../domain/permissao_usuario.dart';
+import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../services/print_service.dart';
 import 'clientes_page.dart';
@@ -54,7 +56,13 @@ class CadastrosPage extends StatelessWidget {
   final PrintService printService;
 
   bool get _podeCadastros =>
-      usuarioLogado.admin || usuarioLogado.podeCadastros;
+      UsuarioPermissaoHelper.tem(usuarioLogado, PermissaoUsuario.cadastros);
+
+  bool get _podeGerenciarUsuarios =>
+      UsuarioPermissaoHelper.tem(
+        usuarioLogado,
+        PermissaoUsuario.gerenciarUsuarios,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -71,11 +79,11 @@ class CadastrosPage extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        ProdutosPage(
-                          produtoRepository: produtoRepository,
-                          printService: printService,
-                        ),
+                    builder: (_) => ProdutosPage(
+                      produtoRepository: produtoRepository,
+                      printService: printService,
+                      usuarioLogado: usuarioLogado,
+                    ),
                   ),
                 );
               },
@@ -190,13 +198,14 @@ class CadastrosPage extends StatelessWidget {
               icon: Icons.manage_accounts_outlined,
               corDestaque: _corUsuarios,
               titulo: 'Usuarios',
-              habilitado: usuarioLogado.admin,
+              habilitado: _podeGerenciarUsuarios,
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => UsuariosPage(
                       usuarioRepository: UsuarioRepository(),
+                      usuarioLogado: usuarioLogado,
                     ),
                   ),
                 );

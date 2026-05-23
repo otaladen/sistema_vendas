@@ -11,7 +11,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../main.dart';
 import '../data/produto_repository.dart';
+import '../domain/permissao_usuario.dart';
 import '../domain/produto_unidade_exibicao.dart';
+import '../domain/usuario_permissao_helper.dart';
+import '../model/usuario_sistema.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../domain/produto_precificacao.dart';
@@ -43,10 +46,12 @@ class ProdutosPage extends StatefulWidget {
     super.key,
     required this.produtoRepository,
     required this.printService,
+    this.usuarioLogado,
   });
 
   final ProdutoRepository produtoRepository;
   final PrintService printService;
+  final UsuarioSistema? usuarioLogado;
 
   @override
   State<ProdutosPage> createState() => _ProdutosPageState();
@@ -67,6 +72,12 @@ class _ProdutosPageState extends State<ProdutosPage>
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       );
+
+  bool get _podeEditarPrecoProduto {
+    final u = widget.usuarioLogado;
+    if (u == null) return true;
+    return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.editarPrecoProduto);
+  }
 
   /// Larguras fixas para dados curtos (nao esticar ate metade da tela).
   static const double _wQtdInteira = 158;
@@ -5012,6 +5023,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                 TextFormField(
                                                                   controller:
                                                                       ctrl,
+                                                                  readOnly:
+                                                                      !_podeEditarPrecoProduto,
                                                                   keyboardType:
                                                                       const TextInputType.numberWithOptions(
                                                                         decimal:
@@ -5025,6 +5038,10 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                   decoration:
                                                                       _erpInputDecoration(
                                                                         context,
+                                                                      ).copyWith(
+                                                                        helperText: !_podeEditarPrecoProduto
+                                                                            ? 'Sem permissao para editar precos'
+                                                                            : null,
                                                                       ),
                                                                   onChanged: (_) =>
                                                                       setState(

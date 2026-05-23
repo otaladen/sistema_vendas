@@ -5,6 +5,7 @@ import '../data/app_config_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
+import '../domain/usuario_permissao_helper.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
@@ -191,9 +192,8 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     loginController.dispose();
     senhaController.dispose();
     final u = await _usuarioRepository.autenticar(login, senha);
-    final autorizado = u != null &&
-        u.ativo &&
-        (u.admin || u.podeFinanceiro || u.podeManutencaoAuditoriaCaixa);
+    final autorizado =
+        u != null && UsuarioPermissaoHelper.podeCancelarVendas(u);
     if (!autorizado) return (false, '');
     return (true, u.login);
   }

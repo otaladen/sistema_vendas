@@ -129,6 +129,14 @@ class SyncFullSync {
       h.venda.target;
       _add(m, 'historico_entrega', h.id, SyncEntityCodecExtras.historicoEntregaParaMap(h));
     }
+    for (final c in _db.conferenciaCargaRomaneioBox.getAll()) {
+      _add(
+        m,
+        'conferencia_carga_romaneio',
+        c.id,
+        SyncEntityCodecExtras.conferenciaCargaRomaneioParaMap(c),
+      );
+    }
     for (final r in _db.registroDevolucaoBox.getAll()) {
       r.vendaOrigem.target;
       r.linhasEntrada.length;
@@ -226,6 +234,9 @@ class SyncFullSync {
       case 'historico_entrega':
         await _aplicarHistoricoEntrega(payload);
         break;
+      case 'conferencia_carga_romaneio':
+        await _aplicarConferenciaCargaRomaneio(payload);
+        break;
       case 'registro_devolucao':
         await _aplicarRegistroDevolucao(payload);
         break;
@@ -292,6 +303,9 @@ class SyncFullSync {
         break;
       case 'historico_entrega':
         _db.historicoEntregaBox.remove(id);
+        break;
+      case 'conferencia_carga_romaneio':
+        _db.conferenciaCargaRomaneioBox.remove(id);
         break;
       case 'registro_devolucao':
         _removerRegistroDevolucao(id);
@@ -479,6 +493,38 @@ class SyncFullSync {
       if (v != null) h.venda.target = v;
     }
     _db.historicoEntregaBox.put(h);
+  }
+
+  Future<void> _aplicarConferenciaCargaRomaneio(
+    Map<String, dynamic> payload,
+  ) async {
+    final remoto = SyncEntityCodecExtras.conferenciaCargaRomaneioDeMap(payload);
+    final escopo = remoto.escopoViagem.trim();
+    final chave = remoto.chaveProduto.trim();
+    if (escopo.isEmpty || chave.isEmpty) return;
+
+    final q = _db.conferenciaCargaRomaneioBox
+        .query(
+          ConferenciaCargaRomaneio_.escopoViagem
+              .equals(escopo)
+              .and(ConferenciaCargaRomaneio_.chaveProduto.equals(chave)),
+        )
+        .build();
+    try {
+      final local = q.findFirst();
+      if (local != null) {
+        if (!remoto.atualizadoEm.isBefore(local.atualizadoEm)) {
+          local.conferido = remoto.conferido;
+          local.usuarioLogin = remoto.usuarioLogin;
+          local.atualizadoEm = remoto.atualizadoEm;
+        }
+        _db.conferenciaCargaRomaneioBox.put(local);
+      } else {
+        _db.conferenciaCargaRomaneioBox.put(remoto);
+      }
+    } finally {
+      q.close();
+    }
   }
 
   void _removerRegistroDevolucao(int id) {

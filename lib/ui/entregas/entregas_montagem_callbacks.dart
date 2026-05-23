@@ -16,6 +16,8 @@ class EntregasMontagemCallbacks {
     required this.recarregar,
     required this.confirmarAgrupamento,
     required this.removerAgrupamento,
+    required this.editarMotoristaPedido,
+    required this.definirMotoristaEmLote,
   });
 
   final void Function(
@@ -57,4 +59,10 @@ class EntregasMontagemCallbacks {
 
   /// Remove agrupamento das vendas selecionadas.
   final Future<void> Function(Set<int> vendaIds) removerAgrupamento;
+
+  /// Um pedido avulso (fora de grupo).
+  final Future<void> Function(Venda venda) editarMotoristaPedido;
+
+  /// Mesmo motorista em varios pedidos (ids da lista visivel).
+  final Future<void> Function(Set<int> vendaIds) definirMotoristaEmLote;
 }

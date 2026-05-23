@@ -1,6 +1,15 @@
 import '../../model/venda.dart';
 import 'logistica_entregas.dart';
 
+/// Escopo persistido da conferencia de carga (`g:grupo` ou `s:vendaId`).
+String escopoViagemLogistica(List<Venda> vendas) {
+  if (vendas.isEmpty) return '';
+  if (vendas.length >= 2 && vendas.first.grupoEntregaFreteId > 0) {
+    return 'g:${vendas.first.grupoEntregaFreteId}';
+  }
+  return 's:${vendas.first.id}';
+}
+
 /// Uma viagem (grupo mesmo carro) ou entrega avulsa para o painel de montagem.
 class MontagemEntregaViagem {
   const MontagemEntregaViagem({
@@ -42,9 +51,7 @@ List<MontagemEntregaViagem> montagemViagensDoMotorista(
   return blocos
       .map(
         (b) => MontagemEntregaViagem(
-          chave: b.length >= 2 && b.first.grupoEntregaFreteId > 0
-              ? 'g:${b.first.grupoEntregaFreteId}'
-              : 's:${b.first.id}',
+          chave: escopoViagemLogistica(b),
           vendas: b,
         ),
       )

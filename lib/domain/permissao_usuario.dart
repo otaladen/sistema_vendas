@@ -1,0 +1,279 @@
+import 'package:flutter/material.dart';
+
+/// Chaves de permissao do ERP (cadastro de usuarios + checagens no app).
+enum PermissaoUsuario {
+  cadastros,
+  estoque,
+  vendasHub,
+  acessarPdv,
+  acessarCaixa,
+  acessarRelatorios,
+  leituraParcialCaixa,
+  manutencaoAuditoriaCaixa,
+  visualizarEntregas,
+  gerenciarEntregas,
+  financeiro,
+  configuracoes,
+  cancelarVendas,
+  autorizarSegundaViaCupom,
+  autorizarMargemVenda,
+  reajustePrecoLote,
+  autorizarReajustePreco,
+  alterarPrecoPdv,
+  venderFiado,
+  verCustoMargem,
+  gerenciarUsuarios,
+  editarPrecoProduto,
+  alterarPrecoUnitarioPdv,
+  relatoriosComissao,
+  relatoriosFiado,
+  relatoriosLogSistema,
+}
+
+/// Metadados para exibir no cadastro de usuarios.
+class PermissaoUsuarioInfo {
+  const PermissaoUsuarioInfo({
+    required this.chave,
+    required this.titulo,
+    required this.descricao,
+    required this.grupo,
+    this.dependeDe,
+  });
+
+  final PermissaoUsuario chave;
+  final String titulo;
+  final String descricao;
+  final PermissaoGrupo grupo;
+
+  /// Outra permissao que costuma ser necessaria (apenas dica na UI).
+  final PermissaoUsuario? dependeDe;
+}
+
+enum PermissaoGrupo {
+  modulosMenu,
+  vendasCaixa,
+  logistica,
+  financeiroConfig,
+  autorizacoesGerente,
+  administracao,
+}
+
+extension PermissaoGrupoExt on PermissaoGrupo {
+  String get titulo {
+    switch (this) {
+      case PermissaoGrupo.modulosMenu:
+        return 'Modulos do menu principal';
+      case PermissaoGrupo.vendasCaixa:
+        return 'Vendas e caixa';
+      case PermissaoGrupo.logistica:
+        return 'Logistica e entregas';
+      case PermissaoGrupo.financeiroConfig:
+        return 'Financeiro e configuracoes';
+      case PermissaoGrupo.autorizacoesGerente:
+        return 'Autorizacoes de gerente';
+      case PermissaoGrupo.administracao:
+        return 'Administracao';
+    }
+  }
+
+  IconData get icone {
+    switch (this) {
+      case PermissaoGrupo.modulosMenu:
+        return Icons.dashboard_outlined;
+      case PermissaoGrupo.vendasCaixa:
+        return Icons.point_of_sale_outlined;
+      case PermissaoGrupo.logistica:
+        return Icons.local_shipping_outlined;
+      case PermissaoGrupo.financeiroConfig:
+        return Icons.account_balance_wallet_outlined;
+      case PermissaoGrupo.autorizacoesGerente:
+        return Icons.verified_user_outlined;
+      case PermissaoGrupo.administracao:
+        return Icons.admin_panel_settings_outlined;
+    }
+  }
+}
+
+/// Catalogo ordenado de permissoes para a tela de usuarios.
+class PermissaoUsuarioCatalogo {
+  PermissaoUsuarioCatalogo._();
+
+  static const ordemGrupos = PermissaoGrupo.values;
+
+  static const itens = <PermissaoUsuarioInfo>[
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.cadastros,
+      titulo: 'Cadastros',
+      descricao: 'Produtos, clientes, vendedores, motoristas e demais cadastros.',
+      grupo: PermissaoGrupo.modulosMenu,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.estoque,
+      titulo: 'Estoque e notas fiscais',
+      descricao: 'Entrada de mercadoria, NF importadas e movimentacoes.',
+      grupo: PermissaoGrupo.modulosMenu,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.vendasHub,
+      titulo: 'Hub Vendas (menu)',
+      descricao: 'Abre o modulo Vendas no menu principal.',
+      grupo: PermissaoGrupo.modulosMenu,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.acessarPdv,
+      titulo: 'Ponto de venda (PDV)',
+      descricao: 'Orcamentos e vendas no balcao.',
+      grupo: PermissaoGrupo.vendasCaixa,
+      dependeDe: PermissaoUsuario.vendasHub,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.acessarCaixa,
+      titulo: 'Caixa',
+      descricao: 'Abertura, fechamento e movimentos do caixa.',
+      grupo: PermissaoGrupo.vendasCaixa,
+      dependeDe: PermissaoUsuario.vendasHub,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.acessarRelatorios,
+      titulo: 'Relatorios de vendas',
+      descricao: 'Relatorios gerenciais dentro do modulo Vendas.',
+      grupo: PermissaoGrupo.vendasCaixa,
+      dependeDe: PermissaoUsuario.vendasHub,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.leituraParcialCaixa,
+      titulo: 'Leitura parcial do caixa',
+      descricao: 'Ver totais por forma de pagamento sem fechar o caixa.',
+      grupo: PermissaoGrupo.vendasCaixa,
+      dependeDe: PermissaoUsuario.acessarCaixa,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.manutencaoAuditoriaCaixa,
+      titulo: 'Manutencao da auditoria do caixa',
+      descricao: 'Limpar registros antigos da auditoria do caixa.',
+      grupo: PermissaoGrupo.vendasCaixa,
+      dependeDe: PermissaoUsuario.acessarCaixa,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.visualizarEntregas,
+      titulo: 'Visualizar entregas',
+      descricao: 'Ver fila, romaneio e mapa (somente leitura).',
+      grupo: PermissaoGrupo.logistica,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.gerenciarEntregas,
+      titulo: 'Gerenciar entregas',
+      descricao: 'Alterar status, montagem de carga, motorista e impressao.',
+      grupo: PermissaoGrupo.logistica,
+      dependeDe: PermissaoUsuario.visualizarEntregas,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.financeiro,
+      titulo: 'Financeiro',
+      descricao: 'Contas a pagar e rotinas financeiras.',
+      grupo: PermissaoGrupo.financeiroConfig,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.configuracoes,
+      titulo: 'Configuracoes',
+      descricao: 'Empresa, impressao, rede e parametros do sistema.',
+      grupo: PermissaoGrupo.financeiroConfig,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.cancelarVendas,
+      titulo: 'Cancelar vendas e devolucoes',
+      descricao: 'Cancelar pedidos e registrar devolucao/troca sem senha de gerente.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.autorizarSegundaViaCupom,
+      titulo: 'Autorizar segunda via do cupom',
+      descricao: 'Login/senha para reimpressao de cupom.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.autorizarMargemVenda,
+      titulo: 'Autorizar margem promocional',
+      descricao: 'Libera venda abaixo da margem minima da campanha no PDV.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.reajustePrecoLote,
+      titulo: 'Reajuste de precos em lote',
+      descricao: 'Executa assistente de reajuste no Estoque (perfil Gerente/Dono).',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+      dependeDe: PermissaoUsuario.estoque,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.autorizarReajustePreco,
+      titulo: 'Autorizar reajuste com alertas',
+      descricao: 'Aprova reajuste com margem/variacao/custo fora do padrao.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.alterarPrecoPdv,
+      titulo: 'Desconto manual no PDV',
+      descricao: 'Aplica desconto manual no checkout alem do teto automatico.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+      dependeDe: PermissaoUsuario.acessarPdv,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.venderFiado,
+      titulo: 'Vender a prazo (fiado)',
+      descricao: 'Permite forma de pagamento fiado no PDV.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+      dependeDe: PermissaoUsuario.acessarPdv,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.verCustoMargem,
+      titulo: 'Ver custo e margem',
+      descricao: 'Exibe custo em estoque, relatorios e exportacoes com custo.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+      dependeDe: PermissaoUsuario.estoque,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.gerenciarUsuarios,
+      titulo: 'Gerenciar usuarios',
+      descricao: 'Cadastrar, editar e remover usuarios do sistema.',
+      grupo: PermissaoGrupo.administracao,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.editarPrecoProduto,
+      titulo: 'Editar preco no cadastro de produtos',
+      descricao: 'Altera precos de venda/custo no cadastro de produtos.',
+      grupo: PermissaoGrupo.modulosMenu,
+      dependeDe: PermissaoUsuario.cadastros,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.alterarPrecoUnitarioPdv,
+      titulo: 'Alterar preco unitario no PDV',
+      descricao: 'Permite ajustar manualmente o preco de um item no carrinho.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+      dependeDe: PermissaoUsuario.acessarPdv,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.relatoriosComissao,
+      titulo: 'Relatorio de comissao',
+      descricao: 'Acessa relatorio de comissao de vendedores.',
+      grupo: PermissaoGrupo.vendasCaixa,
+      dependeDe: PermissaoUsuario.acessarRelatorios,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.relatoriosFiado,
+      titulo: 'Relatorio de fiados',
+      descricao: 'Acessa relatorio de titulos/fiados em aberto.',
+      grupo: PermissaoGrupo.vendasCaixa,
+      dependeDe: PermissaoUsuario.acessarRelatorios,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.relatoriosLogSistema,
+      titulo: 'Log do sistema',
+      descricao: 'Acessa auditoria e log central do ERP.',
+      grupo: PermissaoGrupo.administracao,
+      dependeDe: PermissaoUsuario.acessarRelatorios,
+    ),
+  ];
+
+  static List<PermissaoUsuarioInfo> porGrupo(PermissaoGrupo grupo) =>
+      itens.where((i) => i.grupo == grupo).toList();
+}
