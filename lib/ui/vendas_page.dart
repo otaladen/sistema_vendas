@@ -134,6 +134,7 @@ class VendasPage extends StatelessWidget {
                         u,
                         PermissaoUsuario.manutencaoAuditoriaCaixa,
                       ),
+                      onLogout: onLogout,
                     ),
                   ),
                 );
@@ -253,6 +254,7 @@ class VendasPage extends StatelessWidget {
                                 u,
                                 PermissaoUsuario.manutencaoAuditoriaCaixa,
                               ),
+                              onLogout: onLogout,
                             ),
                           ),
                         );

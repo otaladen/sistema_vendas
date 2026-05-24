@@ -13,9 +13,19 @@ class ContaSessaoAppBarActions extends StatelessWidget {
   final String login;
   final VoidCallback onLogout;
 
+  /// Fecha telas empilhadas (hub Vendas, Caixa, etc.) antes de limpar a sessao.
+  void _executarLogout(BuildContext context) {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    if (navigator.canPop()) {
+      navigator.popUntil((route) => route.isFirst);
+    }
+    onLogout();
+  }
+
   Future<void> _confirmarMudarDeUsuario(BuildContext context) async {
     final aceitar = await showDialog<bool>(
       context: context,
+      useRootNavigator: true,
       builder: (ctx) {
         return AlertDialog(
           title: const Text('Mudar de usuário'),
@@ -35,7 +45,8 @@ class ContaSessaoAppBarActions extends StatelessWidget {
         );
       },
     );
-    if (aceitar == true && context.mounted) onLogout();
+    if (aceitar != true || !context.mounted) return;
+    _executarLogout(context);
   }
 
   @override
@@ -62,7 +73,7 @@ class ContaSessaoAppBarActions extends StatelessWidget {
                 _confirmarMudarDeUsuario(context);
                 break;
               case _AcaoMenuConta.sair:
-                onLogout();
+                _executarLogout(context);
                 break;
             }
           },

@@ -9,6 +9,7 @@ import '../../model/promocao_item.dart';
 import '../app_config_repository.dart';
 import '../mensageria_repository.dart';
 import '../objectbox.dart';
+import '../caixa_sessao_repository.dart';
 import '../usuario_repository.dart';
 import '../cliente_repository.dart';
 import '../../objectbox.g.dart';
@@ -158,6 +159,14 @@ class SyncFullSync {
     final usuarios = await UsuarioRepository().listarTodos();
     _add(m, 'usuarios_sistema', 1, SyncEntityCodecExtras.usuariosParaMap(usuarios));
 
+    final sessoes = await CaixaSessaoRepository().listarTodasSessoes();
+    _add(
+      m,
+      'caixa_sessoes',
+      1,
+      CaixaSessaoRepository.pacoteParaSync(sessoes),
+    );
+
     return m;
   }
 
@@ -248,6 +257,9 @@ class SyncFullSync {
         break;
       case 'usuarios_sistema':
         await _aplicarUsuarios(payload);
+        break;
+      case 'caixa_sessoes':
+        await CaixaSessaoRepository().aplicarPacoteRede(payload);
         break;
     }
   }
