@@ -41,6 +41,7 @@ import '../cupom_venda_impressao_helper.dart';
 import '../segunda_via_cupom_autorizacao.dart';
 import '../widgets/conta_sessao_app_bar_actions.dart';
 import '../widgets/receber_fiado_panel.dart';
+import '../../services/recibo_movimento_caixa_pdf.dart';
 import '../../services/recibo_recebimento_fiado_pdf.dart';
 import 'caixa_feedback.dart';
 
@@ -1071,18 +1072,41 @@ class _CaixaPageState extends State<CaixaPage> {
       }
     });
     await _salvarSessaoCaixa();
+    final dataHora = DateTime.now();
     await _registrarAuditoriaCaixa(
       suprimento ? 'suprimento' : 'sangria',
       detalhes: {
         'valor': valor,
         'observacao': obs,
+        'em': dataHora.toIso8601String(),
       },
     );
     if (!mounted) return;
     final tipo = suprimento ? 'Suprimento' : 'Sangria';
-    final sufixoObs = obs.isEmpty ? '' : ' Obs: $obs';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$tipo de ${_formatarMoeda(valor)} registrado.$sufixoObs')),
+    final tipoArquivo = suprimento ? 'suprimento' : 'sangria';
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!mounted) return;
+    CaixaFeedback.sucesso(context, '$tipo de ${_formatarMoeda(valor)} registrado.');
+    await mostrarFluxoImpressaoCupomVenda(
+      context,
+      printService: widget.printService,
+      config: config,
+      title: 'Comprovante de $tipo',
+      content: 'Deseja imprimir o comprovante desta $tipo?',
+      suggestedFileName:
+          '${tipoArquivo}_caixa_${DateFormat('yyyyMMdd_HHmmss').format(dataHora)}.pdf',
+      gerarPdfBytes: () => ReciboMovimentoCaixaPdf.gerarBytes(
+        suprimento: suprimento,
+        valor: valor,
+        observacao: obs,
+        operadorCaixa: _operadorCaixa,
+        terminalId: _terminalId,
+        dataHora: dataHora,
+        config: config,
+        fundoInicial: _fundoTrocoAbertura,
+        totalSuprimentos: _totalSuprimentos,
+        totalSangrias: _totalSangrias,
+      ),
     );
   }
 
