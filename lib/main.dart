@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
@@ -24,38 +25,58 @@ import 'services/auditoria_registrar.dart';
 import 'services/auditoria_retencao_service.dart';
 import 'services/print_service.dart';
 import 'services/trusted_http_client.dart';
+import 'ui/app_startup_error_page.dart';
 import 'ui/layout/app_layout.dart';
 import 'ui/login_page.dart';
 import 'ui/main_menu_page.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  configurarHttpOverridesPlataforma();
-  await initializeDateFormatting('pt_BR');
-  await _tentarSincronizarHorarioSistemaNoInicio();
-  final objectBox = await ObjectBox.create();
-  final auditoriaRepository = AuditoriaRepository(objectBox);
-  AuditoriaRegistrar.inicializar(auditoriaRepository);
-  final appConfigRepository = AppConfigRepository();
-  await AuditoriaRetencaoService.aplicarSeConfigurado(
-    configRepository: appConfigRepository,
-    auditoriaRepository: auditoriaRepository,
-  );
-  await _executarMigracaoMotoristaEntrega(
-    objectBox: objectBox,
-    configRepository: appConfigRepository,
-  );
-  final syncService = SyncService(
-    objectBox: objectBox,
-    configRepository: appConfigRepository,
-  );
-  final lanSyncScheduler = LanSyncScheduler(syncService: syncService);
-  runApp(
-    MyApp(
-      objectBox: objectBox,
-      lanSyncScheduler: lanSyncScheduler,
-      appConfigRepository: appConfigRepository,
-    ),
+  runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      configurarHttpOverridesPlataforma();
+      await initializeDateFormatting('pt_BR');
+      await _tentarSincronizarHorarioSistemaNoInicio();
+
+      ObjectBox objectBox;
+      try {
+        objectBox = await ObjectBox.create();
+      } catch (e, st) {
+        runApp(
+          AppStartupErrorPage(
+            erro: 'Falha ao abrir banco local (ObjectBox):\n$e\n\n$st',
+          ),
+        );
+        return;
+      }
+
+      final auditoriaRepository = AuditoriaRepository(objectBox);
+      AuditoriaRegistrar.inicializar(auditoriaRepository);
+      final appConfigRepository = AppConfigRepository();
+      await AuditoriaRetencaoService.aplicarSeConfigurado(
+        configRepository: appConfigRepository,
+        auditoriaRepository: auditoriaRepository,
+      );
+      await _executarMigracaoMotoristaEntrega(
+        objectBox: objectBox,
+        configRepository: appConfigRepository,
+      );
+      final syncService = SyncService(
+        objectBox: objectBox,
+        configRepository: appConfigRepository,
+      );
+      final lanSyncScheduler = LanSyncScheduler(syncService: syncService);
+      runApp(
+        MyApp(
+          objectBox: objectBox,
+          lanSyncScheduler: lanSyncScheduler,
+          appConfigRepository: appConfigRepository,
+        ),
+      );
+    },
+    (error, stack) {
+      debugPrint('Erro nao tratado: $error\n$stack');
+    },
   );
 }
 

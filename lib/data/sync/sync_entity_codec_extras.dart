@@ -454,6 +454,7 @@ class SyncEntityCodecExtras {
         'redeModoServidor': c.redeModoServidor,
         'redePortaServidor': c.redePortaServidor,
         'redeServidorUrl': c.redeServidorUrl,
+        'redeSyncToken': c.redeSyncToken,
         'backupAutomaticoAtivo': c.backupAutomaticoAtivo,
         'backupAutomaticoPasta': c.backupAutomaticoPasta,
         'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
@@ -501,6 +502,7 @@ class SyncEntityCodecExtras {
       redePortaServidor:
           (m['redePortaServidor'] as num?)?.toInt() ?? base.redePortaServidor,
       redeServidorUrl: (m['redeServidorUrl'] ?? base.redeServidorUrl).toString(),
+      redeSyncToken: (m['redeSyncToken'] ?? base.redeSyncToken).toString(),
       backupAutomaticoAtivo:
           m['backupAutomaticoAtivo'] as bool? ?? base.backupAutomaticoAtivo,
       backupAutomaticoPasta:
@@ -537,7 +539,35 @@ class SyncEntityCodecExtras {
   }
 
   static Map<String, dynamic> usuariosParaMap(List<UsuarioSistema> lista) =>
-      {'usuarios': lista.map((u) => u.toMap()).toList()};
+      {'usuarios': lista.map((u) => u.toMapParaSync()).toList()};
+
+  /// Mescla usuarios vindos da rede preservando hash de senha local.
+  static List<UsuarioSistema> mesclarUsuariosAposSync({
+    required List<UsuarioSistema> locais,
+    required List<UsuarioSistema> remotos,
+  }) {
+    final porId = {for (final u in locais) u.id: u};
+    final out = <UsuarioSistema>[];
+    final vistos = <String>{};
+
+    for (final rem in remotos) {
+      if (rem.id.isEmpty) continue;
+      vistos.add(rem.id);
+      final local = porId[rem.id];
+      if (local == null) {
+        out.add(rem);
+        continue;
+      }
+      out.add(rem.copyWith(senha: local.senha));
+    }
+
+    for (final loc in locais) {
+      if (!vistos.contains(loc.id)) {
+        out.add(loc);
+      }
+    }
+    return out;
+  }
 
   static List<UsuarioSistema> usuariosDeMap(Map<String, dynamic> m) {
     final raw = m['usuarios'];

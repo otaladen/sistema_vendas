@@ -16,10 +16,30 @@ class ClienteRepository {
   }
 
   /// Busca indexada no ObjectBox (evita carregar todos os clientes na RAM).
+  /// Pagina clientes ordenados por nome (telas operacionais; evita [listarTodos]).
+  List<Cliente> listarPaginado({
+    int offset = 0,
+    int limit = 80,
+    bool somenteAtivos = false,
+  }) {
+    if (limit <= 0) return const [];
+    final qb = somenteAtivos
+        ? _db.clienteBox.query(Cliente_.ativo.equals(true))
+        : _db.clienteBox.query();
+    final query = qb.order(Cliente_.nomeRazao).build();
+    try {
+      query.offset = offset < 0 ? 0 : offset;
+      query.limit = limit;
+      return query.find();
+    } finally {
+      query.close();
+    }
+  }
+
   List<Cliente> pesquisar(String termo) {
     final t = termo.trim();
     if (t.isEmpty) {
-      return listarTodos();
+      return const [];
     }
     final lower = t.toLowerCase();
     final cond = _condicaoPesquisaCliente(lower);

@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import '../../data/app_config_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/sync/sync_api_client.dart';
+import '../../data/sync/sync_log.dart';
+import '../../domain/sync_token_util.dart';
 import '../../services/lan_sync_server_manager.dart';
 
 /// Assistente de rede local: servidor neste PC ou cliente apontando para outro.
@@ -26,6 +28,7 @@ class RedeSincronizacaoCard extends StatefulWidget {
 class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   final _urlController = TextEditingController();
   final _portaController = TextEditingController();
+  final _tokenController = TextEditingController();
 
   bool _modoServidor = false;
   bool _syncAtiva = false;
@@ -53,6 +56,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   void dispose() {
     _urlController.dispose();
     _portaController.dispose();
+    _tokenController.dispose();
     super.dispose();
   }
 
@@ -84,6 +88,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       _ipLocal = ip;
       _portaController.text = '$porta';
       _urlController.text = url;
+      _tokenController.text = config.redeSyncToken;
       _servidorOnline = online;
       _carregando = false;
     });
@@ -121,16 +126,25 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         _preencherUrlServidorLocal();
       }
       final atual = await widget.configRepository.carregarEmpresaConfig();
+      var token = _tokenController.text.trim();
+      if (_syncAtiva && token.isEmpty) {
+        token = gerarTokenSyncLan();
+        _tokenController.text = token;
+      }
       final config = atual.copyWith(
         redeSincronizacaoAtiva: _syncAtiva,
         redeModoServidor: _modoServidor,
         redePortaServidor: _porta,
         redeServidorUrl: _urlController.text.trim(),
+        redeSyncToken: token,
       );
       await widget.configRepository.salvarEmpresaConfig(config);
 
       if (_modoServidor && iniciarServidorSeModoServidor && Platform.isWindows) {
-        final err = await LanSyncServerManager.iniciarServidor(porta: _porta);
+        final err = await LanSyncServerManager.iniciarServidor(
+          porta: _porta,
+          syncToken: token,
+        );
         if (err != null && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(err)),
@@ -202,7 +216,10 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     final porta = uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
     setState(() => _testandoRede = true);
     try {
-      final health = await SyncApiClient(baseUrl: _urlController.text).health();
+      final health = await SyncApiClient(
+        baseUrl: _urlController.text,
+        syncToken: _tokenController.text.trim(),
+      ).health();
       if (!mounted) return;
       if (health) {
         setState(() => _servidorOnline = true);
@@ -254,7 +271,10 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   Future<void> _iniciarServidor() async {
     setState(() => _iniciandoServidor = true);
     try {
-      final err = await LanSyncServerManager.iniciarServidor(porta: _porta);
+      final err = await LanSyncServerManager.iniciarServidor(
+        porta: _porta,
+        syncToken: _tokenController.text.trim(),
+      );
       if (!mounted) return;
       if (err != null) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
@@ -346,7 +366,10 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       _carregandoPresenca = true;
       _presencaErro = '';
     });
-    final client = SyncApiClient(baseUrl: uri);
+    final client = SyncApiClient(
+      baseUrl: uri,
+      syncToken: _tokenController.text.trim(),
+    );
     try {
       final map = await client.obterPresenca();
       if (!mounted) return;
@@ -381,6 +404,13 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         _presencaErro = 'Erro: $e';
       });
     }
+  }
+
+  String _formatarHora(DateTime dt) {
+    final l = dt.toLocal();
+    final h = l.hour.toString().padLeft(2, '0');
+    final m = l.minute.toString().padLeft(2, '0');
+    return '$h:$m';
   }
 
   void _copiarEnderecoClientes() {
@@ -452,6 +482,52 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
               subtitle: const Text(
                 'Sincroniza cadastros, estoque, vendas, NF-e, kits, usuarios e configuracoes.',
               ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _tokenController,
+              decoration: InputDecoration(
+                labelText: 'Token de sincronizacao (LAN)',
+                hintText: 'Gerado ao salvar se vazio',
+                border: const OutlineInputBorder(),
+                isDense: true,
+                suffixIcon: IconButton(
+                  tooltip: 'Gerar novo token',
+                  icon: const Icon(Icons.vpn_key_outlined),
+                  onPressed: () {
+                    setState(() {
+                      _tokenController.text = gerarTokenSyncLan();
+                    });
+                  },
+                ),
+              ),
+              obscureText: true,
+              autocorrect: false,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'O mesmo token deve estar no servidor (variavel SYNC_TOKEN ao iniciar '
+              'o .exe) e em todos os PCs clientes. Senhas de usuario nao sao replicadas.',
+              style: tema.textTheme.bodySmall,
+            ),
+            ValueListenableBuilder<SyncLogEntry?>(
+              valueListenable: SyncLog.ultimo,
+              builder: (context, entry, _) {
+                if (entry == null) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    entry.sucesso
+                        ? 'Ultima sync: OK (${_formatarHora(entry.em)})'
+                        : 'Ultima sync falhou (${_formatarHora(entry.em)}): '
+                            '${entry.mensagem.split('\n').first}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: entry.sucesso ? Colors.green.shade800 : erro,
+                    ),
+                  ),
+                );
+              },
             ),
             if (_modoServidor) ...[
               const SizedBox(height: 8),

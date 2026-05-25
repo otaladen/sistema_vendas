@@ -28,6 +28,7 @@ class Produto {
     int? estoqueReal,
     int? estoqueAtual,
     this.estoqueReservado = 0,
+    this.estoqueVersao = 0,
     this.leadTimeDias = 7,
     this.vendaMediaDiaria = 0,
     this.estoqueSeguranca = 0,
@@ -87,6 +88,9 @@ class Produto {
   String cfopVenda;
   int estoqueReal;
   int estoqueReservado;
+
+  /// Incrementado a cada mutacao local de estoque; usado no sync LAN.
+  int estoqueVersao;
 
   /// Estoque atual para compras preditivas (mantido alinhado a [estoqueReal]).
   int estoqueAtual;

@@ -7,7 +7,9 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../app_config_repository.dart';
 import 'sync_api_client.dart';
 import 'sync_cursor_storage.dart';
+import 'sync_log.dart';
 import 'sync_service.dart';
+import 'sync_auth.dart';
 
 /// Agenda sincronizacao periodica quando a rede esta habilitada nas configuracoes.
 ///
@@ -52,7 +54,7 @@ class LanSyncScheduler {
     }
     _instanciaAtiva = this;
     await sincronizarAgora();
-    _timer = Timer.periodic(intervalo, (_) => sincronizarAgora());
+    _timer = Timer.periodic(intervalo, (_) => unawaited(sincronizarAgora()));
     unawaited(_conectarTempoReal());
     _heartbeatTimer?.cancel();
     _heartbeatTimer =
@@ -79,7 +81,10 @@ class LanSyncScheduler {
     if (!config.redeSincronizacaoAtiva || config.redeServidorUrl.trim().isEmpty) {
       return;
     }
-    final client = SyncApiClient(baseUrl: config.redeServidorUrl);
+    final client = SyncApiClient(
+      baseUrl: config.redeServidorUrl,
+      syncToken: config.redeSyncToken,
+    );
     if (!client.configurado) return;
     try {
       final stationId = await _cursorStorage.obterOuCriarDeviceId();
@@ -116,7 +121,7 @@ class LanSyncScheduler {
     _realtimeChannel = null;
   }
 
-  Uri? _uriWebSocketDaBase(String raw) {
+  Uri? _uriWebSocketDaBase(String raw, String syncToken) {
     var s = raw.trim();
     if (s.isEmpty) return null;
     if (!s.contains('://')) {
@@ -124,11 +129,15 @@ class LanSyncScheduler {
     }
     final u = Uri.parse(s);
     final scheme = u.scheme == 'https' ? 'wss' : 'ws';
+    final token = syncToken.trim();
     return Uri(
       scheme: scheme,
       host: u.host,
       port: u.hasPort ? u.port : null,
       path: '/sync/stream',
+      queryParameters: token.isNotEmpty
+          ? {SyncAuth.queryParam: token}
+          : null,
     );
   }
 
@@ -140,7 +149,10 @@ class LanSyncScheduler {
         config.redeServidorUrl.trim().isEmpty) {
       return;
     }
-    final wsUri = _uriWebSocketDaBase(config.redeServidorUrl.trim());
+    final wsUri = _uriWebSocketDaBase(
+      config.redeServidorUrl.trim(),
+      config.redeSyncToken,
+    );
     if (wsUri == null) return;
     try {
       _realtimeChannel = WebSocketChannel.connect(wsUri);

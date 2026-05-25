@@ -11,7 +11,9 @@ import '../data/conferencia_carga_repository.dart';
 import '../data/motorista_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
+import '../domain/entrega_filtro_util.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/filtro_listagem_entregas.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../model/historico_entrega.dart';
 import '../model/item_venda.dart';
@@ -81,6 +83,8 @@ class _EntregasPageState extends State<EntregasPage> {
   ];
 
   List<Venda> _entregas = [];
+  int _contagemAtrasadasCache = 0;
+  int _contagemPendentesHojeCache = 0;
   String _statusSelecionado = 'todos';
   String _filtroMotorista = 'todos';
   String _filtroVendedor = 'todos';
@@ -420,41 +424,6 @@ class _EntregasPageState extends State<EntregasPage> {
     return scheme.outline;
   }
 
-  /// Filtro opcional: numero do cupom ([Venda.numeroOrcamento]) ou id interno ([Venda.id]).
-  List<Venda> _filtrarPorNumeroNotaSeInformado(List<Venda> entregas) {
-    var raw = _numeroNotaController.text.trim();
-    if (raw.isEmpty) return entregas;
-    if (raw.startsWith('#')) {
-      raw = raw.substring(1).trim();
-    }
-    final n = int.tryParse(raw);
-    if (n == null) return <Venda>[];
-    return entregas.where((v) {
-      if (v.numeroOrcamento > 0 && v.numeroOrcamento == n) return true;
-      return v.id == n;
-    }).toList();
-  }
-
-  bool _vendaEhAtrasada(Venda venda) {
-    if (_statusFinalizado(venda.statusEntrega)) return false;
-    final marcada = venda.dataEntregaMarcada?.toLocal();
-    if (marcada == null) return false;
-    final hoje = DateTime.now();
-    final baseHoje = DateTime(hoje.year, hoje.month, hoje.day);
-    final baseMarcada = DateTime(marcada.year, marcada.month, marcada.day);
-    return baseMarcada.isBefore(baseHoje);
-  }
-
-  bool _vendaEhAgendaHoje(Venda venda) {
-    if (_statusFinalizado(venda.statusEntrega)) return false;
-    final marcada = venda.dataEntregaMarcada?.toLocal();
-    if (marcada == null) return false;
-    final hoje = DateTime.now();
-    final baseHoje = DateTime(hoje.year, hoje.month, hoje.day);
-    final baseMarcada = DateTime(marcada.year, marcada.month, marcada.day);
-    return baseMarcada == baseHoje;
-  }
-
   bool _vendaNaChaveDiaPlanejamento(
     Venda venda,
     String chaveDia,
@@ -468,18 +437,43 @@ class _EntregasPageState extends State<EntregasPage> {
     return dataMarcadaFmt.format(marcada) == chaveDia;
   }
 
-  void _carregarEntregas() {
-    // Periodo da venda no repositorio ignora data marcada; para ver atrasadas/agendas
-    // de pedidos antigos, nao restringimos por [_inicio]/[_fim] com filtro de resumo ativo.
-    final usarPeriodoVenda = _filtroResumoLista == _FiltroResumoEntregas.nenhum;
-    var entregas = widget.vendaRepository.listarEntregas(
+  FiltroListagemEntregas _montarFiltroEntregas({
+    required bool usarPeriodoVendaNaLista,
+    bool paraContagemResumo = false,
+  }) {
+    final usarPeriodo = paraContagemResumo
+        ? false
+        : (_filtroResumoLista == _FiltroResumoEntregas.nenhum &&
+            usarPeriodoVendaNaLista);
+    return FiltroListagemEntregas(
       statusEntrega: _statusSelecionado,
       bairroTermo: _bairroController.text,
-      inicio: usarPeriodoVenda ? _inicio : null,
-      fim: usarPeriodoVenda ? _fim : null,
+      inicio: usarPeriodo ? _inicio : null,
+      fim: usarPeriodo ? _fim : null,
+      filtroDataMarcada: _filtroDataMarcada,
+      filtroMotorista: _filtroMotorista,
+      filtroVendedor: _filtroVendedor,
+      numeroNota: _numeroNotaController.text,
+      apenasAtrasadas:
+          !paraContagemResumo &&
+          _filtroResumoLista == _FiltroResumoEntregas.atrasadas,
+      apenasPendentesHoje:
+          !paraContagemResumo &&
+          _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje,
     );
-    entregas = entregas.where(_atendeFiltroDataMarcada).toList();
-    entregas = _filtrarPorNumeroNotaSeInformado(entregas);
+  }
+
+  void _carregarEntregas() {
+    final filtroLista = _montarFiltroEntregas(usarPeriodoVendaNaLista: true);
+    final filtroContagem = _montarFiltroEntregas(
+      usarPeriodoVendaNaLista: false,
+      paraContagemResumo: true,
+    );
+    final resultado = widget.vendaRepository.carregarListagemEntregasComResumo(
+      filtroLista: filtroLista,
+      filtroContagem: filtroContagem,
+    );
+    final entregas = resultado.entregas;
     final vendedoresDisponiveis =
         (entregas
             .map(_nomeVendedor)
@@ -488,30 +482,10 @@ class _EntregasPageState extends State<EntregasPage> {
             .toSet()
             .toList()
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
-    if (_filtroMotorista != 'todos') {
-      entregas = entregas
-          .where((v) => _nomeMotorista(v).toLowerCase() == _filtroMotorista)
-          .toList();
-    }
-    if (_filtroVendedor != 'todos') {
-      entregas = entregas
-          .where((v) => _nomeVendedor(v).toLowerCase() == _filtroVendedor)
-          .toList();
-    }
-    if (_filtroResumoLista == _FiltroResumoEntregas.atrasadas) {
-      entregas = entregas.where(_vendaEhAtrasada).toList();
-    } else if (_filtroResumoLista == _FiltroResumoEntregas.pendentesHoje) {
-      entregas = entregas.where(_vendaEhAgendaHoje).toList();
-    }
-    entregas.sort((a, b) {
-      final pa = _pesoPrioridade(a.prioridadeEntrega);
-      final pb = _pesoPrioridade(b.prioridadeEntrega);
-      final byPri = pb.compareTo(pa);
-      if (byPri != 0) return byPri;
-      return b.data.compareTo(a.data);
-    });
     setState(() {
       _entregas = entregas;
+      _contagemAtrasadasCache = resultado.atrasadas;
+      _contagemPendentesHojeCache = resultado.pendentesHoje;
       _vendedoresDisponiveis = vendedoresDisponiveis;
       if (_chaveDiaPlanejamentoSelecionado != null) {
         final fmtPlanej = DateFormat('dd/MM/yyyy');
@@ -625,15 +599,16 @@ class _EntregasPageState extends State<EntregasPage> {
 
   /// Mesma logica de [_carregarEntregas] sem segundo setState no fim (evita piscar).
   Future<void> _carregarEntregasSyncState() async {
-    final usarPeriodoVenda = _filtroResumoLista == _FiltroResumoEntregas.nenhum;
-    var entregas = widget.vendaRepository.listarEntregas(
-      statusEntrega: _statusSelecionado,
-      bairroTermo: _bairroController.text,
-      inicio: usarPeriodoVenda ? _inicio : null,
-      fim: usarPeriodoVenda ? _fim : null,
+    final filtroLista = _montarFiltroEntregas(usarPeriodoVendaNaLista: true);
+    final filtroContagem = _montarFiltroEntregas(
+      usarPeriodoVendaNaLista: false,
+      paraContagemResumo: true,
     );
-    entregas = entregas.where(_atendeFiltroDataMarcada).toList();
-    entregas = _filtrarPorNumeroNotaSeInformado(entregas);
+    final resultado = widget.vendaRepository.carregarListagemEntregasComResumo(
+      filtroLista: filtroLista,
+      filtroContagem: filtroContagem,
+    );
+    final entregas = resultado.entregas;
     final vendedoresDisponiveis =
         (entregas
             .map(_nomeVendedor)
@@ -642,31 +617,11 @@ class _EntregasPageState extends State<EntregasPage> {
             .toSet()
             .toList()
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
-    if (_filtroMotorista != 'todos') {
-      entregas = entregas
-          .where((v) => _nomeMotorista(v).toLowerCase() == _filtroMotorista)
-          .toList();
-    }
-    if (_filtroVendedor != 'todos') {
-      entregas = entregas
-          .where((v) => _nomeVendedor(v).toLowerCase() == _filtroVendedor)
-          .toList();
-    }
-    if (_filtroResumoLista == _FiltroResumoEntregas.atrasadas) {
-      entregas = entregas.where(_vendaEhAtrasada).toList();
-    } else if (_filtroResumoLista == _FiltroResumoEntregas.pendentesHoje) {
-      entregas = entregas.where(_vendaEhAgendaHoje).toList();
-    }
-    entregas.sort((a, b) {
-      final pa = _pesoPrioridade(a.prioridadeEntrega);
-      final pb = _pesoPrioridade(b.prioridadeEntrega);
-      final byPri = pb.compareTo(pa);
-      if (byPri != 0) return byPri;
-      return b.data.compareTo(a.data);
-    });
     if (!mounted) return;
     setState(() {
       _entregas = entregas;
+      _contagemAtrasadasCache = resultado.atrasadas;
+      _contagemPendentesHojeCache = resultado.pendentesHoje;
       _vendedoresDisponiveis = vendedoresDisponiveis;
       if (_chaveDiaPlanejamentoSelecionado != null) {
         final fmtPlanej = DateFormat('dd/MM/yyyy');
@@ -680,20 +635,6 @@ class _EntregasPageState extends State<EntregasPage> {
         if (!aindaExiste) _chaveDiaPlanejamentoSelecionado = null;
       }
     });
-  }
-
-  bool _atendeFiltroDataMarcada(Venda venda) {
-    final filtro = _filtroDataMarcada;
-    if (filtro == 'todos') return true;
-    if (filtro == 'sem_data') return venda.dataEntregaMarcada == null;
-    final marcada = venda.dataEntregaMarcada?.toLocal();
-    if (marcada == null) return false;
-    final hoje = DateTime.now();
-    final base = DateTime(hoje.year, hoje.month, hoje.day);
-    final d = DateTime(marcada.year, marcada.month, marcada.day);
-    if (filtro == 'hoje') return d == base;
-    if (filtro == 'amanha') return d == base.add(const Duration(days: 1));
-    return true;
   }
 
   Widget _conteudoRomaneioUmaVenda(
@@ -1858,10 +1799,6 @@ class _EntregasPageState extends State<EntregasPage> {
     return 'Periodo: ${fmt.format(_inicio!.toLocal())} ate ${fmt.format(_fim!.toLocal())}';
   }
 
-  bool _statusFinalizado(String status) {
-    return status == 'entregue' || status == 'cancelada';
-  }
-
   bool _transicaoStatusPermitida(String atual, String novo) {
     if (atual == novo) return true;
     if (atual == 'entregue' || atual == 'cancelada') return false;
@@ -1917,51 +1854,6 @@ class _EntregasPageState extends State<EntregasPage> {
 
   String _mensagemSemPermissaoStatus() {
     return 'Seu perfil nao possui permissao para alterar status de entrega.';
-  }
-
-  /// Total no banco (respeitando status/bairro/nota/motorista/vendedor; sem recorte por periodo de venda).
-  int _contagemAtrasadasProjetada() {
-    var entregas = widget.vendaRepository.listarEntregas(
-      statusEntrega: _statusSelecionado,
-      bairroTermo: _bairroController.text,
-      inicio: null,
-      fim: null,
-    );
-    entregas = entregas.where(_atendeFiltroDataMarcada).toList();
-    entregas = _filtrarPorNumeroNotaSeInformado(entregas);
-    if (_filtroMotorista != 'todos') {
-      entregas = entregas
-          .where((v) => _nomeMotorista(v).toLowerCase() == _filtroMotorista)
-          .toList();
-    }
-    if (_filtroVendedor != 'todos') {
-      entregas = entregas
-          .where((v) => _nomeVendedor(v).toLowerCase() == _filtroVendedor)
-          .toList();
-    }
-    return entregas.where(_vendaEhAtrasada).length;
-  }
-
-  int _contagemPendentesHojeProjetada() {
-    var entregas = widget.vendaRepository.listarEntregas(
-      statusEntrega: _statusSelecionado,
-      bairroTermo: _bairroController.text,
-      inicio: null,
-      fim: null,
-    );
-    entregas = entregas.where(_atendeFiltroDataMarcada).toList();
-    entregas = _filtrarPorNumeroNotaSeInformado(entregas);
-    if (_filtroMotorista != 'todos') {
-      entregas = entregas
-          .where((v) => _nomeMotorista(v).toLowerCase() == _filtroMotorista)
-          .toList();
-    }
-    if (_filtroVendedor != 'todos') {
-      entregas = entregas
-          .where((v) => _nomeVendedor(v).toLowerCase() == _filtroVendedor)
-          .toList();
-    }
-    return entregas.where(_vendaEhAgendaHoje).length;
   }
 
   Future<void> _abrirHistoricoEntrega(Venda venda) async {
@@ -3789,8 +3681,8 @@ class _EntregasPageState extends State<EntregasPage> {
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
     final dataMarcadaFmt = DateFormat('dd/MM/yyyy');
-    final atrasadas = _contagemAtrasadasProjetada();
-    final pendentesHoje = _contagemPendentesHojeProjetada();
+    final atrasadas = _contagemAtrasadasCache;
+    final pendentesHoje = _contagemPendentesHojeCache;
     final resumoPorDia = PlanejamentoEntregaDia.resumoDeEntregas(_entregas);
     final temProximosDias =
         PlanejamentoEntregaDia.proximosDiasComEntrega(resumoPorDia).isNotEmpty;

@@ -28,6 +28,7 @@ class SyncEntityCodec {
       'cfopVenda': p.cfopVenda,
       'estoqueReal': p.estoqueReal,
       'estoqueReservado': p.estoqueReservado,
+      'estoqueVersao': p.estoqueVersao,
       'estoqueAtual': p.estoqueAtual,
       'leadTimeDias': p.leadTimeDias,
       'vendaMediaDiaria': p.vendaMediaDiaria,
@@ -71,6 +72,7 @@ class SyncEntityCodec {
       cfopVenda: (m['cfopVenda'] ?? '').toString(),
       estoqueReal: (m['estoqueReal'] as num?)?.toInt() ?? 0,
       estoqueReservado: (m['estoqueReservado'] as num?)?.toInt() ?? 0,
+      estoqueVersao: (m['estoqueVersao'] as num?)?.toInt() ?? 0,
       estoqueAtual: (m['estoqueAtual'] as num?)?.toInt() ??
           (m['estoqueReal'] as num?)?.toInt() ??
           0,

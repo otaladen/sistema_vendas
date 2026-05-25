@@ -27,6 +27,29 @@ final List<StreamSink<Object?>> _wsClientes = [];
 /// Ultimo heartbeat por estacao ([stationId] = epoch ms UTC). TTL define "online".
 const int _presenceTtlMs = 90000;
 
+/// Se definido, exige header `x-sync-token` ou query `token` em `/sync/*`.
+final String _syncToken = (Platform.environment['SYNC_TOKEN'] ?? '').trim();
+
+bool _syncAutorizado(Request request) {
+  if (_syncToken.isEmpty) return true;
+  final path = request.url.path;
+  if (path == '/health') return true;
+  if (!path.startsWith('/sync')) return true;
+  final header = (request.headers['x-sync-token'] ?? '').trim();
+  final query = (request.url.queryParameters['token'] ?? '').trim();
+  return header == _syncToken || query == _syncToken;
+}
+
+Middleware _syncAuthMiddleware(Handler inner) {
+  return (Request request) {
+    if (_syncAutorizado(request)) return inner(request);
+    return Response.forbidden(
+      jsonEncode({'ok': false, 'error': 'sync_token_invalid'}),
+      headers: {'content-type': 'application/json'},
+    );
+  };
+}
+
 final Map<String, int> _heartbeatLastMs = {};
 final Map<String, String> _heartbeatLabels = {};
 
@@ -84,14 +107,17 @@ void main(List<String> args) async {
     )
     ..post('/sync/push', _push);
 
-  final handler =
-      const Pipeline().addMiddleware(logRequests()).addHandler(router.call);
+  final handler = Pipeline()
+      .addMiddleware(_syncAuthMiddleware)
+      .addMiddleware(logRequests())
+      .addHandler(router.call);
 
   final server = await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
   // ignore: avoid_print
   print(
     'sistema_vendas sync server | db=$dbPath | '
-    'http://${server.address.address}:$port | ws=/sync/stream',
+    'http://${server.address.address}:$port | ws=/sync/stream | '
+    'auth=${_syncToken.isEmpty ? "desligada" : "token ativo"}',
   );
 }
 

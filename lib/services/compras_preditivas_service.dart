@@ -1,6 +1,7 @@
 import 'package:objectbox/objectbox.dart';
 
 import '../data/objectbox.dart';
+import '../domain/produto_estoque_sync.dart';
 import '../model/produto.dart';
 
 /// Compras preditivas: ponto de pedido (PP) e indicadores de estoque critico.
@@ -148,6 +149,7 @@ class ComprasPreditivasService {
       produto,
       consumoPrecalculado: consumoPrecalculado,
     );
+    ProdutoEstoqueSync.marcarEstoqueAlterado(produto);
     _db.produtoBox.put(produto);
   }
 

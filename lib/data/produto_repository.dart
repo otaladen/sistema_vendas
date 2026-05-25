@@ -94,6 +94,29 @@ class ProdutoRepository extends ChangeNotifier {
     return produtos;
   }
 
+  /// Pagina produtos ordenados por nome (sugestoes PDV sem carregar catalogo inteiro).
+  List<Produto> listarPaginado({
+    int offset = 0,
+    int limit = 50,
+    bool somenteAtivos = true,
+  }) {
+    _migrarCampoAtivoLegadoUmaVez();
+    if (limit <= 0) return const [];
+    final qb = somenteAtivos
+        ? _db.produtoBox.query(Produto_.ativo.equals(true))
+        : _db.produtoBox.query();
+    final query = qb.order(Produto_.nome).build();
+    try {
+      query.offset = offset < 0 ? 0 : offset;
+      query.limit = limit;
+      final produtos = query.find();
+      _normalizarDadosLegados(produtos);
+      return produtos;
+    } finally {
+      query.close();
+    }
+  }
+
   /// Migracao unica: registros antigos ganham coluna [ativo]; define todos como ativos.
   void _migrarCampoAtivoLegadoUmaVez() {
     if (_migracaoAtivoLegadoOk) return;

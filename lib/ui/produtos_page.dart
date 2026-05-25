@@ -2158,9 +2158,10 @@ class _ProdutosPageState extends State<ProdutosPage>
       return;
     }
 
-    if (!_geminiService.configurado) {
+    if (!await _geminiService.configurado) {
       _snackbarBrasilApi(
-        'Chave da API Gemini nao configurada. Cole em lib/services/gemini_service.dart.',
+        'Chave da API Gemini nao configurada. Use GEMINI_API_KEY (ambiente ou '
+        'dart-define) ou salve em Configuracoes.',
         erro: true,
       );
       return;

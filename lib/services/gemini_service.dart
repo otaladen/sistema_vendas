@@ -3,10 +3,7 @@ import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 import '../domain/gemini_produto_padronizado.dart';
-
-/// Chave exclusiva do Gemini (Google AI Studio — nao use a do Custom Search).
-/// Crie em: https://aistudio.google.com/apikey
-const String _apiKey = 'AIzaSyDeIddn1lEuIAZHU6SemmaMRqVvo5Zib5E';
+import 'gemini_config.dart';
 
 /// Modelos tentados em ordem. Cada modelo tem cota separada no tier gratuito.
 const List<String> _modelosGemini = [
@@ -81,8 +78,16 @@ class GeminiService {
 
   final String? _apiKeyOverride;
   final List<String> _modelos;
+  String? _cachedApiKey;
 
-  String get _resolvedApiKey => (_apiKeyOverride ?? _apiKey).trim();
+  Future<String> _resolvedApiKey() async {
+    final override = _apiKeyOverride?.trim() ?? '';
+    if (override.isNotEmpty) {
+      return override;
+    }
+    _cachedApiKey ??= await GeminiConfig.resolverChave();
+    return _cachedApiKey!;
+  }
 
   static final Schema _schemaProdutoPadronizado = Schema.object(
     description: 'Produto de material de construcao padronizado',
@@ -133,7 +138,10 @@ class GeminiService {
     ],
   );
 
-  bool get configurado => _resolvedApiKey.isNotEmpty;
+  Future<bool> get configurado async {
+    final k = await _resolvedApiKey();
+    return GeminiConfig.chavePareceValida(k);
+  }
 
   /// Padroniza [nomeBruto] via Gemini com Structured Output (JSON).
   ///
@@ -146,9 +154,12 @@ class GeminiService {
     final bruto = nomeBruto.trim();
     if (bruto.isEmpty) return null;
 
-    if (!configurado) {
+    final apiKey = await _resolvedApiKey();
+    if (!GeminiConfig.chavePareceValida(apiKey)) {
       throw GeminiConfigException(
-        'Configure a constante _apiKey em lib/services/gemini_service.dart.',
+        'Chave da API Gemini nao configurada. Defina a variavel de ambiente '
+        'GEMINI_API_KEY, use --dart-define=GEMINI_API_KEY=... na compilacao '
+        'ou salve em Configuracoes > Integracoes.',
       );
     }
 
@@ -169,7 +180,7 @@ class GeminiService {
     for (final nomeModelo in _modelos) {
       final model = GenerativeModel(
         model: nomeModelo,
-        apiKey: _resolvedApiKey,
+        apiKey: apiKey,
         systemInstruction: Content.system(_systemPrompt),
         generationConfig: GenerationConfig(
           responseMimeType: 'application/json',
@@ -261,7 +272,7 @@ class GeminiService {
           'generativelanguage.googleapis.com',
           'Em Restricoes de aplicativo, use "Nenhuma" para app Windows/desktop '
           'ou restrinja por IP — nao use "Sites HTTP" nem apps Android/iOS.',
-          'Cole a chave em lib/services/gemini_service.dart e reinicie o app.',
+          'Configure GEMINI_API_KEY e reinicie o app.',
         ],
       );
     }

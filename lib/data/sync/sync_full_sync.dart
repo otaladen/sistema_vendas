@@ -10,12 +10,14 @@ import '../app_config_repository.dart';
 import '../mensageria_repository.dart';
 import '../objectbox.dart';
 import '../caixa_sessao_repository.dart';
+import '../conferencia_carga_repository.dart';
 import '../usuario_repository.dart';
 import '../cliente_repository.dart';
 import '../../objectbox.g.dart';
 import '../produto_repository.dart';
 import '../venda_repository.dart';
 import '../vendedor_repository.dart';
+import '../../domain/produto_estoque_sync.dart';
 import 'sync_entity_codec.dart';
 import 'sync_entity_codec_extras.dart';
 
@@ -188,7 +190,7 @@ class SyncFullSync {
 
     switch (entity) {
       case 'produto':
-        _db.produtoBox.put(SyncEntityCodec.produtoDeMap(payload));
+        _aplicarProdutoSync(payload);
         break;
       case 'cliente':
         _db.clienteBox.put(SyncEntityCodec.clienteDeMap(payload));
@@ -262,6 +264,17 @@ class SyncFullSync {
         await CaixaSessaoRepository().aplicarPacoteRede(payload);
         break;
     }
+  }
+
+  void _aplicarProdutoSync(Map<String, dynamic> payload) {
+    final id = (payload['id'] as num?)?.toInt() ?? 0;
+    final local = id > 0 ? _db.produtoBox.get(id) : null;
+    final merged = ProdutoEstoqueSync.mergeProdutoRemoto(
+      local: local,
+      payload: payload,
+    );
+    _db.produtoBox.put(merged);
+    _produtoRepo.invalidarCacheBusca();
   }
 
   void _aplicarDelete(String entity, int id) {
@@ -510,33 +523,7 @@ class SyncFullSync {
   Future<void> _aplicarConferenciaCargaRomaneio(
     Map<String, dynamic> payload,
   ) async {
-    final remoto = SyncEntityCodecExtras.conferenciaCargaRomaneioDeMap(payload);
-    final escopo = remoto.escopoViagem.trim();
-    final chave = remoto.chaveProduto.trim();
-    if (escopo.isEmpty || chave.isEmpty) return;
-
-    final q = _db.conferenciaCargaRomaneioBox
-        .query(
-          ConferenciaCargaRomaneio_.escopoViagem
-              .equals(escopo)
-              .and(ConferenciaCargaRomaneio_.chaveProduto.equals(chave)),
-        )
-        .build();
-    try {
-      final local = q.findFirst();
-      if (local != null) {
-        if (!remoto.atualizadoEm.isBefore(local.atualizadoEm)) {
-          local.conferido = remoto.conferido;
-          local.usuarioLogin = remoto.usuarioLogin;
-          local.atualizadoEm = remoto.atualizadoEm;
-        }
-        _db.conferenciaCargaRomaneioBox.put(local);
-      } else {
-        _db.conferenciaCargaRomaneioBox.put(remoto);
-      }
-    } finally {
-      q.close();
-    }
+    ConferenciaCargaRepository(_db).aplicarConferenciaSync(payload);
   }
 
   void _removerRegistroDevolucao(int id) {
@@ -616,11 +603,17 @@ class SyncFullSync {
   }
 
   Future<void> _aplicarUsuarios(Map<String, dynamic> payload) async {
-    final lista = SyncEntityCodecExtras.usuariosDeMap(payload);
+    final remotos = SyncEntityCodecExtras.usuariosDeMap(payload);
+    final repo = UsuarioRepository();
+    final locais = await repo.listarTodos();
+    final mesclados = SyncEntityCodecExtras.mesclarUsuariosAposSync(
+      locais: locais,
+      remotos: remotos,
+    );
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _kUsuarios,
-      jsonEncode(lista.map((u) => u.toMap()).toList()),
+      jsonEncode(mesclados.map((u) => u.toMap()).toList()),
     );
   }
 

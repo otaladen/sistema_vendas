@@ -148,7 +148,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(2, 12069401530715107),
     name: 'Produto',
-    lastPropertyId: const obx_int.IdUid(40, 6382696563161980443),
+    lastPropertyId: const obx_int.IdUid(41, 1735947808757991430),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -387,6 +387,12 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(40, 6382696563161980443),
         name: 'apelidosBusca',
         type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(41, 1735947808757991430),
+        name: 'estoqueVersao',
+        type: 6,
         flags: 0,
       ),
     ],
@@ -2930,7 +2936,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final cfopVendaOffset = fbb.writeString(object.cfopVenda);
         final unidadeCompraOffset = fbb.writeString(object.unidadeCompra);
         final apelidosBuscaOffset = fbb.writeString(object.apelidosBusca);
-        fbb.startTable(41);
+        fbb.startTable(42);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, nomeOffset);
         fbb.addInt64(2, object.estoque);
@@ -2970,6 +2976,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addBool(37, object.permiteQuantidadeFracionada);
         fbb.addInt64(38, object.ultimaVendaEm?.millisecondsSinceEpoch);
         fbb.addOffset(39, apelidosBuscaOffset);
+        fbb.addInt64(40, object.estoqueVersao);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -3060,6 +3067,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
           buffer,
           rootOffset,
           52,
+          0,
+        );
+        final estoqueVersaoParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          84,
           0,
         );
         final leadTimeDiasParam = const fb.Int64Reader().vTableGet(
@@ -3178,6 +3191,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           estoqueReal: estoqueRealParam,
           estoqueAtual: estoqueAtualParam,
           estoqueReservado: estoqueReservadoParam,
+          estoqueVersao: estoqueVersaoParam,
           leadTimeDias: leadTimeDiasParam,
           vendaMediaDiaria: vendaMediaDiariaParam,
           estoqueSeguranca: estoqueSegurancaParam,
@@ -6461,6 +6475,11 @@ class Produto_ {
   /// See [Produto.apelidosBusca].
   static final apelidosBusca = obx.QueryStringProperty<Produto>(
     _entities[1].properties[38],
+  );
+
+  /// See [Produto.estoqueVersao].
+  static final estoqueVersao = obx.QueryIntegerProperty<Produto>(
+    _entities[1].properties[39],
   );
 
   /// see [Produto.historicoEntradas]

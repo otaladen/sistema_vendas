@@ -2,10 +2,17 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'sync_auth.dart';
+
 class SyncApiClient {
-  SyncApiClient({required String baseUrl}) : _base = _normalizarBase(baseUrl);
+  SyncApiClient({
+    required String baseUrl,
+    String syncToken = '',
+  })  : _base = _normalizarBase(baseUrl),
+        _syncToken = syncToken.trim();
 
   final String _base;
+  final String _syncToken;
 
   static String _normalizarBase(String raw) {
     var s = raw.trim();
@@ -21,16 +28,31 @@ class SyncApiClient {
 
   bool get configurado => _base.isNotEmpty;
 
+  Map<String, String> _headersJson() {
+    final h = <String, String>{'content-type': 'application/json'};
+    if (_syncToken.isNotEmpty) {
+      h[SyncAuth.headerName] = _syncToken;
+    }
+    return h;
+  }
+
   Uri _uri(String path, [Map<String, String>? query]) {
+    final q = <String, String>{};
+    if (query != null) q.addAll(query);
+    if (_syncToken.isNotEmpty) {
+      q[SyncAuth.queryParam] = _syncToken;
+    }
     final u = Uri.parse('$_base$path');
-    if (query == null || query.isEmpty) return u;
-    return u.replace(queryParameters: {...u.queryParameters, ...query});
+    if (q.isEmpty) return u;
+    return u.replace(queryParameters: {...u.queryParameters, ...q});
   }
 
   Future<bool> health() async {
     if (!configurado) return false;
     try {
-      final r = await http.get(_uri('/health')).timeout(const Duration(seconds: 8));
+      final r = await http
+          .get(_uri('/health'))
+          .timeout(const Duration(seconds: 8));
       return r.statusCode == 200;
     } catch (_) {
       return false;
@@ -47,7 +69,7 @@ class SyncApiClient {
       final r = await http
           .post(
             _uri('/sync/heartbeat'),
-            headers: {'content-type': 'application/json'},
+            headers: _headersJson(),
             body: jsonEncode({
               'stationId': stationId,
               'label': label,
@@ -87,8 +109,17 @@ class SyncApiClient {
             'deviceId': deviceId,
             'limit': '$limit',
           }),
+          headers: _syncToken.isNotEmpty
+              ? {SyncAuth.headerName: _syncToken}
+              : null,
         )
         .timeout(const Duration(seconds: 120));
+    if (r.statusCode == 401 || r.statusCode == 403) {
+      throw StateError(
+        'Sync recusado pelo servidor (token invalido ou ausente). '
+        'Configure o mesmo token em Configuracoes > Rede.',
+      );
+    }
     if (r.statusCode != 200) {
       throw StateError('pull HTTP ${r.statusCode}: ${r.body}');
     }
@@ -106,13 +137,18 @@ class SyncApiClient {
     final r = await http
         .post(
           _uri('/sync/push'),
-          headers: {'content-type': 'application/json'},
+          headers: _headersJson(),
           body: jsonEncode({
             'deviceId': deviceId,
             'mutations': mutations,
           }),
         )
         .timeout(const Duration(seconds: 120));
+    if (r.statusCode == 401 || r.statusCode == 403) {
+      throw StateError(
+        'Sync recusado pelo servidor (token invalido ou ausente).',
+      );
+    }
     if (r.statusCode != 200) {
       throw StateError('push HTTP ${r.statusCode}: ${r.body}');
     }

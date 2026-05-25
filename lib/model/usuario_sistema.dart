@@ -212,6 +212,14 @@ class UsuarioSistema {
     );
   }
 
+  /// Payload de sync LAN: metadados e permissoes, sem hash de senha.
+  Map<String, dynamic> toMapParaSync() {
+    final m = toMap();
+    m.remove('senha');
+    m['senhaConfigurada'] = senha.trim().isNotEmpty;
+    return m;
+  }
+
   Map<String, dynamic> toMap() {
     final caixa = podeAcessarCaixa || podeCaixa;
     final entregas =

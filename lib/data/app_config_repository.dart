@@ -20,7 +20,7 @@ class EmpresaConfig {
 
     /// Limite de desconto (%) sobre o subtotal de produtos no PDV ao enviar ao caixa (0 = desabilitado).
     this.maxDescontoPercentualPdv = 15,
-    this.permitirVendaSemEstoque = true,
+    this.permitirVendaSemEstoque = false,
     this.whatsappApiVersion = 'v20.0',
     this.whatsappPhoneNumberId = '',
     this.whatsappAccessToken = '',
@@ -29,6 +29,7 @@ class EmpresaConfig {
     this.redeModoServidor = false,
     this.redePortaServidor = 8787,
     this.redeServidorUrl = '',
+    this.redeSyncToken = '',
     this.backupAutomaticoAtivo = false,
     this.backupAutomaticoPasta = '',
     this.backupAutomaticoIntervaloMinutos = 1440,
@@ -68,10 +69,13 @@ class EmpresaConfig {
   /// Porta TCP do servidor de sync neste PC (padrao 8787).
   final int redePortaServidor;
 
-  /// Ex.: `http://192.168.0.15:8787` — servidor de sincronizacao na LAN.
-  final String redeServidorUrl;
+    /// Ex.: `http://192.168.0.15:8787` — servidor de sincronizacao na LAN.
+    final String redeServidorUrl;
 
-  /// Copia periodica dos dados locais para [backupAutomaticoPasta] (quando ativo).
+    /// Segredo compartilhado na LAN (header [SyncAuth.headerName]). Vazio = sem auth no servidor.
+    final String redeSyncToken;
+
+    /// Copia periodica dos dados locais para [backupAutomaticoPasta] (quando ativo).
   final bool backupAutomaticoAtivo;
 
   /// Pasta pai onde serao criadas subpastas `backup_sistema_vendas_*`.
@@ -114,6 +118,7 @@ class EmpresaConfig {
     bool? redeModoServidor,
     int? redePortaServidor,
     String? redeServidorUrl,
+    String? redeSyncToken,
     bool? backupAutomaticoAtivo,
     String? backupAutomaticoPasta,
     int? backupAutomaticoIntervaloMinutos,
@@ -150,6 +155,7 @@ class EmpresaConfig {
       redeModoServidor: redeModoServidor ?? this.redeModoServidor,
       redePortaServidor: redePortaServidor ?? this.redePortaServidor,
       redeServidorUrl: redeServidorUrl ?? this.redeServidorUrl,
+      redeSyncToken: redeSyncToken ?? this.redeSyncToken,
       backupAutomaticoAtivo:
           backupAutomaticoAtivo ?? this.backupAutomaticoAtivo,
       backupAutomaticoPasta:
@@ -193,6 +199,7 @@ class AppConfigRepository {
   static const _kRedeModoServidor = 'config_rede_modo_servidor';
   static const _kRedePortaServidor = 'config_rede_porta_servidor';
   static const _kRedeServidorUrl = 'config_rede_servidor_url';
+  static const _kRedeSyncToken = 'config_rede_sync_token';
   static const _kBackupAutomaticoAtivo = 'config_backup_automatico_ativo';
   static const _kBackupAutomaticoPasta = 'config_backup_automatico_pasta';
   static const _kBackupAutomaticoIntervaloMinutos =
@@ -229,7 +236,7 @@ class AppConfigRepository {
         if (v == null) return 15.0;
         return v.clamp(0.0, 100.0).toDouble();
       }(),
-      permitirVendaSemEstoque: prefs.getBool(_kPermitirVendaSemEstoque) ?? true,
+      permitirVendaSemEstoque: prefs.getBool(_kPermitirVendaSemEstoque) ?? false,
       whatsappApiVersion: prefs.getString(_kWhatsappApiVersion) ?? 'v20.0',
       whatsappPhoneNumberId: prefs.getString(_kWhatsappPhoneNumberId) ?? '',
       whatsappAccessToken: prefs.getString(_kWhatsappAccessToken) ?? '',
@@ -242,6 +249,7 @@ class AppConfigRepository {
         return p;
       }(),
       redeServidorUrl: prefs.getString(_kRedeServidorUrl) ?? '',
+      redeSyncToken: prefs.getString(_kRedeSyncToken) ?? '',
       backupAutomaticoAtivo: prefs.getBool(_kBackupAutomaticoAtivo) ?? false,
       backupAutomaticoPasta: prefs.getString(_kBackupAutomaticoPasta) ?? '',
       backupAutomaticoIntervaloMinutos: () {
@@ -334,6 +342,7 @@ class AppConfigRepository {
       config.redePortaServidor.clamp(1024, 65535),
     );
     await prefs.setString(_kRedeServidorUrl, config.redeServidorUrl.trim());
+    await prefs.setString(_kRedeSyncToken, config.redeSyncToken.trim());
     await prefs.setBool(
       _kBackupAutomaticoAtivo,
       config.backupAutomaticoAtivo,

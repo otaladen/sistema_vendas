@@ -229,7 +229,10 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     }
 
     if (out.length < 20) {
-      for (final p in widget.produtoRepository.listarTodos(somenteAtivos: true)) {
+      for (final p in widget.produtoRepository.listarPaginado(
+        limit: 50,
+        somenteAtivos: true,
+      )) {
         addId(p.id);
         if (out.length >= 50) break;
       }

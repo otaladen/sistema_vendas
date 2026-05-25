@@ -1,7 +1,10 @@
 import '../domain/auditoria_catalogo.dart';
 import '../domain/complemento_entrega_codec.dart';
+import '../domain/entrega_filtro_util.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/filtro_listagem_entregas.dart';
 import '../domain/limite_credito_helper.dart';
+import '../domain/produto_estoque_sync.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/promocao_cadastro.dart';
@@ -22,6 +25,32 @@ import 'objectbox.dart';
 import 'recebimento_fiado_repository.dart';
 import 'sync/sync_write_trigger.dart';
 import 'titulo_receber_repository.dart';
+
+/// Totais por meio de pagamento no periodo do caixa.
+class TotaisMeiosPagamentoCaixa {
+  const TotaisMeiosPagamentoCaixa({
+    required this.dinheiro,
+    required this.pix,
+    required this.debito,
+    required this.credito,
+  });
+
+  final double dinheiro;
+  final double pix;
+  final double debito;
+  final double credito;
+}
+
+/// Resumo de vendas finalizadas no periodo do caixa.
+class ResumoVendasCaixaPeriodo {
+  const ResumoVendasCaixaPeriodo({
+    required this.totalVendas,
+    required this.quantidadeVendas,
+  });
+
+  final double totalVendas;
+  final int quantidadeVendas;
+}
 
 /// Resultado de [VendaRepository.limparAbaEntregasCancelandoVendas].
 class ResultadoLimpezaAbaEntregas {
@@ -229,6 +258,73 @@ void _aplicarDadosEntregaOrcamentoNaVenda(
   venda.dataEntregaMarcada = temCarreto ? entrega.dataEntregaMarcada : null;
 }
 
+void _persistirProdutoEstoque(ObjectBox db, Produto produto) {
+  ProdutoEstoqueSync.marcarEstoqueAlterado(produto);
+  db.produtoBox.put(produto);
+}
+
+int _quantidadeReservavelOrcamentoItem(ItemVenda item) {
+  final tipo = EntregaVendaHelper.tipoEfetivoItem(item);
+  if (tipo == EntregaVendaHelper.tipoRetirada) return 0;
+  if (tipo == EntregaVendaHelper.tipoRetiradaFutura ||
+      tipo == EntregaVendaHelper.tipoEntregaLoja) {
+    return item.quantidade;
+  }
+  return 0;
+}
+
+void _reservarEstoqueItemOrcamento({
+  required ObjectBox db,
+  required ItemVenda item,
+  required bool permitirVendaSemEstoque,
+}) {
+  final q = _quantidadeReservavelOrcamentoItem(item);
+  if (q <= 0) return;
+  final produto = item.produto.target;
+  if (produto == null) {
+    throw StateError('Produto do item "${item.nomeProduto}" nao encontrado.');
+  }
+  if (!permitirVendaSemEstoque && produto.estoqueLivreParaVenda < q) {
+    throw StateError(
+      'Estoque insuficiente para reservar ${produto.nome} '
+      '(livre ${produto.estoqueLivreParaVenda}, necessario $q).',
+    );
+  }
+  produto.estoqueReservado += q;
+  if (EntregaVendaHelper.tipoEfetivoItem(item) ==
+      EntregaVendaHelper.tipoEntregaLoja) {
+    item.quantidadeNoCarreto = q;
+    db.itemVendaBox.put(item);
+  }
+  _persistirProdutoEstoque(db, produto);
+}
+
+void _liberarReservaEstoqueItemOrcamento({
+  required ObjectBox db,
+  required ItemVenda item,
+}) {
+  final q = _quantidadeReservavelOrcamentoItem(item);
+  if (q <= 0) return;
+  final produto = item.produto.target;
+  if (produto == null) return;
+  final reservadoAtual = produto.estoqueReservado;
+  produto.estoqueReservado =
+      (reservadoAtual - q).clamp(0, reservadoAtual).toInt();
+  if (EntregaVendaHelper.tipoEfetivoItem(item) ==
+          EntregaVendaHelper.tipoEntregaLoja &&
+      item.quantidadeNoCarreto > 0) {
+    item.quantidadeNoCarreto = 0;
+    db.itemVendaBox.put(item);
+  }
+  _persistirProdutoEstoque(db, produto);
+}
+
+void _liberarReservaEstoqueOrcamento(ObjectBox db, Venda venda) {
+  for (final item in venda.itens) {
+    _liberarReservaEstoqueItemOrcamento(db: db, item: item);
+  }
+}
+
 void _baixarEstoqueItemAoFinalizarOrcamento({
   required ObjectBox db,
   required ItemVenda item,
@@ -260,14 +356,32 @@ void _baixarEstoqueItemAoFinalizarOrcamento({
       );
       break;
     case EntregaVendaHelper.tipoRetiradaFutura:
-      produto.estoqueReservado += q;
-      db.produtoBox.put(produto);
+      if (produto.estoqueReservado < q) {
+        final falta = q - produto.estoqueReservado;
+        if (!permitirVendaSemEstoque &&
+            produto.estoqueLivreParaVenda < falta) {
+          throw StateError(
+            'Reserva de estoque insuficiente para ${produto.nome}.',
+          );
+        }
+        produto.estoqueReservado += falta;
+        _persistirProdutoEstoque(db, produto);
+      }
       break;
     case EntregaVendaHelper.tipoEntregaLoja:
-      produto.estoqueReservado += q;
+      if (produto.estoqueReservado < q) {
+        final falta = q - produto.estoqueReservado;
+        if (!permitirVendaSemEstoque &&
+            produto.estoqueLivreParaVenda < falta) {
+          throw StateError(
+            'Reserva de estoque insuficiente para ${produto.nome}.',
+          );
+        }
+        produto.estoqueReservado += falta;
+      }
       item.quantidadeNoCarreto = q;
-      db.produtoBox.put(produto);
       db.itemVendaBox.put(item);
+      _persistirProdutoEstoque(db, produto);
       break;
   }
 }
@@ -455,6 +569,176 @@ class VendaRepository {
     final vendas = query.find();
     query.close();
     return vendas;
+  }
+
+  /// Ultimas vendas finalizadas ativas (consulta limitada no ObjectBox).
+  List<Venda> listarUltimasVendasFinalizadas({int limit = 20}) {
+    if (limit <= 0) return const [];
+    final query = _db.vendaBox
+        .query(
+          Venda_.status
+              .equals('finalizada')
+              .and(Venda_.cancelada.equals(false)),
+        )
+        .order(Venda_.data, flags: Order.descending)
+        .build();
+    try {
+      query.limit = limit;
+      return query.find();
+    } finally {
+      query.close();
+    }
+  }
+
+  /// Data da venda finalizada mais recente (relógio do sistema / caixa).
+  DateTime? dataUltimaVendaFinalizada() {
+    final ultimas = listarUltimasVendasFinalizadas(limit: 1);
+    if (ultimas.isEmpty) return null;
+    return ultimas.first.data;
+  }
+
+  /// Segunda via: busca por numero do orcamento ou id interno da venda.
+  Venda? buscarVendaFinalizadaPorNumeroOuId(int numeroOuId) {
+    if (numeroOuId <= 0) return null;
+    final porNumero = _db.vendaBox
+        .query(
+          Venda_.status
+              .equals('finalizada')
+              .and(Venda_.cancelada.equals(false))
+              .and(Venda_.numeroOrcamento.equals(numeroOuId)),
+        )
+        .build();
+    try {
+      final v = porNumero.findFirst();
+      if (v != null) return v;
+    } finally {
+      porNumero.close();
+    }
+    final porId = obterPorId(numeroOuId);
+    if (porId == null ||
+        porId.status != 'finalizada' ||
+        porId.cancelada) {
+      return null;
+    }
+    return porId;
+  }
+
+  /// Totais por meio de pagamento no periodo (fechamento de caixa).
+  TotaisMeiosPagamentoCaixa totaisMeiosPagamentoVendasFinalizadas({
+    DateTime? inicio,
+    DateTime? fim,
+  }) {
+    var dinheiro = 0.0;
+    var pix = 0.0;
+    var debito = 0.0;
+    var credito = 0.0;
+    final query = _db.vendaBox
+        .query(_condicaoVendasFinalizadasAtivasPeriodo(inicio: inicio, fim: fim))
+        .build();
+    try {
+      for (final venda in query.find()) {
+        _acumularTotaisMeioPagamentoVenda(
+          venda,
+          onDinheiro: (v) => dinheiro += v,
+          onPix: (v) => pix += v,
+          onDebito: (v) => debito += v,
+          onCredito: (v) => credito += v,
+        );
+      }
+    } finally {
+      query.close();
+    }
+    return TotaisMeiosPagamentoCaixa(
+      dinheiro: dinheiro,
+      pix: pix,
+      debito: debito,
+      credito: credito,
+    );
+  }
+
+  /// Soma e contagem de vendas finalizadas no periodo (painel do caixa).
+  ResumoVendasCaixaPeriodo resumoVendasFinalizadasNoPeriodo({
+    DateTime? inicio,
+    DateTime? fim,
+  }) {
+    var totalVendas = 0.0;
+    var quantidadeVendas = 0;
+    final query = _db.vendaBox
+        .query(_condicaoVendasFinalizadasAtivasPeriodo(inicio: inicio, fim: fim))
+        .build();
+    try {
+      for (final venda in query.find()) {
+        totalVendas += venda.total;
+        quantidadeVendas++;
+      }
+    } finally {
+      query.close();
+    }
+    return ResumoVendasCaixaPeriodo(
+      totalVendas: totalVendas,
+      quantidadeVendas: quantidadeVendas,
+    );
+  }
+
+  Condition<Venda> _condicaoVendasFinalizadasAtivasPeriodo({
+    DateTime? inicio,
+    DateTime? fim,
+  }) {
+    var c = Venda_.status
+        .equals('finalizada')
+        .and(Venda_.cancelada.equals(false));
+    if (inicio != null) {
+      c = c.and(Venda_.data.greaterOrEqualDate(inicio.toUtc()));
+    }
+    if (fim != null) {
+      c = c.and(Venda_.data.lessOrEqualDate(fim.toUtc()));
+    }
+    return c;
+  }
+
+  void _acumularTotaisMeioPagamentoVenda(
+    Venda venda, {
+    required void Function(double valor) onDinheiro,
+    required void Function(double valor) onPix,
+    required void Function(double valor) onDebito,
+    required void Function(double valor) onCredito,
+  }) {
+    if (venda.formaPagamento == 'misto' &&
+        venda.pagamentosJson.trim().isNotEmpty) {
+      for (final l in PagamentoOrcamentoCodec.decode(venda.pagamentosJson)) {
+        switch (l.meio) {
+          case 'pix':
+            onPix(l.valor);
+            break;
+          case 'cartao_debito':
+            onDebito(l.valor);
+            break;
+          case 'cartao_credito':
+            onCredito(l.valor);
+            break;
+          case 'dinheiro':
+            onDinheiro(l.valor);
+            break;
+          default:
+            break;
+        }
+      }
+      return;
+    }
+    switch (venda.formaPagamento) {
+      case 'pix':
+        onPix(venda.total);
+        break;
+      case 'cartao_debito':
+        onDebito(venda.total);
+        break;
+      case 'cartao_credito':
+        onCredito(venda.total);
+        break;
+      case 'dinheiro':
+      default:
+        onDinheiro(venda.total);
+    }
   }
 
   /// Vendas finalizadas (ativas ou canceladas) vinculadas ao vendedor.
@@ -834,9 +1118,7 @@ class VendaRepository {
     if (cliente.limiteCredito <= 0) {
       return ValidacaoLimiteCredito.semLimiteConfigurado();
     }
-    // Somente fiado ja finalizado no caixa (titulos). Orcamentos abertos
-    // nao entram no saldo ate finalizar — evita duplicar com orcamento pendente.
-    final saldo = saldoFiadoEmAbertoCliente(
+    final saldo = exposicaoFiadoCliente(
       clienteId,
       ignorarVendaId: ignorarVendaId,
     );
@@ -862,7 +1144,8 @@ class VendaRepository {
       nomeCliente: cliente.nomeRazao,
       mensagem:
           'Limite de credito excedido para ${cliente.nomeRazao}. '
-          'Fiado em aberto (vendas finalizadas): ${LimiteCreditoHelper.formatarMoedaBr(saldo)}. '
+          'Exposicao fiado (titulos + orcamentos pendentes): '
+          '${LimiteCreditoHelper.formatarMoedaBr(saldo)}. '
           'Disponivel para novo fiado: ${LimiteCreditoHelper.formatarMoedaBr(disponivel)}. '
           'Fiado desta operacao: ${LimiteCreditoHelper.formatarMoedaBr(valorFiadoOperacao)}'
           '${excedeDisponivel > 0.02 ? ' (excede o disponivel em ${LimiteCreditoHelper.formatarMoedaBr(excedeDisponivel)})' : ''}. '
@@ -1118,6 +1401,7 @@ class VendaRepository {
     int? clienteId,
     int? vendedorId,
     double descontoEmReais = 0,
+    bool permitirVendaSemEstoque = false,
   }) {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
@@ -1194,12 +1478,21 @@ class VendaRepository {
         valorFiadoOperacao: LimiteCreditoHelper.valorFiadoNaVenda(venda),
       );
       _aplicarPlanoFiadoNoOrcamento(venda, planoFiado: pagamento.planoFiado);
+      _exigirLimiteCredito(
+        clienteId: clienteId,
+        valorFiadoOperacao: LimiteCreditoHelper.valorFiadoNaVenda(venda),
+      );
       final vendaId = _db.vendaBox.put(venda);
       venda.id = vendaId;
 
       for (final item in itens) {
         item.venda.target = venda;
         _db.itemVendaBox.put(item);
+        _reservarEstoqueItemOrcamento(
+          db: _db,
+          item: item,
+          permitirVendaSemEstoque: permitirVendaSemEstoque,
+        );
       }
 
       return vendaId;
@@ -1568,6 +1861,7 @@ class VendaRepository {
     int? clienteId,
     int? vendedorId,
     double descontoEmReais = 0,
+    bool permitirVendaSemEstoque = false,
   }) {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
@@ -1606,6 +1900,8 @@ class VendaRepository {
         venda.vendedor.target = vendedor;
       }
 
+      _liberarReservaEstoqueOrcamento(_db, venda);
+
       final idsAntigos = venda.itens.map((i) => i.id).toList();
       if (idsAntigos.isNotEmpty) {
         _db.itemVendaBox.removeMany(idsAntigos);
@@ -1614,6 +1910,7 @@ class VendaRepository {
 
       double total = 0;
       double custoTotal = 0;
+      final itensNovos = <ItemVenda>[];
       for (final input in itensInput) {
         final produto = _db.produtoBox.get(input.produtoId);
         if (produto == null) {
@@ -1626,6 +1923,7 @@ class VendaRepository {
         item.produto.target = produto;
         item.venda.target = venda;
         _db.itemVendaBox.put(item);
+        itensNovos.add(item);
         total += item.subtotal;
         custoTotal += item.subtotalCusto;
       }
@@ -1661,7 +1959,19 @@ class VendaRepository {
         valorFiadoOperacao: LimiteCreditoHelper.valorFiadoNaVenda(venda),
       );
       _aplicarPlanoFiadoNoOrcamento(venda, planoFiado: pagamento.planoFiado);
+      _exigirLimiteCredito(
+        clienteId: venda.cliente.targetId,
+        valorFiadoOperacao: LimiteCreditoHelper.valorFiadoNaVenda(venda),
+        ignorarVendaId: vendaId,
+      );
       _db.vendaBox.put(venda);
+      for (final item in itensNovos) {
+        _reservarEstoqueItemOrcamento(
+          db: _db,
+          item: item,
+          permitirVendaSemEstoque: permitirVendaSemEstoque,
+        );
+      }
     });
     _notificarRedeAposEscrita();
   }
@@ -1830,7 +2140,7 @@ class VendaRepository {
       // Fisico pode ja estar baixo/negativo se houve retirada na loja antes;
       // a saida do carro consome o que ainda estava reservado para o carreto.
       produto.estoqueReal -= qReserva;
-      _db.produtoBox.put(produto);
+      _persistirProdutoEstoque(_db, produto);
     }
   }
 
@@ -1852,7 +2162,7 @@ class VendaRepository {
       if (q <= 0) continue;
       produto.estoqueReal += q;
       produto.estoqueReservado += q;
-      _db.produtoBox.put(produto);
+      _persistirProdutoEstoque(_db, produto);
     }
   }
 
@@ -1957,8 +2267,9 @@ class VendaRepository {
   void atualizarQuantidadeItemOrcamento(
     int vendaId,
     int itemId,
-    int novaQuantidade,
-  ) {
+    int novaQuantidade, {
+    bool permitirVendaSemEstoque = false,
+  }) {
     if (novaQuantidade <= 0) {
       throw StateError('Quantidade deve ser maior que zero.');
     }
@@ -1974,8 +2285,14 @@ class VendaRepository {
       if (item == null) {
         throw StateError('Item $itemId nao encontrado no orcamento.');
       }
+      _liberarReservaEstoqueItemOrcamento(db: _db, item: item);
       item.quantidade = novaQuantidade;
       _db.itemVendaBox.put(item);
+      _reservarEstoqueItemOrcamento(
+        db: _db,
+        item: item,
+        permitirVendaSemEstoque: permitirVendaSemEstoque,
+      );
       _recalcularTotaisVenda(venda);
     });
     _notificarRedeAposEscrita();
@@ -1990,10 +2307,11 @@ class VendaRepository {
       if (venda.status != 'orcamento') {
         throw StateError('Somente orcamentos podem ser alterados.');
       }
-      final existeItem = venda.itens.any((i) => i.id == itemId);
-      if (!existeItem) {
+      final item = venda.itens.where((i) => i.id == itemId).firstOrNull;
+      if (item == null) {
         throw StateError('Item $itemId nao encontrado no orcamento.');
       }
+      _liberarReservaEstoqueItemOrcamento(db: _db, item: item);
       venda.itens.removeWhere((i) => i.id == itemId);
       _db.itemVendaBox.remove(itemId);
       if (venda.itens.isEmpty) {
@@ -2181,26 +2499,220 @@ class VendaRepository {
     DateTime? inicio,
     DateTime? fim,
   }) {
-    final termo = bairroTermo.trim().toLowerCase();
+    return listarEntregasFiltradas(
+      FiltroListagemEntregas(
+        statusEntrega: statusEntrega ?? 'todos',
+        bairroTermo: bairroTermo,
+        inicio: inicio,
+        fim: fim,
+      ),
+    );
+  }
+
+  /// Consulta ObjectBox (carreto/misto finalizado) + filtros em memoria.
+  List<Venda> listarEntregasFiltradas(FiltroListagemEntregas filtro) {
+    final candidatas = _consultarEntregasCarretoNoBanco(
+      statusEntrega: filtro.statusEntrega,
+      inicio: filtro.inicio,
+      fim: filtro.fim,
+    );
+    return _aplicarFiltrosEntregasEmMemoria(candidatas, filtro);
+  }
+
+  /// Pagina sobre o mesmo conjunto de [listarEntregasFiltradas] (ordenado por data desc).
+  List<Venda> listarEntregasPaginadas(
+    FiltroListagemEntregas filtro, {
+    int offset = 0,
+    int limit = 50,
+  }) {
+    if (limit <= 0) return const [];
+    final todas = listarEntregasFiltradas(filtro);
+    if (offset >= todas.length) return const [];
+    final fim = offset + limit;
+    return todas.sublist(
+      offset,
+      fim > todas.length ? todas.length : fim,
+    );
+  }
+
+  /// Lista + contadores de resumo em uma unica passagem no banco.
+  ResultadoListagemEntregas carregarListagemEntregasComResumo({
+    required FiltroListagemEntregas filtroLista,
+    required FiltroListagemEntregas filtroContagem,
+  }) {
+    final baseContagem = _consultarEntregasCarretoNoBanco(
+      statusEntrega: filtroContagem.statusEntrega,
+      inicio: filtroContagem.inicio,
+      fim: filtroContagem.fim,
+    );
+    final paraContagem =
+        _aplicarFiltrosEntregasEmMemoria(baseContagem, filtroContagem);
+    var atrasadas = 0;
+    var pendentesHoje = 0;
+    for (final v in paraContagem) {
+      if (EntregaFiltroUtil.ehAtrasada(v)) atrasadas++;
+      if (EntregaFiltroUtil.ehAgendaHoje(v)) pendentesHoje++;
+    }
+
+    final candidatasLista = _consultarEntregasCarretoNoBanco(
+      statusEntrega: filtroLista.statusEntrega,
+      inicio: filtroLista.inicio,
+      fim: filtroLista.fim,
+    );
+    final lista = _aplicarFiltrosEntregasEmMemoria(candidatasLista, filtroLista);
+    lista.sort(_ordenarEntregasPorPrioridadeEData);
+
+    return ResultadoListagemEntregas(
+      entregas: lista,
+      atrasadas: atrasadas,
+      pendentesHoje: pendentesHoje,
+    );
+  }
+
+  List<Venda> _consultarEntregasCarretoNoBanco({
+    required String statusEntrega,
+    DateTime? inicio,
+    DateTime? fim,
+  }) {
+    var cond = Venda_.status
+        .equals('finalizada')
+        .and(Venda_.cancelada.equals(false))
+        .and(
+          Venda_.tipoEntrega.equals(EntregaVendaHelper.tipoEntregaLoja).or(
+            Venda_.tipoEntrega.equals(EntregaVendaHelper.tipoMisto),
+          ),
+        );
+    if (statusEntrega != 'todos') {
+      cond = cond.and(Venda_.statusEntrega.equals(statusEntrega));
+    }
     final inicioUtc = inicio?.toUtc();
     final fimUtc = fim?.toUtc();
-    return listarTodas().where((venda) {
-      if (venda.cancelada || venda.status != 'finalizada') return false;
-      if (!EntregaVendaHelper.vendaTemItensCarreto(venda)) return false;
-      if (statusEntrega != null &&
-          statusEntrega != 'todos' &&
-          venda.statusEntrega != statusEntrega) {
+    if (inicioUtc != null) {
+      cond = cond.and(Venda_.data.greaterOrEqualDate(inicioUtc));
+    }
+    if (fimUtc != null) {
+      cond = cond.and(Venda_.data.lessOrEqualDate(fimUtc));
+    }
+
+    final query = _db.vendaBox
+        .query(cond)
+        .order(Venda_.data, flags: Order.descending)
+        .build();
+    try {
+      final vendas = query.find();
+      return vendas
+          .where(EntregaVendaHelper.vendaTemItensCarreto)
+          .toList(growable: false);
+    } finally {
+      query.close();
+    }
+  }
+
+  List<Venda> _aplicarFiltrosEntregasEmMemoria(
+    List<Venda> candidatas,
+    FiltroListagemEntregas filtro,
+  ) {
+    final termo = filtro.bairroTermo.trim().toLowerCase();
+    final motorista = filtro.filtroMotorista.trim().toLowerCase();
+    final vendedor = filtro.filtroVendedor.trim().toLowerCase();
+
+    var out = candidatas.where((venda) {
+      if (!EntregaFiltroUtil.atendeFiltroDataMarcada(
+        venda,
+        filtro.filtroDataMarcada,
+      )) {
         return false;
       }
-      final dataVendaUtc = venda.data.toUtc();
-      if (inicioUtc != null && dataVendaUtc.isBefore(inicioUtc)) return false;
-      if (fimUtc != null && dataVendaUtc.isAfter(fimUtc)) return false;
       if (termo.isNotEmpty &&
           !venda.enderecoEntrega.toLowerCase().contains(termo)) {
         return false;
       }
+      if (motorista != 'todos' && motorista.isNotEmpty) {
+        final m = venda.motoristaEntrega.trim().toLowerCase();
+        if (m != motorista) return false;
+      }
+      if (vendedor != 'todos' && vendedor.isNotEmpty) {
+        final vend = venda.vendedor.target;
+        final nomeExib = vend?.apelido.trim().isNotEmpty == true
+            ? vend!.apelido.trim().toLowerCase()
+            : (vend?.nomeCompleto.trim() ?? '').toLowerCase();
+        if (nomeExib != vendedor) return false;
+      }
+      if (filtro.apenasAtrasadas && !EntregaFiltroUtil.ehAtrasada(venda)) {
+        return false;
+      }
+      if (filtro.apenasPendentesHoje &&
+          !EntregaFiltroUtil.ehAgendaHoje(venda)) {
+        return false;
+      }
       return true;
     }).toList();
+
+    out = EntregaFiltroUtil.filtrarPorNumeroNota(out, filtro.numeroNota);
+    return out;
+  }
+
+  static int _ordenarEntregasPorPrioridadeEData(Venda a, Venda b) {
+    int peso(String p) => switch (p) {
+          'urgente' => 3,
+          'agendada' => 2,
+          _ => 1,
+        };
+    final byPri = peso(b.prioridadeEntrega).compareTo(peso(a.prioridadeEntrega));
+    if (byPri != 0) return byPri;
+    return b.data.compareTo(a.data);
+  }
+
+  void _validarEstoqueAntesDespachoCarreto(Venda venda) {
+    if (!venda.carretoReservaAteSaida) return;
+    final porProduto = <int, ({int q, String nome})>{};
+    for (final item in venda.itens) {
+      final q = _quantidadeItemParaEstoqueCarreto(item);
+      if (q <= 0) continue;
+      final produto = item.produto.target;
+      final pid = produto?.id ?? item.produto.targetId;
+      if (pid <= 0) {
+        throw StateError(
+          'Item "${item.nomeProduto}" sem produto vinculado — '
+          'nao e possivel despachar.',
+        );
+      }
+      final nome = produto?.nome ?? item.nomeProduto;
+      final atual = porProduto[pid];
+      porProduto[pid] = (
+        q: (atual?.q ?? 0) + q,
+        nome: nome,
+      );
+    }
+    if (porProduto.isEmpty) return;
+
+    final falhas = <String>[];
+    for (final e in porProduto.entries) {
+      final produto = _db.produtoBox.get(e.key);
+      if (produto == null) {
+        falhas.add('Produto id ${e.key} nao encontrado.');
+        continue;
+      }
+      final q = e.value.q;
+      if (produto.estoqueReservado < q) {
+        falhas.add(
+          '${e.value.nome}: reservado ${produto.estoqueReservado}, '
+          'necessario $q para o romaneio.',
+        );
+      }
+      if (produto.estoqueReal < q) {
+        falhas.add(
+          '${e.value.nome}: fisico ${produto.estoqueReal}, '
+          'necessario $q para saida do carro.',
+        );
+      }
+    }
+    if (falhas.isNotEmpty) {
+      throw StateError(
+        'Nao foi possivel marcar "Saiu": estoque insuficiente.\n'
+        '${falhas.join('\n')}',
+      );
+    }
   }
 
   /// Cancela todas as vendas de carreto da aba Entregas e limpa conferencia/historico.
@@ -2396,6 +2908,7 @@ class VendaRepository {
           venda.status == 'finalizada' &&
           !venda.cancelada) {
         if (!saiuAntes && saiuDepois) {
+          _validarEstoqueAntesDespachoCarreto(venda);
           _baixarEstoqueCarretoAoMarcarSaida(venda);
         } else if (saiuAntes && !saiuDepois) {
           _estornarBaixaEstoqueCarretoAoDesmarcarSaida(venda);
@@ -2943,6 +3456,7 @@ class VendaRepository {
             _db.vendaBox.put(mae);
           }
         }
+        _liberarReservaEstoqueOrcamento(_db, venda);
         venda.cancelada = true;
         venda.motivoCancelamento = motivoLimpo;
         venda.canceladaPor = usuarioCancelamento;

@@ -44,6 +44,7 @@ import '../widgets/receber_fiado_panel.dart';
 import '../../services/recibo_movimento_caixa_pdf.dart';
 import '../../services/recibo_recebimento_fiado_pdf.dart';
 import 'caixa_feedback.dart';
+import 'caixa_ultimas_vendas_list.dart';
 
 class CaixaPage extends StatefulWidget {
   const CaixaPage({
@@ -102,7 +103,6 @@ class _CaixaPageState extends State<CaixaPage> {
   double? _valorRecebido;
   String _tipoDesconto = 'percentual';
   int? _itemSelecionadoId;
-  List<Cliente> _clientesAtivos = [];
   bool _caixaAberto = false;
   String _operadorCaixa = '';
   DateTime? _aberturaCaixaEm;
@@ -111,7 +111,7 @@ class _CaixaPageState extends State<CaixaPage> {
   double _totalSangrias = 0;
   double _limiteDivergenciaSemSupervisor = 20;
   bool _mostrarCampoDescontoCaixa = true;
-  bool _permitirVendaSemEstoque = true;
+  bool _permitirVendaSemEstoque = false;
   int? _mistoPreparadoParaId;
   List<PagamentoOrcamentoLinha> _mistoLinhasModelo = [];
   final List<TextEditingController> _mistoValorControllers = [];
@@ -128,7 +128,6 @@ class _CaixaPageState extends State<CaixaPage> {
   void initState() {
     super.initState();
     _mensageriaRepository = MensageriaRepository();
-    _atualizarListaClientesAtivos();
     _carregarLimiteDivergenciaCaixa();
     _carregarSessaoCaixa();
     _carregarOrcamentos();
@@ -1128,51 +1127,14 @@ class _CaixaPageState extends State<CaixaPage> {
   Map<String, double> _totaisEsperadosFechamento() {
     final abertura = _aberturaCaixaEm;
     final agora = DateTime.now();
-    var dinheiro = 0.0;
-    var pix = 0.0;
-    var debito = 0.0;
-    var credito = 0.0;
-    for (final venda in widget.vendaRepository.listarTodas()) {
-      if (venda.status != 'finalizada' || venda.cancelada) continue;
-      if (abertura != null && venda.data.isBefore(abertura)) continue;
-      if (venda.data.isAfter(agora)) continue;
-      if (venda.formaPagamento == 'misto' &&
-          venda.pagamentosJson.trim().isNotEmpty) {
-        for (final l in PagamentoOrcamentoCodec.decode(venda.pagamentosJson)) {
-          switch (l.meio) {
-            case 'pix':
-              pix += l.valor;
-              break;
-            case 'cartao_debito':
-              debito += l.valor;
-              break;
-            case 'cartao_credito':
-              credito += l.valor;
-              break;
-            case 'dinheiro':
-              dinheiro += l.valor;
-              break;
-            default:
-              break;
-          }
-        }
-        continue;
-      }
-      switch (venda.formaPagamento) {
-        case 'pix':
-          pix += venda.total;
-          break;
-        case 'cartao_debito':
-          debito += venda.total;
-          break;
-        case 'cartao_credito':
-          credito += venda.total;
-          break;
-        case 'dinheiro':
-        default:
-          dinheiro += venda.total;
-      }
-    }
+    final totais = widget.vendaRepository.totaisMeiosPagamentoVendasFinalizadas(
+      inicio: abertura,
+      fim: agora,
+    );
+    var dinheiro = totais.dinheiro;
+    var pix = totais.pix;
+    var debito = totais.debito;
+    var credito = totais.credito;
     if (abertura != null) {
       for (final rec in widget.vendaRepository.recebimentos.listarNoPeriodo(
         inicio: abertura,
@@ -1208,16 +1170,14 @@ class _CaixaPageState extends State<CaixaPage> {
   ({double totalVendas, int quantidadeVendas}) _totalVendasNoPeriodoCaixa() {
     final abertura = _aberturaCaixaEm;
     final agora = DateTime.now();
-    var totalVendas = 0.0;
-    var quantidadeVendas = 0;
-    for (final venda in widget.vendaRepository.listarTodas()) {
-      if (venda.status != 'finalizada' || venda.cancelada) continue;
-      if (abertura != null && venda.data.isBefore(abertura)) continue;
-      if (venda.data.isAfter(agora)) continue;
-      totalVendas += venda.total;
-      quantidadeVendas++;
-    }
-    return (totalVendas: totalVendas, quantidadeVendas: quantidadeVendas);
+    final resumo = widget.vendaRepository.resumoVendasFinalizadasNoPeriodo(
+      inicio: abertura,
+      fim: agora,
+    );
+    return (
+      totalVendas: resumo.totalVendas,
+      quantidadeVendas: resumo.quantidadeVendas,
+    );
   }
 
   Future<void> _abrirReceberFiado() async {
@@ -2195,14 +2155,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   DateTime? _ultimaVendaFinalizada() {
-    DateTime? ultima;
-    for (final venda in widget.vendaRepository.listarTodas()) {
-      if (venda.status != 'finalizada' || venda.cancelada) continue;
-      if (ultima == null || venda.data.isAfter(ultima)) {
-        ultima = venda.data;
-      }
-    }
-    return ultima;
+    return widget.vendaRepository.dataUltimaVendaFinalizada();
   }
 
   bool _horarioSistemaInconsistente() {
@@ -2903,30 +2856,15 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Venda? _buscarVendaFinalizadaParaSegundaVia(int numeroOuId) {
-    final todas = widget.vendaRepository.listarTodas();
-    for (final v in todas) {
-      if (v.status != 'finalizada' || v.cancelada) continue;
-      if (v.numeroOrcamento == numeroOuId) return v;
-    }
-    for (final v in todas) {
-      if (v.status != 'finalizada' || v.cancelada) continue;
-      if (v.id == numeroOuId) return v;
-    }
-    return null;
+    return widget.vendaRepository.buscarVendaFinalizadaPorNumeroOuId(numeroOuId);
   }
 
   static const int _ultimasVendasFinalizadasLimite = 20;
 
   List<Venda> _ultimasVendasFinalizadasParaCaixa() {
-    final todas = widget.vendaRepository.listarTodas();
-    final lista = todas
-        .where((v) => v.status == 'finalizada' && !v.cancelada)
-        .toList()
-      ..sort((a, b) => b.data.compareTo(a.data));
-    if (lista.length <= _ultimasVendasFinalizadasLimite) {
-      return lista;
-    }
-    return lista.sublist(0, _ultimasVendasFinalizadasLimite);
+    return widget.vendaRepository.listarUltimasVendasFinalizadas(
+      limit: _ultimasVendasFinalizadasLimite,
+    );
   }
 
   Future<void> _abrirAcoesVendaFinalizada(Venda vIn) async {
@@ -3380,6 +3318,7 @@ class _CaixaPageState extends State<CaixaPage> {
         venda.id,
         item.id,
         novaQuantidade,
+        permitirVendaSemEstoque: _permitirVendaSemEstoque,
       );
       _carregarOrcamentos();
       setState(() {
@@ -3411,16 +3350,6 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
-  void _atualizarListaClientesAtivos() {
-    _clientesAtivos = widget.clienteRepository
-        .listarTodos()
-        .where((c) => c.ativo)
-        .toList()
-      ..sort(
-        (a, b) => a.nomeRazao.toLowerCase().compareTo(b.nomeRazao.toLowerCase()),
-      );
-  }
-
   Future<int?> _abrirCadastroNovoCliente() async {
     final cliente = await Navigator.push<Cliente>(
       context,
@@ -3434,7 +3363,6 @@ class _CaixaPageState extends State<CaixaPage> {
       ),
     );
     if (!mounted || cliente == null) return null;
-    setState(_atualizarListaClientesAtivos);
     return cliente.id;
   }
 
@@ -3442,11 +3370,32 @@ class _CaixaPageState extends State<CaixaPage> {
     final venda = _selecionado;
     if (venda == null) return;
     int? clienteSelecionadoId = venda.cliente.target?.id;
+    final pesquisaClienteController = TextEditingController();
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (context) {
+        var clientesExibidos = widget.clienteRepository.listarPaginado(
+          limit: 60,
+          somenteAtivos: true,
+        );
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            void atualizarBusca(String termo) {
+              final t = termo.trim();
+              setDialogState(() {
+                clientesExibidos = t.isEmpty
+                    ? widget.clienteRepository.listarPaginado(
+                        limit: 60,
+                        somenteAtivos: true,
+                      )
+                    : widget.clienteRepository
+                        .pesquisar(t)
+                        .where((c) => c.ativo)
+                        .take(60)
+                        .toList();
+              });
+            }
+
             return AlertDialog(
               title: const Text('Vincular cliente ao orcamento'),
               content: SizedBox(
@@ -3461,6 +3410,9 @@ class _CaixaPageState extends State<CaixaPage> {
                         if (novoId == null) return;
                         setDialogState(() {
                           clienteSelecionadoId = novoId;
+                          clientesExibidos = [
+                            widget.clienteRepository.obterPorId(novoId),
+                          ].whereType<Cliente>().toList();
                         });
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -3475,33 +3427,49 @@ class _CaixaPageState extends State<CaixaPage> {
                       label: const Text('Cadastrar novo cliente'),
                     ),
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<int?>(
-                      key: ValueKey<int?>(clienteSelecionadoId),
-                      initialValue: clienteSelecionadoId,
+                    TextField(
+                      controller: pesquisaClienteController,
                       decoration: const InputDecoration(
-                        labelText: 'Cliente (opcional)',
+                        labelText: 'Buscar cliente',
+                        prefixIcon: Icon(Icons.search),
                       ),
-                      items: [
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('Sem cliente'),
-                        ),
-                        ..._clientesAtivos.map(
-                          (c) => DropdownMenuItem<int?>(
-                            value: c.id,
-                            child: Text(
-                              c.nomeRazao,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                      onChanged: atualizarBusca,
+                    ),
+                    const SizedBox(height: 8),
+                    ListTile(
+                      dense: true,
+                      selected: clienteSelecionadoId == null,
+                      leading: const Icon(Icons.person_off_outlined),
+                      title: const Text('Sem cliente'),
+                      onTap: () => setDialogState(() => clienteSelecionadoId = null),
+                    ),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 240),
+                      child: clientesExibidos.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: Text(
+                                'Nenhum cliente. Digite para buscar ou cadastre um novo.',
+                              ),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: clientesExibidos.length,
+                              itemBuilder: (context, index) {
+                                final c = clientesExibidos[index];
+                                return ListTile(
+                                  dense: true,
+                                  selected: clienteSelecionadoId == c.id,
+                                  title: Text(c.nomeRazao),
+                                  subtitle: c.documento.trim().isEmpty
+                                      ? null
+                                      : Text(c.documento),
+                                  onTap: () => setDialogState(
+                                    () => clienteSelecionadoId = c.id,
+                                  ),
+                                );
+                              },
                             ),
-                          ),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        setDialogState(() {
-                          clienteSelecionadoId = value;
-                        });
-                      },
                     ),
                   ],
                 ),
@@ -3521,6 +3489,7 @@ class _CaixaPageState extends State<CaixaPage> {
         );
       },
     );
+    pesquisaClienteController.dispose();
     if (confirmar != true) return;
     try {
       widget.vendaRepository.vincularClienteNoOrcamento(
@@ -4981,79 +4950,11 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Widget _buildListaUltimasVendasFinalizadasCaixa(BuildContext context) {
-    final lista = _ultimasVendasFinalizadasParaCaixa();
-    final dtCurto = DateFormat('dd/MM HH:mm');
-    if (lista.isEmpty) {
-      return Center(
-        child: Text(
-          'Nenhuma venda finalizada ainda.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-      );
-    }
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: ListView.separated(
-          padding: EdgeInsets.zero,
-          itemCount: lista.length,
-          separatorBuilder: (context, index) => const Divider(height: 1),
-          itemBuilder: (context, index) {
-            final v = lista[index];
-            final cliente = _clienteDaVenda(v);
-            final badge = v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '${v.id}';
-            return ListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              leading: CircleAvatar(
-                radius: 16,
-                child: Text(
-                  badge,
-                  style: const TextStyle(fontSize: 10),
-                ),
-              ),
-              title: Text(
-                'Venda ${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-              ),
-              subtitle: Text(
-                '${dtCurto.format(v.data.toLocal())} · '
-                '${cliente?.nomeRazao ?? 'Sem cliente'} · '
-                '${v.itens.length} itens',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (v.nfceEmitida)
-                    Tooltip(
-                      message: 'NFC-e emitida',
-                      child: Icon(
-                        Icons.receipt_long,
-                        size: 18,
-                        color: Colors.green.shade700,
-                      ),
-                    ),
-                  if (v.nfceEmitida) const SizedBox(width: 8),
-                  Text(
-                    _formatarMoeda(v.total),
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ],
-              ),
-              onTap: () => _abrirAcoesVendaFinalizada(v),
-            );
-          },
-        ),
-      ),
+    return CaixaUltimasVendasList(
+      vendas: _ultimasVendasFinalizadasParaCaixa(),
+      clienteDaVenda: _clienteDaVenda,
+      formatarMoeda: _formatarMoeda,
+      onVendaTap: _abrirAcoesVendaFinalizada,
     );
   }
 

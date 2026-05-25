@@ -162,7 +162,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   late final PromocaoCarrinhoService _promoCarrinho =
       PromocaoCarrinhoService(_promoRepo);
   final _usuarioRepository = UsuarioRepository();
-  List<Cliente> _clientes = [];
   List<Vendedor> _vendedoresAtivos = [];
   final List<_OrcamentoItemDraft> _carrinho = [];
 
@@ -331,7 +330,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   String _prioridadeEntregaSelecionada = 'normal';
   String _janelaEntregaSelecionada = 'nao_definida';
   DateTime? _dataEntregaMarcada;
-  bool _permitirVendaSemEstoque = true;
+  bool _permitirVendaSemEstoque = false;
   double _maxDescontoPercentualPdv = 15;
 
   /// `percentual` | `valor` — desconto sempre limitado ao configurado (% sobre subtotal).
@@ -1248,10 +1247,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   void _carregarDadosIniciais() {
     setState(() {
-      _clientes = widget.clienteRepository
-          .listarTodos()
-          .where((c) => c.ativo)
-          .toList();
       _vendedoresAtivos = widget.vendedorRepository.listarAtivos();
     });
   }
@@ -1524,7 +1519,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   Cliente? _clienteSelecionado() {
     final id = _clienteSelecionadoId;
     if (id == null) return null;
-    return _clientes.where((c) => c.id == id).firstOrNull;
+    return widget.clienteRepository.obterPorId(id);
   }
 
   List<EnderecoCliente> _enderecosClienteSelecionado() {
@@ -1811,12 +1806,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final salvo = widget.clienteRepository.obterPorId(id);
     if (salvo == null) return;
 
-    setState(() {
-      _clientes = widget.clienteRepository
-          .listarTodos()
-          .where((c) => c.ativo)
-          .toList();
-    });
     await _aplicarClientePdv(salvo);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1845,7 +1834,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       });
       return;
     }
-    final cliente = _clientes.where((c) => c.id == value).firstOrNull;
+    final cliente = widget.clienteRepository.obterPorId(value);
     if (cliente == null) return;
     final tabela = ClienteCadastro.normalizarTabelaPreco(
       cliente.tabelaPrecoPadrao,
@@ -1901,12 +1890,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     if (!mounted || clienteCriado == null) {
       return;
     }
-    setState(() {
-      _clientes = widget.clienteRepository
-          .listarTodos()
-          .where((c) => c.ativo)
-          .toList();
-    });
     await _selecionarClienteNoOrcamento(clienteCriado.id);
     _sincronizarTextoBuscaClientePdv();
     setDialogState?.call(() {});
@@ -2058,11 +2041,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   Future<void> _abrirSeletorClienteNoPdv({StateSetter? setDialogState}) async {
+    final pesquisaController = TextEditingController();
     final resultado = await showDialog<int>(
       context: context,
       builder: (dialogContext) {
-        final pesquisaController = TextEditingController();
-        var filtrados = List<Cliente>.from(_clientes);
+        var filtrados = widget.clienteRepository.listarPaginado(
+          limit: 60,
+          somenteAtivos: true,
+        );
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
@@ -2080,42 +2066,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                         prefixIcon: Icon(Icons.search),
                       ),
                       onChanged: (value) {
-                        final termo = value.trim().toLowerCase();
-                        final termoNumerico = value.replaceAll(
-                          RegExp(r'\D'),
-                          '',
-                        );
+                        final termo = value.trim();
                         setDialogState(() {
-                          if (termo.isEmpty) {
-                            filtrados = List<Cliente>.from(_clientes);
-                            return;
-                          }
-                          filtrados = _clientes.where((cliente) {
-                            final campos = [
-                              cliente.nomeRazao,
-                              cliente.nomeFantasia,
-                              cliente.documento,
-                              cliente.telefone,
-                              cliente.whatsapp,
-                              cliente.email,
-                              cliente.cidade,
-                            ].map((e) => e.toLowerCase());
-                            final matchTexto = campos.any(
-                              (campo) => campo.contains(termo),
-                            );
-                            if (matchTexto) return true;
-                            if (termoNumerico.isEmpty) return false;
-                            final camposNumericos = [
-                              cliente.documento,
-                              cliente.telefone,
-                              cliente.whatsapp,
-                              cliente.cep,
-                            ].map((e) => e.replaceAll(RegExp(r'\D'), ''));
-                            return camposNumericos.any(
-                              (campoNumerico) =>
-                                  campoNumerico.contains(termoNumerico),
-                            );
-                          }).toList();
+                          filtrados = termo.isEmpty
+                              ? widget.clienteRepository.listarPaginado(
+                                  limit: 60,
+                                  somenteAtivos: true,
+                                )
+                              : widget.clienteRepository
+                                  .pesquisar(termo)
+                                  .where((c) => c.ativo)
+                                  .take(60)
+                                  .toList();
                         });
                       },
                     ),
@@ -2183,6 +2145,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         );
       },
     );
+    pesquisaController.dispose();
 
     if (!mounted || resultado == null) {
       return;
@@ -4031,7 +3994,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       clienteId,
       ignorarVendaId: _orcamentoEmEdicaoId,
     );
-    final cliente = _clientes.where((c) => c.id == clienteId).firstOrNull;
+    final cliente = widget.clienteRepository.obterPorId(clienteId);
     final limite = cliente?.limiteCredito ?? 0;
     if (limite <= 0) return const SizedBox.shrink();
 
@@ -4313,6 +4276,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           clienteId: _clienteSelecionadoId,
           vendedorId: _vendedorSelecionadoId,
           descontoEmReais: descontoPdV,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
         );
         orcamentoId = orcamentoEdicaoId;
       } else {
@@ -4323,6 +4287,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           clienteId: _clienteSelecionadoId,
           vendedorId: _vendedorSelecionadoId,
           descontoEmReais: descontoPdV,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
         );
       }
       await LanSyncScheduler.solicitarSyncImediato();
@@ -4429,10 +4394,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     return t;
   }
 
-  Produto? _resolverProdutoItemOrcamento(
-    ItemVenda item,
-    List<Produto> todosProdutos,
-  ) {
+  Produto? _resolverProdutoItemOrcamento(ItemVenda item) {
     final porTarget = item.produto.target;
     if (porTarget != null) {
       return porTarget;
@@ -4447,7 +4409,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       return null;
     }
 
-    final exato = todosProdutos.where((p) {
+    final candidatos = widget.produtoRepository.pesquisar(
+      item.nomeProduto,
+      limite: 12,
+      somenteAtivos: false,
+      excluirProdutosInternos: false,
+    );
+    final exato = candidatos.where((p) {
       final nome = _normalizarTextoComparacao(p.nome);
       return nome == nomeItem;
     }).firstOrNull;
@@ -4455,11 +4423,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       return exato;
     }
 
-    final aproximado = todosProdutos.where((p) {
+    return candidatos.where((p) {
       final nome = _normalizarTextoComparacao(p.nome);
       return nome.contains(nomeItem) || nomeItem.contains(nome);
     }).firstOrNull;
-    return aproximado;
   }
 
   Future<void> _abrirLeitorOrcamento() async {
@@ -4569,9 +4536,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         widget.vendaRepository.obterPorId(selecionado.id) ?? selecionado;
     final drafts = <_OrcamentoItemDraft>[];
     final nomesItensSemProduto = <String>[];
-    final todosProdutos = widget.produtoRepository.listarTodos();
     for (final item in orcamentoCompleto.itens) {
-      final produto = _resolverProdutoItemOrcamento(item, todosProdutos);
+      final produto = _resolverProdutoItemOrcamento(item);
       if (produto == null) {
         nomesItensSemProduto.add(item.nomeProduto);
         continue;
@@ -4615,9 +4581,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final vendedorIdCarregado = orcamentoCompleto.vendedor.targetId == 0
         ? null
         : orcamentoCompleto.vendedor.targetId;
+    final clienteCarregado = clienteIdCarregado == null
+        ? null
+        : widget.clienteRepository.obterPorId(clienteIdCarregado);
     final clienteIdValido =
-        clienteIdCarregado != null &&
-            _clientes.any((c) => c.id == clienteIdCarregado)
+        clienteCarregado != null && clienteCarregado.ativo
         ? clienteIdCarregado
         : null;
     final vendedorIdValido =
@@ -4643,9 +4611,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     };
     var indiceEndereco = 0;
     if (clienteIdValido != null) {
-      final cliente = _clientes
-          .where((c) => c.id == clienteIdValido)
-          .firstOrNull;
+      final cliente = widget.clienteRepository.obterPorId(clienteIdValido);
       final enderecos = cliente?.listarEnderecos() ?? const <EnderecoCliente>[];
       if (enderecos.isNotEmpty) {
         final enderecoAtual = orcamentoCompleto.enderecoEntrega.trim();

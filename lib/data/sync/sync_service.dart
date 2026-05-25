@@ -10,6 +10,7 @@ import '../../model/item_venda.dart';
 import 'sync_api_client.dart';
 import 'sync_cursor_storage.dart';
 import 'sync_full_sync.dart';
+import 'sync_log.dart';
 import 'sync_refresh_hub.dart';
 import 'sync_write_trigger.dart';
 
@@ -54,7 +55,10 @@ class SyncService {
       return null;
     }
 
-    final client = SyncApiClient(baseUrl: config.redeServidorUrl);
+    final client = SyncApiClient(
+      baseUrl: config.redeServidorUrl,
+      syncToken: config.redeSyncToken,
+    );
     if (!client.configurado) {
       return 'URL do servidor vazia.';
     }
@@ -95,6 +99,7 @@ class SyncService {
 
       final mutations = await _fullSync.montarMutacoes();
       if (mutations.isEmpty) {
+        SyncLog.registrarSucesso();
         return null;
       }
 
@@ -123,9 +128,13 @@ class SyncService {
         }
       }
 
+      SyncLog.registrarSucesso();
       return null;
     } catch (e, st) {
-      return '${e.toString()}\n${st.toString().split('\n').take(3).join('\n')}';
+      final msg =
+          '${e.toString()}\n${st.toString().split('\n').take(3).join('\n')}';
+      SyncLog.registrarFalha(msg);
+      return msg;
     }
   }
 

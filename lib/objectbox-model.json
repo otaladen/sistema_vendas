@@ -90,7 +90,7 @@
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "40:6382696563161980443",
+      "lastPropertyId": "41:1735947808757991430",
       "name": "Produto",
       "properties": [
         {
@@ -296,6 +296,11 @@
           "id": "40:6382696563161980443",
           "name": "apelidosBusca",
           "type": 9
+        },
+        {
+          "id": "41:1735947808757991430",
+          "name": "estoqueVersao",
+          "type": 6
         }
       ],
       "relations": []

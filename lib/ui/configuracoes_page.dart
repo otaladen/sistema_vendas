@@ -76,7 +76,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   String _backupAutomaticoPasta = '';
   int _backupAutomaticoIntervaloMinutos = 1440;
   int _ultimoBackupAutomaticoMs = 0;
-  bool _permitirVendaSemEstoque = true;
+  bool _permitirVendaSemEstoque = false;
   bool _mostrarCampoDescontoCaixa = true;
   List<MensagemTemplate> _templatesMensagem = [];
   int _filaPendente = 0;
@@ -1492,7 +1492,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         },
                         title: const Text('Permitir venda sem estoque'),
                         subtitle: const Text(
-                          'Quando ativo, o sistema permite finalizar venda mesmo sem saldo e o estoque pode ficar negativo.',
+                          'Desativado por padrao (recomendado). Quando ativo, permite '
+                          'orcamento e finalizacao sem saldo; o estoque pode ficar negativo.',
                         ),
                       ),
                       const SizedBox(height: 12),

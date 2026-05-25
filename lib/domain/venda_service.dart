@@ -88,6 +88,7 @@ class VendaService {
     int? clienteId,
     int? vendedorId,
     double descontoEmReais = 0,
+    bool permitirVendaSemEstoque = false,
   }) {
     return _vendaRepository.registrarOrcamento(
       itens,
@@ -98,6 +99,7 @@ class VendaService {
       clienteId: clienteId,
       vendedorId: vendedorId,
       descontoEmReais: descontoEmReais,
+      permitirVendaSemEstoque: permitirVendaSemEstoque,
     );
   }
 

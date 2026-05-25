@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,17 +8,35 @@ import '../model/caixa_sessao.dart';
 import 'sync/sync_write_trigger.dart';
 
 /// Persistencia local + pacote para sincronizacao LAN de sessoes de caixa.
+///
+/// Escritas serializadas para evitar lost update em [SharedPreferences].
 class CaixaSessaoRepository {
   static const _kTerminalId = 'caixa_terminal_id_v1';
   static const _kSessoesRede = 'caixa_sessoes_rede_v1';
   static const _kLegadoSessao = 'caixa_sessao_atual_v1';
 
-  /// Identificador estavel deste equipamento (balcao).
+  static Future<void> _mutex = Future<void>.value();
+
+  static Future<T> _serializar<T>(Future<T> Function() acao) async {
+    final anterior = _mutex;
+    final liberado = Completer<void>();
+    _mutex = liberado.future;
+    await anterior;
+    try {
+      return await acao();
+    } finally {
+      liberado.complete();
+    }
+  }
+
   Future<String> obterTerminalId() async {
+    return _serializar(_obterTerminalIdInterno);
+  }
+
+  Future<String> _obterTerminalIdInterno() async {
     final prefs = await SharedPreferences.getInstance();
     var id = prefs.getString(_kTerminalId)?.trim() ?? '';
     if (id.isNotEmpty) return id;
-    // Evita Platform.localHostname no Windows (pode bloquear por varios segundos).
     var host = '';
     try {
       host = Platform.localHostname.trim();
@@ -32,6 +51,12 @@ class CaixaSessaoRepository {
   }
 
   Future<Map<String, CaixaSessao>> listarTodasSessoes({bool migrarLegado = true}) async {
+    return _serializar(() => _listarTodasSessoesInterno(migrarLegado: migrarLegado));
+  }
+
+  Future<Map<String, CaixaSessao>> _listarTodasSessoesInterno({
+    bool migrarLegado = true,
+  }) async {
     if (migrarLegado) {
       await _migrarLegadoSeNecessario();
     }
@@ -64,35 +89,42 @@ class CaixaSessaoRepository {
   }
 
   Future<void> salvarSessaoLocal(CaixaSessao sessao, {bool propagarRede = true}) async {
-    final todas = await listarTodasSessoes(migrarLegado: false);
-    final atualizado = sessao.copyWith(
-      terminalId: sessao.terminalId.isNotEmpty ? sessao.terminalId : await obterTerminalId(),
-      atualizadoEm: DateTime.now(),
-    );
-    todas[atualizado.terminalId] = atualizado;
-    await _persistirMapa(todas);
-    if (propagarRede) {
-      notificarAlteracaoParaRede();
-    }
+    await _serializar(() async {
+      final todas = await _listarTodasSessoesInterno(migrarLegado: false);
+      final terminalId = sessao.terminalId.isNotEmpty
+          ? sessao.terminalId
+          : await _obterTerminalIdInterno();
+      final atualizado = sessao.copyWith(
+        terminalId: terminalId,
+        atualizadoEm: DateTime.now(),
+      );
+      todas[terminalId] = atualizado;
+      await _persistirMapa(todas);
+      if (propagarRede) {
+        notificarAlteracaoParaRede();
+      }
+    });
   }
 
   Future<void> aplicarPacoteRede(Map<String, dynamic> payload) async {
-    final remotas = _mapaDePayload(payload);
-    final locais = await listarTodasSessoes(migrarLegado: false);
-    for (final entry in remotas.entries) {
-      final remota = entry.value;
-      final local = locais[entry.key];
-      if (local == null) {
-        locais[entry.key] = remota;
-        continue;
+    await _serializar(() async {
+      final remotas = _mapaDePayload(payload);
+      final locais = await _listarTodasSessoesInterno(migrarLegado: false);
+      for (final entry in remotas.entries) {
+        final remota = entry.value;
+        final local = locais[entry.key];
+        if (local == null) {
+          locais[entry.key] = remota;
+          continue;
+        }
+        final tLocal = local.atualizadoEm?.millisecondsSinceEpoch ?? 0;
+        final tRemota = remota.atualizadoEm?.millisecondsSinceEpoch ?? 0;
+        if (tRemota >= tLocal) {
+          locais[entry.key] = remota;
+        }
       }
-      final tLocal = local.atualizadoEm?.millisecondsSinceEpoch ?? 0;
-      final tRemota = remota.atualizadoEm?.millisecondsSinceEpoch ?? 0;
-      if (tRemota >= tLocal) {
-        locais[entry.key] = remota;
-      }
-    }
-    await _persistirMapa(locais);
+      await _persistirMapa(locais);
+    });
   }
 
   static Map<String, dynamic> pacoteParaSync(Map<String, CaixaSessao> mapa) {
@@ -133,7 +165,7 @@ class CaixaSessaoRepository {
     }
     try {
       final map = jsonDecode(legado) as Map<String, dynamic>;
-      final terminalId = await obterTerminalId();
+      final terminalId = await _obterTerminalIdInterno();
       final sessao = CaixaSessao(
         terminalId: terminalId,
         aberto: map['aberto'] == true,
@@ -144,10 +176,8 @@ class CaixaSessaoRepository {
         sangrias: ((map['sangrias'] as num?) ?? 0).toDouble(),
         atualizadoEm: DateTime.now(),
       );
-      // Grava direto: salvarSessaoLocal -> listarTodasSessoes reentrava na migracao.
       await prefs.remove(_kLegadoSessao);
-      final mapa = {terminalId: sessao};
-      await _persistirMapa(mapa);
+      await _persistirMapa({terminalId: sessao});
     } catch (_) {
       await prefs.remove(_kLegadoSessao);
     }

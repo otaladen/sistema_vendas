@@ -89,7 +89,10 @@ class LanSyncServerManager {
   }
 
   /// Inicia o processo do servidor (Windows). Retorna mensagem de erro ou null se OK.
-  static Future<String?> iniciarServidor({int porta = portaPadrao}) async {
+  static Future<String?> iniciarServidor({
+    int porta = portaPadrao,
+    String syncToken = '',
+  }) async {
     if (!Platform.isWindows) {
       return 'Iniciar servidor pelo app so esta disponivel no Windows.';
     }
@@ -105,11 +108,17 @@ class LanSyncServerManager {
     }
 
     try {
+      final env = Map<String, String>.from(Platform.environment);
+      final token = syncToken.trim();
+      if (token.isNotEmpty) {
+        env['SYNC_TOKEN'] = token;
+      }
       final process = await Process.start(
         exe,
         ['$porta'],
         mode: ProcessStartMode.detached,
         workingDirectory: File(exe).parent.path,
+        environment: env,
       );
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_kPid, process.pid);
