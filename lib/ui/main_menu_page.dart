@@ -153,6 +153,10 @@ class _MainMenuPageState extends State<MainMenuPage> {
                   MaterialPageRoute(
                     builder: (_) => NotasFiscaisPage(
                       produtoRepository: widget.produtoRepository,
+                      vendaRepository: widget.vendaRepository,
+                      clienteRepository: widget.clienteRepository,
+                      appConfigRepository: widget.appConfigRepository,
+                      usuarioLogado: widget.usuarioLogado,
                     ),
                   ),
                 );

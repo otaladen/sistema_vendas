@@ -27,7 +27,7 @@ class ContaPagar {
     this.valorPago,
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// Chave da NF-e (44 dígitos); nulo quando conta manual.

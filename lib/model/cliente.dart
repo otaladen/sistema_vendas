@@ -17,6 +17,7 @@ class EnderecoCliente {
     this.cidade = '',
     this.uf = '',
     this.referencia = '',
+    this.codigoIbge = '',
   });
 
   /// principal | obra | entrega | cobranca
@@ -31,6 +32,9 @@ class EnderecoCliente {
   final String cidade;
   final String uf;
   final String referencia;
+
+  /// Codigo IBGE do municipio (7 digitos) para NF-e.
+  final String codigoIbge;
 
   factory EnderecoCliente.fromMap(Map<String, dynamic> map) {
     return EnderecoCliente(
@@ -47,6 +51,10 @@ class EnderecoCliente {
       cidade: (map['cidade'] ?? '').toString(),
       uf: (map['uf'] ?? '').toString(),
       referencia: (map['referencia'] ?? '').toString(),
+      codigoIbge: (map['codigoIbge'] ?? '').toString().replaceAll(
+        RegExp(r'\D'),
+        '',
+      ),
     );
   }
 
@@ -63,6 +71,7 @@ class EnderecoCliente {
       'cidade': cidade,
       'uf': uf,
       'referencia': referencia,
+      if (codigoIbge.trim().isNotEmpty) 'codigoIbge': codigoIbge,
     };
   }
 
@@ -150,7 +159,7 @@ class Cliente {
   })  : criadoEm = criadoEm ?? DateTime.now(),
         atualizadoEm = atualizadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   String tipoPessoa; // fisica | juridica
@@ -348,6 +357,7 @@ class Cliente {
           cidade: e.cidade.trim(),
           uf: e.uf.trim().toUpperCase(),
           referencia: e.referencia.trim(),
+          codigoIbge: e.codigoIbge.trim(),
         ),
       );
     }
@@ -370,6 +380,7 @@ class Cliente {
           cidade: e.cidade,
           uf: e.uf,
           referencia: e.referencia,
+          codigoIbge: e.codigoIbge,
         );
       }
     }

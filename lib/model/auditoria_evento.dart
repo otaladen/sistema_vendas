@@ -15,7 +15,7 @@ class AuditoriaEvento {
     DateTime? dataHora,
   }) : dataHora = dataHora ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   @Property(type: PropertyType.dateUtc)

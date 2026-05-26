@@ -7,7 +7,19 @@
 /// Consultas indexadas preferidas: [pesquisar], [listarPaginado], [listarUltimasVendasFinalizadas],
 /// [listarEntregasPaginadas], etc.
 ///
-/// Excecoes documentadas com `// policy-allow: motivo` no arquivo.
+/// Alteracoes de [Produto.estoqueReal] / [Produto.estoqueReservado] devem passar por
+/// [GerenciadorEstoqueService] (entradas NF-e, vendas, ajustes, reservas).
+///
+/// Escritas em [produtoBox.put] permitidas fora do gerenciador:
+/// - [GerenciadorEstoqueService.persistirProduto] / [persistirProdutoMetadados]
+/// - [VendaRepository] — apenas [Produto.ultimaVendaEm] (metadado)
+/// - [ProdutoRepository.salvar] — orquestra ajuste via gerenciador + metadados
+/// - [ProdutoRepository] migracao/normalizacao legada, custo medio, cadastro sem estoque
+/// - [NfeEntradaRepository] — custo medio e cadastro (estoque via gerenciador)
+/// - [ReajustePrecoRepository], [ComprasPreditivasService] — precos e metricas, sem fisico
+/// - [sync_full_sync.dart] — merge LAN com [ProdutoEstoqueSync]
+///
+/// Excecoes pontuais com `// policy-allow: motivo` no arquivo.
 library;
 
 /// Caminhos de UI considerados operacionais (monitorados por teste).

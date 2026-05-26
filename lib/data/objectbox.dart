@@ -34,6 +34,42 @@ import '../objectbox.g.dart';
 
 class ObjectBox {
   ObjectBox._create(this.store) {
+    _inicializarBoxes();
+  }
+
+  late Store store;
+  late Box<Produto> produtoBox;
+  late Box<Cliente> clienteBox;
+  late Box<Venda> vendaBox;
+  late Box<ItemVenda> itemVendaBox;
+  late Box<RegistroDevolucao> registroDevolucaoBox;
+  late Box<LinhaDevolucaoEntrada> linhaDevolucaoEntradaBox;
+  late Box<LinhaTrocaSaida> linhaTrocaSaidaBox;
+  late Box<HistoricoEntrega> historicoEntregaBox;
+  late Box<Motorista> motoristaBox;
+  late Box<Vendedor> vendedorBox;
+  late Box<Funcionario> funcionarioBox;
+  late Box<LancamentoFuncionario> lancamentoFuncionarioBox;
+  late Box<FornecedorNfe> fornecedorNfeBox;
+  late Box<VinculoFornecedorProduto> vinculoFornecedorProdutoBox;
+  late Box<HistoricoEntrada> historicoEntradaBox;
+  late Box<NfeImportadaRegistro> nfeImportadaRegistroBox;
+  late Box<KitOrcamento> kitOrcamentoBox;
+  late Box<KitOrcamentoItem> kitOrcamentoItemBox;
+  late Box<Promocao> promocaoBox;
+  late Box<PromocaoItem> promocaoItemBox;
+  late Box<PromocaoComboItem> promocaoComboItemBox;
+  late Box<ContaPagar> contaPagarBox;
+  late Box<TituloReceber> tituloReceberBox;
+  late Box<RecebimentoFiado> recebimentoFiadoBox;
+  late Box<ReajustePreco> reajustePrecoBox;
+  late Box<ReajustePrecoItem> reajustePrecoItemBox;
+  late Box<AuditoriaEvento> auditoriaEventoBox;
+  late Box<ConferenciaCargaRomaneio> conferenciaCargaRomaneioBox;
+  late Directory productImagesDir;
+  late String storeDirectoryPath;
+
+  void _inicializarBoxes() {
     produtoBox = Box<Produto>(store);
     clienteBox = Box<Cliente>(store);
     vendaBox = Box<Venda>(store);
@@ -64,37 +100,19 @@ class ObjectBox {
     conferenciaCargaRomaneioBox = Box<ConferenciaCargaRomaneio>(store);
   }
 
-  late final Store store;
-  late final Box<Produto> produtoBox;
-  late final Box<Cliente> clienteBox;
-  late final Box<Venda> vendaBox;
-  late final Box<ItemVenda> itemVendaBox;
-  late final Box<RegistroDevolucao> registroDevolucaoBox;
-  late final Box<LinhaDevolucaoEntrada> linhaDevolucaoEntradaBox;
-  late final Box<LinhaTrocaSaida> linhaTrocaSaidaBox;
-  late final Box<HistoricoEntrega> historicoEntregaBox;
-  late final Box<Motorista> motoristaBox;
-  late final Box<Vendedor> vendedorBox;
-  late final Box<Funcionario> funcionarioBox;
-  late final Box<LancamentoFuncionario> lancamentoFuncionarioBox;
-  late final Box<FornecedorNfe> fornecedorNfeBox;
-  late final Box<VinculoFornecedorProduto> vinculoFornecedorProdutoBox;
-  late final Box<HistoricoEntrada> historicoEntradaBox;
-  late final Box<NfeImportadaRegistro> nfeImportadaRegistroBox;
-  late final Box<KitOrcamento> kitOrcamentoBox;
-  late final Box<KitOrcamentoItem> kitOrcamentoItemBox;
-  late final Box<Promocao> promocaoBox;
-  late final Box<PromocaoItem> promocaoItemBox;
-  late final Box<PromocaoComboItem> promocaoComboItemBox;
-  late final Box<ContaPagar> contaPagarBox;
-  late final Box<TituloReceber> tituloReceberBox;
-  late final Box<RecebimentoFiado> recebimentoFiadoBox;
-  late final Box<ReajustePreco> reajustePrecoBox;
-  late final Box<ReajustePrecoItem> reajustePrecoItemBox;
-  late final Box<AuditoriaEvento> auditoriaEventoBox;
-  late final Box<ConferenciaCargaRomaneio> conferenciaCargaRomaneioBox;
-  late final Directory productImagesDir;
-  late final String storeDirectoryPath;
+  /// Fecha o banco para copia consistente de `data.mdb` (backup/restauracao).
+  Future<void> fecharParaCopiaDeArquivos() async {
+    if (!store.isClosed()) {
+      store.close();
+    }
+  }
+
+  /// Reabre o banco apos backup manual sem reiniciar o app.
+  Future<void> reabrirAposCopiaDeArquivos() async {
+    if (!store.isClosed()) return;
+    store = await openStore(directory: storeDirectoryPath);
+    _inicializarBoxes();
+  }
 
   static Future<ObjectBox> create() async {
     final baseDir = Platform.isWindows

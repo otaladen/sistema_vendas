@@ -21,7 +21,7 @@ class ItemVenda {
     this.promocaoNomeSnapshot = '',
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   String nomeProduto;

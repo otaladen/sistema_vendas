@@ -31,6 +31,8 @@ class UsuarioAuditoriaDiff {
     'podeRelatoriosComissao': 'Relatorio comissao',
     'podeRelatoriosFiado': 'Relatorio fiados',
     'podeRelatoriosLogSistema': 'Log do sistema',
+    'podeEmitirNfeSaida': 'Emitir NF-e saida',
+    'podeCancelarNfeSaida': 'Cancelar NF-e saida',
     'descontoMaximoPercentualPdv': 'Teto desconto PDV %',
   };
 

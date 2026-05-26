@@ -10,7 +10,7 @@ class Motorista {
     DateTime? criadoEm,
   }) : criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   String nome;

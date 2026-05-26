@@ -9,6 +9,7 @@ import '../vendedor_repository.dart';
 import '../../model/item_venda.dart';
 import 'sync_api_client.dart';
 import 'sync_cursor_storage.dart';
+import 'sync_apply_order.dart';
 import 'sync_full_sync.dart';
 import 'sync_log.dart';
 import 'sync_refresh_hub.dart';
@@ -74,7 +75,9 @@ class SyncService {
       if (changes is List && changes.isNotEmpty) {
         enterSyncApplySilencioso();
         try {
-          for (final raw in changes) {
+          final fila = List<dynamic>.from(changes);
+          SyncApplyOrder.ordenarAlteracoes(fila);
+          for (final raw in fila) {
             if (raw is Map<String, dynamic>) {
               await _fullSync.aplicarAlteracao(raw);
             } else if (raw is Map) {

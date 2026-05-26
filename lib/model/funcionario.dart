@@ -43,7 +43,7 @@ class Funcionario {
        dataAdmissao = dataAdmissao ?? DateTime.now(),
        criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   String codigoInterno;

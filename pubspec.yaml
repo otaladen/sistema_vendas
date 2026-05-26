@@ -55,6 +55,7 @@ dependencies:
   url_launcher: ^6.3.2
   google_generative_ai: ^0.4.7
   crypto: ^3.0.6
+  archive: ^4.0.7
 
 dev_dependencies:
   flutter_test:

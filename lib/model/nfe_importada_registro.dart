@@ -14,7 +14,7 @@ class NfeImportadaRegistro {
     this.quantidadeItens = 0,
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// Chave de acesso da NF-e (44 digitos), unica.

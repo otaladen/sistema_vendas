@@ -55,7 +55,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 2844102084704375443),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 2558730134591822875),
@@ -148,14 +148,14 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(2, 12069401530715107),
     name: 'Produto',
-    lastPropertyId: const obx_int.IdUid(41, 1735947808757991430),
+    lastPropertyId: const obx_int.IdUid(44, 656435191199984921),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(1, 6845762842088825305),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 8766242792253639911),
@@ -395,6 +395,24 @@ final _entities = <obx_int.ModelEntity>[
         type: 6,
         flags: 0,
       ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(42, 7040760717734096316),
+        name: 'icmsOrigem',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(43, 1497108408252705900),
+        name: 'icmsSituacaoTributaria',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(44, 656435191199984921),
+        name: 'pisCofinsSituacaoTributaria',
+        type: 9,
+        flags: 0,
+      ),
     ],
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[
@@ -408,14 +426,14 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(44, 8986871678185575789),
+    lastPropertyId: const obx_int.IdUid(59, 4422169989691478015),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(1, 3054998435758771479),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 9148258983918137274),
@@ -675,6 +693,96 @@ final _entities = <obx_int.ModelEntity>[
         type: 9,
         flags: 0,
       ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(45, 4517097519644439141),
+        name: 'estoqueBaixadoCupom',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(46, 3952658258266609299),
+        name: 'cupomNaoFiscalEmitidoEm',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(47, 3886762088961953701),
+        name: 'nfceUrlXml',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(48, 8910491912435990611),
+        name: 'nfceStatusFocus',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(49, 7766039942686888077),
+        name: 'nfceUrlXmlCancelamento',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(50, 7049101155785921210),
+        name: 'nfeReferenciaFocus',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(51, 2716433305853269487),
+        name: 'nfeChaveAcesso',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(52, 6665459004286281584),
+        name: 'nfeNumero',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(53, 8352095810714034298),
+        name: 'nfeSerie',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(54, 4336446988243815361),
+        name: 'nfeProtocolo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(55, 3459744761776286447),
+        name: 'nfeUrlDanfe',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(56, 1747231419853714362),
+        name: 'nfeUrlXml',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(57, 7626093994612717717),
+        name: 'nfeStatusFocus',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(58, 7185032283179276768),
+        name: 'nfeUrlXmlCancelamento',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(59, 4422169989691478015),
+        name: 'nfeEmitidaEm',
+        type: 10,
+        flags: 0,
+      ),
     ],
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[
@@ -700,7 +808,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 890861945693633328),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 6553881396131161790),
@@ -955,7 +1063,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 8181750620432306485),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 110391731621943108),
@@ -1037,7 +1145,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 1808003882336436767),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 900293050554019496),
@@ -1086,7 +1194,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 8421766027808062743),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 7943140216547078444),
@@ -1312,7 +1420,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 9154550035482299243),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 7110726591828941183),
@@ -1352,7 +1460,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 9184417973143937701),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 1419546889472551924),
@@ -1410,7 +1518,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 3544467081093683947),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 4804843447993656533),
@@ -1474,7 +1582,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 5591194229489112244),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 3453749993916784300),
@@ -1540,7 +1648,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 1134374851525712080),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 5370081357738054084),
@@ -1575,7 +1683,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 3108530581055948697),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 4681869373384331077),
@@ -1622,7 +1730,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 4265842071031702314),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 4901670479881182684),
@@ -1707,7 +1815,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 8488433745786611591),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 3900012154129650384),
@@ -1766,7 +1874,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 5276412564478228526),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 5445766289043013544),
@@ -1813,7 +1921,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 8887029425978519169),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 1062784189422608548),
@@ -1859,7 +1967,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 1786356506869194131),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 1290947324146922611),
@@ -1938,7 +2046,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 2549234501368440798),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 2536030793733652060),
@@ -1999,7 +2107,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 996878043985931258),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 650631902406352781),
@@ -2060,7 +2168,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 260569806563522537),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 439035966504430654),
@@ -2142,7 +2250,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 4152730998524830938),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 3002918360634746208),
@@ -2272,7 +2380,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 966018518159822602),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 7432499412022598544),
@@ -2333,7 +2441,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 4026804578538288033),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 6849939505849915321),
@@ -2376,7 +2484,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 6590985335993289439),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 1283978725364575098),
@@ -2518,7 +2626,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 4522265553171645979),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 461418009140313017),
@@ -2615,7 +2723,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 8937463353850954377),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 9076494333508968551),
@@ -2679,7 +2787,7 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(1, 2021353450784145394),
         name: 'id',
         type: 6,
-        flags: 1,
+        flags: 129,
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(2, 2093090190032671715),
@@ -2936,7 +3044,14 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final cfopVendaOffset = fbb.writeString(object.cfopVenda);
         final unidadeCompraOffset = fbb.writeString(object.unidadeCompra);
         final apelidosBuscaOffset = fbb.writeString(object.apelidosBusca);
-        fbb.startTable(42);
+        final icmsOrigemOffset = fbb.writeString(object.icmsOrigem);
+        final icmsSituacaoTributariaOffset = fbb.writeString(
+          object.icmsSituacaoTributaria,
+        );
+        final pisCofinsSituacaoTributariaOffset = fbb.writeString(
+          object.pisCofinsSituacaoTributaria,
+        );
+        fbb.startTable(45);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, nomeOffset);
         fbb.addInt64(2, object.estoque);
@@ -2977,6 +3092,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addInt64(38, object.ultimaVendaEm?.millisecondsSinceEpoch);
         fbb.addOffset(39, apelidosBuscaOffset);
         fbb.addInt64(40, object.estoqueVersao);
+        fbb.addOffset(41, icmsOrigemOffset);
+        fbb.addOffset(42, icmsSituacaoTributariaOffset);
+        fbb.addOffset(43, pisCofinsSituacaoTributariaOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -3045,6 +3163,15 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final cfopVendaParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 62, '');
+        final icmsOrigemParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 86, '');
+        final icmsSituacaoTributariaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 88, '');
+        final pisCofinsSituacaoTributariaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 90, '');
         final estoqueParam = const fb.Int64Reader().vTableGet(
           buffer,
           rootOffset,
@@ -3187,6 +3314,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           cest: cestParam,
           grupoTributario: grupoTributarioParam,
           cfopVenda: cfopVendaParam,
+          icmsOrigem: icmsOrigemParam,
+          icmsSituacaoTributaria: icmsSituacaoTributariaParam,
+          pisCofinsSituacaoTributaria: pisCofinsSituacaoTributariaParam,
           estoque: estoqueParam,
           estoqueReal: estoqueRealParam,
           estoqueAtual: estoqueAtualParam,
@@ -3270,7 +3400,25 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final nfceProtocoloOffset = fbb.writeString(object.nfceProtocolo);
         final nfceUrlDanfeOffset = fbb.writeString(object.nfceUrlDanfe);
         final planoFiadoJsonOffset = fbb.writeString(object.planoFiadoJson);
-        fbb.startTable(45);
+        final nfceUrlXmlOffset = fbb.writeString(object.nfceUrlXml);
+        final nfceStatusFocusOffset = fbb.writeString(object.nfceStatusFocus);
+        final nfceUrlXmlCancelamentoOffset = fbb.writeString(
+          object.nfceUrlXmlCancelamento,
+        );
+        final nfeReferenciaFocusOffset = fbb.writeString(
+          object.nfeReferenciaFocus,
+        );
+        final nfeChaveAcessoOffset = fbb.writeString(object.nfeChaveAcesso);
+        final nfeNumeroOffset = fbb.writeString(object.nfeNumero);
+        final nfeSerieOffset = fbb.writeString(object.nfeSerie);
+        final nfeProtocoloOffset = fbb.writeString(object.nfeProtocolo);
+        final nfeUrlDanfeOffset = fbb.writeString(object.nfeUrlDanfe);
+        final nfeUrlXmlOffset = fbb.writeString(object.nfeUrlXml);
+        final nfeStatusFocusOffset = fbb.writeString(object.nfeStatusFocus);
+        final nfeUrlXmlCancelamentoOffset = fbb.writeString(
+          object.nfeUrlXmlCancelamento,
+        );
+        fbb.startTable(60);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -3314,6 +3462,24 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(41, nfceUrlDanfeOffset);
         fbb.addInt64(42, object.nfceEmitidaEm?.millisecondsSinceEpoch);
         fbb.addOffset(43, planoFiadoJsonOffset);
+        fbb.addBool(44, object.estoqueBaixadoCupom);
+        fbb.addInt64(
+          45,
+          object.cupomNaoFiscalEmitidoEm?.millisecondsSinceEpoch,
+        );
+        fbb.addOffset(46, nfceUrlXmlOffset);
+        fbb.addOffset(47, nfceStatusFocusOffset);
+        fbb.addOffset(48, nfceUrlXmlCancelamentoOffset);
+        fbb.addOffset(49, nfeReferenciaFocusOffset);
+        fbb.addOffset(50, nfeChaveAcessoOffset);
+        fbb.addOffset(51, nfeNumeroOffset);
+        fbb.addOffset(52, nfeSerieOffset);
+        fbb.addOffset(53, nfeProtocoloOffset);
+        fbb.addOffset(54, nfeUrlDanfeOffset);
+        fbb.addOffset(55, nfeUrlXmlOffset);
+        fbb.addOffset(56, nfeStatusFocusOffset);
+        fbb.addOffset(57, nfeUrlXmlCancelamentoOffset);
+        fbb.addInt64(58, object.nfeEmitidaEm?.millisecondsSinceEpoch);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -3331,6 +3497,13 @@ obx_int.ModelDefinition getObjectBoxModel() {
           buffer,
           rootOffset,
           88,
+        );
+        final cupomNaoFiscalEmitidoEmValue = const fb.Int64Reader()
+            .vTableGetNullable(buffer, rootOffset, 94);
+        final nfeEmitidaEmValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          120,
         );
         final idParam = const fb.Int64Reader().vTableGet(
           buffer,
@@ -3502,10 +3675,65 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final nfceUrlDanfeParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 86, '');
+        final nfceUrlXmlParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 96, '');
+        final nfceStatusFocusParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 98, '');
+        final nfceUrlXmlCancelamentoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 100, '');
         final nfceEmitidaEmParam = nfceEmitidaEmValue == null
             ? null
             : DateTime.fromMillisecondsSinceEpoch(
                 nfceEmitidaEmValue,
+                isUtc: true,
+              );
+        final nfeReferenciaFocusParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 102, '');
+        final nfeChaveAcessoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 104, '');
+        final nfeNumeroParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 106, '');
+        final nfeSerieParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 108, '');
+        final nfeProtocoloParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 110, '');
+        final nfeUrlDanfeParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 112, '');
+        final nfeUrlXmlParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 114, '');
+        final nfeStatusFocusParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 116, '');
+        final nfeUrlXmlCancelamentoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 118, '');
+        final nfeEmitidaEmParam = nfeEmitidaEmValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                nfeEmitidaEmValue,
+                isUtc: true,
+              );
+        final estoqueBaixadoCupomParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          92,
+          false,
+        );
+        final cupomNaoFiscalEmitidoEmParam =
+            cupomNaoFiscalEmitidoEmValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                cupomNaoFiscalEmitidoEmValue,
                 isUtc: true,
               );
         final object = Venda(
@@ -3549,7 +3777,22 @@ obx_int.ModelDefinition getObjectBoxModel() {
           nfceSerie: nfceSerieParam,
           nfceProtocolo: nfceProtocoloParam,
           nfceUrlDanfe: nfceUrlDanfeParam,
+          nfceUrlXml: nfceUrlXmlParam,
+          nfceStatusFocus: nfceStatusFocusParam,
+          nfceUrlXmlCancelamento: nfceUrlXmlCancelamentoParam,
           nfceEmitidaEm: nfceEmitidaEmParam,
+          nfeReferenciaFocus: nfeReferenciaFocusParam,
+          nfeChaveAcesso: nfeChaveAcessoParam,
+          nfeNumero: nfeNumeroParam,
+          nfeSerie: nfeSerieParam,
+          nfeProtocolo: nfeProtocoloParam,
+          nfeUrlDanfe: nfeUrlDanfeParam,
+          nfeUrlXml: nfeUrlXmlParam,
+          nfeStatusFocus: nfeStatusFocusParam,
+          nfeUrlXmlCancelamento: nfeUrlXmlCancelamentoParam,
+          nfeEmitidaEm: nfeEmitidaEmParam,
+          estoqueBaixadoCupom: estoqueBaixadoCupomParam,
+          cupomNaoFiscalEmitidoEm: cupomNaoFiscalEmitidoEmParam,
         );
         object.cliente.targetId = const fb.Int64Reader().vTableGet(
           buffer,
@@ -6482,6 +6725,21 @@ class Produto_ {
     _entities[1].properties[39],
   );
 
+  /// See [Produto.icmsOrigem].
+  static final icmsOrigem = obx.QueryStringProperty<Produto>(
+    _entities[1].properties[40],
+  );
+
+  /// See [Produto.icmsSituacaoTributaria].
+  static final icmsSituacaoTributaria = obx.QueryStringProperty<Produto>(
+    _entities[1].properties[41],
+  );
+
+  /// See [Produto.pisCofinsSituacaoTributaria].
+  static final pisCofinsSituacaoTributaria = obx.QueryStringProperty<Produto>(
+    _entities[1].properties[42],
+  );
+
   /// see [Produto.historicoEntradas]
   static final historicoEntradas =
       obx.QueryBacklinkToMany<HistoricoEntrada, Produto>(
@@ -6700,6 +6958,81 @@ class Venda_ {
   /// See [Venda.planoFiadoJson].
   static final planoFiadoJson = obx.QueryStringProperty<Venda>(
     _entities[2].properties[42],
+  );
+
+  /// See [Venda.estoqueBaixadoCupom].
+  static final estoqueBaixadoCupom = obx.QueryBooleanProperty<Venda>(
+    _entities[2].properties[43],
+  );
+
+  /// See [Venda.cupomNaoFiscalEmitidoEm].
+  static final cupomNaoFiscalEmitidoEm = obx.QueryDateProperty<Venda>(
+    _entities[2].properties[44],
+  );
+
+  /// See [Venda.nfceUrlXml].
+  static final nfceUrlXml = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[45],
+  );
+
+  /// See [Venda.nfceStatusFocus].
+  static final nfceStatusFocus = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[46],
+  );
+
+  /// See [Venda.nfceUrlXmlCancelamento].
+  static final nfceUrlXmlCancelamento = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[47],
+  );
+
+  /// See [Venda.nfeReferenciaFocus].
+  static final nfeReferenciaFocus = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[48],
+  );
+
+  /// See [Venda.nfeChaveAcesso].
+  static final nfeChaveAcesso = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[49],
+  );
+
+  /// See [Venda.nfeNumero].
+  static final nfeNumero = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[50],
+  );
+
+  /// See [Venda.nfeSerie].
+  static final nfeSerie = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[51],
+  );
+
+  /// See [Venda.nfeProtocolo].
+  static final nfeProtocolo = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[52],
+  );
+
+  /// See [Venda.nfeUrlDanfe].
+  static final nfeUrlDanfe = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[53],
+  );
+
+  /// See [Venda.nfeUrlXml].
+  static final nfeUrlXml = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[54],
+  );
+
+  /// See [Venda.nfeStatusFocus].
+  static final nfeStatusFocus = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[55],
+  );
+
+  /// See [Venda.nfeUrlXmlCancelamento].
+  static final nfeUrlXmlCancelamento = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[56],
+  );
+
+  /// See [Venda.nfeEmitidaEm].
+  static final nfeEmitidaEm = obx.QueryDateProperty<Venda>(
+    _entities[2].properties[57],
   );
 
   /// see [Venda.itens]

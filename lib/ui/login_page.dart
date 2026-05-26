@@ -123,6 +123,8 @@ class _LoginPageState extends State<LoginPage> {
         podeVenderFiado: true,
         podeVerCustoMargem: true,
         podeGerenciarUsuarios: true,
+        podeEmitirNfeSaida: true,
+        podeCancelarNfeSaida: true,
       );
       await widget.usuarioRepository.salvar(admin, senhaPlainNova: senha);
       AuditoriaRegistrar.registrar(

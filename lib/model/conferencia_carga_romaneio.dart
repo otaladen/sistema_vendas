@@ -12,7 +12,7 @@ class ConferenciaCargaRomaneio {
     DateTime? atualizadoEm,
   }) : atualizadoEm = atualizadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// `g:{grupoEntregaFreteId}` ou `s:{vendaId}` (mesmo [MontagemEntregaViagem.chave]).

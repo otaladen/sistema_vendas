@@ -30,6 +30,8 @@ enum PermissaoUsuario {
   relatoriosComissao,
   relatoriosFiado,
   relatoriosLogSistema,
+  emitirNfeSaida,
+  cancelarNfeSaida,
 }
 
 /// Metadados para exibir no cadastro de usuarios.
@@ -291,6 +293,20 @@ class PermissaoUsuarioCatalogo {
       descricao: 'Acessa auditoria e log central do ERP.',
       grupo: PermissaoGrupo.administracao,
       dependeDe: PermissaoUsuario.acessarRelatorios,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.emitirNfeSaida,
+      titulo: 'Emitir NF-e de saida (55)',
+      descricao: 'Painel NF-e / Focus — faturamento construtoras.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+      dependeDe: PermissaoUsuario.estoque,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.cancelarNfeSaida,
+      titulo: 'Cancelar NF-e de saida',
+      descricao: 'Cancelamento e carta de correcao na SEFAZ.',
+      grupo: PermissaoGrupo.autorizacoesGerente,
+      dependeDe: PermissaoUsuario.emitirNfeSaida,
     ),
   ];
 

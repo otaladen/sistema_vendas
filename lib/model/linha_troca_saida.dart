@@ -14,7 +14,7 @@ class LinhaTrocaSaida {
     this.nomeProdutoSnapshot = '',
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   int quantidade;

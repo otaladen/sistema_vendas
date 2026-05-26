@@ -24,17 +24,18 @@ import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/entrega_venda_helper.dart';
-import '../../domain/fiscal/fiscal_pedido_nfce.dart';
+import '../../config/fiscal_config.dart';
+import '../../domain/fiscal/cliente_fiscal_helper.dart';
+import '../../config/focus_nfe_runtime.dart';
 import '../../domain/pagamento_orcamento.dart';
 import '../../domain/plano_fiado.dart';
 import '../../model/caixa_sessao.dart';
 import '../../model/cliente.dart';
-import '../../model/item_venda.dart';
 import '../../model/venda.dart';
 import '../../model/vendedor.dart';
 import '../../services/auditoria_registrar.dart';
 import '../../services/cupom_nao_fiscal_venda_pdf.dart';
-import '../../services/fiscal_service.dart';
+import '../../services/focus_nfe_service.dart';
 import '../../services/print_service.dart';
 import '../clientes_page.dart';
 import '../cupom_venda_impressao_helper.dart';
@@ -43,6 +44,8 @@ import '../widgets/conta_sessao_app_bar_actions.dart';
 import '../widgets/receber_fiado_panel.dart';
 import '../../services/recibo_movimento_caixa_pdf.dart';
 import '../../services/recibo_recebimento_fiado_pdf.dart';
+import '../fiscal/nfe_gerenciamento_page.dart';
+import '../../model/usuario_sistema.dart';
 import 'caixa_feedback.dart';
 import 'caixa_ultimas_vendas_list.dart';
 
@@ -123,10 +126,12 @@ class _CaixaPageState extends State<CaixaPage> {
   int? _ultimoTrocoVendaId;
   int _ultimoTrocoNumeroOrcamento = 0;
   double _ultimoTrocoValor = 0;
+  late final FocusNfeService _focusNfeService;
 
   @override
   void initState() {
     super.initState();
+    _focusNfeService = FocusNfeService(config: criarFocusNfeConfigPadrao());
     _mensageriaRepository = MensageriaRepository();
     _carregarLimiteDivergenciaCaixa();
     _carregarSessaoCaixa();
@@ -144,6 +149,21 @@ class _CaixaPageState extends State<CaixaPage> {
         _descontoController.clear();
         _tipoDesconto = 'percentual';
       }
+    });
+  }
+
+  /// Limpa selecao e campos apos finalizar venda — caixa pronto para o proximo orcamento.
+  void _prepararCaixaPosProximaVenda() {
+    _carregarOrcamentos();
+    _disposeMistoEdicao();
+    setState(() {
+      _selecionado = null;
+      _itemSelecionadoId = null;
+      _valorRecebidoController.clear();
+      _descontoController.clear();
+      _tipoDesconto = 'percentual';
+      _valorRecebido = null;
+      _valorRecebidoFocusNode.unfocus();
     });
   }
 
@@ -2452,17 +2472,8 @@ class _CaixaPageState extends State<CaixaPage> {
           await _mensageriaRepository.processarFilaPendente(limite: 5);
         }
       }
-      _carregarOrcamentos();
+      _prepararCaixaPosProximaVenda();
       if (!mounted) return;
-      _disposeMistoEdicao();
-      setState(() {
-        _selecionado = null;
-        _itemSelecionadoId = null;
-        _valorRecebidoController.clear();
-        _descontoController.clear();
-        _tipoDesconto = 'percentual';
-        _valorRecebido = null;
-      });
       final numCupom =
           vendaFinalizada.numeroOrcamento > 0
               ? vendaFinalizada.numeroOrcamento
@@ -2518,6 +2529,9 @@ class _CaixaPageState extends State<CaixaPage> {
         ? venda.numeroOrcamento
         : venda.id;
     final cliente = _clienteDaVenda(venda);
+    final exigeNfe55 = ClienteFiscalHelper.clienteExigeNfe55(cliente);
+    final jaTemNfe55 =
+        widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id) != null;
     final acao = await showDialog<String>(
       context: context,
       useRootNavigator: true,
@@ -2533,20 +2547,24 @@ class _CaixaPageState extends State<CaixaPage> {
                 Navigator.pop(dialogContext, 'cupom'),
             const SingleActivator(LogicalKeyboardKey.digit3): () =>
                 Navigator.pop(dialogContext, 'nfce'),
+            const SingleActivator(LogicalKeyboardKey.digit4): () =>
+                Navigator.pop(dialogContext, 'nfe55'),
             const SingleActivator(LogicalKeyboardKey.numpad1): () =>
                 Navigator.pop(dialogContext, 'fechar'),
             const SingleActivator(LogicalKeyboardKey.numpad2): () =>
                 Navigator.pop(dialogContext, 'cupom'),
             const SingleActivator(LogicalKeyboardKey.numpad3): () =>
                 Navigator.pop(dialogContext, 'nfce'),
+            const SingleActivator(LogicalKeyboardKey.numpad4): () =>
+                Navigator.pop(dialogContext, 'nfe55'),
           },
           child: AlertDialog(
             title: Text('Venda $numCupom finalizada'),
             content: SizedBox(
-              width: 420,
+              width: 440,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
                     'Pagamento confirmado. O que deseja fazer agora?',
@@ -2556,10 +2574,61 @@ class _CaixaPageState extends State<CaixaPage> {
                   Text(
                     'Cliente: ${cliente?.nomeRazao ?? 'Consumidor / sem cadastro'}',
                   ),
+                  if (exigeNfe55 && !jaTemNfe55) ...[
+                    const SizedBox(height: 10),
+                    Material(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              Icons.warning_amber_rounded,
+                              color: Colors.amber.shade900,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Cliente com CNPJ — emita NF-e modelo 55 (tecla 4) '
+                                'para faturamento correto antes de encerrar.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: Colors.amber.shade900,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Text(
-                    'A NFC-e deve ser emitida no caixa apos o recebimento.',
+                    'Baixa de estoque (itens leva agora) ao autorizar NFC-e/NF-e '
+                    'ou ao cupom interno (2). Carreto e retirada futura: reserva.',
                     style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.pop(dialogContext, 'cupom'),
+                    icon: const Icon(Icons.receipt_outlined),
+                    label: const Text('Cupom nao fiscal (2)'),
+                  ),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    autofocus: true,
+                    onPressed: () => Navigator.pop(dialogContext, 'nfce'),
+                    icon: const Icon(Icons.receipt_long_outlined),
+                    label: const Text('Emitir Cupom Fiscal (NFC-e) (3 · Enter)'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.pop(dialogContext, 'nfe55'),
+                    icon: const Icon(Icons.description_outlined),
+                    label: const Text('Emitir NF-e Completa (Modelo 55) (4)'),
                   ),
                 ],
               ),
@@ -2569,23 +2638,40 @@ class _CaixaPageState extends State<CaixaPage> {
                 onPressed: () => Navigator.pop(dialogContext, 'fechar'),
                 child: const Text('Fechar (Esc · 1)'),
               ),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.pop(dialogContext, 'cupom'),
-                icon: const Icon(Icons.receipt_outlined),
-                label: const Text('Cupom nao fiscal (2)'),
-              ),
-              FilledButton.icon(
-                autofocus: true,
-                onPressed: () => Navigator.pop(dialogContext, 'nfce'),
-                icon: const Icon(Icons.receipt_long_outlined),
-                label: const Text('Emitir NFC-e (3 · Enter)'),
-              ),
             ],
           ),
         );
       },
     );
-    if (!mounted || acao == null || acao == 'fechar') return;
+    if (!mounted || acao == null || acao == 'fechar') {
+      if (mounted && (acao == null || acao == 'fechar')) {
+        await _alertarVendaSemNfe55SeNecessario(venda);
+        await _alertarVendaSemBaixaEstoqueSeNecessario(venda);
+      }
+      return;
+    }
+
+    if (acao == 'nfe55') {
+      final vendaId = venda.id;
+      final usuarioNfe = await _resolverUsuarioSessaoParaNfe();
+      _prepararCaixaPosProximaVenda();
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => NfeGerenciamentoPage(
+            vendaRepository: widget.vendaRepository,
+            clienteRepository: widget.clienteRepository,
+            appConfigRepository: widget.appConfigRepository,
+            usuarioLogado: usuarioNfe,
+            vendaIdInicial: vendaId,
+          ),
+        ),
+      );
+      if (!mounted) return;
+      await _tentarCupomInternoPosNfe55Autorizada(vendaId);
+      _prepararCaixaPosProximaVenda();
+      return;
+    }
 
     if (acao == 'nfce') {
       await _aguardarEntreDialogos();
@@ -2603,11 +2689,159 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
+  Future<void> _registrarCupomInternoPosFiscalAutorizada(
+    int vendaId, {
+    String origem = 'nota fiscal',
+  }) async {
+    try {
+      widget.vendaRepository.registrarCupomInternoPosAutorizacaoFiscal(
+        vendaId,
+        permitirVendaSemEstoque: _permitirVendaSemEstoque,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(
+        context,
+        'Nota autorizada, mas falhou ao registrar cupom interno (estoque): $e',
+      );
+    }
+  }
+
+  Future<UsuarioSistema> _resolverUsuarioSessaoParaNfe() async {
+    final todos = await UsuarioRepository().listarTodos();
+    for (final u in todos) {
+      if (u.login == widget.usuarioAtual) return u;
+    }
+    return UsuarioSistema(
+      id: 'sessao',
+      nome: widget.usuarioAtual,
+      login: widget.usuarioAtual,
+      senha: '',
+      admin: true,
+      podeEmitirNfeSaida: true,
+      podeCancelarNfeSaida: true,
+    );
+  }
+
+  Future<void> _tentarCupomInternoPosNfe55Autorizada(int vendaId) async {
+    final v = widget.vendaRepository.obterPorId(vendaId);
+    if (v == null || v.estoqueBaixadoCupom) return;
+    final nfe = widget.vendaRepository.obterNfe55AutorizadaPorVenda(vendaId);
+    if (nfe == null) return;
+    await _registrarCupomInternoPosFiscalAutorizada(
+      vendaId,
+      origem: 'NF-e 55',
+    );
+    if (!mounted) return;
+    final atualizado = widget.vendaRepository.obterPorId(vendaId);
+    if (atualizado?.estoqueBaixadoCupom == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'NF-e ${nfe.numero.isNotEmpty ? nfe.numero : nfe.referenciaFocus} '
+            'vinculada — cupom interno e estoque atualizados.',
+          ),
+          backgroundColor: Colors.green.shade700,
+        ),
+      );
+    }
+  }
+
+  Future<void> _alertarVendaSemNfe55SeNecessario(Venda venda) async {
+    final cliente = _clienteDaVenda(venda);
+    if (!ClienteFiscalHelper.clienteExigeNfe55(cliente)) return;
+    if (widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id) != null) {
+      return;
+    }
+    if (!mounted) return;
+    final r = await showDialog<String>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(Icons.description_outlined, color: Colors.orange.shade800),
+        title: const Text('NF-e modelo 55 pendente'),
+        content: Text(
+          'A venda para ${cliente?.nomeRazao ?? 'cliente CNPJ'} foi finalizada '
+          'sem NF-e autorizada.\n\n'
+          'Construtoras e revendas costumam exigir NF-e 55. '
+          'Abra Notas Fiscais → NF-e de saida ou use a tecla 4 neste dialogo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Depois'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'emitir'),
+            child: const Text('Emitir NF-e agora'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || r != 'emitir') return;
+    final usuarioNfe = await _resolverUsuarioSessaoParaNfe();
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => NfeGerenciamentoPage(
+          vendaRepository: widget.vendaRepository,
+          clienteRepository: widget.clienteRepository,
+          appConfigRepository: widget.appConfigRepository,
+          usuarioLogado: usuarioNfe,
+          vendaIdInicial: venda.id,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _alertarVendaSemBaixaEstoqueSeNecessario(Venda venda) async {
+    final v = widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    if (v.estoqueBaixadoCupom) return;
+    final temNfce = v.nfceEmitida;
+    final nfe55 =
+        widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null;
+    if (temNfce || nfe55) return;
+
+    await showDialog<void>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(Icons.warning_amber_rounded, color: Colors.orange.shade800),
+        title: const Text('Venda sem baixa de estoque'),
+        content: const Text(
+          'Esta venda foi finalizada sem cupom interno e sem nota fiscal '
+          'autorizada.\n\n'
+          'Itens retirados agora na loja ainda nao tiveram baixa no estoque. '
+          'Emita NFC-e/NF-e autorizada ou use o cupom nao fiscal (2) / '
+          'listagem de vendas.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _imprimirCupomNaoFiscalPosVenda({
     required Venda venda,
     required double totalRecebido,
     required double troco,
   }) async {
+    try {
+      widget.vendaRepository.registrarBaixaEstoqueCupomNaoFiscal(
+        venda.id,
+        permitirVendaSemEstoque: _permitirVendaSemEstoque,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(context, 'Nao foi possivel baixar estoque: $e');
+      return;
+    }
+    final vendaAtualizada =
+        widget.vendaRepository.obterPorId(venda.id) ?? venda;
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     final nomeArquivo =
@@ -2617,10 +2851,10 @@ class _CaixaPageState extends State<CaixaPage> {
       printService: widget.printService,
       config: config,
       gerarPdfBytes: () => CupomNaoFiscalVendaPdf.gerarBytes(
-        venda: venda,
+        venda: vendaAtualizada,
         config: config,
-        cliente: _clienteDaVenda(venda),
-        vendedor: _vendedorDaVenda(venda),
+        cliente: _clienteDaVenda(vendaAtualizada),
+        vendedor: _vendedorDaVenda(vendaAtualizada),
         totalRecebido: totalRecebido,
         troco: troco,
         segundaVia: false,
@@ -2635,60 +2869,127 @@ class _CaixaPageState extends State<CaixaPage> {
     await Future<void>.delayed(const Duration(milliseconds: 80));
   }
 
+  String? _dicaCorrecaoFalhaNfce(String mensagem) {
+    final m = mensagem.toLowerCase();
+    if (m.contains('habilitad') && m.contains('nfce')) {
+      return 'No painel Focus (ambiente de homologacao):\n\n'
+          '1. Menu Empresas — cadastre o CNPJ de ${FiscalConfig.cnpjEmitente} '
+          '(se ainda nao existir).\n'
+          '2. Na empresa, marque/habilite NFC-e (modelo 65) para a Bahia.\n'
+          '3. Envie o certificado digital A1 (.pfx) e a senha.\n'
+          '4. Confira CSC e ID CSC da SEFAZ-BA (se a Focus nao preencher sozinha).\n'
+          '5. Use o token de homologacao dessa mesma empresa em fiscal_config.dart.\n'
+          '6. Aguarde alguns minutos apos salvar e tente de novo.\n\n'
+          'Guia: focusnfe.com.br/guides/configurando-empresa/';
+    }
+    return null;
+  }
+
   Future<bool?> _mostrarDialogoFalhaNfce({required String mensagem}) {
     if (!mounted) return Future.value(false);
+    final dica = _dicaCorrecaoFalhaNfce(mensagem);
     return showDialog<bool>(
       context: context,
       useRootNavigator: true,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Falha na NFC-e'),
-        content: SingleChildScrollView(child: Text(mensagem)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Fechar'),
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return AlertDialog(
+          icon: Icon(Icons.error_outline, color: theme.colorScheme.error, size: 32),
+          title: const Text('NFC-e rejeitada'),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.errorContainer
+                          .withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: theme.colorScheme.error.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Text(
+                      mensagem,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                    ),
+                  ),
+                  if (dica != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      dica,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Fechar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Tentar reemitir'),
+            ),
+          ],
+        );
+      },
     );
   }
 
   Future<_EmissaoNfceDialogResult> _executarChamadaFiscalNfce(Venda venda) async {
-    final vendaAtual =
-        widget.vendaRepository.obterPorId(venda.id) ?? venda;
-    final itens = List<ItemVenda>.from(vendaAtual.itens);
-    if (itens.isEmpty) {
+    final vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    if (vendaAtual.itens.isEmpty) {
       return _EmissaoNfceDialogResult.erroValidacao(
         'A venda nao possui itens para emitir NFC-e.',
       );
     }
 
     try {
-      final resultado = await FiscalService().emitirNfceDaVenda(
-        venda: vendaAtual,
-        itens: itens,
+      _focusNfeService.validarConfiguracao();
+    } on FocusNfeConfigIncompletaException catch (e) {
+      return _EmissaoNfceDialogResult.erroConfig(e.message);
+    }
+
+    try {
+      final resultado = await _focusNfeService.emitirNfce(
+        vendaAtual,
         cliente: _clienteDaVenda(vendaAtual),
-        valorDesconto: vendaAtual.descontoImplicitoTotal,
+        entregaDomicilio: vendaAtual.tipoEntrega == 'entrega_loja' ||
+            vendaAtual.enderecoEntrega.trim().isNotEmpty,
       );
 
-      if (resultado.sucesso) {
+      if (resultado.autorizada) {
         return _EmissaoNfceDialogResult.sucesso(
+          resultado: resultado,
+          vendaAtual: vendaAtual,
+        );
+      }
+      if (resultado.processando) {
+        return _EmissaoNfceDialogResult.processando(
           resultado: resultado,
           vendaAtual: vendaAtual,
         );
       }
 
       final msg = resultado.mensagem.isEmpty
-          ? 'A API fiscal retornou erro sem mensagem.'
+          ? 'A SEFAZ rejeitou a NFC-e sem mensagem detalhada.'
           : resultado.mensagem;
       return _EmissaoNfceDialogResult.erroApi(msg, vendaAtual);
-    } on FiscalConfigIncompletaException catch (e) {
-      return _EmissaoNfceDialogResult.erroConfig(e.message);
-    } on FiscalValidacaoException catch (e) {
+    } on FocusNfeValidacaoException catch (e) {
       return _EmissaoNfceDialogResult.erroValidacao(e.message);
     } catch (e) {
       return _EmissaoNfceDialogResult.erroGenerico('Erro ao emitir NFC-e: $e');
@@ -2720,23 +3021,30 @@ class _CaixaPageState extends State<CaixaPage> {
         context: context,
         useRootNavigator: true,
         barrierDismissible: false,
-        builder: (ctx) => PopScope(
-          canPop: false,
-          child: AlertDialog(
-            content: Row(
-              children: [
-                const CircularProgressIndicator(),
-                const SizedBox(width: 20),
-                Expanded(
-                  child: Text(
-                    'Emitindo NFC-e...\nAguarde a resposta da SEFAZ.',
-                    style: Theme.of(ctx).textTheme.bodyMedium,
-                  ),
+        builder: (ctx) {
+          final theme = Theme.of(ctx);
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              title: const Text('Emissao NFC-e'),
+              content: SizedBox(
+                width: 360,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Comunicando com a SEFAZ através da Focus NFe...',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       );
       await _aguardarEntreDialogos();
 
@@ -2792,17 +3100,80 @@ class _CaixaPageState extends State<CaixaPage> {
             ),
           );
           return;
+        case _EmissaoNfceDialogKind.processando:
+          final r = dialogResult.resultado!;
+          final vSalvar = dialogResult.vendaAtual ?? vendaAtual;
+          try {
+            widget.vendaRepository.registrarNfcePendenteFocus(
+              vendaId: vSalvar.id,
+              referencia: r.referencia,
+              protocolo: r.protocolo,
+              statusFocus: r.statusFocus,
+            );
+          } catch (e) {
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text(
+                  'NFC-e em processamento, mas falhou ao salvar pendencia: $e',
+                ),
+                backgroundColor: Colors.orange.shade800,
+                duration: const Duration(seconds: 10),
+              ),
+            );
+          }
+          await showDialog<void>(
+            context: context,
+            useRootNavigator: true,
+            builder: (ctx) {
+              final theme = Theme.of(ctx);
+              return AlertDialog(
+                icon: Icon(
+                  Icons.hourglass_top_outlined,
+                  color: theme.colorScheme.primary,
+                  size: 32,
+                ),
+                title: const Text('NFC-e em processamento'),
+                content: Text(
+                  r.mensagem.isEmpty
+                      ? 'A nota foi enviada a Focus NFe e aguarda retorno da '
+                          'SEFAZ. Consulte novamente pelo painel Focus ou '
+                          'reemita quando o servico normalizar.\n\n'
+                          'Referencia: ${r.referencia}'
+                      : '${r.mensagem}\n\nReferencia: ${r.referencia}',
+                  textAlign: TextAlign.center,
+                ),
+                actionsAlignment: MainAxisAlignment.center,
+                actions: [
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Entendi'),
+                  ),
+                ],
+              );
+            },
+          );
+          return;
         case _EmissaoNfceDialogKind.sucesso:
           final r = dialogResult.resultado!;
           final vSalvar = dialogResult.vendaAtual ?? vendaAtual;
           try {
             widget.vendaRepository.registrarNfceEmitida(
               vendaId: vSalvar.id,
-              chaveAcesso: r.chaveAcesso,
+              chaveAcesso: r.chaveNfe,
               numero: r.numero,
               serie: r.serie,
               protocolo: r.protocolo,
               urlDanfe: r.urlDanfe,
+              urlXml: r.urlXml,
+              statusFocus:
+                  r.cancelada ? 'cancelado' : (r.statusFocus.isNotEmpty
+                      ? r.statusFocus
+                      : 'autorizado'),
+              urlXmlCancelamento: r.urlXmlCancelamento,
+            );
+            await _registrarCupomInternoPosFiscalAutorizada(
+              vSalvar.id,
+              origem: 'NFC-e',
             );
           } catch (e) {
             messenger.showSnackBar(
@@ -2817,37 +3188,70 @@ class _CaixaPageState extends State<CaixaPage> {
             return;
           }
 
+          final vendaComNfce =
+              widget.vendaRepository.obterPorId(vSalvar.id) ?? vSalvar;
           final detalhe = <String>[
             if (r.numero.isNotEmpty) 'Numero: ${r.numero}',
             if (r.serie.isNotEmpty) 'Serie: ${r.serie}',
-            if (r.chaveAcesso.isNotEmpty) 'Chave: ${r.chaveAcesso}',
+            if (r.chaveNfe.isNotEmpty) 'Chave: ${r.chaveNfe}',
             if (r.protocolo.isNotEmpty) 'Protocolo: ${r.protocolo}',
-            if (r.urlDanfe.isNotEmpty) 'DANFE salvo para reimpressao.',
+            if (r.mensagem.isNotEmpty) r.mensagem,
           ].join('\n');
+          final temDanfe = r.urlDanfe.trim().isNotEmpty;
 
           await showDialog<void>(
             context: context,
             useRootNavigator: true,
-            builder: (ctx) => AlertDialog(
-              title: const Text('NFC-e emitida com sucesso'),
-              content: Text(
-                detalhe.isEmpty
-                    ? (r.mensagem.isEmpty ? 'Nota autorizada.' : r.mensagem)
-                    : detalhe,
-              ),
-              actions: [
-                FilledButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('OK'),
+            builder: (ctx) {
+              final theme = Theme.of(ctx);
+              return AlertDialog(
+                icon: Icon(
+                  Icons.check_circle_outline,
+                  color: theme.colorScheme.primary,
+                  size: 36,
                 ),
-              ],
-            ),
+                title: const Text('NFC-e autorizada'),
+                content: SizedBox(
+                  width: 420,
+                  child: Text(
+                    detalhe.isEmpty ? 'Nota autorizada pela SEFAZ.' : detalhe,
+                  ),
+                ),
+                actionsAlignment: MainAxisAlignment.center,
+                actions: [
+                  if (temDanfe)
+                    FilledButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        await _abrirDanfeNfceVenda(vendaComNfce);
+                      },
+                      icon: const Icon(Icons.picture_as_pdf_outlined),
+                      label: const Text('Imprimir DANFE (NFC-e)'),
+                    ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: Text(temDanfe ? 'Fechar' : 'OK'),
+                  ),
+                ],
+              );
+            },
           );
           if (!mounted) return;
+          final vPosCupom =
+              widget.vendaRepository.obterPorId(vSalvar.id) ?? vendaComNfce;
+          final msgCupom = vPosCupom.estoqueBaixadoCupom
+              ? ' Cupom interno vinculado — estoque dos itens retirados agora atualizado.'
+              : '';
           messenger.showSnackBar(
-            const SnackBar(
-              content: Text('NFC-e emitida com sucesso.'),
-              backgroundColor: Colors.green,
+            SnackBar(
+              content: Text(
+                temDanfe
+                    ? 'NFC-e ${r.numero.isNotEmpty ? r.numero : ''} autorizada.$msgCupom '
+                        'Use Imprimir DANFE para o PDF.'
+                    : 'NFC-e autorizada.$msgCupom',
+              ),
+              backgroundColor: Colors.green.shade700,
+              duration: const Duration(seconds: 8),
             ),
           );
           return;
@@ -3009,11 +3413,25 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _emitirSegundaViaCupomParaVenda(Venda v) async {
+    if (!v.estoqueBaixadoCupom) {
+      try {
+        widget.vendaRepository.registrarBaixaEstoqueCupomNaoFiscal(
+          v.id,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      } catch (e) {
+        if (!mounted) return;
+        CaixaFeedback.erro(context, 'Nao foi possivel baixar estoque: $e');
+        return;
+      }
+    }
+    final vendaAtualizada = widget.vendaRepository.obterPorId(v.id) ?? v;
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
-    final infer = CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(v);
+    final infer =
+        CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(vendaAtualizada);
     final nomeArquivo =
-        'venda_${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}_2via.pdf';
+        'venda_${vendaAtualizada.numeroOrcamento > 0 ? vendaAtualizada.numeroOrcamento : vendaAtualizada.id}_2via.pdf';
     await mostrarFluxoImpressaoCupomVenda(
       context,
       printService: widget.printService,
@@ -3021,14 +3439,14 @@ class _CaixaPageState extends State<CaixaPage> {
       title: 'Segunda via do cupom',
       content: 'Deseja imprimir ou gerar PDF da segunda via?',
       gerarPdfBytes: () => CupomNaoFiscalVendaPdf.gerarBytes(
-        venda: v,
+        venda: vendaAtualizada,
         config: config,
-        cliente: _clienteDaVenda(v),
-        vendedor: _vendedorDaVenda(v),
+        cliente: _clienteDaVenda(vendaAtualizada),
+        vendedor: _vendedorDaVenda(vendaAtualizada),
         totalRecebido: infer.recebido,
         troco: infer.troco,
         segundaVia: true,
-        dataCabecalhoVenda: v.data,
+        dataCabecalhoVenda: vendaAtualizada.data,
       ),
       suggestedFileName: nomeArquivo,
     );
@@ -5362,6 +5780,7 @@ class _CaixaPageState extends State<CaixaPage> {
 
 enum _EmissaoNfceDialogKind {
   sucesso,
+  processando,
   erroApi,
   erroConfig,
   erroValidacao,
@@ -5377,16 +5796,26 @@ class _EmissaoNfceDialogResult {
   });
 
   final _EmissaoNfceDialogKind kind;
-  final FiscalEmissaoResultado? resultado;
+  final FocusNfeEmissaoResultado? resultado;
   final String mensagem;
   final Venda? vendaAtual;
 
   factory _EmissaoNfceDialogResult.sucesso({
-    required FiscalEmissaoResultado resultado,
+    required FocusNfeEmissaoResultado resultado,
     required Venda vendaAtual,
   }) =>
       _EmissaoNfceDialogResult._(
         kind: _EmissaoNfceDialogKind.sucesso,
+        resultado: resultado,
+        vendaAtual: vendaAtual,
+      );
+
+  factory _EmissaoNfceDialogResult.processando({
+    required FocusNfeEmissaoResultado resultado,
+    required Venda vendaAtual,
+  }) =>
+      _EmissaoNfceDialogResult._(
+        kind: _EmissaoNfceDialogKind.processando,
         resultado: resultado,
         vendaAtual: vendaAtual,
       );

@@ -10,7 +10,7 @@ class FornecedorNfe {
     this.nomeFantasia = '',
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// CNPJ (14 digitos) ou CPF (11 digitos) do emitente, apenas numeros.

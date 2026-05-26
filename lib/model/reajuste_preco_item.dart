@@ -21,7 +21,7 @@ class ReajustePrecoItem {
     this.alterouPreco3 = false,
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   int produtoId;

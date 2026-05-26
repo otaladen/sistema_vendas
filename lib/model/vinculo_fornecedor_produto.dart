@@ -12,7 +12,7 @@ class VinculoFornecedorProduto {
     required this.fatorConversao,
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// [prod]/cProd na NF-e — busca junto com [fornecedor].

@@ -15,7 +15,7 @@ class RegistroDevolucao {
     DateTime? data,
   }) : data = data ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// `devolucao` ou `troca`.

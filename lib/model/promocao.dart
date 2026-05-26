@@ -27,7 +27,7 @@ class Promocao {
     DateTime? criadoEm,
   }) : criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   @Index()

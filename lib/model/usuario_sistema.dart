@@ -37,6 +37,8 @@ class UsuarioSistema {
     this.podeRelatoriosComissao = false,
     this.podeRelatoriosFiado = false,
     this.podeRelatoriosLogSistema = false,
+    this.podeEmitirNfeSaida = false,
+    this.podeCancelarNfeSaida = false,
     this.descontoMaximoPercentualPdv,
   });
 
@@ -107,6 +109,12 @@ class UsuarioSistema {
   final bool podeRelatoriosFiado;
   final bool podeRelatoriosLogSistema;
 
+  /// Emitir NF-e modelo 55 (Notas Fiscais / Focus).
+  final bool podeEmitirNfeSaida;
+
+  /// Cancelar NF-e e emitir CC-e (acao sensivel).
+  final bool podeCancelarNfeSaida;
+
   /// Teto de desconto no PDV (%). Null = usar configuracao da empresa.
   final double? descontoMaximoPercentualPdv;
 
@@ -148,6 +156,8 @@ class UsuarioSistema {
     bool? podeRelatoriosComissao,
     bool? podeRelatoriosFiado,
     bool? podeRelatoriosLogSistema,
+    bool? podeEmitirNfeSaida,
+    bool? podeCancelarNfeSaida,
     double? descontoMaximoPercentualPdv,
     bool limparDescontoMaximoPdv = false,
   }) {
@@ -206,6 +216,8 @@ class UsuarioSistema {
       podeRelatoriosFiado: podeRelatoriosFiado ?? this.podeRelatoriosFiado,
       podeRelatoriosLogSistema:
           podeRelatoriosLogSistema ?? this.podeRelatoriosLogSistema,
+      podeEmitirNfeSaida: podeEmitirNfeSaida ?? this.podeEmitirNfeSaida,
+      podeCancelarNfeSaida: podeCancelarNfeSaida ?? this.podeCancelarNfeSaida,
       descontoMaximoPercentualPdv: limparDescontoMaximoPdv
           ? null
           : (descontoMaximoPercentualPdv ?? this.descontoMaximoPercentualPdv),
@@ -262,6 +274,8 @@ class UsuarioSistema {
       'podeRelatoriosComissao': podeRelatoriosComissao,
       'podeRelatoriosFiado': podeRelatoriosFiado,
       'podeRelatoriosLogSistema': podeRelatoriosLogSistema,
+      'podeEmitirNfeSaida': podeEmitirNfeSaida,
+      'podeCancelarNfeSaida': podeCancelarNfeSaida,
       if (descontoMaximoPercentualPdv != null)
         'descontoMaximoPercentualPdv': descontoMaximoPercentualPdv,
     };
@@ -355,6 +369,15 @@ class UsuarioSistema {
           map['podeFinanceiro'] == true,
       podeRelatoriosLogSistema: map['podeRelatoriosLogSistema'] == true ||
           admin,
+      podeEmitirNfeSaida: map.containsKey('podeEmitirNfeSaida')
+          ? map['podeEmitirNfeSaida'] == true
+          : (map['podeEstoque'] == true || admin),
+      podeCancelarNfeSaida: map.containsKey('podeCancelarNfeSaida')
+          ? map['podeCancelarNfeSaida'] == true
+          : (map['podeCancelarVendas'] == true ||
+              legadoCancelarSemFlag ||
+              legadoCancelarAuditoria ||
+              admin),
       descontoMaximoPercentualPdv:
           (map['descontoMaximoPercentualPdv'] as num?)?.toDouble(),
     );

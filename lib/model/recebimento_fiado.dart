@@ -16,7 +16,7 @@ class RecebimentoFiado {
   })  : data = data ?? DateTime.now(),
         criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   double valorTotal;

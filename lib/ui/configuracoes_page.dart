@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_config_repository.dart';
 import '../data/auto_backup_service.dart';
@@ -15,10 +16,15 @@ import '../domain/auditoria_catalogo.dart';
 import '../services/auditoria_registrar.dart';
 import '../data/local_app_data_paths.dart';
 import '../data/local_backup_copy.dart';
+import '../data/local_backup_restore.dart';
+import '../data/local_backup_validation.dart';
 import '../data/mensageria_repository.dart';
 import '../data/objectbox.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
+import '../config/fiscal_config.dart';
+import '../services/fiscal_config_store.dart';
+import '../services/gemini_config.dart';
 import '../services/print_service.dart';
 import 'widgets/rede_sincronizacao_card.dart';
 import '../model/mensagem_log.dart';
@@ -59,7 +65,14 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _whatsPhoneIdController = TextEditingController();
   final _whatsTokenController = TextEditingController();
   final _mensageriaBackendUrlController = TextEditingController();
+  final _geminiApiKeyController = TextEditingController();
+  final _fiscalTokenController = TextEditingController();
+  final _fiscalCnpjController = TextEditingController();
+  final _fiscalIeController = TextEditingController();
   final _mensageriaRepository = MensageriaRepository();
+  bool _geminiChaveOculta = true;
+  bool _fiscalTokenOculto = true;
+  String _fiscalAmbiente = 'homologacao';
   String _modeloPdf = 'cupom';
   String _impressoraPadrao = '';
   String _logoPath = '';
@@ -112,6 +125,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   void initState() {
     super.initState();
     _carregarConfig();
+    _carregarChaveGemini();
+    _carregarConfigFiscal();
     _carregarDiagnosticoHorario();
     _carregarMensageria();
   }
@@ -132,7 +147,110 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _mensageriaBackendUrlController.dispose();
     _filtroTextoLogController.dispose();
     _webhookPayloadController.dispose();
+    _geminiApiKeyController.dispose();
+    _fiscalTokenController.dispose();
+    _fiscalCnpjController.dispose();
+    _fiscalIeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _carregarConfigFiscal() async {
+    final cfg = await FiscalConfigStore.carregar();
+    if (!mounted) return;
+    setState(() {
+      _fiscalTokenController.text = cfg.apiToken;
+      _fiscalCnpjController.text = cfg.cnpjEmitente;
+      _fiscalIeController.text = cfg.inscricaoEstadualEmitente;
+      _fiscalAmbiente = cfg.homologacao ? 'homologacao' : 'producao';
+    });
+  }
+
+  Future<void> _salvarConfigFiscal() async {
+    final token = _fiscalTokenController.text.trim();
+    if (token.isNotEmpty && token.length < 8) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Token Focus muito curto.')),
+      );
+      return;
+    }
+    await FiscalConfigStore.salvar(
+      apiToken: token,
+      ambiente: _fiscalAmbiente,
+      cnpjEmitente: _fiscalCnpjController.text,
+      inscricaoEstadualEmitente: _fiscalIeController.text,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _fiscalAmbiente == 'producao'
+              ? 'Fiscal salvo em PRODUCAO. Notas terao validade juridica.'
+              : 'Fiscal salvo em homologacao (testes).',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _abrirPainelFocus() async {
+    final uri = Uri.parse('https://app.focusnfe.com.br/');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nao foi possivel abrir o painel Focus.')),
+      );
+    }
+  }
+
+  Future<void> _carregarChaveGemini() async {
+    final chave = await GeminiConfig.resolverChave();
+    if (!mounted) return;
+    setState(() {
+      _geminiApiKeyController.text = chave;
+    });
+  }
+
+  Future<void> _abrirUrlGeminiAiStudio() async {
+    const url = 'https://aistudio.google.com/apikey';
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    try {
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        await launchUrl(uri);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel abrir: $url')),
+      );
+    }
+  }
+
+  Future<void> _salvarChaveGemini() async {
+    final chave = _geminiApiKeyController.text.trim();
+    if (chave.isNotEmpty && !GeminiConfig.chavePareceValida(chave)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Chave Gemini invalida. Cole a chave completa do Google AI Studio '
+            '(geralmente comeca com AIza).',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    await GeminiConfig.salvarChave(chave);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          chave.isEmpty
+              ? 'Chave Gemini removida.'
+              : 'Chave Gemini salva. Padronizacao com IA liberada no cadastro de produtos.',
+        ),
+      ),
+    );
   }
 
   Future<void> _carregarConfig() async {
@@ -816,18 +934,32 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       if (!baseDadosDir.existsSync()) {
         throw Exception('Pasta de dados local nao encontrada.');
       }
+      LocalBackupValidation.validarDadosAplicacao(baseDadosDir);
 
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final pastaBackup = Directory(
         p.join(destinoRaiz, 'backup_sistema_vendas_$timestamp'),
       );
       pastaBackup.createSync(recursive: true);
-      await copiarDiretorioRecursivo(
-        origem: baseDadosDir,
-        destino: Directory(p.join(pastaBackup.path, 'dados_aplicacao')),
+      final destinoDados = Directory(
+        p.join(pastaBackup.path, 'dados_aplicacao'),
       );
 
+      await widget.lanSyncScheduler?.parar();
+      await widget.objectBox.fecharParaCopiaDeArquivos();
+      try {
+        await copiarDiretorioRecursivo(
+          origem: baseDadosDir,
+          destino: destinoDados,
+        );
+        LocalBackupValidation.validarDadosAplicacao(destinoDados);
+      } finally {
+        await widget.objectBox.reabrirAposCopiaDeArquivos();
+      }
+
       if (!mounted) return;
+      final tamanhoBanco =
+          LocalBackupValidation.descreverTamanhoBanco(destinoDados);
       setState(() {
         _ultimoBackupPath = pastaBackup.path;
       });
@@ -846,9 +978,23 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             children: [
               const Text('Backup concluido com sucesso.'),
               const SizedBox(height: 6),
+              Text(
+                'Banco: $tamanhoBanco (objectbox/data.mdb)',
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 6),
               Text(pastaBackup.path, style: const TextStyle(fontSize: 13)),
             ],
           ),
+        ),
+      );
+    } on LocalBackupInvalidoException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          duration: const Duration(seconds: 10),
+          backgroundColor: Colors.red.shade700,
         ),
       );
     } catch (e) {
@@ -1024,18 +1170,13 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       }
 
       final origemSelecionada = Directory(pastaSelecionada);
-      final origemDadosAplicacao = Directory(
-        p.join(origemSelecionada.path, 'dados_aplicacao'),
+      final origemDados = LocalBackupValidation.resolverPastaDadosBackup(
+        origemSelecionada,
       );
-      final origemRestore = origemDadosAplicacao.existsSync()
-          ? origemDadosAplicacao
-          : origemSelecionada;
+      LocalBackupValidation.validarDadosAplicacao(origemDados);
       final baseDir = await obterDiretorioBaseDadosApp();
 
-      if (!origemRestore.existsSync()) {
-        throw Exception('Pasta de backup invalida.');
-      }
-      if (p.normalize(origemRestore.path) == p.normalize(baseDir.path)) {
+      if (p.normalize(origemDados.path) == p.normalize(baseDir.path)) {
         throw Exception(
           'A pasta de origem nao pode ser a mesma pasta de dados atual.',
         );
@@ -1073,14 +1214,20 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       );
 
       await widget.lanSyncScheduler?.parar();
-      widget.objectBox.store.close();
-      await _limparDiretorio(baseDir);
-      await copiarDiretorioRecursivo(origem: origemRestore, destino: baseDir);
+      await widget.objectBox.fecharParaCopiaDeArquivos();
+      await restaurarDadosLocais(
+        pastaBackupSelecionada: origemSelecionada,
+        destinoBase: baseDir,
+        limparDestino: _limparDiretorio,
+      );
       AuditoriaRegistrar.registrar(
         modulo: AuditoriaModulo.backup,
         acao: AuditoriaAcao.backupRestaurar,
         resumo: 'Backup restaurado (app sera fechado)',
-        detalhes: {'origem': origemRestore.path},
+        detalhes: {
+          'origem': origemDados.path,
+          'banco': LocalBackupValidation.descreverTamanhoBanco(baseDir),
+        },
       );
 
       if (!mounted) {
@@ -1121,6 +1268,24 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           );
         },
       );
+    } on LocalBackupInvalidoException catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).maybePop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            duration: const Duration(seconds: 12),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+      if (widget.objectBox.store.isClosed()) {
+        try {
+          await widget.objectBox.reabrirAposCopiaDeArquivos();
+        } catch (_) {
+          exit(1);
+        }
+      }
     } catch (e) {
       if (mounted) {
         Navigator.of(context, rootNavigator: true).maybePop();
@@ -1129,7 +1294,11 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         );
       }
       if (widget.objectBox.store.isClosed()) {
-        exit(1);
+        try {
+          await widget.objectBox.reabrirAposCopiaDeArquivos();
+        } catch (_) {
+          exit(1);
+        }
       }
     } finally {
       if (mounted) {
@@ -1240,6 +1409,167 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                                 : 'Salvar dados da empresa',
                           ),
                         ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'IA — padronizar produtos (Gemini)',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Usada no cadastro de produtos (icone de varinha no nome). '
+                        'Crie uma chave gratuita em Google AI Studio e cole abaixo.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _geminiApiKeyController,
+                        obscureText: _geminiChaveOculta,
+                        decoration: InputDecoration(
+                          labelText: 'Chave API Gemini (GEMINI_API_KEY)',
+                          hintText: 'AIza...',
+                          suffixIcon: IconButton(
+                            tooltip: _geminiChaveOculta
+                                ? 'Mostrar chave'
+                                : 'Ocultar chave',
+                            onPressed: () => setState(
+                              () => _geminiChaveOculta = !_geminiChaveOculta,
+                            ),
+                            icon: Icon(
+                              _geminiChaveOculta
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () => _abrirUrlGeminiAiStudio(),
+                            icon: const Icon(Icons.open_in_new, size: 18),
+                            label: const Text('Criar chave no AI Studio'),
+                          ),
+                          FilledButton.icon(
+                            onPressed: _salvarChaveGemini,
+                            icon: const Icon(Icons.save_outlined, size: 18),
+                            label: const Text('Salvar chave Gemini'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Fiscal — Focus NFe (NFC-e / NF-e)',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Token e ambiente ficam neste PC (nao vao para o Git). '
+                        'Padrao do codigo: ${FiscalConfig.ambiente}. '
+                        'CNPJ/IE: ${FiscalConfig.cnpjEmitente}.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        value: _fiscalAmbiente,
+                        decoration: const InputDecoration(
+                          labelText: 'Ambiente SEFAZ',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'homologacao',
+                            child: Text('Homologacao (testes)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'producao',
+                            child: Text('Producao (validade juridica)'),
+                          ),
+                        ],
+                        onChanged: (v) {
+                          if (v == null) return;
+                          setState(() => _fiscalAmbiente = v);
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _fiscalTokenController,
+                        obscureText: _fiscalTokenOculto,
+                        decoration: InputDecoration(
+                          labelText: 'Token API Focus',
+                          hintText: 'Cole o token do painel Focus',
+                          suffixIcon: IconButton(
+                            tooltip: _fiscalTokenOculto
+                                ? 'Mostrar token'
+                                : 'Ocultar token',
+                            onPressed: () => setState(
+                              () => _fiscalTokenOculto = !_fiscalTokenOculto,
+                            ),
+                            icon: Icon(
+                              _fiscalTokenOculto
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _fiscalCnpjController,
+                        decoration: const InputDecoration(
+                          labelText: 'CNPJ emitente (14 digitos)',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _fiscalIeController,
+                        decoration: const InputDecoration(
+                          labelText: 'Inscricao estadual emitente',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _abrirPainelFocus,
+                            icon: const Icon(Icons.open_in_new, size: 18),
+                            label: const Text('Painel Focus NFe'),
+                          ),
+                          FilledButton.icon(
+                            onPressed: _salvarConfigFiscal,
+                            icon: const Icon(Icons.save_outlined, size: 18),
+                            label: const Text('Salvar fiscal'),
+                          ),
+                        ],
                       ),
                     ],
                   ),

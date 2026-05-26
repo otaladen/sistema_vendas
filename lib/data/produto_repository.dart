@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../model/historico_entrada.dart';
 import '../model/produto.dart';
+import '../services/gerenciador_estoque_service.dart';
 import 'produto_busca_sinonimos.dart';
 import 'produto_busca_util.dart';
 import '../objectbox.g.dart';
@@ -37,9 +38,10 @@ double? calcularCustoMedioPonderadoEntradasNfe(ObjectBox db, int produtoId) {
 }
 
 class ProdutoRepository extends ChangeNotifier {
-  ProdutoRepository(this._db);
+  ProdutoRepository(this._db) : _estoque = GerenciadorEstoqueService(_db);
 
   final ObjectBox _db;
+  final GerenciadorEstoqueService _estoque;
 
   ObjectBox get objectBox => _db;
 
@@ -881,12 +883,87 @@ class ProdutoRepository extends ChangeNotifier {
     return sb.toString().replaceAll(RegExp(r'[^\w\s\/\-\+]'), ' ');
   }
 
-  int salvar(Produto produto) {
-    produto.estoqueAtual = produto.estoqueReal;
+  /// Persiste cadastro; alteracao de [Produto.estoqueReal] passa pelo gerenciador.
+  int salvar(
+    Produto produto, {
+    String motivoAjusteEstoque = 'Ajuste manual cadastro produto',
+  }) {
+    if (produto.id > 0) {
+      final existente = _db.produtoBox.get(produto.id);
+      if (existente == null) {
+        throw StateError('Produto id ${produto.id} nao encontrado.');
+      }
+      if (produto.estoqueReal != existente.estoqueReal) {
+        _estoque.executarAjusteManualInventario(
+          existente,
+          produto.estoqueReal,
+          motivoAjusteEstoque,
+        );
+      }
+      _copiarCamposCadastro(existente, produto);
+      existente.estoqueAtual = existente.estoqueReal;
+      final id = _estoque.persistirProdutoMetadados(existente);
+      invalidarCacheBusca();
+      notificarAlteracaoParaRede();
+      return id;
+    }
+
+    final estoqueInicial = produto.estoqueReal;
+    produto.estoqueReal = 0;
+    produto.estoqueAtual = 0;
     final id = _db.produtoBox.put(produto);
+    produto.id = id;
+    if (estoqueInicial > 0) {
+      _estoque.executarAjusteManualInventario(
+        produto,
+        estoqueInicial,
+        motivoAjusteEstoque,
+      );
+    }
     invalidarCacheBusca();
     notificarAlteracaoParaRede();
     return id;
+  }
+
+  static void _copiarCamposCadastro(Produto destino, Produto origem) {
+    destino.codigoInterno = origem.codigoInterno;
+    destino.nome = origem.nome;
+    destino.descricao = origem.descricao;
+    destino.unidade = origem.unidade;
+    destino.categoria = origem.categoria;
+    destino.subcategoria = origem.subcategoria;
+    destino.marca = origem.marca;
+    destino.fornecedor = origem.fornecedor;
+    destino.fabricante = origem.fabricante;
+    destino.codigoBarras = origem.codigoBarras;
+    destino.apelidosBusca = origem.apelidosBusca;
+    destino.fotoPath = origem.fotoPath;
+    destino.localizacao = origem.localizacao;
+    destino.ncm = origem.ncm;
+    destino.cest = origem.cest;
+    destino.grupoTributario = origem.grupoTributario;
+    destino.cfopVenda = origem.cfopVenda;
+    destino.icmsOrigem = origem.icmsOrigem;
+    destino.icmsSituacaoTributaria = origem.icmsSituacaoTributaria;
+    destino.pisCofinsSituacaoTributaria = origem.pisCofinsSituacaoTributaria;
+    destino.estoqueReservado = origem.estoqueReservado;
+    destino.leadTimeDias = origem.leadTimeDias;
+    destino.vendaMediaDiaria = origem.vendaMediaDiaria;
+    destino.estoqueSeguranca = origem.estoqueSeguranca;
+    destino.quantidadeMinima = origem.quantidadeMinima;
+    destino.precoCusto = origem.precoCusto;
+    destino.custoMedio = origem.custoMedio;
+    destino.preco1 = origem.preco1;
+    destino.preco2 = origem.preco2;
+    destino.preco3 = origem.preco3;
+    destino.precoVenda = origem.precoVenda;
+    destino.unidadeCompra = origem.unidadeCompra;
+    destino.quantidadePorEmbalagem = origem.quantidadePorEmbalagem;
+    destino.embalagemMultiplica = origem.embalagemMultiplica;
+    destino.permiteQuantidadeFracionada = origem.permiteQuantidadeFracionada;
+    destino.ultimaVendaEm = origem.ultimaVendaEm;
+    destino.criadoEm = origem.criadoEm;
+    destino.ativo = origem.ativo;
   }
 
   bool remover(int id) {

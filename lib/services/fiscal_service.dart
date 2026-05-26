@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../config/fiscal_config.dart';
 import '../domain/fiscal/fiscal_item_nfce.dart';
 import '../domain/fiscal/fiscal_pedido_nfce.dart';
+import '../domain/estoque/tipo_movimento_estoque.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
@@ -258,6 +259,9 @@ class FiscalService {
     String observacao = '',
     String ufDestino = FiscalConfig.ufEmitente,
   }) async {
+    PoliticaMovimentoEstoque.validarNaoAlteraEstoque(
+      TipoMovimentoEstoque.nfceEmissao,
+    );
     final origens = <FiscalItemOrigem>[];
     for (final item in itens) {
       final p = item.produto.target;

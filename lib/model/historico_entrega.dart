@@ -12,7 +12,7 @@ class HistoricoEntrega {
     DateTime? dataHora,
   }) : dataHora = dataHora ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   String statusAnterior;

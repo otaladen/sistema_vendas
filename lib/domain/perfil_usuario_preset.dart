@@ -103,6 +103,8 @@ class PerfilUsuarioPresetAplicador {
       podeRelatoriosComissao: flags.podeRelatoriosComissao,
       podeRelatoriosFiado: flags.podeRelatoriosFiado,
       podeRelatoriosLogSistema: flags.podeRelatoriosLogSistema,
+      podeEmitirNfeSaida: flags.podeEmitirNfeSaida,
+      podeCancelarNfeSaida: flags.podeCancelarNfeSaida,
       descontoMaximoPercentualPdv: flags.descontoMaximoPercentualPdv,
       limparDescontoMaximoPdv: flags.descontoMaximoPercentualPdv == null,
     );
@@ -143,6 +145,8 @@ class PerfilUsuarioPresetAplicador {
           podeRelatoriosComissao: true,
           podeRelatoriosFiado: true,
           podeRelatoriosLogSistema: true,
+          podeEmitirNfeSaida: true,
+          podeCancelarNfeSaida: true,
         );
       case PerfilUsuarioPreset.gerente:
         return const _FlagsPerfil(
@@ -175,6 +179,8 @@ class PerfilUsuarioPresetAplicador {
           podeRelatoriosComissao: true,
           podeRelatoriosFiado: true,
           podeRelatoriosLogSistema: true,
+          podeEmitirNfeSaida: true,
+          podeCancelarNfeSaida: true,
         );
       case PerfilUsuarioPreset.vendedor:
         return const _FlagsPerfil(
@@ -245,6 +251,8 @@ class _FlagsPerfil {
     this.podeRelatoriosComissao = false,
     this.podeRelatoriosFiado = false,
     this.podeRelatoriosLogSistema = false,
+    this.podeEmitirNfeSaida = false,
+    this.podeCancelarNfeSaida = false,
     this.descontoMaximoPercentualPdv,
   });
 
@@ -279,5 +287,7 @@ class _FlagsPerfil {
   final bool podeRelatoriosComissao;
   final bool podeRelatoriosFiado;
   final bool podeRelatoriosLogSistema;
+  final bool podeEmitirNfeSaida;
+  final bool podeCancelarNfeSaida;
   final double? descontoMaximoPercentualPdv;
 }

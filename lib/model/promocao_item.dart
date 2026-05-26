@@ -15,7 +15,7 @@ class PromocaoItem {
     this.ordem = 0,
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// Produto especifico; 0 = usar [categoria]/[subcategoria].

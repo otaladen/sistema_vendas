@@ -25,7 +25,7 @@ class Vendedor {
     DateTime? criadoEm,
   }) : criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// Codigo curto para cupons e identificacao interna (ex.: V03).

@@ -123,6 +123,10 @@ class UsuarioPermissaoHelper {
         return u.podeRelatoriosFiado;
       case PermissaoUsuario.relatoriosLogSistema:
         return u.podeRelatoriosLogSistema;
+      case PermissaoUsuario.emitirNfeSaida:
+        return podeEmitirNfeSaida(u);
+      case PermissaoUsuario.cancelarNfeSaida:
+        return podeCancelarNfeSaida(u);
     }
   }
 
@@ -152,6 +156,18 @@ class UsuarioPermissaoHelper {
     if (!u.ativo) return false;
     if (u.admin) return true;
     return u.podeCancelarVendas;
+  }
+
+  static bool podeEmitirNfeSaida(UsuarioSistema u) {
+    if (!u.ativo) return false;
+    if (u.admin) return true;
+    return u.podeEmitirNfeSaida;
+  }
+
+  static bool podeCancelarNfeSaida(UsuarioSistema u) {
+    if (!u.ativo) return false;
+    if (u.admin) return true;
+    return u.podeCancelarNfeSaida;
   }
 
   static bool podeReajustePrecoLote(UsuarioSistema u) {
@@ -238,6 +254,10 @@ class UsuarioPermissaoHelper {
         return u.podeRelatoriosFiado;
       case PermissaoUsuario.relatoriosLogSistema:
         return u.podeRelatoriosLogSistema;
+      case PermissaoUsuario.emitirNfeSaida:
+        return u.podeEmitirNfeSaida;
+      case PermissaoUsuario.cancelarNfeSaida:
+        return u.podeCancelarNfeSaida;
     }
   }
 
@@ -319,6 +339,10 @@ class UsuarioPermissaoHelper {
         return r.copyWith(podeRelatoriosFiado: valor);
       case PermissaoUsuario.relatoriosLogSistema:
         return r.copyWith(podeRelatoriosLogSistema: valor);
+      case PermissaoUsuario.emitirNfeSaida:
+        return r.copyWith(podeEmitirNfeSaida: valor);
+      case PermissaoUsuario.cancelarNfeSaida:
+        return r.copyWith(podeCancelarNfeSaida: valor);
     }
   }
 

@@ -29,7 +29,7 @@ class ReajustePreco {
     this.estornadoEm,
   }) : criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   @Property(type: PropertyType.dateUtc)

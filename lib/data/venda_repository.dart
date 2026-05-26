@@ -4,7 +4,7 @@ import '../domain/entrega_filtro_util.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/limite_credito_helper.dart';
-import '../domain/produto_estoque_sync.dart';
+import '../domain/estoque/tipo_movimento_estoque.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/promocao_cadastro.dart';
@@ -12,16 +12,17 @@ import '../domain/promocao_preco_service.dart';
 import 'promocao_repository.dart';
 import '../services/auditoria_registrar.dart';
 import '../services/compras_preditivas_service.dart';
+import '../services/gerenciador_estoque_service.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
 import '../model/linha_devolucao_entrada.dart';
 import '../model/linha_troca_saida.dart';
 import '../model/produto.dart';
-import 'produto_busca_util.dart';
 import '../model/registro_devolucao.dart';
 import '../model/venda.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'nfe_saida_fiscal_store.dart';
 import 'recebimento_fiado_repository.dart';
 import 'sync/sync_write_trigger.dart';
 import 'titulo_receber_repository.dart';
@@ -258,134 +259,6 @@ void _aplicarDadosEntregaOrcamentoNaVenda(
   venda.dataEntregaMarcada = temCarreto ? entrega.dataEntregaMarcada : null;
 }
 
-void _persistirProdutoEstoque(ObjectBox db, Produto produto) {
-  ProdutoEstoqueSync.marcarEstoqueAlterado(produto);
-  db.produtoBox.put(produto);
-}
-
-int _quantidadeReservavelOrcamentoItem(ItemVenda item) {
-  final tipo = EntregaVendaHelper.tipoEfetivoItem(item);
-  if (tipo == EntregaVendaHelper.tipoRetirada) return 0;
-  if (tipo == EntregaVendaHelper.tipoRetiradaFutura ||
-      tipo == EntregaVendaHelper.tipoEntregaLoja) {
-    return item.quantidade;
-  }
-  return 0;
-}
-
-void _reservarEstoqueItemOrcamento({
-  required ObjectBox db,
-  required ItemVenda item,
-  required bool permitirVendaSemEstoque,
-}) {
-  final q = _quantidadeReservavelOrcamentoItem(item);
-  if (q <= 0) return;
-  final produto = item.produto.target;
-  if (produto == null) {
-    throw StateError('Produto do item "${item.nomeProduto}" nao encontrado.');
-  }
-  if (!permitirVendaSemEstoque && produto.estoqueLivreParaVenda < q) {
-    throw StateError(
-      'Estoque insuficiente para reservar ${produto.nome} '
-      '(livre ${produto.estoqueLivreParaVenda}, necessario $q).',
-    );
-  }
-  produto.estoqueReservado += q;
-  if (EntregaVendaHelper.tipoEfetivoItem(item) ==
-      EntregaVendaHelper.tipoEntregaLoja) {
-    item.quantidadeNoCarreto = q;
-    db.itemVendaBox.put(item);
-  }
-  _persistirProdutoEstoque(db, produto);
-}
-
-void _liberarReservaEstoqueItemOrcamento({
-  required ObjectBox db,
-  required ItemVenda item,
-}) {
-  final q = _quantidadeReservavelOrcamentoItem(item);
-  if (q <= 0) return;
-  final produto = item.produto.target;
-  if (produto == null) return;
-  final reservadoAtual = produto.estoqueReservado;
-  produto.estoqueReservado =
-      (reservadoAtual - q).clamp(0, reservadoAtual).toInt();
-  if (EntregaVendaHelper.tipoEfetivoItem(item) ==
-          EntregaVendaHelper.tipoEntregaLoja &&
-      item.quantidadeNoCarreto > 0) {
-    item.quantidadeNoCarreto = 0;
-    db.itemVendaBox.put(item);
-  }
-  _persistirProdutoEstoque(db, produto);
-}
-
-void _liberarReservaEstoqueOrcamento(ObjectBox db, Venda venda) {
-  for (final item in venda.itens) {
-    _liberarReservaEstoqueItemOrcamento(db: db, item: item);
-  }
-}
-
-void _baixarEstoqueItemAoFinalizarOrcamento({
-  required ObjectBox db,
-  required ItemVenda item,
-  required bool permitirVendaSemEstoque,
-  Map<int, int>? consumoVendasPrecalculado,
-}) {
-  final produto = item.produto.target;
-  if (produto == null) {
-    throw StateError('Produto do item "${item.nomeProduto}" nao encontrado.');
-  }
-  final q = item.quantidade;
-  if (q <= 0) return;
-
-  final tipo = EntregaVendaHelper.tipoEfetivoItem(item);
-  if (!permitirVendaSemEstoque && produto.estoqueLivreParaVenda < q) {
-    throw StateError('Estoque insuficiente para ${produto.nome}.');
-  }
-
-  switch (tipo) {
-    case EntregaVendaHelper.tipoRetirada:
-      produto.estoqueReal -= q;
-      item.quantidadeJaRetirada = q;
-      db.itemVendaBox.put(item);
-      ComprasPreditivasService(db).atualizarAposVendaRegistrada(
-        produto: produto,
-        quantidadeVendida: q,
-        estoqueRealJaAbatido: true,
-        consumoPrecalculado: consumoVendasPrecalculado,
-      );
-      break;
-    case EntregaVendaHelper.tipoRetiradaFutura:
-      if (produto.estoqueReservado < q) {
-        final falta = q - produto.estoqueReservado;
-        if (!permitirVendaSemEstoque &&
-            produto.estoqueLivreParaVenda < falta) {
-          throw StateError(
-            'Reserva de estoque insuficiente para ${produto.nome}.',
-          );
-        }
-        produto.estoqueReservado += falta;
-        _persistirProdutoEstoque(db, produto);
-      }
-      break;
-    case EntregaVendaHelper.tipoEntregaLoja:
-      if (produto.estoqueReservado < q) {
-        final falta = q - produto.estoqueReservado;
-        if (!permitirVendaSemEstoque &&
-            produto.estoqueLivreParaVenda < falta) {
-          throw StateError(
-            'Reserva de estoque insuficiente para ${produto.nome}.',
-          );
-        }
-        produto.estoqueReservado += falta;
-      }
-      item.quantidadeNoCarreto = q;
-      db.itemVendaBox.put(item);
-      _persistirProdutoEstoque(db, produto);
-      break;
-  }
-}
-
 class LinhaDevolucaoEntradaInput {
   const LinhaDevolucaoEntradaInput({
     required this.itemVendaId,
@@ -534,27 +407,16 @@ class VendaRepository {
     : _onAposEscrita = onAposEscrita {
     titulos = TituloReceberRepository(_db);
     recebimentos = RecebimentoFiadoRepository(_db, titulos);
+    _estoque.migrarEstoqueBaixadoCupomLegadoUmaVez();
   }
 
   final ObjectBox _db;
   final void Function()? _onAposEscrita;
   late final TituloReceberRepository titulos;
   late final RecebimentoFiadoRepository recebimentos;
+  late final GerenciadorEstoqueService _estoque = GerenciadorEstoqueService(_db);
 
   ObjectBox get objectBox => _db;
-
-  void _processarComprasPreditivasAposBaixaEstoque(
-    Produto produto,
-    int quantidadeVendida, {
-    Map<int, int>? consumoVendasPrecalculado,
-  }) {
-    ComprasPreditivasService(_db).atualizarAposVendaRegistrada(
-      produto: produto,
-      quantidadeVendida: quantidadeVendida,
-      estoqueRealJaAbatido: true,
-      consumoPrecalculado: consumoVendasPrecalculado,
-    );
-  }
 
   void _notificarRedeAposEscrita() {
     _onAposEscrita?.call();
@@ -579,6 +441,30 @@ class VendaRepository {
           Venda_.status
               .equals('finalizada')
               .and(Venda_.cancelada.equals(false)),
+        )
+        .order(Venda_.data, flags: Order.descending)
+        .build();
+    try {
+      query.limit = limit;
+      return query.find();
+    } finally {
+      query.close();
+    }
+  }
+
+  /// Vendas finalizadas a partir de [desde] (painel NF-e / pendencias).
+  List<Venda> listarVendasFinalizadasDesde(
+    DateTime desde, {
+    int limit = 100,
+  }) {
+    if (limit <= 0) return const [];
+    final inicioUtc = DateTime(desde.year, desde.month, desde.day).toUtc();
+    final query = _db.vendaBox
+        .query(
+          Venda_.status
+              .equals('finalizada')
+              .and(Venda_.cancelada.equals(false))
+              .and(Venda_.data.greaterOrEqualDate(inicioUtc)),
         )
         .order(Venda_.data, flags: Order.descending)
         .build();
@@ -861,6 +747,25 @@ class VendaRepository {
       }
     } finally {
       qv.close();
+    }
+
+    orPartes.add(
+      Venda_.nfceNumero.contains(tb, caseSensitive: false),
+    );
+    orPartes.add(
+      Venda_.nfceChaveAcesso.contains(tb, caseSensitive: false),
+    );
+    final digitosBusca = tb.replaceAll(RegExp(r'\D'), '');
+    if (digitosBusca.length >= 4) {
+      orPartes.add(
+        Venda_.nfceChaveAcesso.contains(digitosBusca, caseSensitive: false),
+      );
+    }
+
+    final idsNfe55 =
+        NfeSaidaFiscalStore(_db.storeDirectoryPath).buscarVendaIdsPorTexto(tb);
+    if (idsNfe55.isNotEmpty) {
+      orPartes.add(Venda_.id.oneOf(idsNfe55));
     }
 
     final qi = _db.itemVendaBox
@@ -1356,10 +1261,10 @@ class VendaRepository {
           throw StateError('Estoque insuficiente para ${produto.nome}.');
         }
 
-        produto.estoqueReal -= input.quantidade;
-        _processarComprasPreditivasAposBaixaEstoque(
-          produto,
-          input.quantidade,
+        _estoque.baixarEstoqueVendaDiretaLegada(
+          produto: produto,
+          quantidade: input.quantidade,
+          permitirVendaSemEstoque: permitirVendaSemEstoque,
           consumoVendasPrecalculado: consumoVendas,
         );
 
@@ -1488,8 +1393,7 @@ class VendaRepository {
       for (final item in itens) {
         item.venda.target = venda;
         _db.itemVendaBox.put(item);
-        _reservarEstoqueItemOrcamento(
-          db: _db,
+        _estoque.reservarEstoqueItemOrcamento(
           item: item,
           permitirVendaSemEstoque: permitirVendaSemEstoque,
         );
@@ -1502,30 +1406,7 @@ class VendaRepository {
   }
 
   int _obterOuCriarProdutoFreteRetiradaFutura() {
-    final q = _db.produtoBox
-        .query(Produto_.codigoInterno.equals(kCodigoInternoFreteRetiradaFutura))
-        .build();
-    try {
-      final existente = q.findFirst();
-      if (existente != null) {
-        return existente.id;
-      }
-    } finally {
-      q.close();
-    }
-    final novo = Produto(
-      codigoInterno: kCodigoInternoFreteRetiradaFutura,
-      nome: 'Servico: Frete carreto (retirada futura)',
-      quantidadeMinima: 0,
-      precoCusto: 0,
-      precoVenda: 0,
-      preco1: 0,
-      preco2: 0,
-      preco3: 0,
-      ativo: true,
-    );
-    novo.estoqueReal = 0;
-    return _db.produtoBox.put(novo);
+    return _estoque.obterOuCriarProdutoFreteRetiradaFutura();
   }
 
   /// Orcamento filho so para o frete; total da venda mae nao e alterado (opcao 3).
@@ -1782,32 +1663,7 @@ class VendaRepository {
       throw StateError('Venda mae nao esta mais em retirada futura pendente.');
     }
 
-    for (final item in mae.itens) {
-      final q = item.quantidadePendenteRetirada;
-      item.quantidadeNoCarreto = q;
-      if (q <= 0) {
-        _db.itemVendaBox.put(item);
-        continue;
-      }
-      final produto = item.produto.target;
-      if (produto == null) {
-        throw StateError(
-          'Item "${item.nomeProduto}" sem produto ligado: nao e possivel '
-          'baixar estoque na migracao.',
-        );
-      }
-      if (produto.estoqueReservado < q || produto.estoqueReal < q) {
-        throw StateError(
-          'Estoque insuficiente para ${produto.nome}: reservado '
-          '${produto.estoqueReservado}, precisa $q (fisico ${produto.estoqueReal}).',
-        );
-      }
-      produto.estoqueReservado -= q;
-      produto.estoqueReal -= q;
-      _db.produtoBox.put(produto);
-      item.quantidadeJaRetirada += q;
-      _db.itemVendaBox.put(item);
-    }
+    _estoque.migrarEstoqueRetiradaFuturaParaCarretoItens(mae.itens);
 
     mae.tipoEntrega = 'entrega_loja';
     mae.valorFrete = 0;
@@ -1900,7 +1756,7 @@ class VendaRepository {
         venda.vendedor.target = vendedor;
       }
 
-      _liberarReservaEstoqueOrcamento(_db, venda);
+      _estoque.liberarReservaEstoqueOrcamento(venda);
 
       final idsAntigos = venda.itens.map((i) => i.id).toList();
       if (idsAntigos.isNotEmpty) {
@@ -1966,8 +1822,7 @@ class VendaRepository {
       );
       _db.vendaBox.put(venda);
       for (final item in itensNovos) {
-        _reservarEstoqueItemOrcamento(
-          db: _db,
+        _estoque.reservarEstoqueItemOrcamento(
           item: item,
           permitirVendaSemEstoque: permitirVendaSemEstoque,
         );
@@ -2051,14 +1906,10 @@ class VendaRepository {
               EntregaVendaHelper.tipoEfetivoItem(i) ==
               EntregaVendaHelper.tipoRetiradaFutura,
         );
-        final consumoVendas =
-            ComprasPreditivasService(_db).montarConsumoPorProdutoNoPeriodo();
         for (final item in venda.itens) {
-          _baixarEstoqueItemAoFinalizarOrcamento(
-            db: _db,
+          _estoque.ajustarReservaEstoqueAoFinalizarItem(
             item: item,
             permitirVendaSemEstoque: permitirVendaSemEstoque,
-            consumoVendasPrecalculado: consumoVendas,
           );
         }
       }
@@ -2096,6 +1947,126 @@ class VendaRepository {
     _notificarRedeAposEscrita();
   }
 
+  /// Cupom interno (baixa de retirada imediata) apos NFC-e/NF-e autorizada.
+  ///
+  /// Mesma regra do cupom manual: carreto e retirada futura permanecem reservados.
+  void registrarCupomInternoPosAutorizacaoFiscal(
+    int vendaId, {
+    bool permitirVendaSemEstoque = true,
+  }) {
+    registrarBaixaEstoqueCupomNaoFiscal(
+      vendaId,
+      permitirVendaSemEstoque: permitirVendaSemEstoque,
+    );
+  }
+
+  NfeSaidaFiscalRegistro? obterNfe55AutorizadaPorVenda(int vendaId) {
+    final v = obterPorId(vendaId);
+    if (v != null && v.nfe55Autorizada) {
+      return NfeSaidaFiscalRegistro(
+        id: 'venda_${vendaId}_sync',
+        vendaId: vendaId,
+        numeroOrcamento:
+            v.numeroOrcamento > 0 ? v.numeroOrcamento : vendaId,
+        clienteNome: v.cliente.target?.nomeRazao ?? '',
+        referenciaFocus: v.nfeReferenciaFocus,
+        statusFocus: v.nfeStatusFocus,
+        emitidaEm: v.nfeEmitidaEm ?? v.data,
+        statusSefaz: '100',
+        chaveNfe: v.nfeChaveAcesso,
+        numero: v.nfeNumero,
+        serie: v.nfeSerie,
+        protocolo: v.nfeProtocolo,
+        urlDanfe: v.nfeUrlDanfe,
+        urlXml: v.nfeUrlXml,
+        valorTotal: v.total,
+      );
+    }
+    return NfeSaidaFiscalStore(_db.storeDirectoryPath)
+        .ultimaAutorizadaPorVenda(vendaId);
+  }
+
+  /// Vendas com qualquer registro NF-e 55 na venda (sync LAN).
+  List<Venda> listarVendasComDadosNfe55({int limit = 200}) {
+    if (limit <= 0) return const [];
+    final query = _db.vendaBox
+        .query(Venda_.nfeReferenciaFocus.notEquals(''))
+        .order(Venda_.nfeEmitidaEm, flags: Order.descending)
+        .build();
+    try {
+      query.limit = limit;
+      return query.find();
+    } finally {
+      query.close();
+    }
+  }
+
+  bool vendaTemNfe55Autorizada(int vendaId) {
+    final v = obterPorId(vendaId);
+    if (v == null) return false;
+    if (v.nfe55Autorizada) return true;
+    return NfeSaidaFiscalStore(_db.storeDirectoryPath)
+            .ultimaAutorizadaPorVenda(vendaId) !=
+        null;
+  }
+
+  void registrarNfe55Situacao({
+    required int vendaId,
+    required String referenciaFocus,
+    String chaveAcesso = '',
+    String numero = '',
+    String serie = '',
+    String protocolo = '',
+    String urlDanfe = '',
+    String urlXml = '',
+    String statusFocus = '',
+    String urlXmlCancelamento = '',
+    DateTime? emitidaEm,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      venda.nfeReferenciaFocus = referenciaFocus.trim();
+      venda.nfeChaveAcesso = chaveAcesso.trim();
+      venda.nfeNumero = numero.trim();
+      venda.nfeSerie = serie.trim();
+      venda.nfeProtocolo = protocolo.trim();
+      venda.nfeUrlDanfe = urlDanfe.trim();
+      venda.nfeUrlXml = urlXml.trim();
+      venda.nfeStatusFocus = statusFocus.trim().isEmpty
+          ? venda.nfeStatusFocus
+          : statusFocus.trim();
+      venda.nfeUrlXmlCancelamento = urlXmlCancelamento.trim();
+      if (emitidaEm != null) {
+        venda.nfeEmitidaEm = emitidaEm.toUtc();
+      } else if (venda.nfeEmitidaEm == null && chaveAcesso.isNotEmpty) {
+        venda.nfeEmitidaEm = DateTime.now().toUtc();
+      }
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita();
+  }
+
+  /// Baixa fisica de retirada imediata — somente ao cupom nao fiscal (idempotente).
+  void registrarBaixaEstoqueCupomNaoFiscal(
+    int vendaId, {
+    bool permitirVendaSemEstoque = true,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      _estoque.registrarBaixaEstoqueCupomNaoFiscal(
+        venda: venda,
+        permitirVendaSemEstoque: permitirVendaSemEstoque,
+      );
+    });
+    _notificarRedeAposEscrita();
+  }
+
   void _registrarContadoresPromocaoAposFinalizar(int vendaId) {
     final venda = _db.vendaBox.get(vendaId);
     if (venda == null) return;
@@ -2110,157 +2081,6 @@ class VendaRepository {
     final promoRepo = PromocaoRepository(_db);
     for (final e in porPromo.entries) {
       promoRepo.registrarVendaPromocao(e.key, e.value);
-    }
-  }
-
-  /// Unidades do item que ainda seguem no carreto ao marcar "Saiu" (apos retiradas na loja).
-  static int _quantidadeItemParaEstoqueCarreto(ItemVenda item) {
-    if (EntregaVendaHelper.itemMigradoRetiradaFuturaParaCarreto(item)) {
-      return item.quantidadeNoCarreto;
-    }
-    if (EntregaVendaHelper.tipoEfetivoItem(item) !=
-        EntregaVendaHelper.tipoEntregaLoja) {
-      return 0;
-    }
-    return item.quantidadeAindaNoCarretoAntesSaida;
-  }
-
-  void _baixarEstoqueCarretoAoMarcarSaida(Venda venda) {
-    for (final item in venda.itens) {
-      final produto = item.produto.target;
-      if (produto == null) continue;
-      final q = _quantidadeItemParaEstoqueCarreto(item);
-      if (q <= 0) continue;
-
-      // Retirada na loja ja baixou reserva e fisico; sobra no romaneio.
-      final qReserva = q.clamp(0, produto.estoqueReservado);
-      if (qReserva <= 0) continue;
-
-      produto.estoqueReservado -= qReserva;
-      // Fisico pode ja estar baixo/negativo se houve retirada na loja antes;
-      // a saida do carro consome o que ainda estava reservado para o carreto.
-      produto.estoqueReal -= qReserva;
-      _persistirProdutoEstoque(_db, produto);
-    }
-  }
-
-  void _estornarBaixaEstoqueCarretoAoDesmarcarSaida(Venda venda) {
-    for (final item in venda.itens) {
-      final produto = item.produto.target;
-      if (produto == null) continue;
-      var q = _quantidadeItemParaEstoqueCarreto(item);
-      if (q <= 0) continue;
-      if (venda.statusEntrega == 'entregue_complemento_pendente' &&
-          venda.complementoEntregaJson.trim().isNotEmpty) {
-        final m = _quantidadeComplementoDeclaradaPorItem(
-          venda.complementoEntregaJson,
-          item.id,
-        );
-        q -= m;
-        if (q < 0) q = 0;
-      }
-      if (q <= 0) continue;
-      produto.estoqueReal += q;
-      produto.estoqueReservado += q;
-      _persistirProdutoEstoque(_db, produto);
-    }
-  }
-
-  int _quantidadeComplementoDeclaradaPorItem(String json, int itemVendaId) {
-    var s = 0;
-    for (final l in ComplementoEntregaCodec.decode(json)) {
-      if (l.itemVendaId == itemVendaId) s += l.quantidade;
-    }
-    return s;
-  }
-
-  bool _vendaCarretoReservaComSaidaParaEstoqueComplemento(Venda v) {
-    return EntregaVendaHelper.vendaTemItensCarreto(v) &&
-        v.carretoReservaAteSaida &&
-        v.cargaSaiu &&
-        v.status == 'finalizada' &&
-        !v.cancelada;
-  }
-
-  /// Volta ao fisico + reservado o que nao saiu na ida (apos baixa total no "Saiu").
-  void _creditarEstoqueComplementoFaltaNaIda(
-    Venda venda,
-    List<LinhaComplementoEntrega> linhas,
-  ) {
-    if (!_vendaCarretoReservaComSaidaParaEstoqueComplemento(venda)) return;
-    final porItem = <int, int>{};
-    for (final l in linhas) {
-      if (l.itemVendaId <= 0 || l.quantidade <= 0) continue;
-      porItem[l.itemVendaId] = (porItem[l.itemVendaId] ?? 0) + l.quantidade;
-    }
-    if (porItem.isEmpty) {
-      throw StateError('Complemento sem linhas validas para estoque.');
-    }
-    for (final e in porItem.entries) {
-      final item = _db.itemVendaBox.get(e.key);
-      if (item == null || item.venda.targetId != venda.id) {
-        throw StateError('Item de venda ${e.key} invalido no complemento.');
-      }
-      final maxQ = _quantidadeItemParaEstoqueCarreto(item);
-      if (e.value > maxQ) {
-        throw StateError(
-          'Falta declarada (${e.value}) de "${item.nomeProduto}" excede o '
-          'entregavel da linha ($maxQ).',
-        );
-      }
-      final produto = item.produto.target;
-      if (produto == null) {
-        throw StateError('Produto do item ${item.id} nao encontrado.');
-      }
-      produto.estoqueReservado += e.value;
-      produto.estoqueReal += e.value;
-      _db.produtoBox.put(produto);
-    }
-  }
-
-  /// Segunda viagem: baixa o que havia sido creditado ao registrar o complemento.
-  void _baixarEstoqueComplementoEntregaAoConcluir(
-    Venda venda,
-    List<LinhaComplementoEntrega> linhas,
-  ) {
-    if (!_vendaCarretoReservaComSaidaParaEstoqueComplemento(venda)) return;
-    final porItem = <int, int>{};
-    for (final l in linhas) {
-      if (l.itemVendaId <= 0 || l.quantidade <= 0) continue;
-      porItem[l.itemVendaId] = (porItem[l.itemVendaId] ?? 0) + l.quantidade;
-    }
-    if (porItem.isEmpty) return;
-    for (final e in porItem.entries) {
-      final item = _db.itemVendaBox.get(e.key);
-      if (item == null || item.venda.targetId != venda.id) {
-        throw StateError('Item de venda ${e.key} invalido no complemento.');
-      }
-      final maxQ = _quantidadeItemParaEstoqueCarreto(item);
-      if (e.value > maxQ) {
-        throw StateError(
-          'Quantidade do complemento (${e.value}) de "${item.nomeProduto}" '
-          'excede o entregavel da linha ($maxQ).',
-        );
-      }
-      final produto = item.produto.target;
-      if (produto == null) {
-        throw StateError('Produto do item ${item.id} nao encontrado.');
-      }
-      if (produto.estoqueReservado < e.value) {
-        throw StateError(
-          'Reservado insuficiente para ${produto.nome} ao concluir complemento '
-          '(reservado ${produto.estoqueReservado}, precisa ${e.value}).',
-        );
-      }
-      if (produto.estoqueReal < e.value) {
-        throw StateError(
-          'Estoque fisico insuficiente para ${produto.nome} ao concluir complemento '
-          '(real ${produto.estoqueReal}, precisa ${e.value}).',
-        );
-      }
-      produto.estoqueReservado -= e.value;
-      produto.estoqueReal -= e.value;
-      _db.produtoBox.put(produto);
     }
   }
 
@@ -2285,11 +2105,10 @@ class VendaRepository {
       if (item == null) {
         throw StateError('Item $itemId nao encontrado no orcamento.');
       }
-      _liberarReservaEstoqueItemOrcamento(db: _db, item: item);
+      _estoque.liberarReservaEstoqueItemOrcamento(item);
       item.quantidade = novaQuantidade;
       _db.itemVendaBox.put(item);
-      _reservarEstoqueItemOrcamento(
-        db: _db,
+      _estoque.reservarEstoqueItemOrcamento(
         item: item,
         permitirVendaSemEstoque: permitirVendaSemEstoque,
       );
@@ -2311,7 +2130,7 @@ class VendaRepository {
       if (item == null) {
         throw StateError('Item $itemId nao encontrado no orcamento.');
       }
-      _liberarReservaEstoqueItemOrcamento(db: _db, item: item);
+      _estoque.liberarReservaEstoqueItemOrcamento(item);
       venda.itens.removeWhere((i) => i.id == itemId);
       _db.itemVendaBox.remove(itemId);
       if (venda.itens.isEmpty) {
@@ -2352,6 +2171,9 @@ class VendaRepository {
     String serie = '',
     String protocolo = '',
     String urlDanfe = '',
+    String urlXml = '',
+    String statusFocus = 'autorizado',
+    String urlXmlCancelamento = '',
   }) {
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
@@ -2363,7 +2185,38 @@ class VendaRepository {
       venda.nfceSerie = serie.trim();
       venda.nfceProtocolo = protocolo.trim();
       venda.nfceUrlDanfe = urlDanfe.trim();
+      venda.nfceUrlXml = urlXml.trim();
+      venda.nfceStatusFocus = statusFocus.trim().isEmpty
+          ? 'autorizado'
+          : statusFocus.trim();
+      venda.nfceUrlXmlCancelamento = urlXmlCancelamento.trim();
       venda.nfceEmitidaEm = DateTime.now().toUtc();
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita();
+  }
+
+  /// NFC-e enviada a Focus com status `processando_autorizacao` (reconsulta depois).
+  void registrarNfcePendenteFocus({
+    required int vendaId,
+    required String referencia,
+    String protocolo = '',
+    String statusFocus = '',
+  }) {
+    final ref = referencia.trim();
+    final prot = protocolo.trim();
+    final status = statusFocus.trim().toLowerCase();
+    final marcador = prot.isNotEmpty
+        ? prot
+        : 'focus_pendente:${status.isNotEmpty ? status : 'processando'}:$ref';
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      if (venda.nfceChaveAcesso.trim().isEmpty) {
+        venda.nfceProtocolo = marcador;
+      }
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita();
@@ -2663,58 +2516,6 @@ class VendaRepository {
     return b.data.compareTo(a.data);
   }
 
-  void _validarEstoqueAntesDespachoCarreto(Venda venda) {
-    if (!venda.carretoReservaAteSaida) return;
-    final porProduto = <int, ({int q, String nome})>{};
-    for (final item in venda.itens) {
-      final q = _quantidadeItemParaEstoqueCarreto(item);
-      if (q <= 0) continue;
-      final produto = item.produto.target;
-      final pid = produto?.id ?? item.produto.targetId;
-      if (pid <= 0) {
-        throw StateError(
-          'Item "${item.nomeProduto}" sem produto vinculado — '
-          'nao e possivel despachar.',
-        );
-      }
-      final nome = produto?.nome ?? item.nomeProduto;
-      final atual = porProduto[pid];
-      porProduto[pid] = (
-        q: (atual?.q ?? 0) + q,
-        nome: nome,
-      );
-    }
-    if (porProduto.isEmpty) return;
-
-    final falhas = <String>[];
-    for (final e in porProduto.entries) {
-      final produto = _db.produtoBox.get(e.key);
-      if (produto == null) {
-        falhas.add('Produto id ${e.key} nao encontrado.');
-        continue;
-      }
-      final q = e.value.q;
-      if (produto.estoqueReservado < q) {
-        falhas.add(
-          '${e.value.nome}: reservado ${produto.estoqueReservado}, '
-          'necessario $q para o romaneio.',
-        );
-      }
-      if (produto.estoqueReal < q) {
-        falhas.add(
-          '${e.value.nome}: fisico ${produto.estoqueReal}, '
-          'necessario $q para saida do carro.',
-        );
-      }
-    }
-    if (falhas.isNotEmpty) {
-      throw StateError(
-        'Nao foi possivel marcar "Saiu": estoque insuficiente.\n'
-        '${falhas.join('\n')}',
-      );
-    }
-  }
-
   /// Cancela todas as vendas de carreto da aba Entregas e limpa conferencia/historico.
   /// As vendas permanecem no sistema (canceladas), mas somem da aba Entregas.
   ///
@@ -2847,7 +2648,7 @@ class VendaRepository {
         final linhas = ComplementoEntregaCodec.decode(j);
         venda.statusEntrega = novoStatus;
         venda.complementoEntregaJson = j;
-        _creditarEstoqueComplementoFaltaNaIda(venda, linhas);
+        _estoque.creditarEstoqueComplementoFaltaNaIda(venda, linhas);
       } else if (novoStatus == 'entregue') {
         final linhasComplemento = statusAnterior == 'entregue_complemento_pendente'
             ? ComplementoEntregaCodec.decode(venda.complementoEntregaJson)
@@ -2855,7 +2656,10 @@ class VendaRepository {
         venda.statusEntrega = novoStatus;
         venda.complementoEntregaJson = '';
         if (linhasComplemento.isNotEmpty) {
-          _baixarEstoqueComplementoEntregaAoConcluir(venda, linhasComplemento);
+          _estoque.baixarEstoqueComplementoEntregaAoConcluir(
+            venda,
+            linhasComplemento,
+          );
         }
       } else {
         venda.statusEntrega = novoStatus;
@@ -2908,10 +2712,13 @@ class VendaRepository {
           venda.status == 'finalizada' &&
           !venda.cancelada) {
         if (!saiuAntes && saiuDepois) {
-          _validarEstoqueAntesDespachoCarreto(venda);
-          _baixarEstoqueCarretoAoMarcarSaida(venda);
+          _estoque.validarEstoqueAntesDespachoCarreto(venda);
+          _estoque.baixarEstoqueCarretoAoMarcarSaida(venda);
         } else if (saiuAntes && !saiuDepois) {
-          _estornarBaixaEstoqueCarretoAoDesmarcarSaida(venda);
+          _estoque.estornarBaixaEstoqueCarretoAoDesmarcarSaida(
+            venda,
+            complementoEntregaJson: venda.complementoEntregaJson,
+          );
         }
       }
 
@@ -3130,15 +2937,7 @@ class VendaRepository {
         );
       }
 
-      for (final item in venda.itens) {
-        final produto = item.produto.target;
-        if (produto == null) {
-          throw StateError('Produto do item ${item.id} nao encontrado.');
-        }
-        produto.estoqueReal += item.quantidade;
-        produto.estoqueReservado += item.quantidade;
-        _db.produtoBox.put(produto);
-      }
+      _estoque.recomporEstoqueAoMarcarEntregaPendente(venda);
 
       venda.entregaPendente = true;
       _db.vendaBox.put(venda);
@@ -3233,22 +3032,12 @@ class VendaRepository {
         if (produto == null) {
           throw StateError('Produto do item ${item.id} nao encontrado.');
         }
-        if (!permitirSemConferenciaEstoque) {
-          if (produto.estoqueReal < qRet) {
-            throw StateError(
-              'Estoque fisico insuficiente para retirar $qRet de ${produto.nome}.',
-            );
-          }
-          if (produto.estoqueReservado < qRet) {
-            throw StateError(
-              'Estoque reservado inconsistente para ${produto.nome}.',
-            );
-          }
-        }
-
-        produto.estoqueReal -= qRet;
-        produto.estoqueReservado -= qRet;
-        _db.produtoBox.put(produto);
+        _estoque.baixarReservaEFisicoRetirada(
+          item: item,
+          quantidade: qRet,
+          tipo: TipoMovimentoEstoque.retiradaParcialCliente,
+          permitirSemConferenciaEstoque: permitirSemConferenciaEstoque,
+        );
 
         item.quantidadeJaRetirada += qRet;
         _db.itemVendaBox.put(item);
@@ -3369,22 +3158,12 @@ class VendaRepository {
         if (produto == null) {
           throw StateError('Produto do item ${item.id} nao encontrado.');
         }
-        if (!permitirSemConferenciaEstoque) {
-          if (produto.estoqueReal < qRet) {
-            throw StateError(
-              'Estoque fisico insuficiente para retirar $qRet de ${produto.nome}.',
-            );
-          }
-          if (produto.estoqueReservado < qRet) {
-            throw StateError(
-              'Estoque reservado inconsistente para ${produto.nome}.',
-            );
-          }
-        }
-
-        produto.estoqueReal -= qRet;
-        produto.estoqueReservado -= qRet;
-        _db.produtoBox.put(produto);
+        _estoque.baixarReservaEFisicoRetirada(
+          item: item,
+          quantidade: qRet,
+          tipo: TipoMovimentoEstoque.retiradaParcialCliente,
+          permitirSemConferenciaEstoque: permitirSemConferenciaEstoque,
+        );
 
         item.quantidadeJaRetirada += qRet;
         _db.itemVendaBox.put(item);
@@ -3456,7 +3235,7 @@ class VendaRepository {
             _db.vendaBox.put(mae);
           }
         }
-        _liberarReservaEstoqueOrcamento(_db, venda);
+        _estoque.liberarReservaEstoqueOrcamento(venda);
         venda.cancelada = true;
         venda.motivoCancelamento = motivoLimpo;
         venda.canceladaPor = usuarioCancelamento;
@@ -3465,31 +3244,7 @@ class VendaRepository {
         return;
       }
 
-      for (final item in venda.itens) {
-        final produto = item.produto.target;
-        if (produto != null) {
-          if (venda.entregaPendente) {
-            final reservadoAtual = produto.estoqueReservado;
-            produto.estoqueReservado = (reservadoAtual - item.quantidade)
-                .clamp(0, reservadoAtual)
-                .toInt();
-          } else if (EntregaVendaHelper.vendaTemItensCarreto(venda) &&
-              venda.carretoReservaAteSaida) {
-            if (venda.cargaSaiu) {
-              produto.estoqueReal += item.quantidade;
-            } else {
-              final qReserva = _quantidadeItemParaEstoqueCarreto(item);
-              final reservadoAtual = produto.estoqueReservado;
-              produto.estoqueReservado = (reservadoAtual - qReserva)
-                  .clamp(0, reservadoAtual)
-                  .toInt();
-            }
-          } else {
-            produto.estoqueReal += item.quantidade;
-          }
-          _db.produtoBox.put(produto);
-        }
-      }
+      _estoque.estornarEstoqueAoCancelarVenda(venda);
 
       venda.cancelada = true;
       venda.motivoCancelamento = motivoLimpo;
@@ -3614,13 +3369,12 @@ class VendaRepository {
         if (produto == null) {
           throw StateError('Produto do item ${item.id} nao encontrado.');
         }
-        _aplicarEstoqueEntradaDevolucao(
+        _estoque.aplicarEntradaDevolucao(
           venda: venda,
           item: item,
           produto: produto,
           qtd: e.quantidade,
         );
-        _db.produtoBox.put(produto);
         item.quantidadeDevolvida += e.quantidade;
         _db.itemVendaBox.put(item);
       }
@@ -3632,20 +3386,11 @@ class VendaRepository {
           if (p == null) {
             throw StateError('Produto ${s.produtoId} nao encontrado.');
           }
-          if (!permitirVendaSemEstoque && p.estoqueReal < s.quantidade) {
-            throw StateError(
-              'Estoque insuficiente na troca para ${p.nome} (precisa ${s.quantidade}).',
-            );
-          }
-        }
-        for (final s in saidasTroca) {
-          if (s.quantidade <= 0) continue;
-          final p = _db.produtoBox.get(s.produtoId);
-          if (p == null) {
-            throw StateError('Produto ${s.produtoId} nao encontrado.');
-          }
-          p.estoqueReal -= s.quantidade;
-          _db.produtoBox.put(p);
+          _estoque.baixarEstoqueSaidaTroca(
+            produto: p,
+            quantidade: s.quantidade,
+            permitirVendaSemEstoque: permitirVendaSemEstoque,
+          );
         }
       }
 
@@ -3924,32 +3669,4 @@ class VendaRepository {
     return s;
   }
 
-  void _aplicarEstoqueEntradaDevolucao({
-    required Venda venda,
-    required ItemVenda item,
-    required Produto produto,
-    required int qtd,
-  }) {
-    if (qtd <= 0) return;
-    if (venda.entregaPendente) {
-      final daReserva = qtd <= item.quantidadePendenteRetirada
-          ? qtd
-          : item.quantidadePendenteRetirada;
-      final daCliente = qtd - daReserva;
-      if (daReserva > 0) {
-        final r = produto.estoqueReservado;
-        produto.estoqueReservado = (r - daReserva).clamp(0, r).toInt();
-      }
-      if (daCliente > 0) {
-        produto.estoqueReal += daCliente;
-      }
-    } else if (EntregaVendaHelper.vendaTemItensCarreto(venda) &&
-        venda.carretoReservaAteSaida &&
-        !venda.cargaSaiu) {
-      final r = produto.estoqueReservado;
-      produto.estoqueReservado = (r - qtd).clamp(0, r).toInt();
-    } else {
-      produto.estoqueReal += qtd;
-    }
-  }
 }

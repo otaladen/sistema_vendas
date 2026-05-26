@@ -3,18 +3,36 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../data/app_config_repository.dart';
+import '../data/cliente_repository.dart';
 import '../data/nfe_entrada_repository.dart';
 import '../data/produto_repository.dart';
+import '../data/venda_repository.dart';
+import '../model/usuario_sistema.dart';
 import '../services/xml_nfe_parser_service.dart';
 import 'conferencia_xml_screen.dart';
+import 'fiscal/exportar_fechamento_page.dart';
+import 'fiscal/nfe_gerenciamento_page.dart';
+import 'fiscal/relatorio_fiscal_mensal_page.dart';
 import 'nfe_importadas_page.dart';
 import 'widgets/hub_nav_button.dart';
 
 /// Entrada de NF-e por XML e consulta do log de importacoes.
 class NotasFiscaisPage extends StatelessWidget {
-  const NotasFiscaisPage({super.key, required this.produtoRepository});
+  const NotasFiscaisPage({
+    super.key,
+    required this.produtoRepository,
+    required this.vendaRepository,
+    required this.clienteRepository,
+    required this.appConfigRepository,
+    required this.usuarioLogado,
+  });
 
   final ProdutoRepository produtoRepository;
+  final VendaRepository vendaRepository;
+  final ClienteRepository clienteRepository;
+  final AppConfigRepository appConfigRepository;
+  final UsuarioSistema usuarioLogado;
 
   Future<void> _importarNfeXml(BuildContext context) async {
     final pick = await FilePicker.platform.pickFiles(
@@ -48,6 +66,7 @@ class NotasFiscaisPage extends StatelessWidget {
             nfe: nfe,
             nfeRepository: repo,
             produtoRepository: produtoRepository,
+            xmlOriginal: xml,
           ),
         ),
       );
@@ -93,6 +112,60 @@ class NotasFiscaisPage extends StatelessWidget {
                   MaterialPageRoute<void>(
                     builder: (_) => NfeImportadasPage(
                       produtoRepository: produtoRepository,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            HubNavButton(
+              icon: Icons.description_outlined,
+              corDestaque: HubNavColors.menuNotasFiscais,
+              titulo: 'NF-e de saida (Modelo 55)',
+              subtitulo:
+                  'Faturamento para construtoras e cargas pesadas. Emissao Focus NFe.',
+              onTap: () {
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => NfeGerenciamentoPage(
+                      vendaRepository: vendaRepository,
+                      clienteRepository: clienteRepository,
+                      appConfigRepository: appConfigRepository,
+                      usuarioLogado: usuarioLogado,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            HubNavButton(
+              icon: Icons.analytics_outlined,
+              corDestaque: HubNavColors.menuNotasFiscais,
+              titulo: 'Relatorio fiscal do mes',
+              subtitulo:
+                  'Resumo de saidas (NF-e/NFC-e), entradas e totais antes do ZIP.',
+              onTap: () {
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => RelatorioFiscalMensalPage(
+                      vendaRepository: vendaRepository,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            HubNavButton(
+              icon: Icons.folder_zip_outlined,
+              corDestaque: HubNavColors.menuNotasFiscais,
+              titulo: 'Exportar Fechamento do Mes',
+              subtitulo:
+                  'ZIP com XMLs autorizados e planilha Excel para a contabilidade.',
+              onTap: () {
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ExportarFechamentoPage(
+                      vendaRepository: vendaRepository,
                     ),
                   ),
                 );

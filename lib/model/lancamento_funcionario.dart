@@ -16,7 +16,7 @@ class LancamentoFuncionario {
   })  : data = data ?? DateTime.now(),
         criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// Um de [LancamentoFuncionarioCatalogo] (vale, desconto, bonus, observacao).

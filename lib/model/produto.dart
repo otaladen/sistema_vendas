@@ -24,6 +24,9 @@ class Produto {
     this.cest = '',
     this.grupoTributario = 'tributado',
     this.cfopVenda = '',
+    this.icmsOrigem = '',
+    this.icmsSituacaoTributaria = '',
+    this.pisCofinsSituacaoTributaria = '',
     int? estoque,
     int? estoqueReal,
     int? estoqueAtual,
@@ -50,7 +53,7 @@ class Produto {
        estoqueAtual = estoqueAtual ?? estoqueReal ?? estoque ?? 0,
        criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// Buscas por SKU / codigo interno (NF-e, cadastro).
@@ -86,6 +89,12 @@ class Produto {
   String grupoTributario;
   /// CFOP fixo na venda (4 digitos); vazio = calculo automatico no [FiscalService].
   String cfopVenda;
+  /// Origem ICMS (0-8); vazio = [FiscalConfig.icmsOrigemPadrao].
+  String icmsOrigem;
+  /// CST ICMS (2 digitos); vazio = grupo tributario / padrao da loja.
+  String icmsSituacaoTributaria;
+  /// CST PIS e COFINS (2 digitos); vazio = [FiscalConfig.pisCofinsSituacaoTributariaPadrao].
+  String pisCofinsSituacaoTributaria;
   int estoqueReal;
   int estoqueReservado;
 

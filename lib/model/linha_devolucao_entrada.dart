@@ -13,7 +13,7 @@ class LinhaDevolucaoEntrada {
     this.nomeProdutoSnapshot = '',
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   int itemVendaId;

@@ -7,6 +7,7 @@ class AuditoriaModulo {
   static const venda = 'venda';
   static const backup = 'backup';
   static const caixa = 'caixa';
+  static const fiscal = 'fiscal';
   static const sistema = 'sistema';
 
   static const todos = [
@@ -15,6 +16,7 @@ class AuditoriaModulo {
     venda,
     backup,
     caixa,
+    fiscal,
     sistema,
   ];
 }
@@ -38,6 +40,14 @@ class AuditoriaAcao {
   static const usuarioCriado = 'usuario_criado';
   static const usuarioAlterado = 'usuario_alterado';
   static const usuarioRemovido = 'usuario_removido';
+  static const nfeEmitir = 'nfe_emitir';
+  static const nfeCancelar = 'nfe_cancelar';
+  static const nfeCartaCorrecao = 'nfe_carta_correcao';
+  static const nfeReconsultar = 'nfe_reconsultar';
+  static const nfeReconsultarLote = 'nfe_reconsultar_lote';
+  static const nfeEmail = 'nfe_email';
+  static const nfeWhatsapp = 'nfe_whatsapp';
+  static const nfeInutilizar = 'nfe_inutilizar';
 }
 
 String auditoriaRotuloModulo(String modulo) {
@@ -52,6 +62,8 @@ String auditoriaRotuloModulo(String modulo) {
       return 'Backup';
     case AuditoriaModulo.caixa:
       return 'Caixa';
+    case AuditoriaModulo.fiscal:
+      return 'Fiscal';
     case AuditoriaModulo.sistema:
       return 'Sistema';
     default:
@@ -93,6 +105,22 @@ String auditoriaRotuloAcao(String acao) {
       return 'Usuario alterado';
     case AuditoriaAcao.usuarioRemovido:
       return 'Usuario removido';
+    case AuditoriaAcao.nfeEmitir:
+      return 'NF-e emitida';
+    case AuditoriaAcao.nfeCancelar:
+      return 'NF-e cancelada';
+    case AuditoriaAcao.nfeCartaCorrecao:
+      return 'Carta de correcao NF-e';
+    case AuditoriaAcao.nfeReconsultar:
+      return 'Reconsulta NF-e';
+    case AuditoriaAcao.nfeReconsultarLote:
+      return 'Reconsulta NF-e em lote';
+    case AuditoriaAcao.nfeEmail:
+      return 'NF-e enviada por e-mail';
+    case AuditoriaAcao.nfeWhatsapp:
+      return 'DANFE enviado por WhatsApp';
+    case AuditoriaAcao.nfeInutilizar:
+      return 'Inutilizacao numeracao NF-e';
     default:
       return acao;
   }

@@ -28,6 +28,31 @@ class SyncApiClient {
 
   bool get configurado => _base.isNotEmpty;
 
+  /// Host e porta parseados do [baseUrl] (para teste de socket).
+  (String, int)? get hostPorta {
+    if (!configurado) return null;
+    final u = Uri.parse(_base);
+    if (u.host.isEmpty) return null;
+    final porta = u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
+    return (u.host, porta);
+  }
+
+  /// GET `/sync/meta` com ou sem header de token (diagnostico LAN).
+  Future<int> metaStatus({required bool incluirToken}) async {
+    if (!configurado) return 0;
+    try {
+      final headers = incluirToken && _syncToken.isNotEmpty
+          ? {SyncAuth.headerName: _syncToken}
+          : null;
+      final r = await http
+          .get(_uri('/sync/meta'), headers: headers)
+          .timeout(const Duration(seconds: 8));
+      return r.statusCode;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Map<String, String> _headersJson() {
     final h = <String, String>{'content-type': 'application/json'};
     if (_syncToken.isNotEmpty) {

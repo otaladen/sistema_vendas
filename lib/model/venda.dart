@@ -48,10 +48,25 @@ class Venda {
     this.nfceSerie = '',
     this.nfceProtocolo = '',
     this.nfceUrlDanfe = '',
+    this.nfceUrlXml = '',
+    this.nfceStatusFocus = '',
+    this.nfceUrlXmlCancelamento = '',
     this.nfceEmitidaEm,
+    this.nfeReferenciaFocus = '',
+    this.nfeChaveAcesso = '',
+    this.nfeNumero = '',
+    this.nfeSerie = '',
+    this.nfeProtocolo = '',
+    this.nfeUrlDanfe = '',
+    this.nfeUrlXml = '',
+    this.nfeStatusFocus = '',
+    this.nfeUrlXmlCancelamento = '',
+    this.nfeEmitidaEm,
+    this.estoqueBaixadoCupom = false,
+    this.cupomNaoFiscalEmitidoEm,
   }) : data = data ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   @Property(type: PropertyType.dateUtc)
@@ -121,8 +136,40 @@ class Venda {
   String nfceProtocolo;
   /// URL do PDF DANFE retornada pela API fiscal.
   String nfceUrlDanfe;
+
+  /// URL do XML da NFC-e (Focus NFe) para fechamento contabil.
+  String nfceUrlXml;
+
+  /// Status Focus da NFC-e (autorizado, cancelado, etc.).
+  String nfceStatusFocus;
+
+  /// URL do XML de evento de cancelamento (Focus), quando houver.
+  String nfceUrlXmlCancelamento;
+
   @Property(type: PropertyType.dateUtc)
   DateTime? nfceEmitidaEm;
+
+  /// Ultima referencia Focus da NF-e modelo 55 (`venda_{id}_nfe` ou `venda_{id}_nfe_2`).
+  String nfeReferenciaFocus;
+
+  /// Dados da NF-e 55 sincronizados na LAN (mesmo padrao da NFC-e).
+  String nfeChaveAcesso;
+  String nfeNumero;
+  String nfeSerie;
+  String nfeProtocolo;
+  String nfeUrlDanfe;
+  String nfeUrlXml;
+  String nfeStatusFocus;
+  String nfeUrlXmlCancelamento;
+
+  @Property(type: PropertyType.dateUtc)
+  DateTime? nfeEmitidaEm;
+
+  /// Baixa fisica de retirada imediata registrada pelo cupom nao fiscal.
+  bool estoqueBaixadoCupom;
+
+  @Property(type: PropertyType.dateUtc)
+  DateTime? cupomNaoFiscalEmitidoEm;
 
   final cliente = ToOne<Cliente>();
   final vendedor = ToOne<Vendedor>();
@@ -140,6 +187,24 @@ class Venda {
   /// NFC-e ja autorizada e registrada nesta venda.
   bool get nfceEmitida =>
       nfceChaveAcesso.trim().isNotEmpty || nfceUrlDanfe.trim().isNotEmpty;
+
+  bool get nfe55Cancelada =>
+      nfeStatusFocus == 'cancelado' ||
+      nfeUrlXmlCancelamento.trim().isNotEmpty;
+
+  /// NF-e modelo 55 autorizada (campo replicado na venda para sync multi-PC).
+  bool get nfe55Autorizada =>
+      !nfe55Cancelada &&
+      (nfeStatusFocus == 'autorizado' ||
+          (nfeChaveAcesso.trim().length >= 40));
+
+  bool get nfe55Processando => nfeStatusFocus == 'processando_autorizacao';
+
+  bool get nfe55Rejeitada =>
+      !nfe55Autorizada &&
+      !nfe55Cancelada &&
+      !nfe55Processando &&
+      (nfeStatusFocus == 'erro_autorizacao' || nfeStatusFocus == 'denegado');
 
   /// Desconto aplicado sobre o bruto (itens + frete) ate chegar em [total], quando
   /// [total] foi reduzido sem alterar [precoUnitario] nas linhas (ex.: PDV e caixa).

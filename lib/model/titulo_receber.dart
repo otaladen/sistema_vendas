@@ -19,7 +19,7 @@ class TituloReceber {
   })  : vencimento = vencimento ?? DateTime.now(),
         criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   int numeroParcela;

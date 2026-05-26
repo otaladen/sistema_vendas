@@ -78,15 +78,13 @@ class GeminiService {
 
   final String? _apiKeyOverride;
   final List<String> _modelos;
-  String? _cachedApiKey;
 
   Future<String> _resolvedApiKey() async {
     final override = _apiKeyOverride?.trim() ?? '';
     if (override.isNotEmpty) {
       return override;
     }
-    _cachedApiKey ??= await GeminiConfig.resolverChave();
-    return _cachedApiKey!;
+    return GeminiConfig.resolverChave();
   }
 
   static final Schema _schemaProdutoPadronizado = Schema.object(

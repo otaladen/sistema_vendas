@@ -17,6 +17,7 @@ import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
+import '../domain/fiscal/produto_fiscal_catalog.dart';
 import '../domain/produto_precificacao.dart';
 import '../model/produto.dart';
 import '../config/busca_imagem_config.dart';
@@ -262,6 +263,9 @@ class _ProdutosPageState extends State<ProdutosPage>
   String _infoNcmBrasilApi = '';
   String _unidadeSelecionada = 'UN';
   String _grupoTributarioSelecionado = GrupoTributarioProduto.tributado.codigo;
+  String _icmsOrigemSelecionado = kFiscalValorAutomatico;
+  String _icmsCstSelecionado = kFiscalValorAutomatico;
+  String _pisCofinsCstSelecionado = kFiscalValorAutomatico;
   _BaseCalculoPrecoProduto _baseCalculoPreco = _BaseCalculoPrecoProduto.custoDigitado;
   bool _embalagemMultiplica = true;
   bool _permiteQuantidadeFracionada = false;
@@ -1287,6 +1291,9 @@ class _ProdutosPageState extends State<ProdutosPage>
       _cfopVendaController.clear();
       _localizacaoController.clear();
       _grupoTributarioSelecionado = GrupoTributarioProduto.tributado.codigo;
+      _icmsOrigemSelecionado = kFiscalValorAutomatico;
+      _icmsCstSelecionado = kFiscalValorAutomatico;
+      _pisCofinsCstSelecionado = kFiscalValorAutomatico;
       _precoCustoController.clear();
       _preco1Controller.clear();
       _preco2Controller.clear();
@@ -1410,6 +1417,40 @@ class _ProdutosPageState extends State<ProdutosPage>
               },
               child: const Text('Criar chave Gemini'),
             ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _mostrarDialogoConfigurarGemini() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Chave Gemini nao configurada'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'Para padronizar nome, categoria e unidade com IA:\n\n'
+            '1. Abra o menu principal > Configuracoes > aba Empresa.\n'
+            '2. Na secao "IA — padronizar produtos", clique em '
+            '"Criar chave no AI Studio" e gere uma chave gratuita.\n'
+            '3. Cole a chave (AIza...) e clique em "Salvar chave Gemini".\n'
+            '4. Volte ao cadastro de produtos e use o botao de IA novamente.\n\n'
+            'Alternativa avancada: variavel de ambiente GEMINI_API_KEY ou '
+            'flutter run --dart-define=GEMINI_API_KEY=sua_chave',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fechar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _abrirUrlExterna('https://aistudio.google.com/apikey');
+            },
+            child: const Text('Criar chave no AI Studio'),
+          ),
         ],
       ),
     );
@@ -2159,11 +2200,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
 
     if (!await _geminiService.configurado) {
-      _snackbarBrasilApi(
-        'Chave da API Gemini nao configurada. Use GEMINI_API_KEY (ambiente ou '
-        'dart-define) ou salve em Configuracoes.',
-        erro: true,
-      );
+      await _mostrarDialogoConfigurarGemini();
       return;
     }
 
@@ -2399,11 +2436,10 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   String? _validarCest(String? value) {
     final digits = (value ?? '').replaceAll(RegExp(r'\D'), '');
-    if (digits.isEmpty) return null;
-    if (digits.length != 7) {
-      return 'CEST deve ter 7 digitos quando informado.';
-    }
-    return null;
+    return ProdutoFiscalCatalog.validarCestParaGrupo(
+      cestDigitos: digits,
+      grupoTributarioCodigo: _grupoTributarioSelecionado,
+    );
   }
 
   String? _validarCfopVenda(String? value) {
@@ -2898,6 +2934,9 @@ class _ProdutosPageState extends State<ProdutosPage>
       cest: cest,
       grupoTributario: _grupoTributarioSelecionado,
       cfopVenda: cfopVenda,
+      icmsOrigem: _icmsOrigemSelecionado,
+      icmsSituacaoTributaria: _icmsCstSelecionado,
+      pisCofinsSituacaoTributaria: _pisCofinsCstSelecionado,
       estoque: estoque,
       quantidadeMinima: quantidadeMinima,
       leadTimeDias: leadTimeDias > 0 ? leadTimeDias : 7,
@@ -2983,6 +3022,9 @@ class _ProdutosPageState extends State<ProdutosPage>
       _cfopVendaController.text = produto.cfopVenda;
       _grupoTributarioSelecionado =
           grupoTributarioProdutoDeString(produto.grupoTributario).codigo;
+      _icmsOrigemSelecionado = produto.icmsOrigem;
+      _icmsCstSelecionado = produto.icmsSituacaoTributaria;
+      _pisCofinsCstSelecionado = produto.pisCofinsSituacaoTributaria;
       _localizacaoController.text = produto.localizacao;
       _precoCustoController.text = _formatarValorMonetario(produto.precoCusto);
       _preco1Controller.text = _formatarValorMonetario(
@@ -5238,7 +5280,13 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               _erpInputDecoration(
                                                                 context,
                                                                 helper:
-                                                                    '7 digitos — ST / construcao',
+                                                                    grupoTributarioProdutoDeString(
+                                                                          _grupoTributarioSelecionado,
+                                                                        ) ==
+                                                                        GrupoTributarioProduto
+                                                                            .substituicaoTributaria
+                                                                    ? 'Obrigatorio para ST (7 digitos)'
+                                                                    : '7 digitos — ST / construcao',
                                                               ),
                                                         ),
                                                       ],
@@ -5280,6 +5328,153 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                 _grupoTributarioSelecionado =
                                                                     value;
                                                               });
+                                                              _formKey
+                                                                  .currentState
+                                                                  ?.validate();
+                                                            }
+                                                          },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Origem da mercadoria',
+                                                          context,
+                                                        ),
+                                                        DropdownButtonFormField<
+                                                          String
+                                                        >(
+                                                          isDense: true,
+                                                          isExpanded: true,
+                                                          initialValue:
+                                                              _icmsOrigemSelecionado,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                helper:
+                                                                    'Vazio = nacional (0)',
+                                                              ),
+                                                          items: ProdutoFiscalCatalog
+                                                              .icmsOrigens
+                                                              .map(
+                                                                (o) =>
+                                                                    DropdownMenuItem(
+                                                                  value: o.codigo,
+                                                                  child: Text(
+                                                                    o.rotulo,
+                                                                    overflow:
+                                                                        TextOverflow
+                                                                            .ellipsis,
+                                                                  ),
+                                                                ),
+                                                              )
+                                                              .toList(),
+                                                          onChanged: (value) {
+                                                            if (value != null) {
+                                                              setState(() {
+                                                                _icmsOrigemSelecionado =
+                                                                    value;
+                                                              });
+                                                            }
+                                                          },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'CST ICMS',
+                                                          context,
+                                                        ),
+                                                        DropdownButtonFormField<
+                                                          String
+                                                        >(
+                                                          isDense: true,
+                                                          isExpanded: true,
+                                                          initialValue:
+                                                              _icmsCstSelecionado,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                helper:
+                                                                    'Automatico: 00 / 40 / 60 pelo grupo',
+                                                              ),
+                                                          items: ProdutoFiscalCatalog
+                                                              .icmsCstVenda
+                                                              .map(
+                                                                (o) =>
+                                                                    DropdownMenuItem(
+                                                                  value: o.codigo,
+                                                                  child: Text(
+                                                                    o.rotulo,
+                                                                    overflow:
+                                                                        TextOverflow
+                                                                            .ellipsis,
+                                                                  ),
+                                                                ),
+                                                              )
+                                                              .toList(),
+                                                          onChanged: (value) {
+                                                            if (value != null) {
+                                                              setState(() {
+                                                                _icmsCstSelecionado =
+                                                                    value;
+                                                              });
+                                                            }
+                                                          },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'CST PIS/COFINS',
+                                                          context,
+                                                        ),
+                                                        DropdownButtonFormField<
+                                                          String
+                                                        >(
+                                                          isDense: true,
+                                                          isExpanded: true,
+                                                          initialValue:
+                                                              _pisCofinsCstSelecionado,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                                helper:
+                                                                    'Vazio = 01 (padrao loja)',
+                                                              ),
+                                                          items: ProdutoFiscalCatalog
+                                                              .pisCofinsCst
+                                                              .map(
+                                                                (o) =>
+                                                                    DropdownMenuItem(
+                                                                  value: o.codigo,
+                                                                  child: Text(
+                                                                    o.rotulo,
+                                                                    overflow:
+                                                                        TextOverflow
+                                                                            .ellipsis,
+                                                                  ),
+                                                                ),
+                                                              )
+                                                              .toList(),
+                                                          onChanged: (value) {
+                                                            if (value != null) {
+                                                              setState(() {
+                                                                _pisCofinsCstSelecionado =
+                                                                    value;
+                                                              });
                                                             }
                                                           },
                                                         ),
@@ -5314,8 +5509,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                     ),
                                                   ]),
                                                   Text(
-                                                    'CFOP automatico: consumidor final na Bahia — '
-                                                    'Tributado/Isento 5102, ST 5405.',
+                                                    'CFOP automatico na BA: Tributado/Isento 5102, ST 5405. '
+                                                    'CST ICMS automatico pelo grupo se nao escolher acima.',
                                                     style: Theme.of(context)
                                                         .textTheme
                                                         .bodySmall,

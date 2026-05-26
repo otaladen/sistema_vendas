@@ -24,6 +24,7 @@ import 'model/usuario_sistema.dart';
 import 'services/auditoria_registrar.dart';
 import 'services/auditoria_retencao_service.dart';
 import 'services/print_service.dart';
+import 'services/fiscal_config_store.dart';
 import 'services/trusted_http_client.dart';
 import 'ui/app_startup_error_page.dart';
 import 'ui/layout/app_layout.dart';
@@ -53,6 +54,7 @@ Future<void> main() async {
       final auditoriaRepository = AuditoriaRepository(objectBox);
       AuditoriaRegistrar.inicializar(auditoriaRepository);
       final appConfigRepository = AppConfigRepository();
+      await FiscalConfigStore.carregar();
       await AuditoriaRetencaoService.aplicarSeConfigurado(
         configRepository: appConfigRepository,
         auditoriaRepository: auditoriaRepository,

@@ -27,6 +27,7 @@ import 'clientes_page.dart';
 import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
 import 'registrar_devolucao_troca_page.dart';
+import 'fiscal/abrir_documento_fiscal.dart';
 
 /// Lista vendas já finalizadas no Caixa (`status == finalizada`), com filtros e busca.
 class ListagemVendasPage extends StatefulWidget {
@@ -94,6 +95,62 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
+
+  String _rotuloCupomFiscalLista(Venda v) {
+    final cupom = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
+    final partes = <String>['Venda $cupom'];
+    if (v.nfceNumero.trim().isNotEmpty) {
+      partes.add('NFC-e ${v.nfceNumero.trim()}');
+    } else if (v.nfceEmitida) {
+      partes.add('NFC-e (sem numero)');
+    }
+    final nfe55 = widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id);
+    if (nfe55 != null && nfe55.numero.trim().isNotEmpty) {
+      partes.add('NF-e ${nfe55.numero.trim()}');
+    } else if (nfe55 != null) {
+      partes.add('NF-e 55');
+    }
+    return partes.join(' · ');
+  }
+
+  String _statusOperacionalLista(Venda v) {
+    if (v.estoqueBaixadoCupom) {
+      if (v.nfceEmitida ||
+          widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null) {
+        return 'Cupom interno + nota fiscal';
+      }
+      return 'Cupom interno (estoque baixado)';
+    }
+    if (v.nfceEmitida) return 'NFC-e sem baixa de estoque';
+    return 'Sem cupom interno / aguardando nota';
+  }
+
+  Future<void> _verDanfeNfce(Venda v) async {
+    await abrirUrlDocumentoFiscal(
+      context,
+      v.nfceUrlDanfe,
+      mensagemSeVazio: 'Esta venda nao possui DANFE da NFC-e salvo.',
+    );
+  }
+
+  Future<void> _verNfe55(Venda v) async {
+    final reg = widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id);
+    if (reg == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nenhuma NF-e modelo 55 autorizada para esta venda.'),
+        ),
+      );
+      return;
+    }
+    final url = reg.urlDanfe.trim().isNotEmpty ? reg.urlDanfe : reg.urlXml;
+    await abrirUrlDocumentoFiscal(
+      context,
+      url,
+      mensagemSeVazio: 'NF-e autorizada, mas sem link de DANFE/XML salvo.',
+    );
+  }
 
   double _parseValorMonetario(String valor) {
     final normalizado = valor.trim().replaceAll('.', '').replaceAll(',', '.');
@@ -507,7 +564,15 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   Future<void> _segundaViaCupom(Venda vIn) async {
-    final v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
+    var v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
+    if (!v.estoqueBaixadoCupom &&
+        (v.nfceEmitida ||
+            widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null)) {
+      try {
+        widget.vendaRepository.registrarCupomInternoPosAutorizacaoFiscal(v.id);
+        v = widget.vendaRepository.obterPorId(vIn.id) ?? v;
+      } catch (_) {}
+    }
     if (v.cancelada) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1373,7 +1438,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                             decoration: const InputDecoration(
                               labelText: 'Pesquisar venda',
                               hintText:
-                                  'Numero da venda, ID, cliente, vendedor (nome/codigo) ou produto',
+                                  'Venda, NFC-e, NF-e 55, chave, cliente, vendedor ou produto',
                               prefixIcon: Icon(Icons.search),
                             ),
                             textInputAction: TextInputAction.search,
@@ -1469,8 +1534,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                               ),
                             ),
                             title: Text(
-                              '${_rotuloVendaUsuario(v)}'
-                              '${v.cancelada ? ' (cancelada)' : ''}',
+                              _rotuloCupomFiscalLista(v) +
+                                  (v.cancelada ? ' (cancelada)' : ''),
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 color: v.cancelada
@@ -1481,6 +1546,22 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                Text(
+                                  _statusOperacionalLista(v),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelMedium
+                                      ?.copyWith(
+                                        color: v.estoqueBaixadoCupom
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                            : Theme.of(context)
+                                                .colorScheme
+                                                .error,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
                                 Text(_dataHora.format(v.data.toLocal())),
                                 Text(
                                   'Cliente: ${cliente?.nomeRazao ?? 'Sem cliente'} | '
@@ -1610,17 +1691,40 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                         _abrirPagarFreteCarreto(v);
                                       } else if (value == 'devolucao') {
                                         _abrirRegistrarDevolucaoTroca(v);
+                                      } else if (value == 'danfe_nfce') {
+                                        _verDanfeNfce(v);
+                                      } else if (value == 'danfe_nfe55') {
+                                        _verNfe55(v);
                                       } else if (value == 'segunda_via') {
                                         _segundaViaCupom(v);
                                       } else if (value == 'cancelar') {
                                         _cancelarVenda(v);
                                       }
                                     },
-                                    itemBuilder: (context) => [
+                                    itemBuilder: (context) {
+                                      final temNfce = v.nfceEmitida;
+                                      final temNfe55 = widget.vendaRepository
+                                              .obterNfe55AutorizadaPorVenda(
+                                            v.id,
+                                          ) !=
+                                          null;
+                                      return [
+                                      if (temNfce)
+                                        const PopupMenuItem<String>(
+                                          value: 'danfe_nfce',
+                                          child: Text('Ver NFC-e (DANFE)'),
+                                        ),
+                                      if (temNfe55)
+                                        const PopupMenuItem<String>(
+                                          value: 'danfe_nfe55',
+                                          child: Text('Ver NF-e modelo 55'),
+                                        ),
                                       if (!v.cancelada && v.status == 'finalizada')
                                         const PopupMenuItem<String>(
                                           value: 'segunda_via',
-                                          child: Text('Segunda via do cupom'),
+                                          child: Text(
+                                            'Cupom interno (2ª via / PDF)',
+                                          ),
                                         ),
                                       if (_podePagarFreteCarreto(v))
                                         const PopupMenuItem<String>(
@@ -1649,7 +1753,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                         enabled: !v.cancelada,
                                         child: const Text('Cancelar venda'),
                                       ),
-                                    ],
+                                    ];
+                                    },
                                   ),
                                 ],
                               ),

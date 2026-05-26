@@ -19,7 +19,7 @@ class HistoricoEntrada {
     this.precoCustoUnitarioNota = 0,
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// ide/nNF

@@ -16,11 +16,13 @@ class ConferenciaXmlScreen extends StatefulWidget {
     required this.nfe,
     required this.nfeRepository,
     required this.produtoRepository,
+    this.xmlOriginal = '',
   });
 
   final NfeXmlParseResult nfe;
   final NfeEntradaRepository nfeRepository;
   final ProdutoRepository produtoRepository;
+  final String xmlOriginal;
 
   @override
   State<ConferenciaXmlScreen> createState() => _ConferenciaXmlScreenState();
@@ -854,6 +856,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       widget.nfeRepository.confirmarEntrada(
         nfe: widget.nfe,
         linhas: confirmacoes,
+        xmlOriginal: widget.xmlOriginal,
       );
       widget.produtoRepository.invalidarCacheBusca();
       if (!mounted) return;

@@ -13,7 +13,7 @@ class KitOrcamento {
     DateTime? criadoEm,
   }) : criadoEm = criadoEm ?? DateTime.now();
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   @Index()
@@ -38,7 +38,7 @@ class KitOrcamentoItem {
     this.ordem = 0,
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   /// Quantidade deste produto por "1 kit" inserido no orcamento.

@@ -9,6 +9,8 @@ import '../model/nfe_importada_registro.dart';
 import '../model/produto.dart';
 import '../model/vinculo_fornecedor_produto.dart';
 import '../objectbox.g.dart';
+import '../services/gerenciador_estoque_service.dart';
+import 'nfe_entrada_xml_store.dart';
 import 'objectbox.dart';
 import 'produto_repository.dart' show calcularCustoMedioPonderadoEntradasNfe;
 import 'sync/sync_write_trigger.dart';
@@ -88,9 +90,13 @@ class ConferenciaNfeLinhaConfirmacao {
 }
 
 class NfeEntradaRepository {
-  NfeEntradaRepository(this._db);
+  NfeEntradaRepository(this._db)
+      : _estoque = GerenciadorEstoqueService(_db),
+        _xmlStore = NfeEntradaXmlStore(_db.storeDirectoryPath);
 
   final ObjectBox _db;
+  final GerenciadorEstoqueService _estoque;
+  final NfeEntradaXmlStore _xmlStore;
 
   static const List<String> unidadesInternasValidas = [
     'UN',
@@ -193,6 +199,31 @@ class NfeEntradaRepository {
       return false;
     }
     return _buscarImportacaoPorChave(chave) != null;
+  }
+
+  /// Importacoes gravadas entre [inicioUtc] e [fimUtc] (data de entrada no sistema).
+  List<NfeImportadaRegistro> listarImportacoesNoPeriodo({
+    required DateTime inicioUtc,
+    required DateTime fimUtc,
+  }) {
+    final q = _db.nfeImportadaRegistroBox
+        .query(
+          NfeImportadaRegistro_.dataHoraImportacao
+              .greaterOrEqualDate(inicioUtc)
+              .and(
+                NfeImportadaRegistro_.dataHoraImportacao.lessOrEqualDate(fimUtc),
+              ),
+        )
+        .order(
+          NfeImportadaRegistro_.dataHoraImportacao,
+          flags: Order.descending,
+        )
+        .build();
+    try {
+      return q.find();
+    } finally {
+      q.close();
+    }
   }
 
   /// Log de NF-e importadas (mais recentes primeiro).
@@ -305,8 +336,7 @@ class NfeEntradaRepository {
         if (produto == null) continue;
         final qtd = h.quantidadeEntradaEstoque;
         if (qtd > 0) {
-          produto.estoqueReal -= qtd;
-          _db.produtoBox.put(produto);
+          _estoque.estornarEntradaPorNotaFiscal(produto, qtd);
         }
         _db.historicoEntradaBox.remove(h.id);
 
@@ -332,7 +362,7 @@ class NfeEntradaRepository {
         } else {
           p.custoMedio = p.precoCusto < 0 ? 0 : p.precoCusto;
         }
-        _db.produtoBox.put(p);
+        _estoque.persistirProdutoMetadados(p);
       }
     });
 
@@ -399,9 +429,10 @@ class NfeEntradaRepository {
   void confirmarEntrada({
     required NfeXmlParseResult nfe,
     required List<ConferenciaNfeLinhaConfirmacao> linhas,
+    String? xmlOriginal,
   }) {
+    final chaveNorm = nfe.chaveAcesso.replaceAll(RegExp(r'\D'), '');
     _db.store.runInTransaction(TxMode.write, () {
-      final chaveNorm = nfe.chaveAcesso.replaceAll(RegExp(r'\D'), '');
       if (chaveNorm.length != 44) {
         throw StateError(
           'Chave de acesso invalida para registro de importacao.',
@@ -486,7 +517,6 @@ class NfeEntradaRepository {
             );
           }
           produto = existente;
-          produto.estoqueReal = produto.estoqueReal + qtdInterna;
           produto.precoCusto = custoUnitInterno;
           produto.unidade = unidade;
           _sincronizarEmbalagemProdutoComNota(
@@ -503,7 +533,10 @@ class NfeEntradaRepository {
               produto.codigoBarras.isEmpty) {
             produto.codigoBarras = linha.item.codigoBarras;
           }
-          _db.produtoBox.put(produto);
+          _estoque.persistirProdutoMetadados(produto);
+          if (qtdInterna > 0) {
+            _estoque.registrarEntradaPorNotaFiscal(produto, qtdInterna);
+          }
         } else {
           final codigoInterno = _gerarCodigoInterno(nfe, linha.item);
           final uNota = ProdutoEmbalagem.normalizarUnidade(
@@ -528,9 +561,13 @@ class NfeEntradaRepository {
             precoCusto: custoUnitInterno,
             precoVenda: 0,
             quantidadeMinima: 0,
-            estoqueReal: qtdInterna,
+            estoqueReal: 0,
+            estoqueReservado: 0,
           );
-          _db.produtoBox.put(produto);
+          produto.id = _db.produtoBox.put(produto);
+          if (qtdInterna > 0) {
+            _estoque.registrarEntradaPorNotaFiscal(produto, qtdInterna);
+          }
         }
 
         final vExistente = _buscarVinculo(fornecedor.id, linha.item.codigo);
@@ -571,7 +608,7 @@ class NfeEntradaRepository {
         } else {
           p.custoMedio = p.precoCusto < 0 ? 0 : p.precoCusto;
         }
-        _db.produtoBox.put(p);
+        _estoque.persistirProdutoMetadados(p);
       }
 
       _persistirContasPagarNfeImportada(
@@ -594,6 +631,10 @@ class NfeEntradaRepository {
       );
       _db.nfeImportadaRegistroBox.put(registro);
     });
+
+    if (xmlOriginal != null && xmlOriginal.trim().isNotEmpty) {
+      _xmlStore.salvarXml(chaveNorm, xmlOriginal);
+    }
 
     notificarAlteracaoParaRede();
   }

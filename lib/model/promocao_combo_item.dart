@@ -12,7 +12,7 @@ class PromocaoComboItem {
     this.ordem = 0,
   });
 
-  @Id()
+  @Id(assignable: true)
   int id;
 
   int produtoAlvoId;
