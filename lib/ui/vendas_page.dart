@@ -155,8 +155,11 @@ class VendasPage extends StatelessWidget {
                       vendaRepository: vendaRepository,
                       produtoRepository: produtoRepository,
                       motoristaRepository: motoristaRepository,
+                      appConfigRepository: appConfigRepository,
                       usuarioAtual: u.login,
                       podeGerenciarStatusEntrega: podeGerenciarEntregas,
+                      podeRegistrarPodEntrega:
+                          UsuarioPermissaoHelper.podeRegistrarPodEntrega(u),
                       podeRegistrarDevolucaoTrocaSemSenha: podeCancelar,
                     ),
                   ),
@@ -217,9 +220,13 @@ class VendasPage extends StatelessWidget {
                                     vendaRepository: vendaRepository,
                                     produtoRepository: produtoRepository,
                                     motoristaRepository: motoristaRepository,
+                                    appConfigRepository: appConfigRepository,
                                     usuarioAtual: u.login,
                                     podeGerenciarStatusEntrega:
                                         podeGerenciarEntregas,
+                                    podeRegistrarPodEntrega:
+                                        UsuarioPermissaoHelper
+                                            .podeRegistrarPodEntrega(u),
                                     podeRegistrarDevolucaoTrocaSemSenha:
                                         podeCancelar,
                                   ),

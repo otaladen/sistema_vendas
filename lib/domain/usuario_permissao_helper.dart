@@ -148,8 +148,23 @@ class UsuarioPermissaoHelper {
     if (u.admin) return true;
     if (u.podeVisualizarEntregas) return true;
     if (podeGerenciarEntregas(u)) return true;
+    if (podeUsarModoMotorista(u)) return true;
     if (u.podeEntregas) return true;
     return false;
+  }
+
+  /// Painel simplificado: entregas do motorista logado + POD.
+  static bool podeUsarModoMotorista(UsuarioSistema u) {
+    if (!u.ativo) return false;
+    if (u.admin) return true;
+    return u.podeModoMotorista;
+  }
+
+  /// Registrar POD e marcar entregue (expedicao ou motorista).
+  static bool podeRegistrarPodEntrega(UsuarioSistema u) {
+    if (!u.ativo) return false;
+    if (u.admin) return true;
+    return podeGerenciarEntregas(u) || podeUsarModoMotorista(u);
   }
 
   static bool podeCancelarVendas(UsuarioSistema u) {

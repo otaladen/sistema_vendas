@@ -64,6 +64,11 @@ class Venda {
     this.nfeEmitidaEm,
     this.estoqueBaixadoCupom = false,
     this.cupomNaoFiscalEmitidoEm,
+    this.podRecebidoPor = '',
+    this.podRegistradoPor = '',
+    this.podFotoPath = '',
+    this.podFotoPathServidor = '',
+    this.podRegistradoEm,
   }) : data = data ?? DateTime.now();
 
   @Id(assignable: true)
@@ -170,6 +175,21 @@ class Venda {
 
   @Property(type: PropertyType.dateUtc)
   DateTime? cupomNaoFiscalEmitidoEm;
+
+  /// Prova de entrega (POD): quem recebeu na obra/cliente.
+  String podRecebidoPor;
+
+  /// Login do [UsuarioSistema] que registrou o POD.
+  String podRegistradoPor;
+
+  /// Caminho local do JPEG (este PC).
+  String podFotoPath;
+
+  /// Caminho relativo na pasta POD do PC servidor (sync LAN fase 2).
+  String podFotoPathServidor;
+
+  @Property(type: PropertyType.dateUtc)
+  DateTime? podRegistradoEm;
 
   final cliente = ToOne<Cliente>();
   final vendedor = ToOne<Vendedor>();

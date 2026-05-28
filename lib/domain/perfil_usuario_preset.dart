@@ -107,6 +107,7 @@ class PerfilUsuarioPresetAplicador {
       podeCancelarNfeSaida: flags.podeCancelarNfeSaida,
       descontoMaximoPercentualPdv: flags.descontoMaximoPercentualPdv,
       limparDescontoMaximoPdv: flags.descontoMaximoPercentualPdv == null,
+      podeModoMotorista: flags.podeModoMotorista,
     );
   }
 
@@ -205,6 +206,7 @@ class PerfilUsuarioPresetAplicador {
         return const _FlagsPerfil(
           podeVisualizarEntregas: true,
           podeEntregas: true,
+          podeModoMotorista: true,
         );
       case PerfilUsuarioPreset.comprador:
         return const _FlagsPerfil(
@@ -254,6 +256,7 @@ class _FlagsPerfil {
     this.podeEmitirNfeSaida = false,
     this.podeCancelarNfeSaida = false,
     this.descontoMaximoPercentualPdv,
+    this.podeModoMotorista = false,
   });
 
   final bool admin;
@@ -290,4 +293,5 @@ class _FlagsPerfil {
   final bool podeEmitirNfeSaida;
   final bool podeCancelarNfeSaida;
   final double? descontoMaximoPercentualPdv;
+  final bool podeModoMotorista;
 }

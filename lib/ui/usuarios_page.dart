@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/motorista_repository.dart';
 import '../data/usuario_repository.dart';
 import '../domain/perfil_usuario_preset.dart';
 import '../domain/permissao_usuario.dart';
@@ -18,10 +19,12 @@ class UsuariosPage extends StatefulWidget {
   const UsuariosPage({
     super.key,
     required this.usuarioRepository,
+    required this.motoristaRepository,
     required this.usuarioLogado,
   });
 
   final UsuarioRepository usuarioRepository;
+  final MotoristaRepository motoristaRepository;
   final UsuarioSistema usuarioLogado;
 
   @override
@@ -116,6 +119,16 @@ class _UsuariosPageState extends State<UsuariosPage>
         behavior: SnackBarBehavior.floating,
       ),
     );
+  }
+
+  String _motoristaVinculadoValido() {
+    final nome = _form.motoristaEntregaNome.trim();
+    if (nome.isEmpty) return '';
+    final ativos = widget.motoristaRepository
+        .listarAtivos()
+        .map((m) => m.nome)
+        .toList();
+    return ativos.contains(nome) ? nome : '';
   }
 
   void _sincronizarControllers() {
@@ -735,6 +748,44 @@ class _UsuariosPageState extends State<UsuariosPage>
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        SwitchListTile(
+          value: _form.podeModoMotorista,
+          onChanged: _form.admin
+              ? null
+              : (v) => setState(() => _form.definirPodeModoMotorista(v)),
+          title: const Text('Modo motorista (entregas no celular)'),
+          subtitle: const Text(
+            'Permite abrir o painel simplificado de entregas e registrar POD.',
+          ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        if (_form.podeModoMotorista && !_form.admin) ...[
+          const SizedBox(height: 4),
+          DropdownButtonFormField<String>(
+            value: _motoristaVinculadoValido(),
+            decoration: const InputDecoration(
+              labelText: 'Motorista vinculado',
+              helperText:
+                  'Nome do cadastro de motoristas; filtra as entregas deste usuario.',
+              border: OutlineInputBorder(),
+            ),
+            items: [
+              const DropdownMenuItem(
+                value: '',
+                child: Text('(Nenhum — usa o nome do usuario)'),
+              ),
+              for (final m in widget.motoristaRepository.listarAtivos())
+                DropdownMenuItem(
+                  value: m.nome,
+                  child: Text(m.nome),
+                ),
+            ],
+            onChanged: (v) => setState(
+              () => _form.definirMotoristaEntregaNome(v),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         UsuariosResumoPanel(form: _form),
         const SizedBox(height: 16),

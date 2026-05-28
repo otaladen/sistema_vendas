@@ -25,6 +25,8 @@ class UsuarioFormState {
   String get senha => _usuario.senha;
   bool get ativo => _usuario.ativo;
   bool get admin => _usuario.admin;
+  String get motoristaEntregaNome => _usuario.motoristaEntregaNome;
+  bool get podeModoMotorista => _usuario.podeModoMotorista;
   UsuarioSistema get usuario => _usuario;
   PerfilUsuarioPreset get perfilSelecionado => _perfilSelecionado;
 
@@ -34,6 +36,21 @@ class UsuarioFormState {
   void definirLogin(String v) => _usuario = _usuario.copyWith(login: v);
   void definirSenha(String v) => _usuario = _usuario.copyWith(senha: v);
   void definirAtivo(bool v) => _usuario = _usuario.copyWith(ativo: v);
+
+  void definirMotoristaEntregaNome(String? nome) {
+    _perfilSelecionado = PerfilUsuarioPreset.customizado;
+    _usuario = _usuario.copyWith(
+      motoristaEntregaNome: (nome ?? '').trim(),
+    );
+  }
+
+  void definirPodeModoMotorista(bool v) {
+    _perfilSelecionado = PerfilUsuarioPreset.customizado;
+    _usuario = _usuario.copyWith(podeModoMotorista: v);
+    if (!v) {
+      _usuario = _usuario.copyWith(motoristaEntregaNome: '');
+    }
+  }
 
   /// Texto do teto de desconto; vazio = usar configuracao da empresa.
   String get descontoMaximoTexto {

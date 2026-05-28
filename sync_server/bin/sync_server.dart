@@ -105,7 +105,14 @@ void main(List<String> args) async {
         );
       }),
     )
-    ..post('/sync/push', _push);
+    ..post('/sync/push', _push)
+    ..get('/sync/pod/<fileName>', _podDownload)
+    ..post('/sync/pod', _podUpload);
+
+  final podDir = _diretorioPodEntrega();
+  if (!Directory(podDir).existsSync()) {
+    Directory(podDir).createSync(recursive: true);
+  }
 
   final handler = Pipeline()
       .addMiddleware(_syncAuthMiddleware)
@@ -115,9 +122,117 @@ void main(List<String> args) async {
   final server = await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
   // ignore: avoid_print
   print(
-    'sistema_vendas sync server | db=$dbPath | '
+    'sistema_vendas sync server | db=$dbPath | pod=$podDir | '
     'http://${server.address.address}:$port | ws=/sync/stream | '
     'auth=${_syncToken.isEmpty ? "desligada" : "token ativo"}',
+  );
+}
+
+String _diretorioPodEntrega() {
+  final env = (Platform.environment['SYNC_POD_PATH'] ?? '').trim();
+  if (env.isNotEmpty) return env;
+  return '${_diretorioBaseInstalacao()}${Platform.pathSeparator}pod_entrega';
+}
+
+final RegExp _regexNomeArquivoPod = RegExp(r'^venda_\d+_\d{8}_\d{6}\.jpg$');
+
+bool _nomeArquivoPodValido(String raw) {
+  final name = raw.trim();
+  if (name.isEmpty || name.contains('..') || name.contains('/')) {
+    return false;
+  }
+  return _regexNomeArquivoPod.hasMatch(name);
+}
+
+Future<Response> _podUpload(Request request) async {
+  try {
+    final body = await request.readAsString();
+    final decoded = jsonDecode(body);
+    if (decoded is! Map<String, dynamic>) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'json_invalido'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    final fileName = (decoded['fileName'] ?? '').toString();
+    if (!_nomeArquivoPodValido(fileName)) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'nome_arquivo_invalido'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    final b64 = (decoded['contentBase64'] ?? '').toString();
+    if (b64.isEmpty) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'contentBase64_vazio'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    List<int> bytes;
+    try {
+      bytes = base64Decode(b64);
+    } catch (_) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'base64_invalido'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (bytes.isEmpty) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'arquivo_vazio'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (bytes.length > 6 * 1024 * 1024) {
+      return Response(
+        413,
+        body: jsonEncode({'ok': false, 'error': 'arquivo_muito_grande'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    final dir = Directory(_diretorioPodEntrega());
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    File('${dir.path}${Platform.pathSeparator}$fileName')
+        .writeAsBytesSync(bytes);
+    return Response.ok(
+      jsonEncode({
+        'ok': true,
+        'path': 'pod_entrega/$fileName',
+        'bytes': bytes.length,
+      }),
+      headers: {'content-type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'ok': false, 'error': '$e'}),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+}
+
+Response _podDownload(Request request, String fileName) {
+  if (!_nomeArquivoPodValido(fileName)) {
+    return Response.notFound(
+      body: jsonEncode({'ok': false, 'error': 'nao_encontrado'}),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+  final path =
+      '${_diretorioPodEntrega()}${Platform.pathSeparator}$fileName';
+  final arquivo = File(path);
+  if (!arquivo.existsSync()) {
+    return Response.notFound(
+      body: jsonEncode({'ok': false, 'error': 'nao_encontrado'}),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+  final bytes = arquivo.readAsBytesSync();
+  return Response.ok(
+    bytes,
+    headers: {
+      'content-type': 'image/jpeg',
+      'cache-control': 'private, max-age=3600',
+    },
   );
 }
 

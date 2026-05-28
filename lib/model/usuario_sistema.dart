@@ -1,3 +1,5 @@
+import '../domain/perfil_usuario_preset.dart';
+
 class UsuarioSistema {
   const UsuarioSistema({
     required this.id,
@@ -40,6 +42,8 @@ class UsuarioSistema {
     this.podeEmitirNfeSaida = false,
     this.podeCancelarNfeSaida = false,
     this.descontoMaximoPercentualPdv,
+    this.motoristaEntregaNome = '',
+    this.podeModoMotorista = false,
   });
 
   final String id;
@@ -118,6 +122,13 @@ class UsuarioSistema {
   /// Teto de desconto no PDV (%). Null = usar configuracao da empresa.
   final double? descontoMaximoPercentualPdv;
 
+  /// Nome do motorista em [Venda.motoristaEntrega] (cadastro de motoristas).
+  /// Se vazio, no modo motorista usa [nome] ou match com cadastro.
+  final String motoristaEntregaNome;
+
+  /// Acesso ao painel simplificado do motorista (entregas do dia + POD).
+  final bool podeModoMotorista;
+
   UsuarioSistema copyWith({
     String? id,
     String? nome,
@@ -160,6 +171,8 @@ class UsuarioSistema {
     bool? podeCancelarNfeSaida,
     double? descontoMaximoPercentualPdv,
     bool limparDescontoMaximoPdv = false,
+    String? motoristaEntregaNome,
+    bool? podeModoMotorista,
   }) {
     final caixa = podeAcessarCaixa ?? podeCaixa ?? this.podeAcessarCaixa;
     final visualizar =
@@ -221,6 +234,9 @@ class UsuarioSistema {
       descontoMaximoPercentualPdv: limparDescontoMaximoPdv
           ? null
           : (descontoMaximoPercentualPdv ?? this.descontoMaximoPercentualPdv),
+      motoristaEntregaNome:
+          motoristaEntregaNome ?? this.motoristaEntregaNome,
+      podeModoMotorista: podeModoMotorista ?? this.podeModoMotorista,
     );
   }
 
@@ -278,6 +294,8 @@ class UsuarioSistema {
       'podeCancelarNfeSaida': podeCancelarNfeSaida,
       if (descontoMaximoPercentualPdv != null)
         'descontoMaximoPercentualPdv': descontoMaximoPercentualPdv,
+      'motoristaEntregaNome': motoristaEntregaNome,
+      'podeModoMotorista': podeModoMotorista,
     };
   }
 
@@ -380,6 +398,10 @@ class UsuarioSistema {
               admin),
       descontoMaximoPercentualPdv:
           (map['descontoMaximoPercentualPdv'] as num?)?.toDouble(),
+      motoristaEntregaNome: (map['motoristaEntregaNome'] ?? '').toString(),
+      podeModoMotorista: map['podeModoMotorista'] == true ||
+          perfilUsuarioFromId((map['perfil'] ?? '').toString()) ==
+              PerfilUsuarioPreset.motorista,
     );
   }
 }

@@ -88,6 +88,14 @@ abstract final class SyncRedeAjuda {
                 'locais deste PC. Nunca apague dados no servidor.',
                 style: TextStyle(fontSize: 13),
               ),
+              SizedBox(height: 10),
+              Text('4. Fotos de entrega (POD)'),
+              Text(
+                '   No PC servidor, o servico de sync grava JPEG em '
+                'pod_entrega/ (ou SYNC_POD_PATH). Libere a mesma porta no '
+                'firewall. Outros PCs baixam a foto ao abrir os detalhes da entrega.',
+                style: TextStyle(fontSize: 13),
+              ),
             ],
           ),
         ),

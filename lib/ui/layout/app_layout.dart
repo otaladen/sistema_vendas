@@ -56,21 +56,26 @@ class AdaptivePageBody extends StatelessWidget {
   }
 }
 
-/// Lista de hub (menu, cadastros): coluna com rolagem no celular.
+/// Lista de hub (menu, cadastros): coluna com rolagem quando a altura nao cabe.
 class AdaptiveHubBody extends StatelessWidget {
   const AdaptiveHubBody({
     super.key,
     required this.children,
     this.spacing = 12,
+    this.maxContentWidth = 520,
   });
 
   final List<Widget> children;
   final double spacing;
 
+  /// Largura maxima dos botoes no menu (centralizado em telas largas).
+  final double maxContentWidth;
+
   @override
   Widget build(BuildContext context) {
     final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
         for (var i = 0; i < children.length; i++) ...[
           if (i > 0) SizedBox(height: spacing),
@@ -79,12 +84,28 @@ class AdaptiveHubBody extends StatelessWidget {
       ],
     );
 
-    if (context.isCompactLayout) {
-      return AdaptivePageBody(child: column);
-    }
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: column,
+    final padding = context.isCompactLayout
+        ? const EdgeInsets.fromLTRB(12, 12, 12, 20)
+        : const EdgeInsets.fromLTRB(16, 16, 16, 24);
+
+    return SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            padding: padding,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxContentWidth),
+                  child: column,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

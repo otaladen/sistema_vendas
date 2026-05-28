@@ -34,6 +34,7 @@ class HistoricoEntregaEventos {
   static const retiradaFutura = 'retirada_futura';
   static const retiradaLojaPreSaida = 'retirada_loja_pre_saida';
   static const complementoPendente = 'complemento_pendente';
+  static const podEntrega = 'pod_entrega';
 
   static bool ehEventoOcorrencia(String statusNovo) {
     switch (statusNovo) {
@@ -42,6 +43,7 @@ class HistoricoEntregaEventos {
       case retiradaFutura:
       case retiradaLojaPreSaida:
       case complementoPendente:
+      case podEntrega:
         return true;
       default:
         return false;

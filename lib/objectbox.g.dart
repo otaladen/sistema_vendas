@@ -426,7 +426,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(59, 4422169989691478015),
+    lastPropertyId: const obx_int.IdUid(64, 3930676945577310312),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -780,6 +780,36 @@ final _entities = <obx_int.ModelEntity>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(59, 4422169989691478015),
         name: 'nfeEmitidaEm',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(60, 6127552947782347916),
+        name: 'podRecebidoPor',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(61, 7375432993315073498),
+        name: 'podRegistradoPor',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(62, 1734811183728675834),
+        name: 'podFotoPath',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(63, 6087889491953518716),
+        name: 'podFotoPathServidor',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(64, 3930676945577310312),
+        name: 'podRegistradoEm',
         type: 10,
         flags: 0,
       ),
@@ -3418,7 +3448,13 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final nfeUrlXmlCancelamentoOffset = fbb.writeString(
           object.nfeUrlXmlCancelamento,
         );
-        fbb.startTable(60);
+        final podRecebidoPorOffset = fbb.writeString(object.podRecebidoPor);
+        final podRegistradoPorOffset = fbb.writeString(object.podRegistradoPor);
+        final podFotoPathOffset = fbb.writeString(object.podFotoPath);
+        final podFotoPathServidorOffset = fbb.writeString(
+          object.podFotoPathServidor,
+        );
+        fbb.startTable(65);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -3480,6 +3516,11 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(56, nfeStatusFocusOffset);
         fbb.addOffset(57, nfeUrlXmlCancelamentoOffset);
         fbb.addInt64(58, object.nfeEmitidaEm?.millisecondsSinceEpoch);
+        fbb.addOffset(59, podRecebidoPorOffset);
+        fbb.addOffset(60, podRegistradoPorOffset);
+        fbb.addOffset(61, podFotoPathOffset);
+        fbb.addOffset(62, podFotoPathServidorOffset);
+        fbb.addInt64(63, object.podRegistradoEm?.millisecondsSinceEpoch);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -3504,6 +3545,11 @@ obx_int.ModelDefinition getObjectBoxModel() {
           buffer,
           rootOffset,
           120,
+        );
+        final podRegistradoEmValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          130,
         );
         final idParam = const fb.Int64Reader().vTableGet(
           buffer,
@@ -3736,6 +3782,24 @@ obx_int.ModelDefinition getObjectBoxModel() {
                 cupomNaoFiscalEmitidoEmValue,
                 isUtc: true,
               );
+        final podRecebidoPorParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 122, '');
+        final podRegistradoPorParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 124, '');
+        final podFotoPathParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 126, '');
+        final podFotoPathServidorParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 128, '');
+        final podRegistradoEmParam = podRegistradoEmValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                podRegistradoEmValue,
+                isUtc: true,
+              );
         final object = Venda(
           id: idParam,
           data: dataParam,
@@ -3793,6 +3857,11 @@ obx_int.ModelDefinition getObjectBoxModel() {
           nfeEmitidaEm: nfeEmitidaEmParam,
           estoqueBaixadoCupom: estoqueBaixadoCupomParam,
           cupomNaoFiscalEmitidoEm: cupomNaoFiscalEmitidoEmParam,
+          podRecebidoPor: podRecebidoPorParam,
+          podRegistradoPor: podRegistradoPorParam,
+          podFotoPath: podFotoPathParam,
+          podFotoPathServidor: podFotoPathServidorParam,
+          podRegistradoEm: podRegistradoEmParam,
         );
         object.cliente.targetId = const fb.Int64Reader().vTableGet(
           buffer,
@@ -7033,6 +7102,31 @@ class Venda_ {
   /// See [Venda.nfeEmitidaEm].
   static final nfeEmitidaEm = obx.QueryDateProperty<Venda>(
     _entities[2].properties[57],
+  );
+
+  /// See [Venda.podRecebidoPor].
+  static final podRecebidoPor = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[58],
+  );
+
+  /// See [Venda.podRegistradoPor].
+  static final podRegistradoPor = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[59],
+  );
+
+  /// See [Venda.podFotoPath].
+  static final podFotoPath = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[60],
+  );
+
+  /// See [Venda.podFotoPathServidor].
+  static final podFotoPathServidor = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[61],
+  );
+
+  /// See [Venda.podRegistradoEm].
+  static final podRegistradoEm = obx.QueryDateProperty<Venda>(
+    _entities[2].properties[62],
   );
 
   /// see [Venda.itens]

@@ -155,6 +155,52 @@ class SyncApiClient {
     return decoded;
   }
 
+  /// POST `/sync/pod` — envia JPEG (base64) para pasta central do servidor.
+  Future<String?> uploadPodFoto({
+    required String fileName,
+    required List<int> jpegBytes,
+  }) async {
+    if (!configurado) return null;
+    try {
+      final r = await http
+          .post(
+            _uri('/sync/pod'),
+            headers: _headersJson(),
+            body: jsonEncode({
+              'fileName': fileName,
+              'contentBase64': base64Encode(jpegBytes),
+            }),
+          )
+          .timeout(const Duration(seconds: 60));
+      if (r.statusCode != 200) return null;
+      final decoded = jsonDecode(r.body);
+      if (decoded is! Map<String, dynamic>) return null;
+      if (decoded['ok'] != true) return null;
+      return (decoded['path'] ?? '').toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// GET `/sync/pod/<fileName>` — baixa JPEG do servidor.
+  Future<List<int>?> downloadPodFoto({required String fileName}) async {
+    if (!configurado) return null;
+    try {
+      final r = await http
+          .get(
+            _uri('/sync/pod/$fileName'),
+            headers: _syncToken.isNotEmpty
+                ? {SyncAuth.headerName: _syncToken}
+                : null,
+          )
+          .timeout(const Duration(seconds: 60));
+      if (r.statusCode != 200) return null;
+      return r.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>> push({
     required String deviceId,
     required List<Map<String, dynamic>> mutations,

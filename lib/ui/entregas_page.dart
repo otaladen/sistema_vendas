@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -31,6 +32,14 @@ import 'entregas/conferencia_carga_consolidada_lista.dart';
 import 'entregas/romaneio_carga_consolidada.dart';
 import 'entregas/romaneio_pdf.dart';
 import 'entregas/romaneio_relatorios.dart';
+import '../data/app_config_repository.dart';
+import '../data/sync/sync_refresh_hub.dart';
+import '../domain/entrega_pod_regra.dart';
+import '../services/entrega_pod_finalizacao.dart';
+import '../services/entrega_pod_prefetch_service.dart';
+import 'entregas/entrega_pod_chip.dart';
+import 'entregas/entrega_pod_foto_panel.dart';
+import 'entregas/pod_entrega_dialog.dart';
 import 'registrar_devolucao_troca_page.dart';
 
 /// Filtro rapido pelos contadores de resumo (atrasadas / pendentes hoje).
@@ -49,14 +58,18 @@ class EntregasPage extends StatefulWidget {
     required this.motoristaRepository,
     required this.usuarioAtual,
     required this.podeGerenciarStatusEntrega,
+    required this.podeRegistrarPodEntrega,
     required this.podeRegistrarDevolucaoTrocaSemSenha,
+    this.appConfigRepository,
   });
 
   final VendaRepository vendaRepository;
   final ProdutoRepository produtoRepository;
   final MotoristaRepository motoristaRepository;
+  final AppConfigRepository? appConfigRepository;
   final String usuarioAtual;
   final bool podeGerenciarStatusEntrega;
+  final bool podeRegistrarPodEntrega;
   /// Mesmo criterio da listagem de vendas (admin / financeiro / auditoria de caixa).
   final bool podeRegistrarDevolucaoTrocaSemSenha;
 
@@ -215,11 +228,83 @@ class _EntregasPageState extends State<EntregasPage> {
     _fim = null;
     _chaveDiaPlanejamentoSelecionado =
         PlanejamentoEntregaDia.chaveDeDateTime(DateTime.now());
+    SyncRefreshHub.instance.addListener(_onSyncHubNotificado);
     _carregarEntregas();
+    unawaited(_prefetchPodFotos());
+  }
+
+  void _onSyncHubNotificado() {
+    if (!mounted) return;
+    _carregarEntregas();
+    unawaited(_prefetchPodFotos());
+  }
+
+  Future<void> _prefetchPodFotos() async {
+    final repo = widget.appConfigRepository;
+    if (repo == null || _entregas.isEmpty) return;
+    await EntregaPodPrefetchService(configRepository: repo)
+        .prefetchLista(_entregas);
+  }
+
+  void _copiarCamposPod(Venda destino, Venda origem) {
+    destino.podRecebidoPor = origem.podRecebidoPor;
+    destino.podRegistradoPor = origem.podRegistradoPor;
+    destino.podRegistradoEm = origem.podRegistradoEm;
+    destino.podFotoPath = origem.podFotoPath;
+    destino.podFotoPathServidor = origem.podFotoPathServidor;
+  }
+
+  Future<bool> _editarPodEntrega(Venda venda) async {
+    if (!widget.podeRegistrarPodEntrega) return false;
+    final anterior = venda.podRecebidoPor.trim();
+    final pod = await showPodEntregaDialog(
+      context: context,
+      vendaId: venda.id,
+      recebidoPorInicial: anterior,
+      modoEdicao: true,
+    );
+    if (pod == null) return false;
+    try {
+      final podFinal = EntregaPodFinalizacao(
+        configRepository: widget.appConfigRepository,
+      );
+      await podFinal.registrarPod(
+        vendaRepository: widget.vendaRepository,
+        vendaId: venda.id,
+        recebidoPor: pod.recebidoPor,
+        usuarioLogin: widget.usuarioAtual,
+        fotoPathLocal: pod.fotoPathLocal ?? venda.podFotoPath,
+        fotoPathServidor: pod.fotoPathServidor ?? venda.podFotoPathServidor,
+      );
+      final atualizada = widget.vendaRepository.obterPorId(venda.id);
+      if (atualizada != null) _copiarCamposPod(venda, atualizada);
+      widget.vendaRepository.registrarOcorrenciaEntrega(
+        vendaId: venda.id,
+        status: HistoricoEntregaEventos.podEntrega,
+        motivo: anterior.isEmpty
+            ? 'POD registrado — recebido por: ${pod.recebidoPor}'
+            : 'POD alterado — recebido por: ${pod.recebidoPor} (antes: $anterior)',
+        usuario: widget.usuarioAtual,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Prova de entrega atualizada.')),
+        );
+      }
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao alterar POD: $e')),
+        );
+      }
+      return false;
+    }
   }
 
   @override
   void dispose() {
+    SyncRefreshHub.instance.removeListener(_onSyncHubNotificado);
     _kanbanHScrollController.dispose();
     _bairroController.dispose();
     _numeroNotaController.dispose();
@@ -499,6 +584,7 @@ class _EntregasPageState extends State<EntregasPage> {
         if (!aindaExiste) _chaveDiaPlanejamentoSelecionado = null;
       }
     });
+    unawaited(_prefetchPodFotos());
   }
 
   Future<void> _atualizarListaEntregas() async {
@@ -1976,6 +2062,38 @@ class _EntregasPageState extends State<EntregasPage> {
         motivo = await _solicitarMotivoMudancaStatus(novoStatus);
         if (motivo == null) return false;
       }
+      final podComplemento =
+          statusAnterior == 'entregue_complemento_pendente';
+      if (EntregaPodRegra.deveSolicitarPod(
+        novoStatus: novoStatus,
+        statusAnterior: statusAnterior,
+        podRecebidoPorAtual: venda.podRecebidoPor,
+      )) {
+        final pod = await showPodEntregaDialog(
+          context: context,
+          vendaId: venda.id,
+          recebidoPorInicial: podComplemento ? '' : venda.podRecebidoPor.trim(),
+          podComplemento: podComplemento,
+        );
+        if (pod == null) return false;
+        final podFinal = EntregaPodFinalizacao(
+          configRepository: widget.appConfigRepository,
+        );
+        await podFinal.registrarPod(
+          vendaRepository: widget.vendaRepository,
+          vendaId: venda.id,
+          recebidoPor: pod.recebidoPor,
+          usuarioLogin: widget.usuarioAtual,
+          fotoPathLocal: pod.fotoPathLocal ?? '',
+          fotoPathServidor: pod.fotoPathServidor ?? '',
+        );
+        final atualizada = widget.vendaRepository.obterPorId(venda.id);
+        venda.podRecebidoPor = pod.recebidoPor;
+        venda.podFotoPath =
+            atualizada?.podFotoPath ?? pod.fotoPathLocal ?? '';
+        venda.podFotoPathServidor =
+            atualizada?.podFotoPathServidor ?? pod.fotoPathServidor ?? '';
+      }
       widget.vendaRepository.atualizarStatusEntrega(
         venda.id,
         novoStatus,
@@ -1987,6 +2105,20 @@ class _EntregasPageState extends State<EntregasPage> {
         statusNovo: novoStatus,
         usuario: widget.usuarioAtual,
       );
+      if (novoStatus == 'entregue' && venda.podRecebidoPor.trim().isNotEmpty) {
+        final comFoto = EntregaPodRegra.temReferenciaFoto(
+          podFotoPath: venda.podFotoPath,
+          podFotoPathServidor: venda.podFotoPathServidor,
+        );
+        final prefixo = podComplemento ? 'Complemento — ' : '';
+        widget.vendaRepository.registrarOcorrenciaEntrega(
+          vendaId: venda.id,
+          status: HistoricoEntregaEventos.podEntrega,
+          motivo:
+              '${prefixo}Recebido por: ${venda.podRecebidoPor.trim()}${comFoto ? ' (com foto)' : ''}',
+          usuario: widget.usuarioAtual,
+        );
+      }
       if (motivo != null) {
         widget.vendaRepository.registrarOcorrenciaEntrega(
           vendaId: venda.id,
@@ -2310,29 +2442,57 @@ class _EntregasPageState extends State<EntregasPage> {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (context) {
-        final usaMigrado = _vendaUsaItensCarretoMigrado(venda);
-        final itensLista = venda.itens
-            .where((i) => _quantidadeExibicaoEntrega(venda, i) > 0)
-            .toList();
-        return AlertDialog(
-          title: Text(
-            usaMigrado
-                ? 'Itens para entrega ${venda.numeroOrcamento}'
-                : 'Itens do pedido ${venda.numeroOrcamento}',
-          ),
-          content: SizedBox(
-            width: 620,
-            child: itensLista.isEmpty
-                ? const Text('Nenhum item encontrado para esta entrega.')
-                : Column(
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            final exibir =
+                widget.vendaRepository.obterPorId(venda.id) ?? venda;
+            final usaMigrado = _vendaUsaItensCarretoMigrado(exibir);
+            final itensLista = exibir.itens
+                .where((i) => _quantidadeExibicaoEntrega(exibir, i) > 0)
+                .toList();
+            return AlertDialog(
+              title: Text(
+                usaMigrado
+                    ? 'Itens para entrega ${exibir.numeroOrcamento}'
+                    : 'Itens do pedido ${exibir.numeroOrcamento}',
+              ),
+              content: SizedBox(
+                width: 620,
+                child: SingleChildScrollView(
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Cliente: ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}',
+                      EntregaPodFotoPanel(
+                        key: ValueKey(
+                          '${exibir.podRecebidoPor}|${exibir.podRegistradoEm}|'
+                          '${exibir.podFotoPathServidor}',
+                        ),
+                        venda: exibir,
+                        configRepository: widget.appConfigRepository,
+                        podeEditar: widget.podeRegistrarPodEntrega,
+                        onEditar: () async {
+                          final ok = await _editarPodEntrega(exibir);
+                          if (ok) {
+                            final ref =
+                                widget.vendaRepository.obterPorId(venda.id);
+                            if (ref != null) {
+                              _copiarCamposPod(venda, ref);
+                              _copiarCamposPod(exibir, ref);
+                            }
+                            setDialogState(() {});
+                            _carregarEntregas();
+                          }
+                        },
                       ),
-                      Text('Vendedor: ${_nomeVendedor(venda)}'),
+                      if (itensLista.isEmpty)
+                        const Text('Nenhum item encontrado para esta entrega.')
+                      else ...[
+                        Text(
+                          'Cliente: ${exibir.cliente.target?.nomeRazao ?? 'Sem cliente'}',
+                        ),
+                      Text('Vendedor: ${_nomeVendedor(exibir)}'),
                       if (usaMigrado) ...[
                         const SizedBox(height: 6),
                         Text(
@@ -2341,8 +2501,8 @@ class _EntregasPageState extends State<EntregasPage> {
                         ),
                       ],
                       if (!usaMigrado &&
-                          _vendaCarretoReservaNativaSemMigracao(venda) &&
-                          venda.itens.any((i) => i.quantidadeJaRetirada > 0)) ...[
+                          _vendaCarretoReservaNativaSemMigracao(exibir) &&
+                          exibir.itens.any((i) => i.quantidadeJaRetirada > 0)) ...[
                         const SizedBox(height: 6),
                         Text(
                           'Parte dos itens ja foi retirada na loja antes da saida do carro; '
@@ -2351,15 +2511,15 @@ class _EntregasPageState extends State<EntregasPage> {
                         ),
                       ],
                       const SizedBox(height: 8),
-                      Flexible(
-                        child: ListView.separated(
+                      ListView.separated(
                           shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
                           itemCount: itensLista.length,
                           separatorBuilder: (_, _) => const Divider(height: 10),
                           itemBuilder: (context, index) {
                             final item = itensLista[index];
-                            final q = _quantidadeExibicaoEntrega(venda, item);
-                            final sub = _subtotalExibicaoEntrega(venda, item);
+                            final q = _quantidadeExibicaoEntrega(exibir, item);
+                            final sub = _subtotalExibicaoEntrega(exibir, item);
                             return Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -2417,26 +2577,29 @@ class _EntregasPageState extends State<EntregasPage> {
                             );
                           },
                         ),
-                      ),
                       const SizedBox(height: 10),
                       Text(
-                        'Total na carga: ${_formatarMoeda(itensLista.fold<double>(0, (s, i) => s + _subtotalExibicaoEntrega(venda, i)))}',
+                        'Total na carga: ${_formatarMoeda(itensLista.fold<double>(0, (s, i) => s + _subtotalExibicaoEntrega(exibir, i)))}',
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       if (usaMigrado)
                         Text(
-                          'Total da venda (produtos): ${_formatarMoeda(venda.total)}',
+                          'Total da venda (produtos): ${_formatarMoeda(exibir.total)}',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
-                    ],
-                  ),
+                  ],
+                ],
+              ),
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Fechar'),
             ),
           ],
+            );
+          },
         );
       },
     );
@@ -2752,6 +2915,7 @@ class _EntregasPageState extends State<EntregasPage> {
                     ),
                   ),
                 ),
+                EntregaPodChip(venda: venda),
               ],
             ),
                       ],
@@ -3357,6 +3521,7 @@ class _EntregasPageState extends State<EntregasPage> {
                       ),
                     ),
                   ),
+                  EntregaPodChip(venda: venda, compacto: true),
                   Text(
                     venda.dataEntregaMarcada == null
                         ? 'Sem data'

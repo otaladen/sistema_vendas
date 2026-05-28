@@ -2830,6 +2830,60 @@ class VendaRepository {
     return n;
   }
 
+  /// Grava POD (recebido por + foto opcional) sem alterar status.
+  void registrarPodEntrega({
+    required int vendaId,
+    required String recebidoPor,
+    required String usuarioLogin,
+    String fotoPathLocal = '',
+    String fotoPathServidor = '',
+  }) {
+    final nome = recebidoPor.trim();
+    if (nome.isEmpty) {
+      throw StateError('Informe quem recebeu a entrega.');
+    }
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      venda.podRecebidoPor = nome;
+      venda.podRegistradoPor =
+          usuarioLogin.trim().isEmpty ? 'sistema' : usuarioLogin.trim();
+      venda.podRegistradoEm = DateTime.now();
+      venda.podFotoPath = fotoPathLocal.trim();
+      venda.podFotoPathServidor = fotoPathServidor.trim();
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita();
+  }
+
+  /// Entregas ativas do motorista (roteirizada / saiu) para o modo motorista.
+  List<Venda> listarEntregasModoMotorista(String nomeMotorista) {
+    final alvo = nomeMotorista.trim().toLowerCase();
+    if (alvo.isEmpty) return const [];
+    final todas = listarEntregasFiltradas(
+      const FiltroListagemEntregas(statusEntrega: 'todos'),
+    );
+    final ativos = <String>{
+      'roteirizada',
+      'saiu_entrega',
+      'entregue_complemento_pendente',
+    };
+    return todas
+        .where((v) {
+          if (!ativos.contains(v.statusEntrega)) return false;
+          return v.motoristaEntrega.trim().toLowerCase() == alvo;
+        })
+        .toList()
+      ..sort((a, b) {
+        final oa = a.ordemEntrega;
+        final ob = b.ordemEntrega;
+        if (oa > 0 && ob > 0 && oa != ob) return oa.compareTo(ob);
+        return a.id.compareTo(b.id);
+      });
+  }
+
   void registrarHistoricoStatusEntrega({
     required int vendaId,
     required String statusAnterior,

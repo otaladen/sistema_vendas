@@ -322,7 +322,7 @@
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "59:4422169989691478015",
+      "lastPropertyId": "64:3930676945577310312",
       "name": "Venda",
       "properties": [
         {
@@ -620,6 +620,31 @@
         {
           "id": "59:4422169989691478015",
           "name": "nfeEmitidaEm",
+          "type": 10
+        },
+        {
+          "id": "60:6127552947782347916",
+          "name": "podRecebidoPor",
+          "type": 9
+        },
+        {
+          "id": "61:7375432993315073498",
+          "name": "podRegistradoPor",
+          "type": 9
+        },
+        {
+          "id": "62:1734811183728675834",
+          "name": "podFotoPath",
+          "type": 9
+        },
+        {
+          "id": "63:6087889491953518716",
+          "name": "podFotoPathServidor",
+          "type": 9
+        },
+        {
+          "id": "64:3930676945577310312",
+          "name": "podRegistradoEm",
           "type": 10
         }
       ],

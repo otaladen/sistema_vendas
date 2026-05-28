@@ -19,6 +19,7 @@ import '../services/print_service.dart';
 import 'cadastros_page.dart';
 import 'configuracoes_page.dart';
 import 'entregas_page.dart';
+import 'motorista/motorista_entregas_page.dart';
 import 'estoque_page.dart';
 import 'financeiro/contas_pagar_page.dart';
 import 'notas_fiscais_page.dart';
@@ -190,6 +191,27 @@ class _MainMenuPageState extends State<MainMenuPage> {
               },
             ),
             HubNavButton(
+              icon: Icons.drive_eta_outlined,
+              corDestaque: const Color(0xFF455A64),
+              titulo: 'Modo motorista',
+              habilitado: UsuarioPermissaoHelper.podeUsarModoMotorista(
+                widget.usuarioLogado,
+              ),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MotoristaEntregasPage(
+                      vendaRepository: widget.vendaRepository,
+                      motoristaRepository: widget.motoristaRepository,
+                      usuarioLogado: widget.usuarioLogado,
+                      appConfigRepository: widget.appConfigRepository,
+                    ),
+                  ),
+                );
+              },
+            ),
+            HubNavButton(
               icon: Icons.local_shipping_outlined,
               corDestaque: const Color(0xFF0277BD),
               titulo: 'Entregas',
@@ -204,9 +226,14 @@ class _MainMenuPageState extends State<MainMenuPage> {
                       vendaRepository: widget.vendaRepository,
                       produtoRepository: widget.produtoRepository,
                       motoristaRepository: widget.motoristaRepository,
+                      appConfigRepository: widget.appConfigRepository,
                       usuarioAtual: widget.usuarioLogado.login,
                       podeGerenciarStatusEntrega:
                           UsuarioPermissaoHelper.podeGerenciarEntregas(
+                        widget.usuarioLogado,
+                      ),
+                      podeRegistrarPodEntrega:
+                          UsuarioPermissaoHelper.podeRegistrarPodEntrega(
                         widget.usuarioLogado,
                       ),
                       podeRegistrarDevolucaoTrocaSemSenha:
