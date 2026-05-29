@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../data/nfe_saida_fiscal_store.dart';
+import '../../../domain/fiscal/nfe_carta_correcao_registro.dart';
 import '../../../domain/fiscal/nfe_historico_timeline.dart';
 
 /// Card de um registro no historico NF-e (timeline + acoes).
@@ -36,8 +37,8 @@ class NfeHistoricoCard extends StatelessWidget {
   final VoidCallback onReemitir;
   final VoidCallback? onEnviarEmail;
   final VoidCallback? onEnviarWhatsapp;
-  final VoidCallback? onAbrirPdfCce;
-  final VoidCallback? onAbrirXmlCce;
+  final void Function(NfeCartaCorrecaoRegistro cce)? onAbrirPdfCce;
+  final void Function(NfeCartaCorrecaoRegistro cce)? onAbrirXmlCce;
 
   @override
   Widget build(BuildContext context) {
@@ -159,7 +160,11 @@ class NfeHistoricoCard extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: emitindo ? null : onCartaCorrecao,
                     icon: const Icon(Icons.edit_note_outlined, size: 18),
-                    label: const Text('CC-e'),
+                    label: Text(
+                      r.totalCartasCorrecao > 0
+                          ? 'Nova CC-e'
+                          : 'CC-e',
+                    ),
                   ),
                   OutlinedButton.icon(
                     onPressed: emitindo ? null : onCancelar,
@@ -167,18 +172,20 @@ class NfeHistoricoCard extends StatelessWidget {
                     label: const Text('Cancelar'),
                   ),
                 ],
-                if (r.numeroCartaCorrecao > 0 && r.urlPdfCartaCorrecao.isNotEmpty)
-                  OutlinedButton.icon(
-                    onPressed: onAbrirPdfCce,
-                    icon: const Icon(Icons.description_outlined, size: 18),
-                    label: Text('CC-e #${r.numeroCartaCorrecao} PDF'),
-                  ),
-                if (r.numeroCartaCorrecao > 0 && r.urlXmlCartaCorrecao.isNotEmpty)
-                  OutlinedButton.icon(
-                    onPressed: onAbrirXmlCce,
-                    icon: const Icon(Icons.article_outlined, size: 18),
-                    label: const Text('CC-e XML'),
-                  ),
+                for (final cce in r.cartasCorrecao) ...[
+                  if (cce.urlPdf.isNotEmpty && onAbrirPdfCce != null)
+                    OutlinedButton.icon(
+                      onPressed: () => onAbrirPdfCce!(cce),
+                      icon: const Icon(Icons.description_outlined, size: 18),
+                      label: Text('CC-e #${cce.numeroSequencia} PDF'),
+                    ),
+                  if (cce.urlXml.isNotEmpty && onAbrirXmlCce != null)
+                    OutlinedButton.icon(
+                      onPressed: () => onAbrirXmlCce!(cce),
+                      icon: const Icon(Icons.article_outlined, size: 18),
+                      label: Text('CC-e #${cce.numeroSequencia} XML'),
+                    ),
+                ],
                 if (r.cancelada && r.urlXmlEventoCancelamento.isNotEmpty)
                   OutlinedButton.icon(
                     onPressed: onAbrirXmlCancelamento,

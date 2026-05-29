@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../domain/fiscal/nfe_carta_correcao_registro.dart';
+
 /// Registro local de NF-e de saida (modelo 55) — painel fiscal, sem estoque.
 class NfeSaidaFiscalRegistro {
   NfeSaidaFiscalRegistro({
@@ -27,10 +29,10 @@ class NfeSaidaFiscalRegistro {
     this.volumes = 0,
     this.pesoBrutoKg = 0,
     this.valorTotal = 0,
-    this.urlPdfCartaCorrecao = '',
-    this.urlXmlCartaCorrecao = '',
-    this.numeroCartaCorrecao = 0,
-  });
+    List<NfeCartaCorrecaoRegistro>? cartasCorrecao,
+  }) : cartasCorrecao = List<NfeCartaCorrecaoRegistro>.from(
+          cartasCorrecao ?? const [],
+        );
 
   final String id;
   final int vendaId;
@@ -53,9 +55,21 @@ class NfeSaidaFiscalRegistro {
   final int volumes;
   final double pesoBrutoKg;
   final double valorTotal;
-  final String urlPdfCartaCorrecao;
-  final String urlXmlCartaCorrecao;
-  final int numeroCartaCorrecao;
+  final List<NfeCartaCorrecaoRegistro> cartasCorrecao;
+
+  NfeCartaCorrecaoRegistro? get ultimaCartaCorrecao =>
+      cartasCorrecao.isEmpty ? null : cartasCorrecao.last;
+
+  int get numeroCartaCorrecao => ultimaCartaCorrecao?.numeroSequencia ?? 0;
+
+  String get urlPdfCartaCorrecao => ultimaCartaCorrecao?.urlPdf ?? '';
+
+  String get urlXmlCartaCorrecao => ultimaCartaCorrecao?.urlXml ?? '';
+
+  int get totalCartasCorrecao => cartasCorrecao.length;
+
+  int get cartasCorrecaoProcessando =>
+      cartasCorrecao.where((c) => c.processando).length;
 
   bool get cancelada =>
       statusFocus == 'cancelado' ||
@@ -80,7 +94,8 @@ class NfeSaidaFiscalRegistro {
       autorizada ||
       cancelada ||
       rejeitada ||
-      urlXmlEventoCancelamento.trim().isNotEmpty;
+      urlXmlEventoCancelamento.trim().isNotEmpty ||
+      cartasCorrecao.isNotEmpty;
 
   String get rotuloStatus {
     if (cancelada) return 'Cancelada';
@@ -113,14 +128,41 @@ class NfeSaidaFiscalRegistro {
         'volumes': volumes,
         'pesoBrutoKg': pesoBrutoKg,
         'valorTotal': valorTotal,
+        if (cartasCorrecao.isNotEmpty)
+          'cartasCorrecao': cartasCorrecao.map((c) => c.toJson()).toList(),
+        if (numeroCartaCorrecao > 0) 'numeroCartaCorrecao': numeroCartaCorrecao,
         if (urlPdfCartaCorrecao.trim().isNotEmpty)
           'urlPdfCartaCorrecao': urlPdfCartaCorrecao,
         if (urlXmlCartaCorrecao.trim().isNotEmpty)
           'urlXmlCartaCorrecao': urlXmlCartaCorrecao,
-        if (numeroCartaCorrecao > 0) 'numeroCartaCorrecao': numeroCartaCorrecao,
       };
 
   factory NfeSaidaFiscalRegistro.fromJson(Map<String, dynamic> json) {
+    var cartas = <NfeCartaCorrecaoRegistro>[];
+    final rawCartas = json['cartasCorrecao'];
+    if (rawCartas is List) {
+      cartas = rawCartas
+          .whereType<Map>()
+          .map(
+            (m) => NfeCartaCorrecaoRegistro.fromJson(
+              m.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          )
+          .toList();
+    }
+    final legadoSeq = ((json['numeroCartaCorrecao'] as num?) ?? 0).toInt();
+    if (cartas.isEmpty && legadoSeq > 0) {
+      cartas.add(
+        NfeCartaCorrecaoRegistro(
+          numeroSequencia: legadoSeq,
+          textoCorrecao: '',
+          urlPdf: (json['urlPdfCartaCorrecao'] ?? '').toString(),
+          urlXml: (json['urlXmlCartaCorrecao'] ?? '').toString(),
+        ),
+      );
+    }
+    cartas.sort((a, b) => a.numeroSequencia.compareTo(b.numeroSequencia));
+
     return NfeSaidaFiscalRegistro(
       id: (json['id'] ?? '').toString(),
       vendaId: ((json['vendaId'] as num?) ?? 0).toInt(),
@@ -145,16 +187,44 @@ class NfeSaidaFiscalRegistro {
       volumes: ((json['volumes'] as num?) ?? 0).toInt(),
       pesoBrutoKg: ((json['pesoBrutoKg'] as num?) ?? 0).toDouble(),
       valorTotal: ((json['valorTotal'] as num?) ?? 0).toDouble(),
-      urlPdfCartaCorrecao: (json['urlPdfCartaCorrecao'] ?? '').toString(),
-      urlXmlCartaCorrecao: (json['urlXmlCartaCorrecao'] ?? '').toString(),
-      numeroCartaCorrecao: ((json['numeroCartaCorrecao'] as num?) ?? 0).toInt(),
+      cartasCorrecao: cartas,
     );
+  }
+
+  NfeSaidaFiscalRegistro comNovaCartaCorrecao(NfeCartaCorrecaoRegistro cce) {
+    final lista = [...cartasCorrecao];
+    final idx = lista.indexWhere((c) => c.numeroSequencia == cce.numeroSequencia);
+    if (idx >= 0) {
+      lista[idx] = cce;
+    } else {
+      lista.add(cce);
+    }
+    lista.sort((a, b) => a.numeroSequencia.compareTo(b.numeroSequencia));
+    return _copiar(cartasCorrecao: lista);
   }
 
   NfeSaidaFiscalRegistro comCartaCorrecao({
     required int numeroSequencia,
     String? urlPdf,
     String? urlXml,
+    String textoCorrecao = '',
+    String protocolo = '',
+    String statusFocus = 'autorizado',
+  }) {
+    return comNovaCartaCorrecao(
+      NfeCartaCorrecaoRegistro(
+        numeroSequencia: numeroSequencia > 0 ? numeroSequencia : 1,
+        textoCorrecao: textoCorrecao,
+        urlPdf: urlPdf ?? '',
+        urlXml: urlXml ?? '',
+        protocolo: protocolo,
+        statusFocus: statusFocus,
+      ),
+    );
+  }
+
+  NfeSaidaFiscalRegistro _copiar({
+    List<NfeCartaCorrecaoRegistro>? cartasCorrecao,
   }) {
     return NfeSaidaFiscalRegistro(
       id: id,
@@ -166,11 +236,11 @@ class NfeSaidaFiscalRegistro {
       emitidaEm: emitidaEm,
       statusSefaz: statusSefaz,
       chaveNfe: chaveNfe,
-      numero: this.numero,
+      numero: numero,
       serie: serie,
       protocolo: protocolo,
       urlDanfe: urlDanfe,
-      urlXml: this.urlXml,
+      urlXml: urlXml,
       urlXmlEventoCancelamento: urlXmlEventoCancelamento,
       mensagemSefaz: mensagemSefaz,
       modalidadeFrete: modalidadeFrete,
@@ -178,14 +248,7 @@ class NfeSaidaFiscalRegistro {
       volumes: volumes,
       pesoBrutoKg: pesoBrutoKg,
       valorTotal: valorTotal,
-      urlPdfCartaCorrecao: (urlPdf ?? '').trim().isNotEmpty
-          ? urlPdf!.trim()
-          : urlPdfCartaCorrecao,
-      urlXmlCartaCorrecao: (urlXml ?? '').trim().isNotEmpty
-          ? urlXml!.trim()
-          : urlXmlCartaCorrecao,
-      numeroCartaCorrecao:
-          numeroSequencia > 0 ? numeroSequencia : numeroCartaCorrecao,
+      cartasCorrecao: cartasCorrecao ?? this.cartasCorrecao,
     );
   }
 }
@@ -195,6 +258,8 @@ class NfeSaidaFiscalStore {
   NfeSaidaFiscalStore(this._storeDirectoryPath);
 
   final String _storeDirectoryPath;
+
+  String get storeDirectoryPath => _storeDirectoryPath;
   static const String _arquivo = 'nfe_saida_emitidas_v1.json';
 
   File get _file => File(p.join(_storeDirectoryPath, _arquivo));

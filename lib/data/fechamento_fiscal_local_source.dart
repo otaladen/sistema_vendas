@@ -6,8 +6,10 @@ import '../domain/fiscal/nota_fiscal_fechamento_item.dart';
 import '../services/fechamento_xml_tributos_parser.dart';
 import '../services/focus_nfe_service.dart';
 import '../services/xml_nfe_parser_service.dart';
+import 'nfe_cce_xml_store.dart';
 import 'nfe_entrada_repository.dart';
 import 'nfe_entrada_xml_store.dart';
+import 'nfe_inutilizacao_store.dart';
 import 'nfce_saida_xml_store.dart';
 import 'nfe_saida_fiscal_store.dart';
 import 'nfe_saida_xml_store.dart';
@@ -24,6 +26,8 @@ class FechamentoFiscalLocalSource {
         _xmlEntradaStore = NfeEntradaXmlStore(storeDirectoryPath),
         _xmlSaidaStore = NfeSaidaXmlStore(storeDirectoryPath),
         _xmlNfceSaidaStore = NfceSaidaXmlStore(storeDirectoryPath),
+        _xmlCceStore = NfeCceXmlStore(storeDirectoryPath),
+        _inutilizacaoStore = NfeInutilizacaoStore(storeDirectoryPath),
         _vendaRepository = vendaRepository,
         _entradaRepository = entradaRepository;
 
@@ -41,6 +45,8 @@ class FechamentoFiscalLocalSource {
   final NfeEntradaXmlStore _xmlEntradaStore;
   final NfeSaidaXmlStore _xmlSaidaStore;
   final NfceSaidaXmlStore _xmlNfceSaidaStore;
+  final NfeCceXmlStore _xmlCceStore;
+  final NfeInutilizacaoStore _inutilizacaoStore;
   final VendaRepository? _vendaRepository;
   final NfeEntradaRepository? _entradaRepository;
 
@@ -154,8 +160,15 @@ class FechamentoFiscalLocalSource {
           vendaOperacionalCancelada: _vendaOperacionalCancelada(reg.vendaId),
           incluirNoZip: reg.urlXml.trim().isNotEmpty ||
               reg.urlXmlEventoCancelamento.trim().isNotEmpty ||
+              reg.cartasCorrecao.any((c) => c.urlXml.trim().isNotEmpty) ||
               (reg.chaveNfe.replaceAll(RegExp(r'\D'), '').length == 44 &&
-                  _xmlSaidaStore.existe(reg.chaveNfe)),
+                  (_xmlSaidaStore.existe(reg.chaveNfe) ||
+                      reg.cartasCorrecao.any(
+                        (c) => _xmlCceStore.existe(
+                          reg.chaveNfe,
+                          c.numeroSequencia,
+                        ),
+                      ))),
         ),
       );
     }
@@ -271,6 +284,43 @@ class FechamentoFiscalLocalSource {
     if (chave.length != 44) return null;
     final f = _xmlSaidaStore.arquivoDaChave(chave, cancelada: cancelada);
     return f.existsSync() ? f : null;
+  }
+
+  File? arquivoXmlCceLocal(String chaveAcesso, int numeroSequencia) {
+    final chave = chaveAcesso.replaceAll(RegExp(r'\D'), '');
+    if (chave.length != 44 || numeroSequencia <= 0) return null;
+    final f = _xmlCceStore.arquivoDaChave(chave, numeroSequencia);
+    return f.existsSync() ? f : null;
+  }
+
+  /// CC-e com XML local no periodo de emissao da carta.
+  List<({String chave, int sequencia, File arquivo})> listarCceLocaisNoPeriodo({
+    required DateTime inicio,
+    required DateTime fim,
+  }) {
+    final ini = DateTime(inicio.year, inicio.month, inicio.day);
+    final f = DateTime(fim.year, fim.month, fim.day, 23, 59, 59, 999);
+    final out = <({String chave, int sequencia, File arquivo})>[];
+    for (final reg in _nfeStore.listar()) {
+      final chave = reg.chaveNfe.replaceAll(RegExp(r'\D'), '');
+      if (chave.length != 44) continue;
+      for (final cce in reg.cartasCorrecao) {
+        final em = cce.emitidaEm.toLocal();
+        if (em.isBefore(ini) || em.isAfter(f)) continue;
+        final arq = arquivoXmlCceLocal(chave, cce.numeroSequencia);
+        if (arq != null) {
+          out.add((chave: chave, sequencia: cce.numeroSequencia, arquivo: arq));
+        }
+      }
+    }
+    return out;
+  }
+
+  List<NfeInutilizacaoRegistro> listarInutilizacoesNoPeriodo({
+    required DateTime inicio,
+    required DateTime fim,
+  }) {
+    return _inutilizacaoStore.listarNoPeriodo(inicio: inicio, fim: fim);
   }
 
   static String _rotuloStatusNfce(String statusFocus) {

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/nfe_saida_fiscal_store.dart';
+import 'package:sistema_vendas/domain/fiscal/nfe_carta_correcao_registro.dart';
 import 'package:sistema_vendas/domain/fiscal/nfe_registro_focus_merge.dart';
 import 'package:sistema_vendas/services/focus_nfe_service.dart';
 
@@ -16,8 +17,13 @@ void main() {
       statusSefaz: '100',
       volumes: 3,
       pesoBrutoKg: 12.5,
-      urlPdfCartaCorrecao: 'http://cce/pdf',
-      numeroCartaCorrecao: 1,
+      cartasCorrecao: [
+        NfeCartaCorrecaoRegistro(
+          numeroSequencia: 1,
+          textoCorrecao: 'Correcao',
+          urlPdf: 'http://cce/pdf',
+        ),
+      ],
     );
     final resultado = FocusNfeEmissaoResultado(
       autorizada: false,

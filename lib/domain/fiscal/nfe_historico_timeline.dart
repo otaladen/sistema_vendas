@@ -63,13 +63,17 @@ abstract final class NfeHistoricoTimelineBuilder {
     }
 
     if (r.numeroCartaCorrecao > 0) {
-      itens.add(
-        NfeHistoricoTimelineItem(
-          titulo: 'Carta de Correcao (CC-e)',
-          subtitulo: 'Sequencia ${r.numeroCartaCorrecao}',
-          concluido: true,
-        ),
-      );
+      for (final cce in r.cartasCorrecao) {
+        itens.add(
+          NfeHistoricoTimelineItem(
+            titulo: 'Carta de Correcao (CC-e)',
+            subtitulo: cce.processando
+                ? 'Sequencia ${cce.numeroSequencia} · processando'
+                : 'Sequencia ${cce.numeroSequencia}',
+            concluido: !cce.processando,
+          ),
+        );
+      }
     }
 
     if (r.cancelada) {

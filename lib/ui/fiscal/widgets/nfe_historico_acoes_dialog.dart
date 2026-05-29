@@ -91,14 +91,17 @@ Future<String?> showNfeCartaCorrecaoDialog(BuildContext context) async {
                 TextFormField(
                   controller: controller,
                   maxLines: 5,
+                  maxLength: 1000,
                   decoration: const InputDecoration(
                     labelText: 'Texto da correcao',
                     border: OutlineInputBorder(),
                     alignLabelWithHint: true,
+                    counterText: 'Min. 15 · max. 1000 caracteres',
                   ),
                   validator: (v) {
                     final t = (v ?? '').trim();
                     if (t.length < 15) return 'Minimo 15 caracteres';
+                    if (t.length > 1000) return 'Maximo 1000 caracteres';
                     return null;
                   },
                 ),

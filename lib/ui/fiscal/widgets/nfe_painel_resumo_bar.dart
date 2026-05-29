@@ -53,6 +53,31 @@ class NfePainelResumoBar extends StatelessWidget {
             valor: resumo.canceladas,
             icon: Icons.cancel_outlined,
           ),
+          if (resumo.totalCartasCorrecao > 0)
+            _chip(
+              theme,
+              label: 'CC-e',
+              valor: resumo.totalCartasCorrecao,
+              icon: Icons.edit_note_outlined,
+              cor: resumo.cartasCorrecaoProcessando > 0
+                  ? theme.colorScheme.primary
+                  : null,
+            ),
+          if (resumo.lacunasNumeracaoSerie1 > 0)
+            _chip(
+              theme,
+              label: 'Lacunas num.',
+              valor: resumo.lacunasNumeracaoSerie1,
+              icon: Icons.warning_amber_outlined,
+              cor: theme.colorScheme.tertiary,
+            ),
+          if (resumo.inutilizacoesRegistradas > 0)
+            _chip(
+              theme,
+              label: 'Inutiliz.',
+              valor: resumo.inutilizacoesRegistradas,
+              icon: Icons.block_outlined,
+            ),
         ],
       ),
     );

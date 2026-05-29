@@ -1,0 +1,118 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
+import '../domain/fiscal/nfe_carta_correcao_registro.dart';
+
+/// Registro de inutilizacao de numeracao NF-e (historico local).
+class NfeInutilizacaoRegistro {
+  NfeInutilizacaoRegistro({
+    required this.id,
+    required this.serie,
+    required this.numeroInicial,
+    required this.numeroFinal,
+    required this.justificativa,
+    required this.usuarioLogin,
+    required this.sucesso,
+    this.protocolo = '',
+    this.mensagemSefaz = '',
+    DateTime? registradaEm,
+  }) : registradaEm = registradaEm ?? DateTime.now();
+
+  final String id;
+  final String serie;
+  final int numeroInicial;
+  final int numeroFinal;
+  final String justificativa;
+  final String usuarioLogin;
+  final bool sucesso;
+  final String protocolo;
+  final String mensagemSefaz;
+  final DateTime registradaEm;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'serie': serie,
+        'numeroInicial': numeroInicial,
+        'numeroFinal': numeroFinal,
+        'justificativa': justificativa,
+        'usuarioLogin': usuarioLogin,
+        'sucesso': sucesso,
+        if (protocolo.trim().isNotEmpty) 'protocolo': protocolo,
+        if (mensagemSefaz.trim().isNotEmpty) 'mensagemSefaz': mensagemSefaz,
+        'registradaEm': registradaEm.toUtc().toIso8601String(),
+      };
+
+  factory NfeInutilizacaoRegistro.fromJson(Map<String, dynamic> json) {
+    return NfeInutilizacaoRegistro(
+      id: (json['id'] ?? '').toString(),
+      serie: (json['serie'] ?? '1').toString(),
+      numeroInicial: ((json['numeroInicial'] as num?) ?? 0).toInt(),
+      numeroFinal: ((json['numeroFinal'] as num?) ?? 0).toInt(),
+      justificativa: (json['justificativa'] ?? '').toString(),
+      usuarioLogin: (json['usuarioLogin'] ?? '').toString(),
+      sucesso: json['sucesso'] == true,
+      protocolo: (json['protocolo'] ?? '').toString(),
+      mensagemSefaz: (json['mensagemSefaz'] ?? '').toString(),
+      registradaEm:
+          DateTime.tryParse((json['registradaEm'] ?? '').toString()) ??
+              DateTime.now(),
+    );
+  }
+}
+
+/// Persistencia JSON do historico de inutilizacoes NF-e.
+class NfeInutilizacaoStore {
+  NfeInutilizacaoStore(this._storeDirectoryPath);
+
+  final String _storeDirectoryPath;
+  static const String _arquivo = 'nfe_inutilizacoes_v1.json';
+
+  File get _file => File(p.join(_storeDirectoryPath, _arquivo));
+
+  List<NfeInutilizacaoRegistro> listar() {
+    if (!_file.existsSync()) return [];
+    try {
+      final raw = jsonDecode(_file.readAsStringSync());
+      if (raw is! List) return [];
+      return raw
+          .whereType<Map>()
+          .map(
+            (e) => NfeInutilizacaoRegistro.fromJson(
+              e.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          )
+          .toList()
+        ..sort((a, b) => b.registradaEm.compareTo(a.registradaEm));
+    } catch (_) {
+      return [];
+    }
+  }
+
+  List<NfeInutilizacaoRegistro> listarNoPeriodo({
+    required DateTime inicio,
+    required DateTime fim,
+  }) {
+    final ini = DateTime(inicio.year, inicio.month, inicio.day);
+    final f = DateTime(fim.year, fim.month, fim.day, 23, 59, 59, 999);
+    return listar().where((r) {
+      final local = r.registradaEm.toLocal();
+      return !local.isBefore(ini) && !local.isAfter(f);
+    }).toList();
+  }
+
+  void gravar(NfeInutilizacaoRegistro registro) {
+    final todos = listar();
+    final idx = todos.indexWhere((r) => r.id == registro.id);
+    if (idx >= 0) {
+      todos[idx] = registro;
+    } else {
+      todos.insert(0, registro);
+    }
+    _file.writeAsStringSync(
+      jsonEncode(todos.map((e) => e.toJson()).toList()),
+      flush: true,
+    );
+  }
+}

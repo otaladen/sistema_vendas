@@ -8,6 +8,7 @@ import '../config/fiscal_config.dart';
 import '../config/focus_nfe_runtime.dart';
 import '../services/fiscal_config_store.dart';
 import '../data/fechamento_fiscal_local_source.dart';
+import '../data/nfe_inutilizacao_store.dart';
 import '../domain/fiscal/nota_fiscal_entrada_fechamento_item.dart';
 import '../domain/fiscal/nota_fiscal_fechamento_item.dart';
 import 'fechamento_xlsx_builder.dart';
@@ -114,6 +115,16 @@ class FechamentoContabilService {
       );
     }
 
+    final periodo = periodoDoMesAno(mes, ano);
+    final cceLocais = _local.listarCceLocaisNoPeriodo(
+      inicio: periodo.inicio,
+      fim: periodo.fim,
+    );
+    final inutilizacoes = _local.listarInutilizacoesNoPeriodo(
+      inicio: periodo.inicio,
+      fim: periodo.fim,
+    );
+
     final erros = <String>[];
     final arquivosZip = <ArchiveFile>[];
     var xmlsOk = 0;
@@ -122,7 +133,8 @@ class FechamentoContabilService {
     final saidasEnriquecidas = <NotaFiscalFechamentoItem>[];
     final totalPassos = pacote.saidas.length +
         pacote.entradas.length +
-        pacote.saidas.where((s) => s.urlXmlEventoCancelamento.isNotEmpty).length;
+        pacote.saidas.where((s) => s.urlXmlEventoCancelamento.isNotEmpty).length +
+        cceLocais.length;
     var passo = 0;
 
     for (final nota in pacote.saidas) {
@@ -248,6 +260,36 @@ class FechamentoContabilService {
       }
     }
 
+    for (final cce in cceLocais) {
+      passo++;
+      onProgresso?.call(
+        passo,
+        totalPassos > 0 ? totalPassos : 1,
+        'CC-e: ${cce.chave.substring(0, 8)} seq ${cce.sequencia}...',
+      );
+      try {
+        final bytes = await cce.arquivo.readAsBytes();
+        if (bytes.isEmpty) {
+          xmlsFalha++;
+          erros.add(
+            'CC-e ${cce.chave} seq ${cce.sequencia}: arquivo vazio.',
+          );
+          continue;
+        }
+        arquivosZip.add(
+          ArchiveFile(
+            'xml/cce/${cce.chave}_cce_${cce.sequencia}.xml',
+            bytes.length,
+            bytes,
+          ),
+        );
+        xmlsOk++;
+      } catch (e) {
+        xmlsFalha++;
+        erros.add('CC-e ${cce.chave} seq ${cce.sequencia}: $e');
+      }
+    }
+
     onProgresso?.call(totalPassos, totalPassos, 'Compactando ZIP...');
     final archive = Archive();
     for (final f in arquivosZip) {
@@ -282,6 +324,7 @@ class FechamentoContabilService {
       ano: ano,
       saidas: saidasEnriquecidas,
       entradas: pacote.entradas,
+      inutilizacoes: inutilizacoes,
       totais: totais,
       errosDownload: erros,
     );
@@ -415,9 +458,15 @@ class FechamentoContabilService {
     required int ano,
     required List<NotaFiscalFechamentoItem> saidas,
     required List<NotaFiscalEntradaFechamentoItem> entradas,
+    required List<NfeInutilizacaoRegistro> inutilizacoes,
     required FechamentoContabilTotais totais,
     required List<String> errosDownload,
   }) {
+    final inutRows = _linhasAbaInutilizacoes(
+      mes: mes,
+      ano: ano,
+      inutilizacoes: inutilizacoes,
+    );
     return FechamentoXlsxBuilder.build(
       sheet1Name: 'Saidas',
       sheet1Rows: _linhasAbaSaidas(
@@ -434,7 +483,51 @@ class FechamentoContabilService {
         entradas: entradas,
         totais: totais,
       ),
+      sheet3Name: inutRows.isNotEmpty ? 'Inutilizacoes' : null,
+      sheet3Rows: inutRows.isNotEmpty ? inutRows : null,
     );
+  }
+
+  List<List<String>> _linhasAbaInutilizacoes({
+    required int mes,
+    required int ano,
+    required List<NfeInutilizacaoRegistro> inutilizacoes,
+  }) {
+    if (inutilizacoes.isEmpty) return const [];
+    final rows = <List<String>>[..._cabecalhoEmitenteRows(mes, ano)];
+    rows.add([
+      'Data',
+      'Serie',
+      'Numero Inicial',
+      'Numero Final',
+      'Quantidade',
+      'Sucesso',
+      'Protocolo SEFAZ',
+      'Usuario',
+      'Justificativa',
+      'Mensagem SEFAZ',
+    ]);
+    for (final inut in inutilizacoes) {
+      final qtd = inut.numeroFinal - inut.numeroInicial + 1;
+      rows.add([
+        _fmtData.format(inut.registradaEm.toLocal()),
+        inut.serie,
+        inut.numeroInicial.toString(),
+        inut.numeroFinal.toString(),
+        qtd.toString(),
+        inut.sucesso ? 'Sim' : 'Nao',
+        inut.protocolo,
+        inut.usuarioLogin,
+        inut.justificativa,
+        inut.mensagemSefaz,
+      ]);
+    }
+    rows.add([]);
+    rows.add([
+      'Total inutilizacoes no periodo',
+      inutilizacoes.length.toString(),
+    ]);
+    return rows;
   }
 
   List<List<String>> _cabecalhoEmitenteRows(int mes, int ano) => [

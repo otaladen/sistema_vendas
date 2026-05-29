@@ -30,8 +30,49 @@ Future<void> showNfeRegistroDetalheDialog(
               if (registro.protocolo.isNotEmpty) _linha('Protocolo', registro.protocolo),
               if (registro.mensagemSefaz.isNotEmpty)
                 _linha('Mensagem SEFAZ', registro.mensagemSefaz),
-              if (registro.numeroCartaCorrecao > 0)
-                _linha('CC-e', 'Sequencia ${registro.numeroCartaCorrecao}'),
+              if (registro.cartasCorrecao.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Cartas de correcao (${registro.totalCartasCorrecao})',
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+                const SizedBox(height: 6),
+                for (final cce in registro.cartasCorrecao)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Sequencia ${cce.numeroSequencia}'
+                          '${cce.processando ? ' · processando' : ''}',
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        if (cce.textoCorrecao.trim().isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: SelectableText(cce.textoCorrecao),
+                          ),
+                        if (cce.protocolo.trim().isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Protocolo: ${cce.protocolo}',
+                              style: Theme.of(ctx).textTheme.bodySmall,
+                            ),
+                          ),
+                        if (cce.emitidaEm != registro.emitidaEm)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              'Emitida em ${fmt.format(cce.emitidaEm.toLocal())}',
+                              style: Theme.of(ctx).textTheme.bodySmall,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
             ],
           ),
         ),

@@ -472,6 +472,9 @@ class FocusNfeCartaCorrecaoResultado {
     this.numeroSequencia = 0,
     this.urlPdf = '',
     this.urlXml = '',
+    this.protocolo = '',
+    this.statusFocus = '',
+    this.processando = false,
   });
 
   final bool sucesso;
@@ -479,6 +482,9 @@ class FocusNfeCartaCorrecaoResultado {
   final int numeroSequencia;
   final String urlPdf;
   final String urlXml;
+  final String protocolo;
+  final String statusFocus;
+  final bool processando;
 
   factory FocusNfeCartaCorrecaoResultado.erro(String mensagem) {
     return FocusNfeCartaCorrecaoResultado(sucesso: false, mensagem: mensagem);
@@ -491,11 +497,13 @@ class FocusNfeOperacaoSimplesResultado {
     required this.sucesso,
     this.mensagem = '',
     this.httpStatusCode = 0,
+    this.protocolo = '',
   });
 
   final bool sucesso;
   final String mensagem;
   final int httpStatusCode;
+  final String protocolo;
 
   factory FocusNfeOperacaoSimplesResultado.erro(String mensagem) {
     return FocusNfeOperacaoSimplesResultado(sucesso: false, mensagem: mensagem);
@@ -803,6 +811,40 @@ class FocusNfeService {
     }
   }
 
+  /// Consulta CC-e ja enviada (GET /v2/nfe/{referencia}/carta_correcao).
+  Future<FocusNfeCartaCorrecaoResultado> consultarCartaCorrecaoNfe(
+    String referencia, {
+    int? numeroSequencia,
+  }) async {
+    validarConfiguracao();
+    final ref = referencia.trim();
+    if (ref.isEmpty) {
+      return FocusNfeCartaCorrecaoResultado.erro('Referencia da NF-e invalida.');
+    }
+    final base = _config.baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    var uri = Uri.parse(
+      '$base/v2/nfe/${Uri.encodeComponent(ref)}/carta_correcao',
+    );
+    if (numeroSequencia != null && numeroSequencia > 0) {
+      uri = uri.replace(
+        queryParameters: {
+          ...uri.queryParameters,
+          'numero_sequencial': numeroSequencia.toString(),
+        },
+      );
+    }
+    try {
+      final response = await _http
+          .get(uri, headers: _headers())
+          .timeout(const Duration(seconds: 60));
+      return _interpretarCartaCorrecao(response, referencia: ref);
+    } catch (e) {
+      return FocusNfeCartaCorrecaoResultado.erro(
+        'Falha ao consultar CC-e na Focus: $e',
+      );
+    }
+  }
+
   /// Carta de Correcao Eletronica (CC-e) — POST /v2/nfe/{referencia}/carta_correcao.
   Future<FocusNfeCartaCorrecaoResultado> emitirCartaCorrecaoNfe(
     String referencia, {
@@ -814,6 +856,11 @@ class FocusNfeService {
     if (texto.length < 15) {
       return FocusNfeCartaCorrecaoResultado.erro(
         'Texto da correcao deve ter pelo menos 15 caracteres.',
+      );
+    }
+    if (texto.length > 1000) {
+      return FocusNfeCartaCorrecaoResultado.erro(
+        'Texto da correcao deve ter no maximo 1000 caracteres (SEFAZ).',
       );
     }
     final ref = referencia.trim();
@@ -861,10 +908,19 @@ class FocusNfeService {
       final msg = jsonBody == null
           ? ''
           : (jsonBody['mensagem'] ?? jsonBody['status'] ?? '').toString().trim();
+      final protocolo = jsonBody == null
+          ? ''
+          : (jsonBody['protocolo'] ??
+                  jsonBody['numero_protocolo'] ??
+                  jsonBody['protocolo_sefaz'] ??
+                  '')
+              .toString()
+              .trim();
       return FocusNfeOperacaoSimplesResultado(
         sucesso: true,
         mensagem: msg.isNotEmpty ? msg : 'Operacao concluida.',
         httpStatusCode: response.statusCode,
+        protocolo: protocolo,
       );
     }
     final msg = jsonBody != null
@@ -950,13 +1006,31 @@ class FocusNfeService {
     final msg = (jsonBody['mensagem_sefaz'] ?? jsonBody['mensagem'] ?? '')
         .toString()
         .trim();
+    final protocolo = (jsonBody['protocolo'] ??
+            jsonBody['numero_protocolo'] ??
+            jsonBody['protocolo_sefaz'] ??
+            '')
+        .toString()
+        .trim();
+    final statusFocus = (jsonBody['status'] ?? jsonBody['status_sefaz'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final processando = statusFocus.contains('processando') && xml.isEmpty;
 
     return FocusNfeCartaCorrecaoResultado(
       sucesso: true,
-      mensagem: msg.isEmpty ? 'Carta de correcao registrada.' : msg,
+      mensagem: msg.isEmpty
+          ? (processando
+              ? 'CC-e em processamento na SEFAZ.'
+              : 'Carta de correcao registrada.')
+          : msg,
       numeroSequencia: numero > 0 ? numero : 1,
       urlPdf: pdf,
       urlXml: xml,
+      protocolo: protocolo,
+      statusFocus: statusFocus.isEmpty ? 'autorizado' : statusFocus,
+      processando: processando,
     );
   }
 

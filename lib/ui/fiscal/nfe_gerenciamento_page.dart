@@ -14,12 +14,16 @@ import '../../services/focus_nfe_reconsulta_helper.dart';
 import '../../config/focus_nfe_runtime.dart';
 import '../../data/app_config_repository.dart';
 import '../../data/cliente_repository.dart';
+import '../../data/nfe_inutilizacao_store.dart';
 import '../../data/nfe_saida_fiscal_store.dart';
 import '../../data/venda_repository.dart';
 import '../../config/fiscal_config.dart';
 import '../../domain/fiscal/endereco_fiscal_ibge_resolver.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../data/usuario_repository.dart';
+import '../../domain/fiscal/nfe_carta_correcao_registro.dart';
+import '../../domain/fiscal/nfe_cce_reconciliacao.dart';
+import '../../domain/fiscal/nfe_cce_xml_local_service.dart';
 import '../../domain/fiscal/nfe_historico_csv_export.dart';
 import '../../domain/fiscal/nfe_historico_filtro.dart';
 import '../../domain/fiscal/nfe_painel_resumo.dart';
@@ -43,6 +47,7 @@ import 'exportar_fechamento_page.dart';
 import 'nfe_autorizacao.dart';
 import 'nfe_enviar_email_dialog.dart';
 import 'nfe_inutilizacao_dialog.dart';
+import 'nfe_inutilizacao_historico_dialog.dart';
 import 'relatorio_fiscal_mensal_page.dart';
 import 'widgets/nfe_aba_pendencias.dart';
 import 'widgets/nfe_ambiente_banner.dart';
@@ -82,6 +87,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   late final TabController _tabs;
   late FocusNfeService _focusNfe;
   late final NfeSaidaFiscalStore _historicoStore;
+  late final NfeInutilizacaoStore _inutilizacaoStore;
   late final UsuarioRepository _usuarioRepository;
   Timer? _timerReconsultaPendencias;
   final _currency = NumberFormat('#,##0.00', 'pt_BR');
@@ -102,6 +108,10 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     rejeitadas: 0,
     canceladas: 0,
     vendasSemNfeAutorizada: 0,
+    totalCartasCorrecao: 0,
+    cartasCorrecaoProcessando: 0,
+    lacunasNumeracaoSerie1: 0,
+    inutilizacoesRegistradas: 0,
   );
   Venda? _vendaSelecionada;
   Cliente? _cliente;
@@ -132,6 +142,9 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       initialIndex: 0,
     );
     _historicoStore = NfeSaidaFiscalStore(
+      widget.vendaRepository.objectBox.storeDirectoryPath,
+    );
+    _inutilizacaoStore = NfeInutilizacaoStore(
       widget.vendaRepository.objectBox.storeDirectoryPath,
     );
     _focusNfe = FocusNfeService(config: criarFocusNfeConfigPadrao());
@@ -279,6 +292,8 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     final resumo = NfePainelResumoBuilder.calcular(
       historico: lista,
       vendasSemNfe: semNfe.length,
+      inutilizacaoStore: _inutilizacaoStore,
+      nfeStore: _historicoStore,
     );
     setState(() {
       _historico = lista;
@@ -644,9 +659,14 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     setState(() => _emitindo = true);
     final r = await _focusNfe.consultarNfe(reg.referenciaFocus);
     if (!mounted) return;
+    var atualizado = mesclarRegistroComResultadoFocus(reg, r);
+    atualizado = await reconsultarCartasCorrecaoPendentes(
+      registro: atualizado,
+      focusNfe: _focusNfe,
+      storeDirectoryPath: widget.vendaRepository.objectBox.storeDirectoryPath,
+    );
     setState(() => _emitindo = false);
 
-    final atualizado = mesclarRegistroComResultadoFocus(reg, r);
     _persistirRegistro(atualizado);
     _recarregarHistorico();
     _registrarAuditoriaNfe(
@@ -673,7 +693,12 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     for (final reg in fila) {
       final r = await _focusNfe.consultarNfe(reg.referenciaFocus);
       if (!mounted) return;
-      final atualizado = mesclarRegistroComResultadoFocus(reg, r);
+      var atualizado = mesclarRegistroComResultadoFocus(reg, r);
+      atualizado = await reconsultarCartasCorrecaoPendentes(
+        registro: atualizado,
+        focusNfe: _focusNfe,
+        storeDirectoryPath: widget.vendaRepository.objectBox.storeDirectoryPath,
+      );
       _persistirRegistro(atualizado);
       if (atualizado.autorizada) {
         ok++;
@@ -740,7 +765,15 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       context: context,
       focusNfe: _focusNfe,
       usuarioLogin: widget.usuarioLogado.login,
-    );
+      nfeStore: _historicoStore,
+      inutilizacaoStore: _inutilizacaoStore,
+    ).then((_) {
+      if (mounted) _recarregarHistorico();
+    });
+  }
+
+  void _abrirHistoricoInutilizacao() {
+    showNfeInutilizacaoHistoricoDialog(context, _inutilizacaoStore);
   }
 
   Future<void> _enviarEmailNfe(NfeSaidaFiscalRegistro reg) async {
@@ -885,19 +918,44 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       return;
     }
 
-    final atualizado = reg.comCartaCorrecao(
-      numeroSequencia: res.numeroSequencia,
-      urlPdf: res.urlPdf,
-      urlXml: res.urlXml,
+    final atualizado = reg.comNovaCartaCorrecao(
+      NfeCartaCorrecaoRegistro(
+        numeroSequencia: res.numeroSequencia > 0 ? res.numeroSequencia : 1,
+        textoCorrecao: texto,
+        urlPdf: res.urlPdf,
+        urlXml: res.urlXml,
+        protocolo: res.protocolo,
+        statusFocus:
+            res.statusFocus.isEmpty ? 'autorizado' : res.statusFocus,
+      ),
     );
     _persistirRegistro(atualizado);
+    if (reg.chaveNfe.trim().length >= 40 && res.urlXml.trim().isNotEmpty) {
+      unawaited(
+        NfeCceXmlLocalService.arquivarOuEnfileirar(
+          storeDirectoryPath:
+              widget.vendaRepository.objectBox.storeDirectoryPath,
+          chaveAcesso: reg.chaveNfe,
+          numeroSequencia: res.numeroSequencia > 0 ? res.numeroSequencia : 1,
+          urlXml: res.urlXml,
+        ),
+      );
+    }
     _recarregarHistorico();
     _registrarAuditoriaNfe(
       acao: AuditoriaAcao.nfeCartaCorrecao,
       entidadeId: reg.referenciaFocus,
       resumo: 'CC-e #${res.numeroSequencia} NF-e venda ${reg.vendaId}',
+      detalhes: {
+        'sequencia': res.numeroSequencia,
+        if (res.processando) 'processando': true,
+      },
     );
-    _snack(res.mensagem.isNotEmpty ? res.mensagem : 'CC-e registrada.');
+    _snack(
+      res.processando
+          ? 'CC-e enviada — aguardando SEFAZ.'
+          : (res.mensagem.isNotEmpty ? res.mensagem : 'CC-e registrada.'),
+    );
   }
 
   Future<void> _reemitirVenda(NfeSaidaFiscalRegistro reg) async {
@@ -993,6 +1051,11 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
             tooltip: 'Relatorio do mes',
             onPressed: _abrirRelatorioFiscal,
             icon: const Icon(Icons.analytics_outlined),
+          ),
+          IconButton(
+            tooltip: 'Historico inutilizacoes',
+            onPressed: _abrirHistoricoInutilizacao,
+            icon: const Icon(Icons.history_toggle_off_outlined),
           ),
           IconButton(
             tooltip: 'Inutilizar numeracao',
@@ -1578,12 +1641,8 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
                       onReemitir: () => _reemitirVenda(r),
                       onEnviarEmail: () => _enviarEmailNfe(r),
                       onEnviarWhatsapp: () => _enviarWhatsappNfe(r),
-                      onAbrirPdfCce: r.urlPdfCartaCorrecao.isNotEmpty
-                          ? () => _abrirUrl(r.urlPdfCartaCorrecao)
-                          : null,
-                      onAbrirXmlCce: r.urlXmlCartaCorrecao.isNotEmpty
-                          ? () => _abrirUrl(r.urlXmlCartaCorrecao)
-                          : null,
+                      onAbrirPdfCce: (cce) => _abrirUrl(cce.urlPdf),
+                      onAbrirXmlCce: (cce) => _abrirUrl(cce.urlXml),
                     ),
                     );
                   },

@@ -4,6 +4,7 @@ import '../data/nfe_saida_xml_store.dart';
 import '../data/objectbox.dart';
 import '../data/venda_repository.dart';
 import '../domain/fiscal/nfce_xml_local_service.dart';
+import '../domain/fiscal/nfe_cce_xml_local_service.dart';
 import '../domain/fiscal/nfe_xml_local_service.dart';
 import '../services/fiscal_config_store.dart';
 import '../services/focus_nfe_service.dart';
@@ -46,6 +47,10 @@ abstract final class FiscalReconciliacaoStartup {
 
     try {
       await NfeXmlLocalService.processarFilaRetry(storePath);
+    } catch (_) {}
+
+    try {
+      await NfeCceXmlLocalService.processarFilaRetry(storePath);
     } catch (_) {}
   }
 }
