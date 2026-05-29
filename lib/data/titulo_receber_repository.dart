@@ -182,7 +182,10 @@ class TituloReceberRepository {
       titulo.venda.targetId = venda.id;
       _db.tituloReceberBox.put(titulo);
     }
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'titulo_receber',
+      entidadeId: 0,
+    );
   }
 
   void cancelarPorVenda(int vendaId) {
@@ -196,7 +199,10 @@ class TituloReceberRepository {
       t.dataQuitacao = agora;
       _db.tituloReceberBox.put(t);
     }
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'titulo_receber',
+      entidadeId: 0,
+    );
   }
 
   void abaterSaldo(int tituloId, double valor) {
@@ -223,7 +229,10 @@ class TituloReceberRepository {
       t.dataQuitacao = DateTime.now().toUtc();
     }
     _db.tituloReceberBox.put(t);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'titulo_receber',
+      entidadeId: tituloId,
+    );
   }
 
   /// Vendas finalizadas fiado sem titulos (legado).

@@ -101,7 +101,10 @@ class CaixaSessaoRepository {
       todas[terminalId] = atualizado;
       await _persistirMapa(todas);
       if (propagarRede) {
-        notificarAlteracaoParaRede();
+        notificarAlteracaoParaRede(
+          entidade: 'caixa_sessoes',
+          entidadeId: 1,
+        );
       }
     });
   }

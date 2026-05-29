@@ -2,6 +2,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../domain/auditoria_retencao.dart';
 import '../model/config_layout_impressao.dart';
+import 'sync/sync_local_config.dart';
 import 'sync/sync_write_trigger.dart';
 
 class EmpresaConfig {
@@ -210,10 +211,11 @@ class AppConfigRepository {
       'config_migracao_motorista_entrega_concluida';
   static const _kLayoutImpressaoJson = 'config_layout_impressao_json';
   static const _kAuditoriaRetencaoDias = 'config_auditoria_retencao_dias';
+  static const _kModoImplantacaoLocal = 'sync_modo_implantacao_local_v1';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
     final prefs = await SharedPreferences.getInstance();
-    return EmpresaConfig(
+    final base = EmpresaConfig(
       nomeLoja: prefs.getString(_kNomeLoja) ?? 'LOJA DE MATERIAIS',
       telefone: prefs.getString(_kTelefone) ?? '',
       endereco: prefs.getString(_kEndereco) ?? '',
@@ -267,6 +269,7 @@ class AppConfigRepository {
         return 180;
       }(),
     );
+    return SyncLocalConfig.aplicarSobre(base);
   }
 
   Future<void> salvarEmpresaConfig(
@@ -364,8 +367,12 @@ class AppConfigRepository {
       _kAuditoriaRetencaoDias,
       AuditoriaRetencaoOpcoes.normalizar(config.auditoriaRetencaoDias),
     );
+    await SyncLocalConfig.salvarCamposLocais(config);
     if (propagarRede) {
-      notificarAlteracaoParaRede();
+      notificarAlteracaoParaRede(
+        entidade: 'empresa_config',
+        entidadeId: 1,
+      );
     }
   }
 
@@ -385,5 +392,16 @@ class AppConfigRepository {
   Future<void> marcarMigracaoMotoristaEntregaConcluida() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kMigracaoMotoristaEntregaConcluida, true);
+  }
+
+  /// Preferencia local deste PC — nao entra em [EmpresaConfig] / sync LAN.
+  Future<bool> carregarModoImplantacaoLocal() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kModoImplantacaoLocal) ?? false;
+  }
+
+  Future<void> salvarModoImplantacaoLocal(bool ativo) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kModoImplantacaoLocal, ativo);
   }
 }

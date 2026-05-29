@@ -42,7 +42,10 @@ class LancamentoFuncionarioRepository {
   int salvar(LancamentoFuncionario lancamento, int funcionarioId) {
     lancamento.funcionario.targetId = funcionarioId;
     final id = _db.lancamentoFuncionarioBox.put(lancamento);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'lancamento_funcionario',
+      entidadeId: id,
+    );
     return id;
   }
 
@@ -51,20 +54,29 @@ class LancamentoFuncionarioRepository {
     if (l == null) return;
     l.estornado = true;
     _db.lancamentoFuncionarioBox.put(l);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'lancamento_funcionario',
+      entidadeId: id,
+    );
   }
 
   void remover(int id) {
     if (_db.lancamentoFuncionarioBox.remove(id)) {
-      notificarAlteracaoParaRede();
+      registrarDeleteParaRede('lancamento_funcionario', id);
     }
   }
 
   void removerPorFuncionario(int funcionarioId) {
     final lista = listarPorFuncionario(funcionarioId);
     if (lista.isEmpty) return;
+    for (final l in lista) {
+      registrarDeleteParaRede('lancamento_funcionario', l.id);
+    }
     _db.lancamentoFuncionarioBox.removeMany(lista.map((e) => e.id).toList());
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'lancamento_funcionario',
+      entidadeId: 0,
+    );
   }
 
   double totalValesAtivos(int funcionarioId, {DateTime? mesReferencia}) {

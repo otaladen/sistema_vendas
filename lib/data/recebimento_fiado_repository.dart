@@ -89,7 +89,10 @@ class RecebimentoFiadoRepository {
       );
       rec.cliente.targetId = clienteId;
       final id = _db.recebimentoFiadoBox.put(rec);
-      notificarAlteracaoParaRede();
+      notificarAlteracaoParaRede(
+        entidade: 'recebimento_fiado',
+        entidadeId: id,
+      );
       return id;
     });
   }
@@ -128,7 +131,10 @@ class RecebimentoFiadoRepository {
       );
       rec.cliente.targetId = clienteId;
       final id = _db.recebimentoFiadoBox.put(rec);
-      notificarAlteracaoParaRede();
+      notificarAlteracaoParaRede(
+        entidade: 'recebimento_fiado',
+        entidadeId: id,
+      );
       return id;
     });
   }

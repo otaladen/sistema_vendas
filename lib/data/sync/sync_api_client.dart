@@ -204,6 +204,7 @@ class SyncApiClient {
   Future<Map<String, dynamic>> push({
     required String deviceId,
     required List<Map<String, dynamic>> mutations,
+    String? pushBatchId,
   }) async {
     final r = await http
         .post(
@@ -212,6 +213,8 @@ class SyncApiClient {
           body: jsonEncode({
             'deviceId': deviceId,
             'mutations': mutations,
+            if (pushBatchId != null && pushBatchId.trim().isNotEmpty)
+              'pushBatchId': pushBatchId.trim(),
           }),
         )
         .timeout(const Duration(seconds: 120));

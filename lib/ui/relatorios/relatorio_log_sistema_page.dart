@@ -3,9 +3,13 @@ import 'package:intl/intl.dart';
 
 import '../../data/app_config_repository.dart';
 import '../../data/auditoria_repository.dart';
+import '../../data/mensageria_repository.dart';
+import '../../data/venda_repository.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/auditoria_retencao.dart';
 import '../../model/auditoria_evento.dart';
+import '../../model/historico_entrega.dart';
+import '../../model/mensagem_log.dart';
 import '../../services/auditoria_registrar.dart';
 import 'relatorio_export_util.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
@@ -17,10 +21,12 @@ class RelatorioLogSistemaPage extends StatefulWidget {
     required this.appConfigRepository,
     required this.usuarioAdmin,
     this.usuarioLogin = '',
+    this.vendaRepository,
   });
 
   final AuditoriaRepository auditoriaRepository;
   final AppConfigRepository appConfigRepository;
+  final VendaRepository? vendaRepository;
   final bool usuarioAdmin;
   final String usuarioLogin;
 
@@ -29,14 +35,19 @@ class RelatorioLogSistemaPage extends StatefulWidget {
       _RelatorioLogSistemaPageState();
 }
 
-class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage> {
+class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
+    with SingleTickerProviderStateMixin {
   final _buscaController = TextEditingController();
   final _fmtData = DateFormat('dd/MM/yyyy HH:mm');
+  final _mensageriaRepo = MensageriaRepository();
+  late TabController _tabController;
   late DateTime _inicio;
   late DateTime _fim;
   String? _moduloFiltro;
   String? _usuarioFiltro;
   List<AuditoriaEvento> _eventos = [];
+  List<MensagemLog> _mensagens = [];
+  List<HistoricoEntrega> _entregas = [];
   List<String> _usuariosDistintos = [];
   bool _carregando = true;
   int _retencaoDias = AuditoriaRetencaoOpcoes.dias90;
@@ -46,6 +57,10 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     final hoje = DateTime.now();
     _fim = DateTime(hoje.year, hoje.month, hoje.day);
     _inicio = _fim.subtract(const Duration(days: 30));
@@ -55,12 +70,23 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _buscaController.removeListener(_recarregar);
     _buscaController.dispose();
     super.dispose();
   }
 
-  void _recarregar() => setState(() {});
+  void _recarregar() {
+    setState(() {});
+    _carregar();
+  }
+
+  bool _dataNoPeriodo(DateTime data) {
+    final local = data.toLocal();
+    final ini = DateTime(_inicio.year, _inicio.month, _inicio.day);
+    final fim = DateTime(_fim.year, _fim.month, _fim.day, 23, 59, 59, 999);
+    return !local.isBefore(ini) && !local.isAfter(fim);
+  }
 
   Future<void> _carregar({bool incluirConfig = false}) async {
     setState(() => _carregando = true);
@@ -80,6 +106,25 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage> {
         termoBusca: _buscaController.text,
       ),
     );
+
+    final logs = await _mensageriaRepo.listarLogs();
+    final termo = _buscaController.text.trim().toLowerCase();
+    _mensagens = logs.where((m) {
+      if (!_dataNoPeriodo(m.criadoEm)) return false;
+      if (termo.isEmpty) return true;
+      return m.destino.toLowerCase().contains(termo) ||
+          m.templateId.toLowerCase().contains(termo) ||
+          m.resultado.toLowerCase().contains(termo) ||
+          m.statusEntrega.toLowerCase().contains(termo);
+    }).toList();
+
+    _entregas = widget.vendaRepository?.listarHistoricoEntregaGlobal(
+          inicio: _inicio,
+          fim: _fim,
+          termoBusca: _buscaController.text,
+        ) ??
+        [];
+
     if (!mounted) return;
     setState(() => _carregando = false);
   }
@@ -465,156 +510,303 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Log do sistema'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Sistema'),
+            Tab(text: 'Mensagens'),
+            Tab(text: 'Entregas'),
+          ],
+        ),
         actions: [
-          if (widget.usuarioAdmin)
+          if (widget.usuarioAdmin && _tabController.index == 0)
             IconButton(
               tooltip: 'Manutencao do log',
               icon: const Icon(Icons.cleaning_services_outlined),
               onPressed: _abrirManutencaoLimpeza,
             ),
-          RelatorioExportacoesMenu(
-            nomeArquivo: 'log_sistema',
-            paginasPdf: _paginasPdf,
-            linhasCsv: _linhasCsv,
-            mensagemSeVazio: 'Nenhum evento para exportar.',
-          ),
+          if (_tabController.index == 0)
+            RelatorioExportacoesMenu(
+              nomeArquivo: 'log_sistema',
+              paginasPdf: _paginasPdf,
+              linhasCsv: _linhasCsv,
+              mensagemSeVazio: 'Nenhum evento para exportar.',
+            ),
         ],
       ),
       body: _carregando
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Registro central de acoes criticas (login, orcamentos, backup, caixa).',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 12),
-                if (widget.usuarioAdmin) ...[
-                  _buildPainelRetencaoAdmin(),
-                  const SizedBox(height: 12),
-                ],
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _escolherPeriodo,
-                      icon: const Icon(Icons.date_range_outlined, size: 18),
-                      label: Text(periodoFmt),
-                    ),
-                    DropdownButton<String?>(
-                      value: _moduloFiltro,
-                      hint: const Text('Modulo'),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('Todos os modulos'),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Text(
+                    'Visao unificada: auditoria central, envios WhatsApp e historico de entregas.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
-                        ...AuditoriaModulo.todos.map(
-                          (m) => DropdownMenuItem<String?>(
-                            value: m,
-                            child: Text(auditoriaRotuloModulo(m)),
-                          ),
-                        ),
-                      ],
-                      onChanged: (v) {
-                        setState(() => _moduloFiltro = v);
-                        _carregar();
-                      },
-                    ),
-                    DropdownButton<String?>(
-                      value: _usuarioFiltro,
-                      hint: const Text('Usuario'),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('Todos os usuarios'),
-                        ),
-                        ..._usuariosDistintos.map(
-                          (u) => DropdownMenuItem<String?>(
-                            value: u,
-                            child: Text(u),
-                          ),
-                        ),
-                      ],
-                      onChanged: (v) {
-                        setState(() => _usuarioFiltro = v);
-                        _carregar();
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _buscaController,
-                  decoration: InputDecoration(
-                    labelText: 'Buscar no log',
-                    hintText: 'Resumo, motivo, caminho...',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _buscaController.text.trim().isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.clear),
-                            onPressed: () => _buscaController.clear(),
-                          ),
-                    isDense: true,
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  '${_eventos.length} evento(s) no periodo',
-                  style: Theme.of(context).textTheme.titleSmall,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: _buildFiltrosComuns(periodoFmt),
                 ),
-                const SizedBox(height: 8),
-                if (_eventos.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 24),
-                    child: Center(
-                      child: Text('Nenhum evento encontrado com os filtros atuais.'),
-                    ),
-                  )
-                else
-                  ..._eventos.map((e) {
-                    final det = widget.auditoriaRepository.detalhesMap(e);
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: Theme.of(context)
-                              .colorScheme
-                              .primaryContainer,
-                          child: Icon(
-                            _iconeModulo(e.modulo),
-                            size: 20,
-                            color: Theme.of(context).colorScheme.onPrimaryContainer,
-                          ),
-                        ),
-                        title: Text(
-                          e.resumo.isEmpty
-                              ? auditoriaRotuloAcao(e.acao)
-                              : e.resumo,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(
-                          '${_fmtData.format(e.dataHora.toLocal())}'
-                          '${e.usuarioLogin.isEmpty ? '' : ' · ${e.usuarioLogin}'}'
-                          '\n${auditoriaRotuloModulo(e.modulo)} · ${auditoriaRotuloAcao(e.acao)}',
-                        ),
-                        isThreeLine: true,
-                        trailing: det != null && det.isNotEmpty
-                            ? const Icon(Icons.chevron_right)
-                            : null,
-                        onTap: () => _detalhe(e),
-                      ),
-                    );
-                  }),
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildTabSistema(),
+                      _buildTabMensagens(),
+                      _buildTabEntregas(),
+                    ],
+                  ),
+                ),
               ],
             ),
+    );
+  }
+
+  Widget _buildFiltrosComuns(String periodoFmt) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _escolherPeriodo,
+              icon: const Icon(Icons.date_range_outlined, size: 18),
+              label: Text(periodoFmt),
+            ),
+            if (_tabController.index == 0) ...[
+              DropdownButton<String?>(
+                value: _moduloFiltro,
+                hint: const Text('Modulo'),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Todos os modulos'),
+                  ),
+                  ...AuditoriaModulo.todos.map(
+                    (m) => DropdownMenuItem<String?>(
+                      value: m,
+                      child: Text(auditoriaRotuloModulo(m)),
+                    ),
+                  ),
+                ],
+                onChanged: (v) {
+                  setState(() => _moduloFiltro = v);
+                  _carregar();
+                },
+              ),
+              DropdownButton<String?>(
+                value: _usuarioFiltro,
+                hint: const Text('Usuario'),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Todos os usuarios'),
+                  ),
+                  ..._usuariosDistintos.map(
+                    (u) => DropdownMenuItem<String?>(
+                      value: u,
+                      child: Text(u),
+                    ),
+                  ),
+                ],
+                onChanged: (v) {
+                  setState(() => _usuarioFiltro = v);
+                  _carregar();
+                },
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _buscaController,
+          decoration: InputDecoration(
+            labelText: 'Buscar',
+            hintText: 'Resumo, destino, status...',
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: _buscaController.text.trim().isEmpty
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () => _buscaController.clear(),
+                  ),
+            isDense: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTabSistema() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        if (widget.usuarioAdmin) ...[
+          _buildPainelRetencaoAdmin(),
+          const SizedBox(height: 12),
+        ],
+        Text(
+          '${_eventos.length} evento(s) no periodo',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 8),
+        if (_eventos.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 24),
+            child: Center(
+              child: Text('Nenhum evento encontrado com os filtros atuais.'),
+            ),
+          )
+        else
+          ..._eventos.map((e) {
+            final det = widget.auditoriaRepository.detalhesMap(e);
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primaryContainer,
+                  child: Icon(
+                    _iconeModulo(e.modulo),
+                    size: 20,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                title: Text(
+                  e.resumo.isEmpty
+                      ? auditoriaRotuloAcao(e.acao)
+                      : e.resumo,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${_fmtData.format(e.dataHora.toLocal())}'
+                  '${e.usuarioLogin.isEmpty ? '' : ' · ${e.usuarioLogin}'}'
+                  '\n${auditoriaRotuloModulo(e.modulo)} · ${auditoriaRotuloAcao(e.acao)}',
+                ),
+                isThreeLine: true,
+                trailing: det != null && det.isNotEmpty
+                    ? const Icon(Icons.chevron_right)
+                    : null,
+                onTap: () => _detalhe(e),
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  Widget _buildTabMensagens() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        Text(
+          '${_mensagens.length} envio(s) no periodo',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 8),
+        if (_mensagens.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 24),
+            child: Center(
+              child: Text('Nenhuma mensagem encontrada com os filtros atuais.'),
+            ),
+          )
+        else
+          ..._mensagens.map((m) {
+            final ok = m.resultado == 'enviado';
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: ok
+                      ? Theme.of(context).colorScheme.tertiaryContainer
+                      : Theme.of(context).colorScheme.errorContainer,
+                  child: Icon(
+                    ok ? Icons.check_circle_outline : Icons.error_outline,
+                    size: 20,
+                  ),
+                ),
+                title: Text(
+                  '${m.canal.toUpperCase()} · ${m.destino}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${_fmtData.format(m.criadoEm.toLocal())}'
+                  '\n${m.resultado} · entrega: ${m.statusEntrega}'
+                  '${m.templateId.isNotEmpty ? ' · ${m.templateId}' : ''}',
+                ),
+                isThreeLine: true,
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  Widget _buildTabEntregas() {
+    if (widget.vendaRepository == null) {
+      return const Center(
+        child: Text('Historico de entregas indisponivel nesta tela.'),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        Text(
+          '${_entregas.length} evento(s) de entrega no periodo',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 8),
+        if (_entregas.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 24),
+            child: Center(
+              child: Text('Nenhum evento de entrega no periodo.'),
+            ),
+          )
+        else
+          ..._entregas.map((h) {
+            final venda = h.venda.target;
+            final numOrc = venda?.numeroOrcamento ?? 0;
+            final rotuloNovo = HistoricoEntregaEventos.rotulo(h.statusNovo);
+            final rotuloAnterior = h.statusAnterior.isEmpty
+                ? '-'
+                : HistoricoEntregaEventos.rotulo(h.statusAnterior);
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor:
+                      Theme.of(context).colorScheme.secondaryContainer,
+                  child: const Icon(Icons.local_shipping_outlined, size: 20),
+                ),
+                title: Text(
+                  numOrc > 0
+                      ? 'Orcamento #$numOrc · $rotuloNovo'
+                      : rotuloNovo,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${_fmtData.format(h.dataHora.toLocal())}'
+                  '${h.usuario.isEmpty ? '' : ' · ${h.usuario}'}'
+                  '\n$rotuloAnterior → $rotuloNovo',
+                ),
+                isThreeLine: true,
+              ),
+            );
+          }),
+      ],
     );
   }
 
@@ -630,6 +822,8 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage> {
         return Icons.backup_outlined;
       case AuditoriaModulo.caixa:
         return Icons.point_of_sale_outlined;
+      case AuditoriaModulo.estoque:
+        return Icons.inventory_2_outlined;
       default:
         return Icons.history_outlined;
     }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:intl/intl.dart';
 
 import '../domain/produto_embalagem.dart';
@@ -13,6 +15,7 @@ import '../services/gerenciador_estoque_service.dart';
 import 'nfe_entrada_xml_store.dart';
 import 'objectbox.dart';
 import 'produto_repository.dart' show calcularCustoMedioPonderadoEntradasNfe;
+import 'sync/sync_dirty_outbox.dart';
 import 'sync/sync_write_trigger.dart';
 
 /// Origem do casamento produto/nota na conferencia de XML.
@@ -108,6 +111,20 @@ class NfeEntradaRepository {
     'CX',
     'LT',
   ];
+
+  void _notificarMutacaoNfeEntrada() {
+    const entidades = [
+      'nfe_importada',
+      'produto',
+      'fornecedor_nfe',
+      'vinculo_fornecedor',
+      'historico_entrada',
+    ];
+    for (final ent in entidades) {
+      unawaited(SyncDirtyOutbox.registrar(entity: ent, entityId: 0));
+    }
+    notificarAlteracaoParaRede();
+  }
 
   /// Resolve EAN, vinculo fornecedor+cProd e valores iniciais de fator/unidade.
   List<SugestaoLinhaConferencia> prepararSugestoesConferencia(
@@ -366,7 +383,7 @@ class NfeEntradaRepository {
       }
     });
 
-    notificarAlteracaoParaRede();
+    _notificarMutacaoNfeEntrada();
   }
 
   /// Itens de estoque lançados nesta NF-e (mesma chave de 44 dígitos).
@@ -636,7 +653,7 @@ class NfeEntradaRepository {
       _xmlStore.salvarXml(chaveNorm, xmlOriginal);
     }
 
-    notificarAlteracaoParaRede();
+    _notificarMutacaoNfeEntrada();
   }
 
   /// Lança [ContaPagar] para a NF-e: parcelas do XML ou uma linha à vista (paga).

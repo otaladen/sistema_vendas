@@ -125,7 +125,10 @@ class PromocaoRepository {
         _db.promocaoComboItemBox.put(c);
       }
     });
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'promocao',
+      entidadeId: promocao.id > 0 ? promocao.id : 0,
+    );
   }
 
   void registrarVendaPromocao(int promocaoId, int quantidade) {
@@ -136,7 +139,10 @@ class PromocaoRepository {
       p.quantidadeVendidaPromo += quantidade;
       _db.promocaoBox.put(p);
     });
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'promocao',
+      entidadeId: promocaoId,
+    );
   }
 
   /// Produtos com campanha vigente (para etiquetas de gondola).
@@ -174,7 +180,10 @@ class PromocaoRepository {
       _removerComboItensTx(id);
       _db.promocaoBox.remove(id);
     });
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'promocao',
+      entidadeId: id,
+    );
   }
 
   void _removerItensPromocaoTx(int promocaoId) {

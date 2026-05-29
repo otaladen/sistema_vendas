@@ -8,6 +8,7 @@ class AuditoriaModulo {
   static const backup = 'backup';
   static const caixa = 'caixa';
   static const fiscal = 'fiscal';
+  static const estoque = 'estoque';
   static const sistema = 'sistema';
 
   static const todos = [
@@ -17,6 +18,7 @@ class AuditoriaModulo {
     backup,
     caixa,
     fiscal,
+    estoque,
     sistema,
   ];
 }
@@ -48,6 +50,13 @@ class AuditoriaAcao {
   static const nfeEmail = 'nfe_email';
   static const nfeWhatsapp = 'nfe_whatsapp';
   static const nfeInutilizar = 'nfe_inutilizar';
+  static const descontoOrcamento = 'desconto_orcamento';
+  static const autorizacaoMargemPromocao = 'autorizacao_margem_promocao';
+  static const autorizacaoReajustePreco = 'autorizacao_reajuste_preco';
+  static const reajustePrecoLote = 'reajuste_preco_lote';
+  static const reajustePrecoEstorno = 'reajuste_preco_estorno';
+  static const devolucao = 'devolucao';
+  static const troca = 'troca';
 }
 
 String auditoriaRotuloModulo(String modulo) {
@@ -64,6 +73,8 @@ String auditoriaRotuloModulo(String modulo) {
       return 'Caixa';
     case AuditoriaModulo.fiscal:
       return 'Fiscal';
+    case AuditoriaModulo.estoque:
+      return 'Estoque';
     case AuditoriaModulo.sistema:
       return 'Sistema';
     default:
@@ -121,6 +132,20 @@ String auditoriaRotuloAcao(String acao) {
       return 'DANFE enviado por WhatsApp';
     case AuditoriaAcao.nfeInutilizar:
       return 'Inutilizacao numeracao NF-e';
+    case AuditoriaAcao.descontoOrcamento:
+      return 'Desconto no orcamento';
+    case AuditoriaAcao.autorizacaoMargemPromocao:
+      return 'Autorizacao margem promocional';
+    case AuditoriaAcao.autorizacaoReajustePreco:
+      return 'Autorizacao reajuste de precos';
+    case AuditoriaAcao.reajustePrecoLote:
+      return 'Reajuste de precos em lote';
+    case AuditoriaAcao.reajustePrecoEstorno:
+      return 'Estorno de reajuste';
+    case AuditoriaAcao.devolucao:
+      return 'Devolucao';
+    case AuditoriaAcao.troca:
+      return 'Troca';
     default:
       return acao;
   }

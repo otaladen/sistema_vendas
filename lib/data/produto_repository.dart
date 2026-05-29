@@ -139,7 +139,7 @@ class ProdutoRepository extends ChangeNotifier {
       });
       flag.writeAsStringSync('ok');
       _invalidarCacheBusca();
-      notificarAlteracaoParaRede();
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
       _migracaoAtivoLegadoOk = true;
     } catch (_) {
       // Falha de IO: proxima chamada tenta novamente.
@@ -193,7 +193,7 @@ class ProdutoRepository extends ChangeNotifier {
         _db.produtoBox.put(p);
       }
     });
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
   }
 
   /// - [somenteAtivos] padrao true (PDV): ignora inativos.
@@ -888,40 +888,41 @@ class ProdutoRepository extends ChangeNotifier {
     Produto produto, {
     String motivoAjusteEstoque = 'Ajuste manual cadastro produto',
   }) {
-    if (produto.id > 0) {
-      final existente = _db.produtoBox.get(produto.id);
-      if (existente == null) {
-        throw StateError('Produto id ${produto.id} nao encontrado.');
+    final id = _db.store.runInTransaction(TxMode.write, () {
+      if (produto.id > 0) {
+        final existente = _db.produtoBox.get(produto.id);
+        if (existente == null) {
+          throw StateError('Produto id ${produto.id} nao encontrado.');
+        }
+        if (produto.estoqueReal != existente.estoqueReal) {
+          _estoque.prepararAjusteManualInventario(
+            existente,
+            produto.estoqueReal,
+            motivoAjusteEstoque,
+          );
+        }
+        _copiarCamposCadastro(existente, produto);
+        existente.estoqueAtual = existente.estoqueReal;
+        return _db.produtoBox.put(existente);
       }
-      if (produto.estoqueReal != existente.estoqueReal) {
-        _estoque.executarAjusteManualInventario(
-          existente,
-          produto.estoqueReal,
+
+      final estoqueInicial = produto.estoqueReal;
+      produto.estoqueReal = 0;
+      produto.estoqueAtual = 0;
+      final novoId = _db.produtoBox.put(produto);
+      produto.id = novoId;
+      if (estoqueInicial > 0) {
+        _estoque.prepararAjusteManualInventario(
+          produto,
+          estoqueInicial,
           motivoAjusteEstoque,
         );
+        _db.produtoBox.put(produto);
       }
-      _copiarCamposCadastro(existente, produto);
-      existente.estoqueAtual = existente.estoqueReal;
-      final id = _estoque.persistirProdutoMetadados(existente);
-      invalidarCacheBusca();
-      notificarAlteracaoParaRede();
-      return id;
-    }
-
-    final estoqueInicial = produto.estoqueReal;
-    produto.estoqueReal = 0;
-    produto.estoqueAtual = 0;
-    final id = _db.produtoBox.put(produto);
-    produto.id = id;
-    if (estoqueInicial > 0) {
-      _estoque.executarAjusteManualInventario(
-        produto,
-        estoqueInicial,
-        motivoAjusteEstoque,
-      );
-    }
+      return novoId;
+    });
     invalidarCacheBusca();
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(entidade: 'produto', entidadeId: id);
     return id;
   }
 
@@ -969,8 +970,8 @@ class ProdutoRepository extends ChangeNotifier {
   bool remover(int id) {
     final ok = _db.produtoBox.remove(id);
     if (ok) {
+      registrarDeleteParaRede('produto', id);
       invalidarCacheBusca();
-      notificarAlteracaoParaRede();
     }
     return ok;
   }
@@ -1012,7 +1013,7 @@ class ProdutoRepository extends ChangeNotifier {
     }
     _db.produtoBox.put(p);
     invalidarCacheBusca();
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(entidade: 'produto', entidadeId: produtoId);
   }
 
   /// Recalcula custo medio para varios produtos (uma notificacao ao final).
@@ -1039,7 +1040,7 @@ class ProdutoRepository extends ChangeNotifier {
     }
     if (vistos.isNotEmpty) {
       invalidarCacheBusca();
-      notificarAlteracaoParaRede();
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
     }
   }
 

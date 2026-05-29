@@ -8,6 +8,7 @@ import '../services/focus_nfe_service.dart';
 import '../services/xml_nfe_parser_service.dart';
 import 'nfe_entrada_repository.dart';
 import 'nfe_entrada_xml_store.dart';
+import 'nfce_saida_xml_store.dart';
 import 'nfe_saida_fiscal_store.dart';
 import 'nfe_saida_xml_store.dart';
 import 'venda_repository.dart';
@@ -22,6 +23,7 @@ class FechamentoFiscalLocalSource {
   })  : _nfeStore = NfeSaidaFiscalStore(storeDirectoryPath),
         _xmlEntradaStore = NfeEntradaXmlStore(storeDirectoryPath),
         _xmlSaidaStore = NfeSaidaXmlStore(storeDirectoryPath),
+        _xmlNfceSaidaStore = NfceSaidaXmlStore(storeDirectoryPath),
         _vendaRepository = vendaRepository,
         _entradaRepository = entradaRepository;
 
@@ -38,6 +40,7 @@ class FechamentoFiscalLocalSource {
   final NfeSaidaFiscalStore _nfeStore;
   final NfeEntradaXmlStore _xmlEntradaStore;
   final NfeSaidaXmlStore _xmlSaidaStore;
+  final NfceSaidaXmlStore _xmlNfceSaidaStore;
   final VendaRepository? _vendaRepository;
   final NfeEntradaRepository? _entradaRepository;
 
@@ -205,7 +208,8 @@ class FechamentoFiscalLocalSource {
             protocoloSefaz: venda.nfceProtocolo,
             urlXmlEventoCancelamento: venda.nfceUrlXmlCancelamento.trim(),
             vendaOperacionalCancelada: venda.cancelada,
-            incluirNoZip: true,
+            incluirNoZip: _xmlNfceSaidaStore.existe(venda.nfceChaveAcesso) ||
+                venda.nfceUrlXml.trim().isNotEmpty,
           ),
         );
       }
@@ -246,6 +250,16 @@ class FechamentoFiscalLocalSource {
   File? arquivoXmlEntradaLocal(String chaveAcesso) {
     final chave = chaveAcesso.replaceAll(RegExp(r'\D'), '');
     final f = _xmlEntradaStore.arquivoDaChave(chave);
+    return f.existsSync() ? f : null;
+  }
+
+  File? arquivoXmlNfceSaidaLocal(
+    String chaveAcesso, {
+    bool cancelada = false,
+  }) {
+    final chave = chaveAcesso.replaceAll(RegExp(r'\D'), '');
+    if (chave.length != 44) return null;
+    final f = _xmlNfceSaidaStore.arquivoDaChave(chave, cancelada: cancelada);
     return f.existsSync() ? f : null;
   }
 

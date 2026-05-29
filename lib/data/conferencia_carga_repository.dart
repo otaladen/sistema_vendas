@@ -50,7 +50,10 @@ class ConferenciaCargaRepository {
         substituirSeMaisRecente: true,
       );
     });
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'conferencia_carga_romaneio',
+      entidadeId: 0,
+    );
   }
 
   /// Aplica payload de sync; ignora eventos mais antigos que o registro local.

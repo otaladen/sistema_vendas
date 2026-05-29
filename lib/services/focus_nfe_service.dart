@@ -1284,6 +1284,11 @@ class FocusNfeService {
   }
 
   static bool _deveTentarContingenciaNfce(FocusNfeEmissaoResultado resultado) {
+    return pareceFalhaComunicacao(resultado);
+  }
+
+  /// Timeout/rede/indisponibilidade — candidato a reconsulta antes de tratar como falha.
+  static bool pareceFalhaComunicacao(FocusNfeEmissaoResultado resultado) {
     if (resultado.autorizada || resultado.processando) return false;
 
     final http = resultado.httpStatusCode;

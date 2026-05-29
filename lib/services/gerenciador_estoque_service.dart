@@ -124,6 +124,29 @@ class GerenciadorEstoqueService {
         'Produto sem id: inclua o cadastro antes do ajuste de inventario.',
       );
     }
+    final atual = _db.produtoBox.get(produto.id);
+    if (atual == null) {
+      throw StateError('Produto id ${produto.id} nao encontrado.');
+    }
+    prepararAjusteManualInventario(atual, novaQuantidadeFisica, motivo);
+    persistirProduto(atual, TipoMovimentoEstoque.ajusteManual);
+    produto.estoqueReal = atual.estoqueReal;
+    produto.estoqueAtual = atual.estoqueAtual;
+    produto.estoqueVersao = atual.estoqueVersao;
+    produto.estoqueReservado = atual.estoqueReservado;
+  }
+
+  /// Valida e aplica estoque alvo em memoria (persistir na mesma transacao do caller).
+  void prepararAjusteManualInventario(
+    Produto produtoAlvo,
+    num novaQuantidadeFisica,
+    String motivo,
+  ) {
+    if (produtoAlvo.id <= 0) {
+      throw StateError(
+        'Produto sem id: inclua o cadastro antes do ajuste de inventario.',
+      );
+    }
     final motivoNorm = motivo.trim();
     if (motivoNorm.isEmpty) {
       throw StateError('Informe o motivo do ajuste manual de estoque.');
@@ -135,23 +158,15 @@ class GerenciadorEstoqueService {
     PoliticaMovimentoEstoque.validarPermiteAlteracaoFisica(
       TipoMovimentoEstoque.ajusteManual,
     );
-    final atual = _db.produtoBox.get(produto.id);
-    if (atual == null) {
-      throw StateError('Produto id ${produto.id} nao encontrado.');
-    }
-    if (alvo < atual.estoqueReservado) {
+    if (alvo < produtoAlvo.estoqueReservado) {
       throw StateError(
-        'Novo fisico ($alvo) menor que o reservado (${atual.estoqueReservado}) '
-        'em "${atual.nome}". Libere reservas antes do ajuste.',
+        'Novo fisico ($alvo) menor que o reservado (${produtoAlvo.estoqueReservado}) '
+        'em "${produtoAlvo.nome}". Libere reservas antes do ajuste.',
       );
     }
-    atual.estoqueReal = alvo;
-    atual.estoqueAtual = alvo;
-    persistirProduto(atual, TipoMovimentoEstoque.ajusteManual);
-    produto.estoqueReal = atual.estoqueReal;
-    produto.estoqueAtual = atual.estoqueAtual;
-    produto.estoqueVersao = atual.estoqueVersao;
-    produto.estoqueReservado = atual.estoqueReservado;
+    produtoAlvo.estoqueReal = alvo;
+    produtoAlvo.estoqueAtual = alvo;
+    ProdutoEstoqueSync.marcarEstoqueAlterado(produtoAlvo);
   }
 
   // --- Migracao legado cupom ---

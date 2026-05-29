@@ -1,6 +1,16 @@
 import '../data/sync/sync_entity_codec.dart';
 import '../model/produto.dart';
 
+class ProdutoMergeRemoto {
+  const ProdutoMergeRemoto({
+    required this.produto,
+    this.estoqueLocalPreservado = false,
+  });
+
+  final Produto produto;
+  final bool estoqueLocalPreservado;
+}
+
 /// Controle de concorrencia para estoque em sync LAN (last-write-wins por versao).
 abstract final class ProdutoEstoqueSync {
   /// Incrementa antes de persistir alteracao local de estoque.
@@ -10,13 +20,13 @@ abstract final class ProdutoEstoqueSync {
   }
 
   /// Mescla cadastro remoto preservando estoque local quando a versao local e maior.
-  static Produto mergeProdutoRemoto({
+  static ProdutoMergeRemoto mergeProdutoRemoto({
     required Produto? local,
     required Map<String, dynamic> payload,
   }) {
     final remoto = SyncEntityCodec.produtoDeMap(payload);
     if (local == null || local.id <= 0) {
-      return remoto;
+      return ProdutoMergeRemoto(produto: remoto);
     }
 
     final merged = SyncEntityCodec.produtoDeMap(payload);
@@ -26,16 +36,19 @@ abstract final class ProdutoEstoqueSync {
     final versaoLoc = local.estoqueVersao;
 
     if (versaoRem > versaoLoc) {
-      return merged;
+      return ProdutoMergeRemoto(produto: merged);
     }
     if (versaoLoc > versaoRem) {
       merged.estoqueReal = local.estoqueReal;
       merged.estoqueReservado = local.estoqueReservado;
       merged.estoqueAtual = local.estoqueAtual;
       merged.estoqueVersao = local.estoqueVersao;
-      return merged;
+      return ProdutoMergeRemoto(
+        produto: merged,
+        estoqueLocalPreservado: true,
+      );
     }
     // Empate: aplica remoto (mesma regra de LWW do sync).
-    return merged;
+    return ProdutoMergeRemoto(produto: merged);
   }
 }

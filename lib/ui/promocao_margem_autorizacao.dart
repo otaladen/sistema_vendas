@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../domain/auditoria_catalogo.dart';
 import '../data/usuario_repository.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
+import '../services/auditoria_registrar.dart';
 
 class CredenciaisMargemPromocao {
   const CredenciaisMargemPromocao({required this.login, required this.senha});
@@ -57,6 +59,18 @@ Future<bool> solicitarAutorizacaoMargemPromocao(
     );
     return false;
   }
+  AuditoriaRegistrar.registrar(
+    modulo: AuditoriaModulo.orcamento,
+    acao: AuditoriaAcao.autorizacaoMargemPromocao,
+    usuarioLogin: usuario.login,
+    resumo: 'Autorizacao margem promocional: $nomeProduto',
+    detalhes: {
+      'produto': nomeProduto,
+      'margemAtual': margemAtual,
+      'margemMinima': margemMinima,
+      'autorizadoPor': usuario.login,
+    },
+  );
   return true;
 }
 

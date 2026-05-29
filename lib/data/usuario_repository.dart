@@ -81,7 +81,10 @@ class UsuarioRepository {
       lista.add(salvo);
     }
     await _persistir(lista);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'usuarios_sistema',
+      entidadeId: 1,
+    );
 
     final loginAutor = alteradoPor?.login ?? AuditoriaRegistrar.usuarioSessao;
     final diff = UsuarioAuditoriaDiff.diffPermissoes(anterior, salvo);
@@ -116,7 +119,10 @@ class UsuarioRepository {
     }
     lista.removeWhere((u) => u.id == id);
     await _persistir(lista);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'usuarios_sistema',
+      entidadeId: 1,
+    );
 
     if (alvo != null) {
       final loginAutor = removidoPor?.login ?? AuditoriaRegistrar.usuarioSessao;

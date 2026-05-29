@@ -35,7 +35,11 @@ import '../../model/venda.dart';
 import '../../model/vendedor.dart';
 import '../../services/auditoria_registrar.dart';
 import '../../services/cupom_nao_fiscal_venda_pdf.dart';
+import '../../data/sync/sync_cursor_storage.dart';
+import '../../domain/fiscal/fiscal_emissao_lock.dart';
 import '../../services/focus_nfe_service.dart';
+import '../../services/focus_nfe_reconsulta_helper.dart';
+import '../../services/nfce_reconciliacao_service.dart';
 import '../../services/print_service.dart';
 import '../clientes_page.dart';
 import '../cupom_venda_impressao_helper.dart';
@@ -127,15 +131,64 @@ class _CaixaPageState extends State<CaixaPage> {
   int _ultimoTrocoNumeroOrcamento = 0;
   double _ultimoTrocoValor = 0;
   late final FocusNfeService _focusNfeService;
+  late final NfceReconciliacaoService _nfceReconciliacao;
+  Timer? _timerReconciliacaoNfce;
+  String? _deviceIdSync;
 
   @override
   void initState() {
     super.initState();
     _focusNfeService = FocusNfeService(config: criarFocusNfeConfigPadrao());
+    _nfceReconciliacao = NfceReconciliacaoService(
+      vendaRepository: widget.vendaRepository,
+      focusNfe: _focusNfeService,
+    );
     _mensageriaRepository = MensageriaRepository();
     _carregarLimiteDivergenciaCaixa();
     _carregarSessaoCaixa();
     _carregarOrcamentos();
+    unawaited(_carregarDeviceIdSync());
+    unawaited(_reconciliarNfcePendentes(mostrarFeedback: false));
+    _iniciarPollReconciliacaoNfce();
+  }
+
+  Future<String> _obterDeviceIdSync() async {
+    _deviceIdSync ??= await SyncCursorStorage().obterOuCriarDeviceId();
+    return _deviceIdSync!;
+  }
+
+  Future<void> _carregarDeviceIdSync() async {
+    _deviceIdSync = await SyncCursorStorage().obterOuCriarDeviceId();
+  }
+
+  void _iniciarPollReconciliacaoNfce() {
+    _timerReconciliacaoNfce?.cancel();
+    _timerReconciliacaoNfce = Timer.periodic(
+      const Duration(seconds: 45),
+      (_) {
+        if (!mounted) return;
+        unawaited(_reconciliarNfcePendentes(mostrarFeedback: true));
+      },
+    );
+  }
+
+  Future<void> _reconciliarNfcePendentes({required bool mostrarFeedback}) async {
+    try {
+      _focusNfeService.validarConfiguracao();
+    } catch (_) {
+      return;
+    }
+    final lote = await _nfceReconciliacao.reconsultarTodasPendentes();
+    if (!mounted || !mostrarFeedback || lote.autorizadas <= 0) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          lote.autorizadas == 1
+              ? 'NFC-e pendente autorizada na reconsulta.'
+              : '${lote.autorizadas} NFC-e(s) autorizada(s) na reconsulta.',
+        ),
+      ),
+    );
   }
 
   Future<void> _carregarLimiteDivergenciaCaixa() async {
@@ -382,6 +435,7 @@ class _CaixaPageState extends State<CaixaPage> {
               '${dif is num ? ' (dif. ${_formatarMoeda(dif.toDouble())})' : ''}',
           detalhes: detalhes,
         );
+        break;
       case 'fechamento_negado_divergencia':
         AuditoriaRegistrar.registrar(
           modulo: AuditoriaModulo.caixa,
@@ -2965,12 +3019,27 @@ class _CaixaPageState extends State<CaixaPage> {
     }
 
     try {
-      final resultado = await _focusNfeService.emitirNfce(
+      var resultado = await _focusNfeService.emitirNfce(
         vendaAtual,
         cliente: _clienteDaVenda(vendaAtual),
         entregaDomicilio: vendaAtual.tipoEntrega == 'entrega_loja' ||
             vendaAtual.enderecoEntrega.trim().isNotEmpty,
       );
+
+      final ref = FocusNfeService.referenciaVendaNfce(vendaAtual);
+      if (!resultado.autorizada && !resultado.processando) {
+        resultado = await FocusNfeReconsultaHelper.recuperarSePossivel(
+          original: resultado,
+          reconsultar: () => _focusNfeService.consultarNfce(ref),
+        );
+        if (FocusNfeService.pareceFalhaComunicacao(resultado) &&
+            !resultado.autorizada &&
+            !resultado.processando) {
+          resultado = FocusNfeReconsultaHelper.comoProcessandoAposFalhaComunicacao(
+            referencia: ref,
+          );
+        }
+      }
 
       if (resultado.autorizada) {
         return _EmissaoNfceDialogResult.sucesso(
@@ -2992,6 +3061,22 @@ class _CaixaPageState extends State<CaixaPage> {
     } on FocusNfeValidacaoException catch (e) {
       return _EmissaoNfceDialogResult.erroValidacao(e.message);
     } catch (e) {
+      final ref = FocusNfeService.referenciaVendaNfce(vendaAtual);
+      try {
+        final consulta = await _focusNfeService.consultarNfce(ref);
+        if (consulta.autorizada) {
+          return _EmissaoNfceDialogResult.sucesso(
+            resultado: consulta,
+            vendaAtual: vendaAtual,
+          );
+        }
+        if (consulta.processando) {
+          return _EmissaoNfceDialogResult.processando(
+            resultado: consulta,
+            vendaAtual: vendaAtual,
+          );
+        }
+      } catch (_) {}
       return _EmissaoNfceDialogResult.erroGenerico('Erro ao emitir NFC-e: $e');
     }
   }
@@ -3002,6 +3087,7 @@ class _CaixaPageState extends State<CaixaPage> {
     var vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? venda;
 
     while (mounted) {
+      vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? vendaAtual;
       if (vendaAtual.nfceEmitida) {
         messenger.showSnackBar(
           const SnackBar(
@@ -3013,6 +3099,27 @@ class _CaixaPageState extends State<CaixaPage> {
         );
         return;
       }
+
+      final deviceId = await _obterDeviceIdSync();
+      if (FiscalEmissaoLock.nfceBloqueadaPorOutroDispositivo(vendaAtual, deviceId)) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Outro PC esta emitindo NFC-e desta venda. '
+              'Aguarde alguns minutos e tente novamente.',
+            ),
+            duration: Duration(seconds: 8),
+          ),
+        );
+        return;
+      }
+
+      final refNfce = FocusNfeService.referenciaVendaNfce(vendaAtual);
+      widget.vendaRepository.registrarNfceEmissaoEmAndamento(
+        vendaId: vendaAtual.id,
+        deviceId: deviceId,
+        referencia: refNfce,
+      );
 
       final rootNav = Navigator.of(context, rootNavigator: true);
       if (!mounted) return;
@@ -3062,6 +3169,7 @@ class _CaixaPageState extends State<CaixaPage> {
 
       switch (dialogResult.kind) {
         case _EmissaoNfceDialogKind.erroConfig:
+          widget.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
           messenger.showSnackBar(
             SnackBar(
               content: Text(dialogResult.mensagem),
@@ -3070,6 +3178,7 @@ class _CaixaPageState extends State<CaixaPage> {
           );
           return;
         case _EmissaoNfceDialogKind.erroValidacao:
+          widget.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
           messenger.showSnackBar(
             SnackBar(
               content: Text(dialogResult.mensagem),
@@ -3080,6 +3189,7 @@ class _CaixaPageState extends State<CaixaPage> {
           return;
         case _EmissaoNfceDialogKind.erroApi:
         case _EmissaoNfceDialogKind.erroGenerico:
+          widget.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
           final tentar = await _mostrarDialogoFalhaNfce(
             mensagem: dialogResult.mensagem,
           );
@@ -4025,6 +4135,7 @@ class _CaixaPageState extends State<CaixaPage> {
 
   @override
   void dispose() {
+    _timerReconciliacaoNfce?.cancel();
     _valorRecebidoController.dispose();
     _descontoController.dispose();
     _valorRecebidoFocusNode.dispose();

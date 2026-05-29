@@ -40,6 +40,9 @@ class ReajustePrecoLotePage extends StatefulWidget {
 class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
   int _passo = 0;
   bool _somenteAtivos = true;
+  String? _filtroCategoria;
+  String? _filtroMarca;
+  String? _filtroFornecedor;
   ReajustePrecoModo _modo = ReajustePrecoModo.percentualSobrePrecoAtual;
   ReajusteBaseCusto _baseCusto = ReajusteBaseCusto.custoDigitado;
   final Set<ReajusteTabelaPreco> _tabelas = {
@@ -55,16 +58,89 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
   final _margemMinimaController = TextEditingController(text: '5');
   final _motivoController = TextEditingController();
 
+  bool _selecaoManual = false;
+  final Set<int> _idsSelecionados = {};
   ReajustePrecoSimulacaoResumo? _resumo;
   bool _simulando = false;
   bool _aplicando = false;
 
-  List<Produto> get _escopoEfetivo {
+  List<Produto> get _escopoFiltrado {
     var lista = widget.escopoInicial;
     if (_somenteAtivos) {
       lista = lista.where((p) => p.ativo).toList();
     }
+    if (_filtroCategoria != null && _filtroCategoria!.isNotEmpty) {
+      lista = lista.where((p) => p.categoria == _filtroCategoria).toList();
+    }
+    if (_filtroMarca != null && _filtroMarca!.isNotEmpty) {
+      lista = lista.where((p) => p.marca == _filtroMarca).toList();
+    }
+    if (_filtroFornecedor != null && _filtroFornecedor!.isNotEmpty) {
+      lista = lista.where((p) => p.fornecedor == _filtroFornecedor).toList();
+    }
     return lista;
+  }
+
+  List<Produto> get _escopoEfetivo {
+    if (!_selecaoManual) return _escopoFiltrado;
+    return _escopoFiltrado
+        .where((p) => _idsSelecionados.contains(p.id))
+        .toList();
+  }
+
+  void _sincronizarSelecaoComFiltros() {
+    if (!_selecaoManual) return;
+    final idsAtuais = _escopoFiltrado.map((p) => p.id).toSet();
+    _idsSelecionados.removeWhere((id) => !idsAtuais.contains(id));
+    if (_idsSelecionados.isEmpty) {
+      _idsSelecionados.addAll(idsAtuais);
+    }
+  }
+
+  void _atualizarFiltroEscopo(VoidCallback fn) {
+    setState(() {
+      fn();
+      _sincronizarSelecaoComFiltros();
+    });
+  }
+
+  List<String> _valoresDistintos(String Function(Produto) selector) {
+    final valores = <String>{};
+    for (final p in widget.escopoInicial) {
+      final v = selector(p).trim();
+      if (v.isNotEmpty) valores.add(v);
+    }
+    final lista = valores.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return lista;
+  }
+
+  Widget _dropdownFiltroEscopo({
+    required String label,
+    required String? value,
+    required List<String> opcoes,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return InputDecorator(
+      decoration: InputDecoration(labelText: label, isDense: true),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String?>(
+          isExpanded: true,
+          value: value,
+          hint: Text('Todos ($label)'),
+          items: [
+            const DropdownMenuItem<String?>(
+              value: null,
+              child: Text('Todos'),
+            ),
+            ...opcoes.map(
+              (o) => DropdownMenuItem<String?>(value: o, child: Text(o)),
+            ),
+          ],
+          onChanged: onChanged,
+        ),
+      ),
+    );
   }
 
   @override
@@ -420,6 +496,9 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
   Widget _passoEscopo(ThemeData theme) {
     final total = widget.escopoInicial.length;
     final efetivo = _escopoEfetivo.length;
+    final categorias = _valoresDistintos((p) => p.categoria);
+    final marcas = _valoresDistintos((p) => p.marca);
+    final fornecedores = _valoresDistintos((p) => p.fornecedor);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -450,12 +529,113 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
           title: const Text('Somente produtos ativos'),
           subtitle: const Text('Inativos ficam fora do reajuste'),
           value: _somenteAtivos,
-          onChanged: (v) => setState(() => _somenteAtivos = v),
+          onChanged: (v) => _atualizarFiltroEscopo(() => _somenteAtivos = v),
         ),
+        if (categorias.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _dropdownFiltroEscopo(
+            label: 'Categoria',
+            value: _filtroCategoria,
+            opcoes: categorias,
+            onChanged: (v) => _atualizarFiltroEscopo(() => _filtroCategoria = v),
+          ),
+        ],
+        if (marcas.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _dropdownFiltroEscopo(
+            label: 'Marca',
+            value: _filtroMarca,
+            opcoes: marcas,
+            onChanged: (v) => _atualizarFiltroEscopo(() => _filtroMarca = v),
+          ),
+        ],
+        if (fornecedores.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _dropdownFiltroEscopo(
+            label: 'Fornecedor',
+            value: _filtroFornecedor,
+            opcoes: fornecedores,
+            onChanged: (v) =>
+                _atualizarFiltroEscopo(() => _filtroFornecedor = v),
+          ),
+        ],
+        const SizedBox(height: 8),
+        SwitchListTile(
+          title: const Text('Selecionar produtos manualmente'),
+          subtitle: Text(
+            _selecaoManual
+                ? '${_idsSelecionados.length} de ${_escopoFiltrado.length} marcado(s)'
+                : 'Marque apenas os itens que entrarao no reajuste',
+          ),
+          value: _selecaoManual,
+          onChanged: (v) {
+            setState(() {
+              _selecaoManual = v;
+              if (v) {
+                _idsSelecionados
+                  ..clear()
+                  ..addAll(_escopoFiltrado.map((p) => p.id));
+              } else {
+                _idsSelecionados.clear();
+              }
+            });
+          },
+        ),
+        if (_selecaoManual && _escopoFiltrado.isNotEmpty) ...[
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton(
+                onPressed: () => setState(() {
+                  _idsSelecionados
+                    ..clear()
+                    ..addAll(_escopoFiltrado.map((p) => p.id));
+                }),
+                child: const Text('Marcar todos'),
+              ),
+              TextButton(
+                onPressed: () => setState(_idsSelecionados.clear),
+                child: const Text('Desmarcar todos'),
+              ),
+            ],
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _escopoFiltrado.length,
+              itemBuilder: (ctx, i) {
+                final p = _escopoFiltrado[i];
+                return CheckboxListTile(
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text(
+                    p.nome,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    '${p.codigoInterno} · P1 ${_moeda.format(p.preco1)}',
+                  ),
+                  value: _idsSelecionados.contains(p.id),
+                  onChanged: (checked) {
+                    setState(() {
+                      if (checked == true) {
+                        _idsSelecionados.add(p.id);
+                      } else {
+                        _idsSelecionados.remove(p.id);
+                      }
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         Text(
-          'Dica: use busca e filtros na tela de Estoque antes de abrir o reajuste '
-          'para limitar o escopo (ex.: uma marca ou linha de produtos).',
+          'Refine o escopo por categoria, marca, fornecedor ou selecao manual. '
+          'Para escopos amplos, use busca e filtros na Estoque antes de abrir o reajuste.',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.outline,
           ),

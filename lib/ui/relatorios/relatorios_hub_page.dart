@@ -463,7 +463,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         cor: corRelLogSistema,
         titulo: 'Log do sistema',
         subtitulo:
-            'Auditoria central: login, orcamentos, backup, fechamento de caixa e mais.',
+            'Auditoria central, mensagens WhatsApp e historico de entregas.',
         palavrasChave: const [
           'log',
           'auditoria',
@@ -480,6 +480,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
               builder: (_) => RelatorioLogSistemaPage(
                 auditoriaRepository: auditoriaRepo,
                 appConfigRepository: widget.appConfigRepository,
+                vendaRepository: widget.vendaRepository,
                 usuarioAdmin: widget.usuarioAdmin,
                 usuarioLogin: widget.usuarioLogin,
               ),

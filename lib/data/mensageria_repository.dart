@@ -43,14 +43,20 @@ class MensageriaRepository {
       lista.add(template);
     }
     await _persistirTemplates(lista);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'mensageria_templates',
+      entidadeId: 1,
+    );
   }
 
   Future<void> removerTemplate(String templateId) async {
     final lista = await listarTemplates();
     lista.removeWhere((t) => t.id == templateId);
     await _persistirTemplates(lista);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'mensageria_templates',
+      entidadeId: 1,
+    );
   }
 
   Future<List<MensagemFila>> listarFila() async {

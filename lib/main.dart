@@ -25,6 +25,7 @@ import 'services/auditoria_registrar.dart';
 import 'services/auditoria_retencao_service.dart';
 import 'services/print_service.dart';
 import 'services/fiscal_config_store.dart';
+import 'services/fiscal_reconciliacao_startup.dart';
 import 'services/trusted_http_client.dart';
 import 'ui/app_startup_error_page.dart';
 import 'ui/layout/app_layout.dart';
@@ -55,6 +56,9 @@ Future<void> main() async {
       AuditoriaRegistrar.inicializar(auditoriaRepository);
       final appConfigRepository = AppConfigRepository();
       await FiscalConfigStore.carregar();
+      await FiscalReconciliacaoStartup.executarSeConfigurado(
+        objectBox: objectBox,
+      );
       await AuditoriaRetencaoService.aplicarSeConfigurado(
         configRepository: appConfigRepository,
         auditoriaRepository: auditoriaRepository,
@@ -138,10 +142,16 @@ class _MyAppState extends State<MyApp> {
       const Duration(minutes: 5),
       (_) => AutoBackupService.tentarExecutarSeDevido(
         widget.appConfigRepository,
+        objectBox: widget.objectBox,
+        lanSyncScheduler: widget.lanSyncScheduler,
       ),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      AutoBackupService.tentarExecutarSeDevido(widget.appConfigRepository);
+      AutoBackupService.tentarExecutarSeDevido(
+        widget.appConfigRepository,
+        objectBox: widget.objectBox,
+        lanSyncScheduler: widget.lanSyncScheduler,
+      );
     });
   }
 

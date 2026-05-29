@@ -30,14 +30,14 @@ class MotoristaRepository {
 
   int salvar(Motorista motorista) {
     final id = _db.motoristaBox.put(motorista);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(entidade: 'motorista', entidadeId: id);
     return id;
   }
 
   bool remover(int id) {
     final ok = _db.motoristaBox.remove(id);
     if (ok) {
-      notificarAlteracaoParaRede();
+      registrarDeleteParaRede('motorista', id);
     }
     return ok;
   }

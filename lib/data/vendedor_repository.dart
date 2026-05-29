@@ -37,14 +37,14 @@ class VendedorRepository {
 
   int salvar(Vendedor vendedor) {
     final id = _db.vendedorBox.put(vendedor);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(entidade: 'vendedor', entidadeId: id);
     return id;
   }
 
   bool remover(int id) {
     final ok = _db.vendedorBox.remove(id);
     if (ok) {
-      notificarAlteracaoParaRede();
+      registrarDeleteParaRede('vendedor', id);
     }
     return ok;
   }

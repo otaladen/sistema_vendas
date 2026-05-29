@@ -277,6 +277,27 @@ CREATE TABLE IF NOT EXISTS orcamento_seq (
   db.execute(
     'INSERT OR IGNORE INTO orcamento_seq (id, next_num) VALUES (1, 1);',
   );
+  db.execute('''
+CREATE TABLE IF NOT EXISTS push_batches (
+  device_id TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  response_json TEXT NOT NULL,
+  created_ts INTEGER NOT NULL,
+  PRIMARY KEY (device_id, batch_id)
+);
+''');
+  db.execute('''
+CREATE TABLE IF NOT EXISTS tombstones (
+  entity TEXT NOT NULL,
+  entity_id INTEGER NOT NULL,
+  deleted_ts INTEGER NOT NULL,
+  device_id TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (entity, entity_id)
+);
+''');
+  db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_tombstones_entity ON tombstones (entity, entity_id);',
+  );
   _alinharOrcamentoSeqAoHistorico(db);
 }
 
@@ -460,6 +481,21 @@ Future<Response> _push(Request request) async {
     return Response(400, body: 'deviceId obrigatorio');
   }
 
+  final pushBatchId = (body['pushBatchId'] ?? '').toString().trim();
+  if (pushBatchId.isNotEmpty) {
+    final cached = _db.select(
+      'SELECT response_json FROM push_batches WHERE device_id = ? AND batch_id = ?',
+      [deviceId, pushBatchId],
+    );
+    if (cached.isNotEmpty) {
+      final raw = cached.first['response_json']?.toString() ?? '{}';
+      return Response.ok(
+        raw,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+  }
+
   final mutations = body['mutations'];
   if (mutations is! List) {
     return Response(400, body: 'mutations deve ser lista');
@@ -496,6 +532,26 @@ Future<Response> _push(Request request) async {
           now,
         ]);
         stmt.dispose();
+
+        final delGlobal = _db.prepare(
+          'DELETE FROM id_map WHERE entity = ? AND global_id = ?',
+        );
+        delGlobal.execute([entity, entityId]);
+        delGlobal.dispose();
+
+        if (localIdInt > 0) {
+          final delLocal = _db.prepare(
+            'DELETE FROM id_map WHERE device_id = ? AND entity = ? AND local_id = ?',
+          );
+          delLocal.execute([deviceId, entity, localIdInt]);
+          delLocal.dispose();
+        }
+
+        final insTomb = _db.prepare(
+          'INSERT OR REPLACE INTO tombstones (entity, entity_id, deleted_ts, device_id) VALUES (?, ?, ?, ?)',
+        );
+        insTomb.execute([entity, entityId, now, deviceId]);
+        insTomb.dispose();
         continue;
       }
 
@@ -530,6 +586,12 @@ Future<Response> _push(Request request) async {
           });
         }
       }
+
+      final delTomb = _db.prepare(
+        'DELETE FROM tombstones WHERE entity = ? AND entity_id = ?',
+      );
+      delTomb.execute([entity, globalId]);
+      delTomb.dispose();
 
       payload['id'] = globalId;
 
@@ -573,13 +635,42 @@ Future<Response> _push(Request request) async {
 
   _broadcastNovaRevision(appliedRevision);
 
+  final responseBody = jsonEncode({
+    'ok': true,
+    'appliedRevision': appliedRevision,
+    'mappings': mappings,
+    'numeroCorrections': numeroCorrections,
+    'idempotentReplay': false,
+  });
+
+  if (pushBatchId.isNotEmpty) {
+    final insBatch = _db.prepare(
+      'INSERT OR REPLACE INTO push_batches (device_id, batch_id, response_json, created_ts) VALUES (?, ?, ?, ?)',
+    );
+    insBatch.execute([deviceId, pushBatchId, responseBody, now]);
+    insBatch.dispose();
+    _prunePushBatches(deviceId);
+  }
+
   return Response.ok(
-    jsonEncode({
-      'ok': true,
-      'appliedRevision': appliedRevision,
-      'mappings': mappings,
-      'numeroCorrections': numeroCorrections,
-    }),
+    responseBody,
     headers: {'content-type': 'application/json'},
   );
+}
+
+void _prunePushBatches(String deviceId) {
+  final rows = _db.select(
+    'SELECT batch_id FROM push_batches WHERE device_id = ? ORDER BY created_ts DESC',
+    [deviceId],
+  );
+  if (rows.length <= 120) return;
+  for (var i = 120; i < rows.length; i++) {
+    final bid = rows[i]['batch_id']?.toString() ?? '';
+    if (bid.isEmpty) continue;
+    final del = _db.prepare(
+      'DELETE FROM push_batches WHERE device_id = ? AND batch_id = ?',
+    );
+    del.execute([deviceId, bid]);
+    del.dispose();
+  }
 }

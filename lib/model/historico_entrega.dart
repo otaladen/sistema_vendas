@@ -49,4 +49,37 @@ class HistoricoEntregaEventos {
         return false;
     }
   }
+
+  static String rotulo(String status) {
+    switch (status) {
+      case devolucao:
+        return 'Devolucao registrada';
+      case troca:
+        return 'Troca registrada';
+      case retiradaFutura:
+        return 'Retirada futura';
+      case retiradaLojaPreSaida:
+        return 'Retirada na loja (pre-saida)';
+      case complementoPendente:
+        return 'Complemento pendente';
+      case podEntrega:
+        return 'Comprovante de entrega (POD)';
+      case 'pendente':
+        return 'Pendente';
+      case 'roteirizada':
+        return 'Roteirizada';
+      case 'saiu_entrega':
+        return 'Saiu para entrega';
+      case 'entregue_complemento_pendente':
+        return 'Entregue c/ complemento';
+      case 'entregue':
+        return 'Entregue';
+      case 'reagendada':
+        return 'Reagendada';
+      case 'cancelada':
+        return 'Cancelada';
+      default:
+        return status;
+    }
+  }
 }

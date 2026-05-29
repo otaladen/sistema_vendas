@@ -61,7 +61,10 @@ class KitOrcamentoRepository {
         _db.kitOrcamentoItemBox.put(it);
       }
     });
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(
+      entidade: 'kit_orcamento',
+      entidadeId: kit.id > 0 ? kit.id : 0,
+    );
   }
 
   void _removerItensDoKitTx(int kitId) {
@@ -84,7 +87,9 @@ class KitOrcamentoRepository {
       _removerItensDoKitTx(id);
       ok = _db.kitOrcamentoBox.remove(id);
     });
-    if (ok) notificarAlteracaoParaRede();
+    if (ok) {
+      registrarDeleteParaRede('kit_orcamento', id);
+    }
     return ok;
   }
 }

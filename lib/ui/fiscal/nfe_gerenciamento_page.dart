@@ -9,6 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../data/sync/sync_cursor_storage.dart';
+import '../../services/focus_nfe_reconsulta_helper.dart';
 import '../../config/focus_nfe_runtime.dart';
 import '../../data/app_config_repository.dart';
 import '../../data/cliente_repository.dart';
@@ -24,7 +26,6 @@ import '../../domain/fiscal/nfe_painel_resumo.dart';
 import '../../domain/fiscal/nfe_pendencias_filtro.dart';
 import '../../domain/fiscal/nfe_pendencias_service.dart';
 import '../../domain/fiscal/nfe_xml_local_service.dart';
-import '../../data/nfe_saida_xml_store.dart';
 import '../../services/fiscal_config_store.dart';
 import '../../domain/fiscal/nfe_pre_emissao_service.dart';
 import '../../domain/fiscal/nfe_referencia_resolver.dart';
@@ -81,7 +82,6 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   late final TabController _tabs;
   late FocusNfeService _focusNfe;
   late final NfeSaidaFiscalStore _historicoStore;
-  late final NfeXmlLocalService _xmlLocal;
   late final UsuarioRepository _usuarioRepository;
   Timer? _timerReconsultaPendencias;
   final _currency = NumberFormat('#,##0.00', 'pt_BR');
@@ -114,6 +114,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   String _statusIbge = '';
   NfePreEmissaoResultado? _preEmissao;
   final Map<int, bool> _vendaComNfeAutorizada = {};
+  String? _deviceIdSync;
 
   int _modalidadeFrete = 9;
   String _logisticaDica = '';
@@ -133,9 +134,6 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     _historicoStore = NfeSaidaFiscalStore(
       widget.vendaRepository.objectBox.storeDirectoryPath,
     );
-    _xmlLocal = NfeXmlLocalService(
-      NfeSaidaXmlStore(widget.vendaRepository.objectBox.storeDirectoryPath),
-    );
     _focusNfe = FocusNfeService(config: criarFocusNfeConfigPadrao());
     unawaited(_recarregarConfigFocus());
     _usuarioRepository = UsuarioRepository();
@@ -143,6 +141,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     _recarregarHistorico();
     _carregarVendas();
     _carregarEmpresa();
+    unawaited(_carregarDeviceIdSync());
     if (idInicial != null && idInicial > 0) {
       _buscaVendaController.text = '$idInicial';
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -171,6 +170,10 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     _volumesController.dispose();
     _pesoController.dispose();
     super.dispose();
+  }
+
+  Future<void> _carregarDeviceIdSync() async {
+    _deviceIdSync = await SyncCursorStorage().obterOuCriarDeviceId();
   }
 
   Future<void> _carregarEmpresa() async {
@@ -223,14 +226,17 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
 
   Future<void> _arquivarXmlLocal(NfeSaidaFiscalRegistro registro) async {
     final chave = registro.chaveNfe.trim();
+    final storePath = widget.vendaRepository.objectBox.storeDirectoryPath;
     if (registro.urlXml.trim().isNotEmpty) {
-      await _xmlLocal.tentarArquivar(
+      await NfeXmlLocalService.arquivarOuEnfileirar(
+        storeDirectoryPath: storePath,
         chaveAcesso: chave,
         urlXml: registro.urlXml,
       );
     }
     if (registro.urlXmlEventoCancelamento.trim().isNotEmpty) {
-      await _xmlLocal.tentarArquivar(
+      await NfeXmlLocalService.arquivarOuEnfileirar(
+        storeDirectoryPath: storePath,
         chaveAcesso: chave,
         urlXml: registro.urlXmlEventoCancelamento,
         cancelada: true,
@@ -323,6 +329,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         ibge: _ibgeResolvido,
         nfeAutorizada: nfeAuth,
         nfeUltima: nfeUltima,
+        deviceIdAtual: _deviceIdSync,
       );
     });
   }
@@ -504,6 +511,15 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     required String referencia,
   }) async {
     setState(() => _emitindo = true);
+    final deviceId =
+        _deviceIdSync ?? await SyncCursorStorage().obterOuCriarDeviceId();
+    _deviceIdSync = deviceId;
+    widget.vendaRepository.registrarNfeEmissaoEmAndamento(
+      vendaId: venda.id,
+      deviceId: deviceId,
+      referencia: referencia,
+    );
+
     FocusNfeEmissaoResultado resultado;
     try {
       resultado = await _focusNfe.emitirNfe(
@@ -512,21 +528,60 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         logistica: _montarLogistica(),
         referencia: referencia,
       );
+      if (!resultado.autorizada && !resultado.processando) {
+        resultado = await FocusNfeReconsultaHelper.recuperarSePossivel(
+          original: resultado,
+          reconsultar: () => _focusNfe.consultarNfe(referencia),
+        );
+        if (FocusNfeService.pareceFalhaComunicacao(resultado) &&
+            !resultado.autorizada &&
+            !resultado.processando) {
+          resultado =
+              FocusNfeReconsultaHelper.comoProcessandoAposFalhaComunicacao(
+            referencia: referencia,
+          );
+        }
+      }
     } on FocusNfeConfigIncompletaException catch (e) {
+      widget.vendaRepository.liberarNfeEmissaoEmAndamento(venda.id);
       if (!mounted) return;
       setState(() => _emitindo = false);
       _snack(e.message, erro: true);
       return;
     } on FocusNfeValidacaoException catch (e) {
+      widget.vendaRepository.liberarNfeEmissaoEmAndamento(venda.id);
       if (!mounted) return;
       setState(() => _emitindo = false);
       _snack(e.message, erro: true);
       return;
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _emitindo = false);
-      _snack('Erro ao emitir NF-e: $e', erro: true);
-      return;
+      try {
+        final consulta = await _focusNfe.consultarNfe(referencia);
+        if (consulta.autorizada || consulta.processando) {
+          resultado = consulta;
+        } else if (FocusNfeService.pareceFalhaComunicacao(consulta)) {
+          resultado =
+              FocusNfeReconsultaHelper.comoProcessandoAposFalhaComunicacao(
+            referencia: referencia,
+          );
+        } else {
+          widget.vendaRepository.liberarNfeEmissaoEmAndamento(venda.id);
+          if (!mounted) return;
+          setState(() => _emitindo = false);
+          _snack('Erro ao emitir NF-e: $e', erro: true);
+          return;
+        }
+      } catch (_) {
+        widget.vendaRepository.liberarNfeEmissaoEmAndamento(venda.id);
+        if (!mounted) return;
+        setState(() => _emitindo = false);
+        _snack('Erro ao emitir NF-e: $e', erro: true);
+        return;
+      }
+    }
+
+    if (!resultado.autorizada && !resultado.processando) {
+      widget.vendaRepository.liberarNfeEmissaoEmAndamento(venda.id);
     }
 
     if (!mounted) return;

@@ -39,11 +39,12 @@ void main() {
         local: local,
         payload: payload(versao: 2, real: 50, reservado: 5),
       );
-      expect(merged.estoqueReal, 100);
-      expect(merged.estoqueReservado, 10);
-      expect(merged.estoqueVersao, 3);
-      expect(merged.nome, 'Cimento remoto');
-      expect(merged.precoVenda, 21);
+      expect(merged.produto.estoqueReal, 100);
+      expect(merged.produto.estoqueReservado, 10);
+      expect(merged.produto.estoqueVersao, 3);
+      expect(merged.produto.nome, 'Cimento remoto');
+      expect(merged.produto.precoVenda, 21);
+      expect(merged.estoqueLocalPreservado, isTrue);
     });
 
     test('aplica estoque remoto quando versao remota e maior', () {
@@ -52,9 +53,9 @@ void main() {
         local: local,
         payload: payload(versao: 4, real: 50, reservado: 5),
       );
-      expect(merged.estoqueReal, 50);
-      expect(merged.estoqueReservado, 5);
-      expect(merged.estoqueVersao, 4);
+      expect(merged.produto.estoqueReal, 50);
+      expect(merged.produto.estoqueReservado, 5);
+      expect(merged.produto.estoqueVersao, 4);
     });
 
     test('produto novo usa payload integral', () {
@@ -62,9 +63,9 @@ void main() {
         local: null,
         payload: payload(versao: 1, real: 7, reservado: 2),
       );
-      expect(merged.estoqueReal, 7);
-      expect(merged.estoqueReservado, 2);
-      expect(merged.estoqueVersao, 1);
+      expect(merged.produto.estoqueReal, 7);
+      expect(merged.produto.estoqueReservado, 2);
+      expect(merged.produto.estoqueVersao, 1);
     });
   });
 

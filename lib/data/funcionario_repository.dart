@@ -46,7 +46,7 @@ class FuncionarioRepository {
 
   int salvar(Funcionario funcionario) {
     final id = _db.funcionarioBox.put(funcionario);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(entidade: 'funcionario', entidadeId: id);
     return id;
   }
 
@@ -54,7 +54,7 @@ class FuncionarioRepository {
     _lancamentos.removerPorFuncionario(id);
     final ok = _db.funcionarioBox.remove(id);
     if (ok) {
-      notificarAlteracaoParaRede();
+      registrarDeleteParaRede('funcionario', id);
     }
     return ok;
   }

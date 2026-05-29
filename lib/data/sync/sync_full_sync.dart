@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,6 +19,10 @@ import '../produto_repository.dart';
 import '../venda_repository.dart';
 import '../vendedor_repository.dart';
 import '../../domain/produto_estoque_sync.dart';
+import 'sync_conflict_log.dart';
+import 'sync_cursor_storage.dart';
+import 'sync_delete_outbox.dart';
+import 'sync_dirty_outbox.dart';
 import 'sync_entity_codec.dart';
 import 'sync_entity_codec_extras.dart';
 
@@ -62,114 +67,436 @@ class SyncFullSync {
   }
 
   Future<List<Map<String, dynamic>>> montarMutacoes() async {
-    final m = <Map<String, dynamic>>[];
+    final m = await SyncDeleteOutbox.mutacoesParaPush();
+    final revision = await SyncCursorStorage().carregarUltimaRevision();
+    final bootstrap =
+        await SyncDirtyOutbox.precisaBootstrap() || revision == 0;
 
-    for (final f in _db.fornecedorNfeBox.getAll()) {
-      _add(m, 'fornecedor_nfe', f.id, SyncEntityCodecExtras.fornecedorNfeParaMap(f));
-    }
-    for (final p in _produtoRepo.listarTodos()) {
-      _add(m, 'produto', p.id, SyncEntityCodec.produtoParaMap(p));
-    }
-    for (final c in _clienteRepo.listarTodos()) {
-      _add(m, 'cliente', c.id, SyncEntityCodec.clienteParaMap(c));
-    }
-    for (final v in _vendedorRepo.listarTodos()) {
-      _add(m, 'vendedor', v.id, SyncEntityCodec.vendedorParaMap(v));
-    }
-    for (final f in _db.funcionarioBox.getAll()) {
-      _add(m, 'funcionario', f.id, SyncEntityCodecExtras.funcionarioParaMap(f));
-    }
-    for (final l in _db.lancamentoFuncionarioBox.getAll()) {
-      l.funcionario.target;
-      _add(
-        m,
-        'lancamento_funcionario',
-        l.id,
-        SyncEntityCodecExtras.lancamentoFuncionarioParaMap(l),
-      );
-    }
-    for (final mo in _db.motoristaBox.getAll()) {
-      _add(m, 'motorista', mo.id, SyncEntityCodecExtras.motoristaParaMap(mo));
-    }
-    for (final v in _db.vinculoFornecedorProdutoBox.getAll()) {
-      v.fornecedor.target;
-      v.produto.target;
-      _add(m, 'vinculo_fornecedor', v.id, SyncEntityCodecExtras.vinculoParaMap(v));
-    }
-    for (final h in _db.historicoEntradaBox.getAll()) {
-      h.produto.target;
-      _add(m, 'historico_entrada', h.id, SyncEntityCodecExtras.historicoEntradaParaMap(h));
-    }
-    for (final n in _db.nfeImportadaRegistroBox.getAll()) {
-      _add(m, 'nfe_importada', n.id, SyncEntityCodecExtras.nfeImportadaParaMap(n));
-    }
-    for (final k in _db.kitOrcamentoBox.getAll()) {
-      k.itens.length;
-      _add(m, 'kit_orcamento', k.id, SyncEntityCodecExtras.kitParaMap(k));
-    }
-    for (final pr in _db.promocaoBox.getAll()) {
-      pr.itens.length;
-      _add(m, 'promocao', pr.id, SyncEntityCodecExtras.promocaoParaMap(pr));
-    }
-    for (final vend in _vendaRepo.listarTodas()) {
-      _add(m, 'venda', vend.id, SyncEntityCodec.vendaParaMap(vend));
-    }
-    for (final t in _db.tituloReceberBox.getAll()) {
-      t.cliente.target;
-      t.venda.target;
-      _add(m, 'titulo_receber', t.id, SyncEntityCodecExtras.tituloReceberParaMap(t));
-    }
-    for (final r in _db.recebimentoFiadoBox.getAll()) {
-      r.cliente.target;
-      _add(
-        m,
-        'recebimento_fiado',
-        r.id,
-        SyncEntityCodecExtras.recebimentoFiadoParaMap(r),
-      );
-    }
-    for (final h in _db.historicoEntregaBox.getAll()) {
-      h.venda.target;
-      _add(m, 'historico_entrega', h.id, SyncEntityCodecExtras.historicoEntregaParaMap(h));
-    }
-    for (final c in _db.conferenciaCargaRomaneioBox.getAll()) {
-      _add(
-        m,
-        'conferencia_carga_romaneio',
-        c.id,
-        SyncEntityCodecExtras.conferenciaCargaRomaneioParaMap(c),
-      );
-    }
-    for (final r in _db.registroDevolucaoBox.getAll()) {
-      r.vendaOrigem.target;
-      r.linhasEntrada.length;
-      r.linhasSaidaTroca.length;
-      _add(m, 'registro_devolucao', r.id, SyncEntityCodecExtras.registroDevolucaoParaMap(r));
+    if (bootstrap) {
+      await _montarSnapshotCompleto(m);
+      return m;
     }
 
-    final cfg = await _configRepository.carregarEmpresaConfig();
-    _add(m, 'empresa_config', 1, SyncEntityCodecExtras.empresaConfigParaMap(cfg));
+    final dirty = await SyncDirtyOutbox.listar();
+    if (dirty.isEmpty) return m;
 
-    final templates = await MensageriaRepository().listarTemplates();
-    _add(
-      m,
-      'mensageria_templates',
-      1,
-      SyncEntityCodecExtras.mensageriaTemplatesParaMap(templates),
-    );
+    final entidadesInteiras = dirty
+        .where((d) => d.sincronizarTodas)
+        .map((d) => d.entity)
+        .toSet();
+    final porId = <String, Set<int>>{};
+    for (final d in dirty) {
+      if (d.sincronizarTodas) continue;
+      porId.putIfAbsent(d.entity, () => {}).add(d.entityId);
+    }
 
-    final usuarios = await UsuarioRepository().listarTodos();
-    _add(m, 'usuarios_sistema', 1, SyncEntityCodecExtras.usuariosParaMap(usuarios));
-
-    final sessoes = await CaixaSessaoRepository().listarTodasSessoes();
-    _add(
-      m,
-      'caixa_sessoes',
-      1,
-      CaixaSessaoRepository.pacoteParaSync(sessoes),
-    );
-
+    for (final entity in entidadesInteiras) {
+      await _montarEntidadeCompleta(m, entity);
+    }
+    for (final entry in porId.entries) {
+      for (final id in entry.value) {
+        await _montarEntidadeId(m, entry.key, id);
+      }
+    }
     return m;
+  }
+
+  Future<void> _montarSnapshotCompleto(List<Map<String, dynamic>> m) async {
+    for (final entity in _entidadesSync) {
+      await _montarEntidadeCompleta(m, entity);
+    }
+  }
+
+  static const _entidadesSync = [
+    'fornecedor_nfe',
+    'produto',
+    'cliente',
+    'vendedor',
+    'funcionario',
+    'lancamento_funcionario',
+    'motorista',
+    'vinculo_fornecedor',
+    'historico_entrada',
+    'nfe_importada',
+    'kit_orcamento',
+    'promocao',
+    'venda',
+    'titulo_receber',
+    'recebimento_fiado',
+    'historico_entrega',
+    'conferencia_carga_romaneio',
+    'registro_devolucao',
+    'empresa_config',
+    'mensageria_templates',
+    'usuarios_sistema',
+    'caixa_sessoes',
+  ];
+
+  Future<void> _montarEntidadeCompleta(
+    List<Map<String, dynamic>> m,
+    String entity,
+  ) async {
+    switch (entity) {
+      case 'fornecedor_nfe':
+        for (final f in _db.fornecedorNfeBox.getAll()) {
+          _add(
+            m,
+            entity,
+            f.id,
+            SyncEntityCodecExtras.fornecedorNfeParaMap(f),
+          );
+        }
+      case 'produto':
+        for (final p in _produtoRepo.listarTodos()) {
+          _add(m, entity, p.id, SyncEntityCodec.produtoParaMap(p));
+        }
+      case 'cliente':
+        for (final c in _clienteRepo.listarTodos()) {
+          _add(m, entity, c.id, SyncEntityCodec.clienteParaMap(c));
+        }
+      case 'vendedor':
+        for (final v in _vendedorRepo.listarTodos()) {
+          _add(m, entity, v.id, SyncEntityCodec.vendedorParaMap(v));
+        }
+      case 'funcionario':
+        for (final f in _db.funcionarioBox.getAll()) {
+          _add(m, entity, f.id, SyncEntityCodecExtras.funcionarioParaMap(f));
+        }
+      case 'lancamento_funcionario':
+        for (final l in _db.lancamentoFuncionarioBox.getAll()) {
+          l.funcionario.target;
+          _add(
+            m,
+            entity,
+            l.id,
+            SyncEntityCodecExtras.lancamentoFuncionarioParaMap(l),
+          );
+        }
+      case 'motorista':
+        for (final mo in _db.motoristaBox.getAll()) {
+          _add(m, entity, mo.id, SyncEntityCodecExtras.motoristaParaMap(mo));
+        }
+      case 'vinculo_fornecedor':
+        for (final v in _db.vinculoFornecedorProdutoBox.getAll()) {
+          v.fornecedor.target;
+          v.produto.target;
+          _add(m, entity, v.id, SyncEntityCodecExtras.vinculoParaMap(v));
+        }
+      case 'historico_entrada':
+        for (final h in _db.historicoEntradaBox.getAll()) {
+          h.produto.target;
+          _add(
+            m,
+            entity,
+            h.id,
+            SyncEntityCodecExtras.historicoEntradaParaMap(h),
+          );
+        }
+      case 'nfe_importada':
+        for (final n in _db.nfeImportadaRegistroBox.getAll()) {
+          _add(m, entity, n.id, SyncEntityCodecExtras.nfeImportadaParaMap(n));
+        }
+      case 'kit_orcamento':
+        for (final k in _db.kitOrcamentoBox.getAll()) {
+          k.itens.length;
+          _add(m, entity, k.id, SyncEntityCodecExtras.kitParaMap(k));
+        }
+      case 'promocao':
+        for (final pr in _db.promocaoBox.getAll()) {
+          pr.itens.length;
+          _add(m, entity, pr.id, SyncEntityCodecExtras.promocaoParaMap(pr));
+        }
+      case 'venda':
+        for (final vend in _vendaRepo.listarTodas()) {
+          _add(m, entity, vend.id, SyncEntityCodec.vendaParaMap(vend));
+        }
+      case 'titulo_receber':
+        for (final t in _db.tituloReceberBox.getAll()) {
+          t.cliente.target;
+          t.venda.target;
+          _add(
+            m,
+            entity,
+            t.id,
+            SyncEntityCodecExtras.tituloReceberParaMap(t),
+          );
+        }
+      case 'recebimento_fiado':
+        for (final r in _db.recebimentoFiadoBox.getAll()) {
+          r.cliente.target;
+          _add(
+            m,
+            entity,
+            r.id,
+            SyncEntityCodecExtras.recebimentoFiadoParaMap(r),
+          );
+        }
+      case 'historico_entrega':
+        for (final h in _db.historicoEntregaBox.getAll()) {
+          h.venda.target;
+          _add(
+            m,
+            entity,
+            h.id,
+            SyncEntityCodecExtras.historicoEntregaParaMap(h),
+          );
+        }
+      case 'conferencia_carga_romaneio':
+        for (final c in _db.conferenciaCargaRomaneioBox.getAll()) {
+          _add(
+            m,
+            entity,
+            c.id,
+            SyncEntityCodecExtras.conferenciaCargaRomaneioParaMap(c),
+          );
+        }
+      case 'registro_devolucao':
+        for (final r in _db.registroDevolucaoBox.getAll()) {
+          r.vendaOrigem.target;
+          r.linhasEntrada.length;
+          r.linhasSaidaTroca.length;
+          _add(
+            m,
+            entity,
+            r.id,
+            SyncEntityCodecExtras.registroDevolucaoParaMap(r),
+          );
+        }
+      case 'empresa_config':
+        final cfg = await _configRepository.carregarEmpresaConfig();
+        _add(
+          m,
+          entity,
+          1,
+          SyncEntityCodecExtras.empresaConfigParaMap(cfg),
+        );
+      case 'mensageria_templates':
+        final templates = await MensageriaRepository().listarTemplates();
+        _add(
+          m,
+          entity,
+          1,
+          SyncEntityCodecExtras.mensageriaTemplatesParaMap(templates),
+        );
+      case 'usuarios_sistema':
+        final usuarios = await UsuarioRepository().listarTodos();
+        _add(
+          m,
+          entity,
+          1,
+          SyncEntityCodecExtras.usuariosParaMap(usuarios),
+        );
+      case 'caixa_sessoes':
+        final sessoes = await CaixaSessaoRepository().listarTodasSessoes();
+        _add(
+          m,
+          entity,
+          1,
+          CaixaSessaoRepository.pacoteParaSync(sessoes),
+        );
+    }
+  }
+
+  Future<void> _montarEntidadeId(
+    List<Map<String, dynamic>> m,
+    String entity,
+    int localId,
+  ) async {
+    if (localId <= 0 && entity != 'empresa_config') return;
+    switch (entity) {
+      case 'fornecedor_nfe':
+        final f = _db.fornecedorNfeBox.get(localId);
+        if (f != null) {
+          _add(m, entity, f.id, SyncEntityCodecExtras.fornecedorNfeParaMap(f));
+        }
+      case 'produto':
+        final p = _db.produtoBox.get(localId);
+        if (p != null) {
+          _add(m, entity, p.id, SyncEntityCodec.produtoParaMap(p));
+        }
+      case 'cliente':
+        final c = _clienteRepo.obterPorId(localId);
+        if (c != null) {
+          _add(m, entity, c.id, SyncEntityCodec.clienteParaMap(c));
+        }
+      case 'vendedor':
+        final v = _vendedorRepo.obterPorId(localId);
+        if (v != null) {
+          _add(m, entity, v.id, SyncEntityCodec.vendedorParaMap(v));
+        }
+      case 'funcionario':
+        final f = _db.funcionarioBox.get(localId);
+        if (f != null) {
+          _add(m, entity, f.id, SyncEntityCodecExtras.funcionarioParaMap(f));
+        }
+      case 'lancamento_funcionario':
+        final l = _db.lancamentoFuncionarioBox.get(localId);
+        if (l != null) {
+          l.funcionario.target;
+          _add(
+            m,
+            entity,
+            l.id,
+            SyncEntityCodecExtras.lancamentoFuncionarioParaMap(l),
+          );
+        }
+      case 'motorista':
+        final mo = _db.motoristaBox.get(localId);
+        if (mo != null) {
+          _add(m, entity, mo.id, SyncEntityCodecExtras.motoristaParaMap(mo));
+        }
+      case 'vinculo_fornecedor':
+        final v = _db.vinculoFornecedorProdutoBox.get(localId);
+        if (v != null) {
+          v.fornecedor.target;
+          v.produto.target;
+          _add(m, entity, v.id, SyncEntityCodecExtras.vinculoParaMap(v));
+        }
+      case 'historico_entrada':
+        final h = _db.historicoEntradaBox.get(localId);
+        if (h != null) {
+          h.produto.target;
+          _add(
+            m,
+            entity,
+            h.id,
+            SyncEntityCodecExtras.historicoEntradaParaMap(h),
+          );
+        }
+      case 'nfe_importada':
+        final n = _db.nfeImportadaRegistroBox.get(localId);
+        if (n != null) {
+          _add(m, entity, n.id, SyncEntityCodecExtras.nfeImportadaParaMap(n));
+        }
+      case 'kit_orcamento':
+        final k = _db.kitOrcamentoBox.get(localId);
+        if (k != null) {
+          k.itens.length;
+          _add(m, entity, k.id, SyncEntityCodecExtras.kitParaMap(k));
+        }
+      case 'promocao':
+        final pr = _db.promocaoBox.get(localId);
+        if (pr != null) {
+          pr.itens.length;
+          _add(m, entity, pr.id, SyncEntityCodecExtras.promocaoParaMap(pr));
+        }
+      case 'venda':
+        final vend = _db.vendaBox.get(localId);
+        if (vend != null) {
+          _add(m, entity, vend.id, SyncEntityCodec.vendaParaMap(vend));
+        }
+      case 'titulo_receber':
+        final t = _db.tituloReceberBox.get(localId);
+        if (t != null) {
+          t.cliente.target;
+          t.venda.target;
+          _add(
+            m,
+            entity,
+            t.id,
+            SyncEntityCodecExtras.tituloReceberParaMap(t),
+          );
+        }
+      case 'recebimento_fiado':
+        final r = _db.recebimentoFiadoBox.get(localId);
+        if (r != null) {
+          r.cliente.target;
+          _add(
+            m,
+            entity,
+            r.id,
+            SyncEntityCodecExtras.recebimentoFiadoParaMap(r),
+          );
+        }
+      case 'historico_entrega':
+        final h = _db.historicoEntregaBox.get(localId);
+        if (h != null) {
+          h.venda.target;
+          _add(
+            m,
+            entity,
+            h.id,
+            SyncEntityCodecExtras.historicoEntregaParaMap(h),
+          );
+        }
+      case 'conferencia_carga_romaneio':
+        final c = _db.conferenciaCargaRomaneioBox.get(localId);
+        if (c != null) {
+          _add(
+            m,
+            entity,
+            c.id,
+            SyncEntityCodecExtras.conferenciaCargaRomaneioParaMap(c),
+          );
+        }
+      case 'registro_devolucao':
+        final r = _db.registroDevolucaoBox.get(localId);
+        if (r != null) {
+          r.vendaOrigem.target;
+          r.linhasEntrada.length;
+          r.linhasSaidaTroca.length;
+          _add(
+            m,
+            entity,
+            r.id,
+            SyncEntityCodecExtras.registroDevolucaoParaMap(r),
+          );
+        }
+      case 'empresa_config':
+        final cfg = await _configRepository.carregarEmpresaConfig();
+        _add(
+          m,
+          entity,
+          1,
+          SyncEntityCodecExtras.empresaConfigParaMap(cfg),
+        );
+      case 'mensageria_templates':
+        final templates = await MensageriaRepository().listarTemplates();
+        _add(
+          m,
+          entity,
+          1,
+          SyncEntityCodecExtras.mensageriaTemplatesParaMap(templates),
+        );
+      case 'usuarios_sistema':
+        final usuarios = await UsuarioRepository().listarTodos();
+        _add(
+          m,
+          entity,
+          1,
+          SyncEntityCodecExtras.usuariosParaMap(usuarios),
+        );
+      case 'caixa_sessoes':
+        final sessoes = await CaixaSessaoRepository().listarTodasSessoes();
+        _add(
+          m,
+          entity,
+          1,
+          CaixaSessaoRepository.pacoteParaSync(sessoes),
+        );
+    }
+  }
+
+  Future<void> _registrarConflitoSeDirty({
+    required String entity,
+    required int localId,
+    required String detalhe,
+  }) async {
+    if (localId <= 0 && entity != 'empresa_config') return;
+    final dirty = await SyncDirtyOutbox.listar();
+    final idAlvo = entity == 'empresa_config' ? 1 : localId;
+    final conflito = dirty.any(
+      (d) =>
+          d.entity == entity &&
+          (d.entityId == idAlvo || d.sincronizarTodas),
+    );
+    if (!conflito) return;
+    await SyncConflictLog.registrar(
+      tipo: SyncConflictTipo.editEdit,
+      entity: entity,
+      entityId: idAlvo,
+      detalhe: detalhe,
+    );
   }
 
   Future<void> aplicarAlteracao(Map<String, dynamic> ch) async {
@@ -187,6 +514,13 @@ class SyncFullSync {
     final payloadRaw = ch['payload'];
     if (payloadRaw is! Map) return;
     final payload = Map<String, dynamic>.from(payloadRaw);
+    final localId = (payload['id'] as num?)?.toInt() ?? 0;
+
+    await _registrarConflitoSeDirty(
+      entity: entity,
+      localId: localId,
+      detalhe: 'Alteracao remota aplicada sobre registro alterado localmente.',
+    );
 
     switch (entity) {
       case 'produto':
@@ -269,15 +603,42 @@ class SyncFullSync {
   void _aplicarProdutoSync(Map<String, dynamic> payload) {
     final id = (payload['id'] as num?)?.toInt() ?? 0;
     final local = id > 0 ? _db.produtoBox.get(id) : null;
-    final merged = ProdutoEstoqueSync.mergeProdutoRemoto(
+    final merge = ProdutoEstoqueSync.mergeProdutoRemoto(
       local: local,
       payload: payload,
     );
-    _db.produtoBox.put(merged);
+    _db.produtoBox.put(merge.produto);
     _produtoRepo.invalidarCacheBusca();
+    if (merge.estoqueLocalPreservado && id > 0) {
+      unawaited(
+        SyncConflictLog.registrar(
+          tipo: SyncConflictTipo.estoqueMerge,
+          entity: 'produto',
+          entityId: id,
+          detalhe:
+              'Estoque local (v${local?.estoqueVersao ?? 0}) preservado sobre versao remota.',
+        ),
+      );
+    }
   }
 
   void _aplicarDelete(String entity, int id) {
+    if (entity == 'venda' || entity == 'registro_devolucao') {
+      _aplicarDeleteInterno(entity, id);
+      if (entity == 'produto') {
+        _produtoRepo.invalidarCacheBusca();
+      }
+      return;
+    }
+    _db.store.runInTransaction(TxMode.write, () {
+      _aplicarDeleteInterno(entity, id);
+    });
+    if (entity == 'produto') {
+      _produtoRepo.invalidarCacheBusca();
+    }
+  }
+
+  void _aplicarDeleteInterno(String entity, int id) {
     switch (entity) {
       case 'produto':
         _db.produtoBox.remove(id);
@@ -589,8 +950,23 @@ class SyncFullSync {
 
   Future<void> _aplicarEmpresaConfig(Map<String, dynamic> payload) async {
     final atual = await _configRepository.carregarEmpresaConfig();
-    final novo = SyncEntityCodecExtras.empresaConfigDeMap(atual, payload);
-    await _configRepository.salvarEmpresaConfig(novo, propagarRede: false);
+    final dirty = await SyncDirtyOutbox.listar();
+    final tinhaDirtyLocal = dirty.any(
+      (d) =>
+          d.entity == 'empresa_config' &&
+          (d.entityId == 1 || d.sincronizarTodas),
+    );
+    final remoto = SyncEntityCodecExtras.empresaConfigDeMap(atual, payload);
+    await _configRepository.salvarEmpresaConfig(remoto, propagarRede: false);
+    if (tinhaDirtyLocal) {
+      await SyncConflictLog.registrar(
+        tipo: SyncConflictTipo.configMerge,
+        entity: 'empresa_config',
+        entityId: 1,
+        detalhe:
+            'Config compartilhada mesclada; token/impressora/rede local preservados neste PC.',
+      );
+    }
   }
 
   Future<void> _aplicarMensageriaTemplates(Map<String, dynamic> payload) async {

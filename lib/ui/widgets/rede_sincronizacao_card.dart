@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import '../../data/app_config_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/sync/sync_api_client.dart';
+import '../../data/sync/sync_conflict_log.dart';
+import '../../data/sync/sync_conflict_resolver.dart';
 import '../../data/sync/sync_log.dart';
 import '../../data/sync/sync_teste_conexao.dart';
 import '../../domain/sync_rede_ajuda.dart';
@@ -34,6 +36,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
 
   bool _modoServidor = false;
   bool _syncAtiva = false;
+  bool _modoImplantacao = false;
   String? _ipLocal;
   bool _servidorOnline = false;
   bool _carregando = true;
@@ -54,6 +57,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   @override
   void initState() {
     super.initState();
+    SyncConflictLog.carregarSeNecessario();
     _carregar();
   }
 
@@ -80,6 +84,8 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   Future<void> _carregar() async {
     setState(() => _carregando = true);
     final config = await widget.configRepository.carregarEmpresaConfig();
+    final modoImplantacao =
+        await widget.configRepository.carregarModoImplantacaoLocal();
     final ip = await LanSyncServerManager.obterIpv4Local();
     final porta = config.redePortaServidor;
     var url = config.redeServidorUrl.trim();
@@ -94,6 +100,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     setState(() {
       _modoServidor = config.redeModoServidor;
       _syncAtiva = config.redeSincronizacaoAtiva;
+      _modoImplantacao = modoImplantacao;
       _ipLocal = ip;
       _portaController.text = '$porta';
       _urlController.text = url;
@@ -190,6 +197,22 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         ? await LanSyncServerManager.servidorRespondendo(url)
         : await LanSyncServerManager.servidorRespondendoNaPorta(_porta);
     if (mounted) setState(() => _servidorOnline = online);
+  }
+
+  Future<void> _alternarModoImplantacao(bool ativo) async {
+    setState(() => _modoImplantacao = ativo);
+    await widget.configRepository.salvarModoImplantacaoLocal(ativo);
+    await widget.lanSyncScheduler?.iniciar();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ativo
+              ? 'Modo implantacao ativo: sync menos agressiva neste PC (60s / 3s).'
+              : 'Modo implantacao desativado neste PC.',
+        ),
+      ),
+    );
   }
 
   Future<void> _salvar({bool iniciarServidorSeModoServidor = false}) async {
@@ -564,6 +587,88 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
           _StatusLinha(rotulo: 'Dados', valor: syncTxt, valorCor: syncCor),
         ],
       ),
+    );
+  }
+
+  Widget _buildPainelConflitos(ThemeData tema) {
+    return ValueListenableBuilder<List<SyncConflictEntry>>(
+      valueListenable: SyncConflictLog.recentes,
+      builder: (context, lista, _) {
+        if (lista.isEmpty) return const SizedBox.shrink();
+        final visiveis = lista.take(5).toList();
+        return Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Card(
+            color: tema.colorScheme.tertiaryContainer.withValues(alpha: 0.35),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Conflitos recentes na sync',
+                    style: tema.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final c in visiveis)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            '${c.rotuloTipo} · ${c.entity}'
+                            '${c.entityId > 0 ? ' #${c.entityId}' : ''}\n'
+                            '${c.detalhe}',
+                            style: tema.textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              if (c.tipo == SyncConflictTipo.editEdit ||
+                                  c.tipo == SyncConflictTipo.configMerge)
+                                TextButton(
+                                  onPressed: () async {
+                                    await SyncConflictResolver.manterLocal(c);
+                                    if (mounted) setState(() {});
+                                  },
+                                  child: const Text('Manter local'),
+                                ),
+                              if (c.tipo == SyncConflictTipo.editEdit ||
+                                  c.tipo == SyncConflictTipo.configMerge)
+                                TextButton(
+                                  onPressed: () async {
+                                    await SyncConflictResolver.aceitarRemoto(c);
+                                    if (mounted) setState(() {});
+                                  },
+                                  child: const Text('Aceitar remoto'),
+                                ),
+                              TextButton(
+                                onPressed: () async {
+                                  await SyncConflictResolver.dispensar(c);
+                                  if (mounted) setState(() {});
+                                },
+                                child: const Text('Dispensar'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (lista.length > visiveis.length)
+                    Text(
+                      '+ ${lista.length - visiveis.length} registro(s) anterior(es)',
+                      style: tema.textTheme.labelSmall,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -975,6 +1080,17 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
                 'Sincroniza cadastros, estoque, vendas, NF-e, kits, usuarios e configuracoes.',
               ),
             ),
+            if (_syncAtiva)
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _modoImplantacao,
+                onChanged: _alternarModoImplantacao,
+                title: const Text('Modo implantacao (este PC)'),
+                subtitle: const Text(
+                  'Reduz carga na rede: intervalo 60s e espera 3s antes de sync '
+                  'apos varias gravacoes. Preferencia local — nao replica nos outros PCs.',
+                ),
+              ),
             if (!_syncAtiva) ...[
               const SizedBox(height: 12),
               Container(
@@ -1009,6 +1125,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       _buildChecklist(tema, ultimoLog),
+                      _buildPainelConflitos(tema),
                       if (ultimoLog != null && !ultimoLog.sucesso)
                         _buildErroComAjuda(tema, ultimoLog),
                     ],

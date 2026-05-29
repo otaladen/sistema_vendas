@@ -6,6 +6,7 @@ import '../../model/venda.dart';
 import '../../services/focus_nfe_service.dart';
 import '../pagamento_orcamento.dart';
 import 'endereco_fiscal_ibge_resolver.dart';
+import 'fiscal_emissao_lock.dart';
 import 'nfe_cobranca_helper.dart';
 import 'nfe_fiscal_helpers.dart';
 import 'nfe_item_fiscal_preview.dart';
@@ -68,6 +69,7 @@ abstract final class NfePreEmissaoService {
     required EnderecoIbgeResolvido? ibge,
     NfeSaidaFiscalRegistro? nfeAutorizada,
     NfeSaidaFiscalRegistro? nfeUltima,
+    String? deviceIdAtual,
   }) {
     final checklist = <NfeChecklistItem>[];
     FocusNfeDestinatarioNfe? destPreview;
@@ -208,8 +210,40 @@ abstract final class NfePreEmissaoService {
       checklist.add(
         const NfeChecklistItem(
           titulo: 'NFC-e ja emitida nesta venda',
-          detalhe: 'Confira se nao ha duplicidade fiscal (NFC-e + NF-e).',
-          severidade: NfeChecklistSeveridade.aviso,
+          detalhe:
+              'Nao e permitido emitir NF-e modelo 55 quando ja existe NFC-e autorizada.',
+          severidade: NfeChecklistSeveridade.bloqueio,
+        ),
+      );
+    }
+
+    final deviceId = deviceIdAtual?.trim() ?? '';
+    if (deviceId.isNotEmpty &&
+        FiscalEmissaoLock.nfceBloqueadaPorOutroDispositivo(
+          venda,
+          deviceId,
+        )) {
+      checklist.add(
+        const NfeChecklistItem(
+          titulo: 'NFC-e em emissao em outro PC',
+          detalhe:
+              'Aguarde a conclusao da emissao no outro caixa ou tente novamente em alguns minutos.',
+          severidade: NfeChecklistSeveridade.bloqueio,
+        ),
+      );
+    }
+
+    if (deviceId.isNotEmpty &&
+        FiscalEmissaoLock.nfeBloqueadaPorOutroDispositivo(
+          venda,
+          deviceId,
+        )) {
+      checklist.add(
+        const NfeChecklistItem(
+          titulo: 'NF-e em emissao em outro PC',
+          detalhe:
+              'Aguarde a conclusao da emissao na outra estacao antes de continuar.',
+          severidade: NfeChecklistSeveridade.bloqueio,
         ),
       );
     }

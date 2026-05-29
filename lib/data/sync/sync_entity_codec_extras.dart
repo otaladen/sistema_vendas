@@ -432,16 +432,28 @@ class SyncEntityCodecExtras {
       );
 
   // --- Config empresa (registro unico id=1) ---
+  /// Campos locais por PC — nao entram no payload de sync (S7).
+  // ignore: unused_field
+  static const _empresaConfigCamposLocais = {
+    'pastaPadraoPdf',
+    'impressoraPadrao',
+    'logoPath',
+    'redeSincronizacaoAtiva',
+    'redeModoServidor',
+    'redePortaServidor',
+    'redeServidorUrl',
+    'redeSyncToken',
+    'backupAutomaticoPasta',
+    'ultimoBackupAutomaticoMs',
+  };
+
   static Map<String, dynamic> empresaConfigParaMap(EmpresaConfig c) => {
         'nomeLoja': c.nomeLoja,
         'telefone': c.telefone,
         'endereco': c.endereco,
-        'pastaPadraoPdf': c.pastaPadraoPdf,
-        'impressoraPadrao': c.impressoraPadrao,
         'modeloPdf': c.modeloPdf,
         'rodapeNota': c.rodapeNota,
         'rodapeOrcamento': c.rodapeOrcamento,
-        'logoPath': c.logoPath,
         'limiteDivergenciaCaixa': c.limiteDivergenciaCaixa,
         'mostrarCampoDescontoCaixa': c.mostrarCampoDescontoCaixa,
         'maxDescontoPercentualPdv': c.maxDescontoPercentualPdv,
@@ -450,15 +462,8 @@ class SyncEntityCodecExtras {
         'whatsappPhoneNumberId': c.whatsappPhoneNumberId,
         'whatsappAccessToken': c.whatsappAccessToken,
         'mensageriaBackendUrl': c.mensageriaBackendUrl,
-        'redeSincronizacaoAtiva': c.redeSincronizacaoAtiva,
-        'redeModoServidor': c.redeModoServidor,
-        'redePortaServidor': c.redePortaServidor,
-        'redeServidorUrl': c.redeServidorUrl,
-        'redeSyncToken': c.redeSyncToken,
         'backupAutomaticoAtivo': c.backupAutomaticoAtivo,
-        'backupAutomaticoPasta': c.backupAutomaticoPasta,
         'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
-        'ultimoBackupAutomaticoMs': c.ultimoBackupAutomaticoMs,
         'layoutImpressaoJson': c.layoutImpressaoJson,
         'auditoriaRetencaoDias': c.auditoriaRetencaoDias,
       };
@@ -471,13 +476,9 @@ class SyncEntityCodecExtras {
       nomeLoja: (m['nomeLoja'] ?? base.nomeLoja).toString(),
       telefone: (m['telefone'] ?? base.telefone).toString(),
       endereco: (m['endereco'] ?? base.endereco).toString(),
-      pastaPadraoPdf: (m['pastaPadraoPdf'] ?? base.pastaPadraoPdf).toString(),
-      impressoraPadrao:
-          (m['impressoraPadrao'] ?? base.impressoraPadrao).toString(),
       modeloPdf: (m['modeloPdf'] ?? base.modeloPdf).toString(),
       rodapeNota: (m['rodapeNota'] ?? base.rodapeNota).toString(),
       rodapeOrcamento: (m['rodapeOrcamento'] ?? base.rodapeOrcamento).toString(),
-      logoPath: (m['logoPath'] ?? base.logoPath).toString(),
       limiteDivergenciaCaixa:
           (m['limiteDivergenciaCaixa'] as num?)?.toDouble() ??
               base.limiteDivergenciaCaixa,
@@ -496,23 +497,11 @@ class SyncEntityCodecExtras {
           (m['whatsappAccessToken'] ?? base.whatsappAccessToken).toString(),
       mensageriaBackendUrl:
           (m['mensageriaBackendUrl'] ?? base.mensageriaBackendUrl).toString(),
-      redeSincronizacaoAtiva:
-          m['redeSincronizacaoAtiva'] as bool? ?? base.redeSincronizacaoAtiva,
-      redeModoServidor: m['redeModoServidor'] as bool? ?? base.redeModoServidor,
-      redePortaServidor:
-          (m['redePortaServidor'] as num?)?.toInt() ?? base.redePortaServidor,
-      redeServidorUrl: (m['redeServidorUrl'] ?? base.redeServidorUrl).toString(),
-      redeSyncToken: (m['redeSyncToken'] ?? base.redeSyncToken).toString(),
       backupAutomaticoAtivo:
           m['backupAutomaticoAtivo'] as bool? ?? base.backupAutomaticoAtivo,
-      backupAutomaticoPasta:
-          (m['backupAutomaticoPasta'] ?? base.backupAutomaticoPasta).toString(),
       backupAutomaticoIntervaloMinutos:
           (m['backupAutomaticoIntervaloMinutos'] as num?)?.toInt() ??
               base.backupAutomaticoIntervaloMinutos,
-      ultimoBackupAutomaticoMs:
-          (m['ultimoBackupAutomaticoMs'] as num?)?.toInt() ??
-              base.ultimoBackupAutomaticoMs,
       layoutImpressaoJson:
           (m['layoutImpressaoJson'] ?? base.layoutImpressaoJson).toString(),
       auditoriaRetencaoDias: AuditoriaRetencaoOpcoes.normalizar(

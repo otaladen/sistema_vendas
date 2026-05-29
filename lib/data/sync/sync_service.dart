@@ -10,8 +10,12 @@ import '../../model/item_venda.dart';
 import 'sync_api_client.dart';
 import 'sync_cursor_storage.dart';
 import 'sync_apply_order.dart';
+import 'sync_delete_outbox.dart';
+import 'sync_dirty_outbox.dart';
 import 'sync_full_sync.dart';
 import 'sync_log.dart';
+import 'sync_push_idempotency.dart';
+import 'sync_pull_catchup.dart';
 import 'sync_refresh_hub.dart';
 import 'sync_write_trigger.dart';
 
@@ -67,46 +71,84 @@ class SyncService {
     final deviceId = await _cursorStorage.obterOuCriarDeviceId();
 
     try {
-      var since = await _cursorStorage.carregarUltimaRevision();
-
-      final pullData = await client.pull(since: since, deviceId: deviceId);
-      final changes = pullData['changes'];
+      final sinceInicial = await _cursorStorage.carregarUltimaRevision();
       var houveAlteracaoRemota = false;
-      if (changes is List && changes.isNotEmpty) {
-        enterSyncApplySilencioso();
-        try {
-          final fila = List<dynamic>.from(changes);
-          SyncApplyOrder.ordenarAlteracoes(fila);
-          for (final raw in fila) {
-            if (raw is Map<String, dynamic>) {
-              await _fullSync.aplicarAlteracao(raw);
-            } else if (raw is Map) {
-              await _fullSync.aplicarAlteracao(Map<String, dynamic>.from(raw));
-            }
-          }
-          houveAlteracaoRemota = true;
-        } finally {
-          leaveSyncApplySilencioso();
-        }
-      }
 
-      final lastRev = (pullData['lastRevision'] as num?)?.toInt() ?? since;
-      if (lastRev > since) {
-        await _cursorStorage.salvarUltimaRevision(lastRev);
-      }
+      await executarPullCatchup(
+        sinceInicial: sinceInicial,
+        buscarPagina: (since) async {
+          final pullData = await client.pull(since: since, deviceId: deviceId);
+          final changes = pullData['changes'];
+          return SyncPullPage(
+            changes: changes is List ? List<dynamic>.from(changes) : const [],
+            lastRevision:
+                (pullData['lastRevision'] as num?)?.toInt() ?? since,
+            hasMore: pullData['hasMore'] == true,
+          );
+        },
+        aplicarAlteracoes: (changes) async {
+          enterSyncApplySilencioso();
+          try {
+            final fila = List<dynamic>.from(changes);
+            SyncApplyOrder.ordenarAlteracoes(fila);
+            for (final raw in fila) {
+              if (raw is Map<String, dynamic>) {
+                await _fullSync.aplicarAlteracao(raw);
+              } else if (raw is Map) {
+                await _fullSync.aplicarAlteracao(
+                  Map<String, dynamic>.from(raw),
+                );
+              }
+            }
+            houveAlteracaoRemota = true;
+          } finally {
+            leaveSyncApplySilencioso();
+          }
+        },
+        salvarRevision: (revision) =>
+            _cursorStorage.salvarUltimaRevision(revision),
+      );
 
       if (houveAlteracaoRemota) {
         _produtoRepo.invalidarCacheBusca();
         SyncRefreshHub.instance.notificarDadosAtualizados();
       }
 
-      final mutations = await _fullSync.montarMutacoes();
+      final revisionAntes = await _cursorStorage.carregarUltimaRevision();
+      final bootstrap =
+          await SyncDirtyOutbox.precisaBootstrap() || revisionAntes == 0;
+
+      final pendente = await SyncPushIdempotency.carregarPendente();
+      late final List<Map<String, dynamic>> mutations;
+      late final String pushBatchId;
+
+      if (pendente != null) {
+        mutations = pendente.mutations;
+        pushBatchId = pendente.batchId;
+      } else {
+        mutations = await _fullSync.montarMutacoes();
+        if (mutations.isEmpty) {
+          SyncLog.registrarSucesso();
+          return null;
+        }
+        pushBatchId = SyncPushIdempotency.gerarBatchId(deviceId);
+        await SyncPushIdempotency.salvarPendente(
+          batchId: pushBatchId,
+          mutations: mutations,
+        );
+      }
+
       if (mutations.isEmpty) {
+        await SyncPushIdempotency.limparPendente();
         SyncLog.registrarSucesso();
         return null;
       }
 
-      final pushResp = await client.push(deviceId: deviceId, mutations: mutations);
+      final pushResp = await client.push(
+        deviceId: deviceId,
+        mutations: mutations,
+        pushBatchId: pushBatchId,
+      );
       final mappings = pushResp['mappings'];
       if (mappings is List) {
         for (final m in mappings) {
@@ -129,6 +171,14 @@ class SyncService {
             );
           }
         }
+      }
+
+      await SyncDeleteOutbox.limparEnviadas(mutations);
+      await SyncDirtyOutbox.limparEnviadas(mutations);
+      await SyncPushIdempotency.limparPendente();
+      if (bootstrap) {
+        await SyncDirtyOutbox.marcarBootstrapConcluido();
+        await SyncDirtyOutbox.limparTudo();
       }
 
       SyncLog.registrarSucesso();
@@ -163,25 +213,31 @@ class SyncService {
     if (entity == null || localId == null || globalId == null) return;
     if (localId == globalId) return;
 
-    switch (entity) {
-      case 'produto':
-        _remapProduto(localId, globalId);
-        break;
-      case 'cliente':
-        _remapCliente(localId, globalId);
-        break;
-      case 'vendedor':
-        _remapVendedor(localId, globalId);
-        break;
-      case 'venda':
-        _remapVenda(localId, globalId);
-        break;
+    var produtoAfetado = false;
+    _db.store.runInTransaction(TxMode.write, () {
+      switch (entity) {
+        case 'produto':
+          produtoAfetado = _remapProduto(localId, globalId);
+          break;
+        case 'cliente':
+          _remapCliente(localId, globalId);
+          break;
+        case 'vendedor':
+          _remapVendedor(localId, globalId);
+          break;
+        case 'venda':
+          _remapVenda(localId, globalId);
+          break;
+      }
+    });
+    if (produtoAfetado) {
+      _produtoRepo.invalidarCacheBusca();
     }
   }
 
-  void _remapProduto(int oldId, int newId) {
+  bool _remapProduto(int oldId, int newId) {
     final old = _db.produtoBox.get(oldId);
-    if (old == null) return;
+    if (old == null) return false;
 
     for (final item in _db.itemVendaBox.getAll()) {
       if (item.produto.targetId == oldId) {
@@ -195,7 +251,8 @@ class SyncService {
 
     _db.produtoBox.remove(oldId);
     old.id = newId;
-    _produtoRepo.salvar(old);
+    _db.produtoBox.put(old);
+    return true;
   }
 
   void _remapCliente(int oldId, int newId) {
@@ -209,7 +266,7 @@ class SyncService {
 
     _db.clienteBox.remove(oldId);
     old.id = newId;
-    _clienteRepo.salvar(old);
+    _db.clienteBox.put(old);
 
     final novo = _db.clienteBox.get(newId);
     if (novo == null) return;
@@ -230,7 +287,7 @@ class SyncService {
 
     _db.vendedorBox.remove(oldId);
     old.id = newId;
-    _vendedorRepo.salvar(old);
+    _db.vendedorBox.put(old);
 
     final novo = _db.vendedorBox.get(newId);
     if (novo == null) return;

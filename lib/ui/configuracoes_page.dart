@@ -1040,7 +1040,11 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         _backupAutomaticoPasta = pasta;
       });
       await _persistirPreferenciasBackupAutomatico();
-      await AutoBackupService.tentarExecutarSeDevido(widget.appConfigRepository);
+      await AutoBackupService.tentarExecutarSeDevido(
+        widget.appConfigRepository,
+        objectBox: widget.objectBox,
+        lanSyncScheduler: widget.lanSyncScheduler,
+      );
       if (!mounted) return;
       final up = await widget.appConfigRepository.carregarEmpresaConfig();
       setState(() => _ultimoBackupAutomaticoMs = up.ultimoBackupAutomaticoMs);

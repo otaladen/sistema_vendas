@@ -7,7 +7,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../app_config_repository.dart';
 import 'sync_api_client.dart';
 import 'sync_cursor_storage.dart';
-import 'sync_log.dart';
+import 'sync_implantacao_config.dart';
 import 'sync_service.dart';
 import 'sync_auth.dart';
 
@@ -39,6 +39,9 @@ class LanSyncScheduler {
   Timer? _reconnectRealtimeTimer;
   Timer? _debounceSyncEvento;
 
+  /// Debounce compartilhado para [solicitarSyncImediato] (modo implantacao).
+  static Timer? _debounceSyncEscrita;
+
   /// Ultimo scheduler ligado pelo menu principal (logout chama [parar]).
   static LanSyncScheduler? _instanciaAtiva;
 
@@ -54,7 +57,12 @@ class LanSyncScheduler {
     }
     _instanciaAtiva = this;
     await sincronizarAgora();
-    _timer = Timer.periodic(intervalo, (_) => unawaited(sincronizarAgora()));
+    final intervaloEfetivo =
+        await SyncImplantacaoConfig(_configRepository).intervaloSyncPeriodico();
+    _timer = Timer.periodic(
+      intervaloEfetivo,
+      (_) => unawaited(sincronizarAgora()),
+    );
     unawaited(_conectarTempoReal());
     _heartbeatTimer?.cancel();
     _heartbeatTimer =
@@ -107,6 +115,8 @@ class LanSyncScheduler {
     _reconnectRealtimeTimer = null;
     _debounceSyncEvento?.cancel();
     _debounceSyncEvento = null;
+    _debounceSyncEscrita?.cancel();
+    _debounceSyncEscrita = null;
     _mutexSync = Future<void>.value();
     await _realtimeSub?.cancel();
     _realtimeSub = null;
@@ -178,14 +188,35 @@ class LanSyncScheduler {
 
   void _aoReceberEventoTempoReal() {
     _debounceSyncEvento?.cancel();
-    _debounceSyncEvento = Timer(const Duration(milliseconds: 100), () {
+    unawaited(_agendarSyncComDebounceRede(onTimer: (timer) {
+      _debounceSyncEvento = timer;
+    }));
+  }
+
+  Future<void> _agendarSyncComDebounceRede({
+    required void Function(Timer timer) onTimer,
+  }) async {
+    final debounce =
+        await SyncImplantacaoConfig(_configRepository).debounceEventoRede();
+    onTimer(Timer(debounce, () {
       unawaited(sincronizarAgora());
-    });
+    }));
   }
 
   /// Apos gravacao local (orcamento, venda, etc.) para enviar/receber dados sem esperar o timer.
   static Future<void> solicitarSyncImediato() async {
-    await _instanciaAtiva?.sincronizarAgora();
+    final scheduler = _instanciaAtiva;
+    if (scheduler == null) return;
+    final debounce = await SyncImplantacaoConfig(scheduler._configRepository)
+        .debounceEventoRede();
+    if (debounce <= SyncImplantacaoConfig.debounceRedeNormal) {
+      await scheduler.sincronizarAgora();
+      return;
+    }
+    _debounceSyncEscrita?.cancel();
+    _debounceSyncEscrita = Timer(debounce, () {
+      unawaited(scheduler.sincronizarAgora());
+    });
   }
 
   /// Uma execucao (usada pelo timer e pelo botao em Configuracoes).

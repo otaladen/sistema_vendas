@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../domain/auditoria_catalogo.dart';
 import '../data/usuario_repository.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
+import '../services/auditoria_registrar.dart';
 import 'layout/app_layout.dart';
 
 bool usuarioPodeReajustePrecoLote(UsuarioSistema u) {
@@ -53,6 +55,18 @@ Future<bool> solicitarAutorizacaoReajustePreco(
     );
     return false;
   }
+  AuditoriaRegistrar.registrar(
+    modulo: AuditoriaModulo.estoque,
+    acao: AuditoriaAcao.autorizacaoReajustePreco,
+    usuarioLogin: usuario.login,
+    resumo:
+        'Autorizacao reajuste: $itensComAlerta item(ns) com alerta de precificacao',
+    detalhes: {
+      'resumoRegra': resumoRegra,
+      'itensComAlerta': itensComAlerta,
+      'autorizadoPor': usuario.login,
+    },
+  );
   return true;
 }
 

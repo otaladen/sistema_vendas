@@ -1,8 +1,10 @@
+import '../domain/auditoria_catalogo.dart';
 import '../domain/reajuste_preco_lote.dart';
 import '../model/reajuste_preco.dart';
 import '../model/reajuste_preco_item.dart';
 import '../model/usuario_sistema.dart';
 import '../objectbox.g.dart';
+import '../services/auditoria_registrar.dart';
 import 'objectbox.dart';
 import 'produto_repository.dart';
 import 'sync/sync_write_trigger.dart';
@@ -115,7 +117,23 @@ class ReajustePrecoRepository {
 
     if (gravados > 0) {
       _produtoRepository.invalidarCacheBusca();
-      notificarAlteracaoParaRede();
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.estoque,
+        acao: AuditoriaAcao.reajustePrecoLote,
+        usuarioLogin: usuario.login,
+        entidade: 'reajuste_preco',
+        entidadeId: '$reajusteId',
+        resumo:
+            'Reajuste em lote #$reajusteId: $gravados produto(s) alterado(s)',
+        detalhes: {
+          'modo': ReajustePrecoParametros.codigoModo(parametros.modo),
+          if (motivo.trim().isNotEmpty) 'motivo': motivo.trim(),
+          'totalEscopo': linhas.length,
+          'totalAlterados': alteradas.length,
+          'totalIgnorados': linhas.length - gravados,
+        },
+      );
     }
 
     return ReajustePrecoLoteAplicacaoResultado(
@@ -175,7 +193,16 @@ class ReajustePrecoRepository {
 
     if (gravados > 0) {
       _produtoRepository.invalidarCacheBusca();
-      notificarAlteracaoParaRede();
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.estoque,
+        acao: AuditoriaAcao.reajustePrecoEstorno,
+        usuarioLogin: usuario.login,
+        entidade: 'reajuste_preco',
+        entidadeId: '$reajusteId',
+        resumo:
+            'Estorno reajuste #$reajusteId: $gravados produto(s) restaurado(s)',
+      );
     }
 
     return ReajustePrecoLoteAplicacaoResultado(

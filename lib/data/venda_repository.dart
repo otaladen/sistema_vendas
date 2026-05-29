@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import '../domain/auditoria_catalogo.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/entrega_filtro_util.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/limite_credito_helper.dart';
+import '../domain/fiscal/fiscal_emissao_lock.dart';
+import '../domain/fiscal/nfce_xml_local_service.dart';
+import '../domain/fiscal/nfe_xml_local_service.dart';
 import '../domain/estoque/tipo_movimento_estoque.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
@@ -418,9 +423,21 @@ class VendaRepository {
 
   ObjectBox get objectBox => _db;
 
-  void _notificarRedeAposEscrita() {
+  void _notificarRedeAposEscrita({int? vendaId, Iterable<int>? vendaIds}) {
     _onAposEscrita?.call();
-    notificarAlteracaoParaRede();
+    if (vendaIds != null) {
+      var algum = false;
+      for (final id in vendaIds) {
+        if (id <= 0) continue;
+        algum = true;
+        notificarAlteracaoParaRede(entidade: 'venda', entidadeId: id);
+      }
+      if (algum) return;
+    }
+    notificarAlteracaoParaRede(
+      entidade: 'venda',
+      entidadeId: vendaId ?? 0,
+    );
   }
 
   List<Venda> listarTodas() {
@@ -1295,7 +1312,7 @@ class VendaRepository {
 
       return vendaId;
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: novoId);
     return novoId;
   }
 
@@ -1311,6 +1328,8 @@ class VendaRepository {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
     }
+    var descontoRegistrado = 0.0;
+    var numeroOrcamentoRegistrado = 0;
     final novoId = _db.store.runInTransaction(TxMode.write, () {
       final proximoNumero = _proximoNumeroOrcamento();
       final venda = Venda(
@@ -1372,6 +1391,8 @@ class VendaRepository {
       venda.total = (venda.total - descAplicado)
           .clamp(0, double.infinity)
           .toDouble();
+      descontoRegistrado = descAplicado;
+      numeroOrcamentoRegistrado = proximoNumero;
       venda.lucroTotal = venda.total - custoTotal;
       _aplicarPagamentoNoOrcamento(
         venda,
@@ -1401,7 +1422,21 @@ class VendaRepository {
 
       return vendaId;
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: novoId);
+    if (descontoRegistrado > 0.004) {
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.orcamento,
+        acao: AuditoriaAcao.descontoOrcamento,
+        entidade: 'orcamento',
+        entidadeId: '$novoId',
+        resumo:
+            'Desconto R\$ ${descontoRegistrado.toStringAsFixed(2)} no orcamento #$numeroOrcamentoRegistrado',
+        detalhes: {
+          'valorDesconto': descontoRegistrado,
+          'numeroOrcamento': numeroOrcamentoRegistrado,
+        },
+      );
+    }
     return novoId;
   }
 
@@ -1516,7 +1551,7 @@ class VendaRepository {
 
       return vendaId;
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: novoId);
     return novoId;
   }
 
@@ -1573,7 +1608,7 @@ class VendaRepository {
         _db.vendaBox.put(v);
       }
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaIds: ids);
   }
 
   /// Atualiza o motorista em todas as vendas do mesmo [grupoEntregaFreteId].
@@ -1605,7 +1640,14 @@ class VendaRepository {
         q.close();
       }
     });
-    _notificarRedeAposEscrita();
+    final qGrupo = _db.vendaBox
+        .query(Venda_.grupoEntregaFreteId.equals(grupoId))
+        .build();
+    try {
+      _notificarRedeAposEscrita(vendaIds: qGrupo.findIds());
+    } finally {
+      qGrupo.close();
+    }
   }
 
   void limparGrupoEntregaLogisticaEm(Set<int> vendaIds) {
@@ -1618,7 +1660,7 @@ class VendaRepository {
         _db.vendaBox.put(v);
       }
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaIds: vendaIds);
   }
 
   /// Define a sequencia de paradas (1..n) no mesmo [grupoEntregaFreteId].
@@ -1643,7 +1685,7 @@ class VendaRepository {
         _db.vendaBox.put(v);
       }
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaIds: ids);
   }
 
   void _migrarUmaMaeRetiradaFuturaParaCarretoNaTransacao(
@@ -1722,6 +1764,8 @@ class VendaRepository {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
     }
+    var descontoRegistrado = 0.0;
+    var numeroOrcamentoRegistrado = 0;
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
       if (venda == null) {
@@ -1804,6 +1848,8 @@ class VendaRepository {
       venda.total = (venda.total - descAplicado)
           .clamp(0, double.infinity)
           .toDouble();
+      descontoRegistrado = descAplicado;
+      numeroOrcamentoRegistrado = venda.numeroOrcamento;
       venda.lucroTotal = venda.total - custoTotal;
       _aplicarPagamentoNoOrcamento(
         venda,
@@ -1828,7 +1874,21 @@ class VendaRepository {
         );
       }
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
+    if (descontoRegistrado > 0.004) {
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.orcamento,
+        acao: AuditoriaAcao.descontoOrcamento,
+        entidade: 'orcamento',
+        entidadeId: '$vendaId',
+        resumo:
+            'Desconto R\$ ${descontoRegistrado.toStringAsFixed(2)} no orcamento #$numeroOrcamentoRegistrado',
+        detalhes: {
+          'valorDesconto': descontoRegistrado,
+          'numeroOrcamento': numeroOrcamentoRegistrado,
+        },
+      );
+    }
   }
 
   /// Preco promocional na data de fechamento; mantem desconto implicito ja aplicado.
@@ -1944,7 +2004,7 @@ class VendaRepository {
       }
     });
     _registrarContadoresPromocaoAposFinalizar(vendaId);
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   /// Cupom interno (baixa de retirada imediata) apos NFC-e/NF-e autorizada.
@@ -2046,7 +2106,29 @@ class VendaRepository {
       }
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
+    final chave = chaveAcesso.trim();
+    final xml = urlXml.trim();
+    if (chave.length >= 40 && xml.isNotEmpty) {
+      unawaited(
+        NfeXmlLocalService.arquivarOuEnfileirar(
+          storeDirectoryPath: _db.storeDirectoryPath,
+          chaveAcesso: chave,
+          urlXml: xml,
+        ),
+      );
+    }
+    final xmlCancel = urlXmlCancelamento.trim();
+    if (chave.length >= 40 && xmlCancel.isNotEmpty) {
+      unawaited(
+        NfeXmlLocalService.arquivarOuEnfileirar(
+          storeDirectoryPath: _db.storeDirectoryPath,
+          chaveAcesso: chave,
+          urlXml: xmlCancel,
+          cancelada: true,
+        ),
+      );
+    }
   }
 
   /// Baixa fisica de retirada imediata — somente ao cupom nao fiscal (idempotente).
@@ -2064,7 +2146,7 @@ class VendaRepository {
         permitirVendaSemEstoque: permitirVendaSemEstoque,
       );
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void _registrarContadoresPromocaoAposFinalizar(int vendaId) {
@@ -2114,7 +2196,7 @@ class VendaRepository {
       );
       _recalcularTotaisVenda(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void removerItemOrcamento(int vendaId, int itemId) {
@@ -2138,7 +2220,7 @@ class VendaRepository {
       }
       _recalcularTotaisVenda(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void vincularClienteNoOrcamento(int vendaId, int? clienteId) {
@@ -2161,7 +2243,7 @@ class VendaRepository {
       }
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void registrarNfceEmitida({
@@ -2193,7 +2275,18 @@ class VendaRepository {
       venda.nfceEmitidaEm = DateTime.now().toUtc();
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
+    final chave = chaveAcesso.trim();
+    final xml = urlXml.trim();
+    if (chave.length >= 40 && xml.isNotEmpty) {
+      unawaited(
+        NfceXmlLocalService.arquivarOuEnfileirar(
+          storeDirectoryPath: _db.storeDirectoryPath,
+          chaveAcesso: chave,
+          urlXml: xml,
+        ),
+      );
+    }
   }
 
   /// NFC-e enviada a Focus com status `processando_autorizacao` (reconsulta depois).
@@ -2216,10 +2309,106 @@ class VendaRepository {
       }
       if (venda.nfceChaveAcesso.trim().isEmpty) {
         venda.nfceProtocolo = marcador;
+        venda.nfceStatusFocus = status.isNotEmpty
+            ? status
+            : 'processando_autorizacao';
       }
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  void registrarNfceEmissaoEmAndamento({
+    required int vendaId,
+    required String deviceId,
+    required String referencia,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null || venda.nfceEmitida) return;
+      venda.nfceStatusFocus = FiscalEmissaoLock.statusEmAndamento;
+      venda.nfceProtocolo =
+          FiscalEmissaoLock.marcador(deviceId, referencia);
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  void liberarNfceEmissaoEmAndamento(int vendaId) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) return;
+      if (venda.nfceStatusFocus.trim() != FiscalEmissaoLock.statusEmAndamento) {
+        return;
+      }
+      venda.nfceStatusFocus = '';
+      if (FiscalEmissaoLock.ehMarcadorEmissao(venda.nfceProtocolo)) {
+        venda.nfceProtocolo = '';
+      }
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  void registrarNfeEmissaoEmAndamento({
+    required int vendaId,
+    required String deviceId,
+    required String referencia,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null || venda.nfe55Autorizada) return;
+      venda.nfeStatusFocus = FiscalEmissaoLock.statusEmAndamento;
+      venda.nfeProtocolo = FiscalEmissaoLock.marcador(deviceId, referencia);
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  void liberarNfeEmissaoEmAndamento(int vendaId) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) return;
+      if (venda.nfeStatusFocus.trim() != FiscalEmissaoLock.statusEmAndamento) {
+        return;
+      }
+      venda.nfeStatusFocus = '';
+      if (FiscalEmissaoLock.ehMarcadorEmissao(venda.nfeProtocolo)) {
+        venda.nfeProtocolo = '';
+      }
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  /// Vendas finalizadas com NFC-e pendente na Focus (reconsulta no caixa).
+  List<Venda> listarComNfcePendenteFocus({int limite = 80}) {
+    final cond = Venda_.status
+        .equals('finalizada')
+        .and(Venda_.nfceChaveAcesso.equals(''))
+        .and(Venda_.nfceUrlDanfe.equals(''));
+    final query = _db.vendaBox
+        .query(cond)
+        .order(Venda_.id, flags: Order.descending)
+        .build();
+    try {
+      return query
+          .find()
+          .where(_vendaMarcadaComNfcePendenteFocus)
+          .take(limite)
+          .toList();
+    } finally {
+      query.close();
+    }
+  }
+
+  static bool _vendaMarcadaComNfcePendenteFocus(Venda venda) {
+    if (venda.nfceEmitida) return false;
+    final status = venda.nfceStatusFocus.trim().toLowerCase();
+    if (status == 'processando_autorizacao') return true;
+    final protocolo = venda.nfceProtocolo.trim();
+    if (protocolo.contains('focus_pendente')) return true;
+    return false;
   }
 
   void vincularClienteVendaFinalizada(int vendaId, int clienteId) {
@@ -2243,7 +2432,7 @@ class VendaRepository {
       venda.cliente.target = cliente;
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void aplicarDescontoNoOrcamento(int vendaId, double valorDesconto) {
@@ -2298,7 +2487,7 @@ class VendaRepository {
       }
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   /// Substitui linhas do misto ja com valores finais (ex.: conferidos no caixa).
@@ -2343,7 +2532,7 @@ class VendaRepository {
       venda.pagamentosJson = PagamentoOrcamentoCodec.encode(linhas);
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   List<Venda> listarEntregas({
@@ -2588,7 +2777,7 @@ class VendaRepository {
         forcadas > 0 ||
         conferenciasRemovidas > 0 ||
         historicosRemovidos > 0) {
-      _notificarRedeAposEscrita();
+      _notificarRedeAposEscrita(vendaId: 0);
     }
 
     return ResultadoLimpezaAbaEntregas(
@@ -2618,7 +2807,7 @@ class VendaRepository {
       venda.canceladaEm = DateTime.now();
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void atualizarStatusEntrega(
@@ -2666,7 +2855,7 @@ class VendaRepository {
       }
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void atualizarPrioridadeEntrega(int vendaId, String novaPrioridade) {
@@ -2683,7 +2872,7 @@ class VendaRepository {
       venda.prioridadeEntrega = prioridade;
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void atualizarChecklistCargaEntrega(
@@ -2724,7 +2913,7 @@ class VendaRepository {
 
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void atualizarMotoristaEntrega(int vendaId, String motorista) {
@@ -2739,7 +2928,7 @@ class VendaRepository {
       venda.motoristaEntrega = motorista.trim();
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   /// Define o mesmo motorista em varias entregas de carreto (ex.: lote sem motorista).
@@ -2763,7 +2952,7 @@ class VendaRepository {
         alteradas++;
       }
     });
-    if (alteradas > 0) _notificarRedeAposEscrita();
+    if (alteradas > 0) _notificarRedeAposEscrita(vendaIds: vendaIds);
     return alteradas;
   }
 
@@ -2792,7 +2981,7 @@ class VendaRepository {
       }
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   int migrarMotoristaEntregaLegado() {
@@ -2826,7 +3015,7 @@ class VendaRepository {
       }
       return totalMigradas;
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: 0);
     return n;
   }
 
@@ -2855,7 +3044,7 @@ class VendaRepository {
       venda.podFotoPathServidor = fotoPathServidor.trim();
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   /// Entregas ativas do motorista (roteirizada / saiu) para o modo motorista.
@@ -2902,7 +3091,7 @@ class VendaRepository {
       item.venda.target = venda;
       _db.historicoEntregaBox.put(item);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   void _anexarLinhaObservacaoEntregaEmVenda(
@@ -2948,7 +3137,7 @@ class VendaRepository {
       _db.historicoEntregaBox.put(hist);
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   List<HistoricoEntrega> listarHistoricoEntrega(int vendaId) {
@@ -2996,7 +3185,7 @@ class VendaRepository {
       venda.entregaPendente = true;
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
   int _proximoNumeroOrcamento() {
@@ -3111,7 +3300,7 @@ class VendaRepository {
       }
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
 
     final trecho = linhasLog.join('; ');
     var motivoFinal = trecho.isEmpty
@@ -3227,7 +3416,7 @@ class VendaRepository {
 
       _db.vendaBox.put(venda);
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
 
     final trecho = linhasLog.join('; ');
     var motivoFinal = trecho.isEmpty
@@ -3309,7 +3498,7 @@ class VendaRepository {
         titulos.cancelarPorVenda(vendaId);
       }
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaId);
     if (!omitirAuditoriaIndividual) {
       _registrarAuditoriaCancelamentoVenda(
         vendaId: vendaId,
@@ -3523,7 +3712,26 @@ class VendaRepository {
 
       return regId;
     });
-    _notificarRedeAposEscrita();
+    _notificarRedeAposEscrita(vendaId: vendaOrigemId);
+    AuditoriaRegistrar.registrar(
+      modulo: AuditoriaModulo.venda,
+      acao: tipoLimpo == 'troca'
+          ? AuditoriaAcao.troca
+          : AuditoriaAcao.devolucao,
+      usuarioLogin: registradoPor,
+      entidade: 'venda',
+      entidadeId: '$vendaOrigemId',
+      resumo:
+          '${tipoLimpo == 'troca' ? 'Troca' : 'Devolucao'} venda #$vendaOrigemId '
+          '(registro #$registroId)',
+      detalhes: {
+        'registroDevolucaoId': registroId,
+        'motivo': motivoLimpo,
+        'itensDevolvidos': filtradas.length,
+        if (tipoLimpo == 'troca')
+          'itensSaida': saidasTroca.where((s) => s.quantidade > 0).length,
+      },
+    );
     return registroId;
   }
 
@@ -3721,6 +3929,47 @@ class VendaRepository {
       s += valorSaidaTrocaRegistro(r);
     }
     return s;
+  }
+
+  /// Historico global de transicoes e eventos de entrega (filtro em memoria).
+  List<HistoricoEntrega> listarHistoricoEntregaGlobal({
+    DateTime? inicio,
+    DateTime? fim,
+    String termoBusca = '',
+  }) {
+    final q = _db.historicoEntregaBox
+        .query()
+        .order(HistoricoEntrega_.dataHora, flags: Order.descending)
+        .build();
+    try {
+      var lista = q.find();
+      if (inicio != null) {
+        final ini = DateTime(inicio.year, inicio.month, inicio.day);
+        lista = lista
+            .where((h) => !h.dataHora.toLocal().isBefore(ini))
+            .toList();
+      }
+      if (fim != null) {
+        final f = DateTime(fim.year, fim.month, fim.day, 23, 59, 59, 999);
+        lista = lista.where((h) => !h.dataHora.toLocal().isAfter(f)).toList();
+      }
+      final termo = termoBusca.trim().toLowerCase();
+      if (termo.isNotEmpty) {
+        lista = lista.where((h) {
+          final venda = h.venda.target;
+          final numOrc = venda?.numeroOrcamento ?? 0;
+          final rotulo = HistoricoEntregaEventos.rotulo(h.statusNovo);
+          return h.usuario.toLowerCase().contains(termo) ||
+              h.statusAnterior.toLowerCase().contains(termo) ||
+              h.statusNovo.toLowerCase().contains(termo) ||
+              rotulo.toLowerCase().contains(termo) ||
+              '$numOrc'.contains(termo);
+        }).toList();
+      }
+      return lista;
+    } finally {
+      q.close();
+    }
   }
 
 }

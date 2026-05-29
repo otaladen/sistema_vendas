@@ -70,14 +70,14 @@ class ClienteRepository {
 
   int salvar(Cliente cliente) {
     final id = _db.clienteBox.put(cliente);
-    notificarAlteracaoParaRede();
+    notificarAlteracaoParaRede(entidade: 'cliente', entidadeId: id);
     return id;
   }
 
   bool remover(int id) {
     final ok = _db.clienteBox.remove(id);
     if (ok) {
-      notificarAlteracaoParaRede();
+      registrarDeleteParaRede('cliente', id);
     }
     return ok;
   }
