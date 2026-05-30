@@ -9,7 +9,10 @@ import '../../domain/filtro_contas_receber.dart';
 import '../../model/cliente.dart';
 import '../../model/usuario_sistema.dart';
 import '../../main.dart';
+import '../relatorios/relatorio_export_util.dart';
+import '../relatorios/widgets/relatorio_exportacoes_menu.dart';
 import '../widgets/receber_fiado_panel.dart';
+import 'widgets/grafico_vencimentos.dart';
 
 final NumberFormat _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
 final DateFormat _dataFmt = DateFormat('dd/MM/yyyy');
@@ -72,6 +75,58 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
 
   double get _kpiProximos7 =>
       _soma(_todas.where(ContasReceberHelper.ehProximos7));
+
+  List<List<String>> _linhasCsvExport() {
+    final cab = [
+      'Cliente',
+      'Venda',
+      'Parcela',
+      'Vencimento',
+      'Dias atraso',
+      'Saldo',
+    ];
+    final rows = <List<String>>[cab];
+    for (final l in _linhas) {
+      rows.add([
+        l.nomeCliente,
+        '${l.numeroOrcamento}',
+        '${l.titulo.numeroParcela}/${l.titulo.totalParcelas}',
+        _dataFmt.format(l.titulo.vencimento.toLocal()),
+        '${l.diasAtraso}',
+        _moeda.format(l.titulo.saldo),
+      ]);
+    }
+    return rows;
+  }
+
+  List<String> _paginasPdfExport() {
+    final total = _soma(_linhas);
+    return relatorioMontarPaginasTabela(
+      titulo: 'CONTAS A RECEBER (FIADO)',
+      subtitulo:
+          '${_linhas.length} titulo(s) · Total ${_moeda.format(total)} · ${_filtro.rotulo}',
+      cabecalho: [
+        'Cliente',
+        'Venda',
+        'Parc',
+        'Vencimento',
+        'Atraso',
+        'Saldo',
+      ],
+      linhas: _linhas
+          .map(
+            (l) => [
+              l.nomeCliente,
+              '${l.numeroOrcamento}',
+              '${l.titulo.numeroParcela}/${l.titulo.totalParcelas}',
+              _dataFmt.format(l.titulo.vencimento.toLocal()),
+              '${l.diasAtraso}',
+              _moeda.format(l.titulo.saldo),
+            ],
+          )
+          .toList(),
+    );
+  }
 
   Future<void> _abrirRecebimento({Cliente? cliente}) async {
     if (!widget.podeRegistrarRecebimento) {
@@ -207,6 +262,12 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
       appBar: AppBar(
         title: const Text('Contas a receber'),
         actions: [
+          RelatorioExportacoesMenu(
+            nomeArquivo: 'contas_a_receber',
+            paginasPdf: _paginasPdfExport,
+            linhasCsv: _linhasCsvExport,
+            mensagemSeVazio: 'Nenhum titulo para exportar.',
+          ),
           if (widget.podeRegistrarRecebimento)
             IconButton(
               tooltip: 'Registrar recebimento',
@@ -306,6 +367,16 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
                   ],
                 );
               },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: GraficoVencimentosContasPagar(
+              buckets: computeTitulosReceberVencimentosBuckets(_todas),
+              titulo: 'Recebimentos previstos (fiado em aberto)',
+              subtituloVazio:
+                  'Nenhum fiado nas faixas de vencimento exibidas.',
+              altura: 220,
             ),
           ),
           SingleChildScrollView(

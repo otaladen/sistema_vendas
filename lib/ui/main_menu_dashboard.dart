@@ -220,6 +220,13 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       );
       return;
     }
+    if (alerta.filtroContasPagar != null) {
+      MainMenuRouter.abrirContasPagar(
+        context,
+        filtro: alerta.filtroContasPagar!,
+      );
+      return;
+    }
     if (alerta.destino != null) {
       _ir(alerta.destino!);
     }

@@ -9,6 +9,7 @@ import '../../data/vendedor_repository.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../model/usuario_sistema.dart';
+import '../financeiro/relatorio_contas_pagar_page.dart';
 import '../relatorio_fiados_page.dart';
 import '../widgets/hub_nav_button.dart';
 import '../widgets/relatorios/relatorio_hub_secao.dart';
@@ -194,6 +195,32 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
               vendaRepository: v,
               clienteRepository: c,
               vendedorRepository: vd,
+            ),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'financeiro',
+        categoriaTitulo: 'Financeiro e credito',
+        categoriaIcone: Icons.account_balance_wallet_outlined,
+        icon: Icons.payments_outlined,
+        cor: const Color(0xFF5D4037),
+        titulo: 'Contas a pagar',
+        subtitulo:
+            'Parcelas a fornecedores (NF-e e manual); exportar PDF/CSV.',
+        palavrasChave: const [
+          'pagar',
+          'fornecedor',
+          'despesa',
+          'vencimento',
+          'nf-e',
+          'financeiro',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioContasPagarPage(
+              objectBox: v.objectBox,
             ),
           ),
         ),

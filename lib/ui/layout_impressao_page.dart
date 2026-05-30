@@ -458,6 +458,12 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
           ],
         ]),
         _secao('Itens', [
+          if (!_orcamento)
+            _switch(
+              'Layout estilo NFC-e (tabela)',
+              l.estiloCupomNfce,
+              (c, v) => c.copyWith(estiloCupomNfce: v),
+            ),
           _switch(
             'Colunas esquerda-direita',
             l.colunasEsquerdaDireita,

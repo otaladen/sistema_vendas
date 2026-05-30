@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/filtro_contas_pagar.dart';
 import '../../domain/filtro_contas_receber.dart';
 import '../../domain/main_menu_destino.dart';
 import '../../domain/permissao_usuario.dart';
@@ -9,6 +10,7 @@ import '../caixa_page.dart';
 import '../configuracoes_page.dart';
 import '../entregas_page.dart';
 import '../estoque_page.dart';
+import '../financeiro/contas_pagar_page.dart';
 import '../financeiro/contas_receber_page.dart';
 import '../financeiro/financeiro_hub_page.dart';
 import '../motorista/motorista_entregas_page.dart';
@@ -21,6 +23,39 @@ import 'main_menu_deps.dart';
 /// Constroi paginas do menu e abre via shell (desktop) ou push (mobile).
 class MainMenuRouter {
   MainMenuRouter._();
+
+  static void abrirContasPagar(
+    BuildContext context, {
+    FiltroContasPagar filtro = FiltroContasPagar.todos,
+  }) {
+    final deps = MainMenuDeps.maybeOf(context);
+    if (deps == null) return;
+    if (!MainMenuDestino.financeiro.podeAcessar(deps.usuarioLogado)) return;
+
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => MainMenuDeps(
+          objectBox: deps.objectBox,
+          produtoRepository: deps.produtoRepository,
+          clienteRepository: deps.clienteRepository,
+          vendaRepository: deps.vendaRepository,
+          vendedorRepository: deps.vendedorRepository,
+          funcionarioRepository: deps.funcionarioRepository,
+          motoristaRepository: deps.motoristaRepository,
+          usuarioLogado: deps.usuarioLogado,
+          onLogout: deps.onLogout,
+          lanSyncScheduler: deps.lanSyncScheduler,
+          appConfigRepository: deps.appConfigRepository,
+          printService: deps.printService,
+          child: ContasPagarPage(
+            objectBox: deps.objectBox,
+            filtroInicial: filtro,
+          ),
+        ),
+      ),
+    );
+  }
 
   static void abrirContasReceber(
     BuildContext context, {
@@ -178,6 +213,7 @@ class MainMenuRouter {
           vendaRepository: deps.vendaRepository,
           clienteRepository: deps.clienteRepository,
           usuarioLogado: u,
+          onLogout: deps.onLogout,
         );
       case MainMenuDestino.cadastros:
         return CadastrosPage(

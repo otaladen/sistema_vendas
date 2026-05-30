@@ -4471,7 +4471,11 @@ class _CaixaPageState extends State<CaixaPage> {
                                       padding: const EdgeInsets.all(12),
                                       child: LayoutBuilder(
                                         builder: (context, constraints) {
-                                          final isCompact = constraints.maxHeight < 700;
+                                          final isCompact =
+                                              constraints.maxHeight < 700;
+                                          final flexItens = isCompact ? 1 : 2;
+                                          final flexPagamento =
+                                              isCompact ? 4 : 3;
                                           return Column(
                                           crossAxisAlignment:
                                               CrossAxisAlignment.start,
@@ -4625,7 +4629,7 @@ class _CaixaPageState extends State<CaixaPage> {
                                           ],
                                           const SizedBox(height: 8),
                                           Expanded(
-                                            flex: 2,
+                                            flex: flexItens,
                                             child: Row(
                                               crossAxisAlignment:
                                                   CrossAxisAlignment.stretch,
@@ -4936,7 +4940,7 @@ class _CaixaPageState extends State<CaixaPage> {
                                             ),
                                           ),
                                           Expanded(
-                                            flex: 3,
+                                            flex: flexPagamento,
                                             child: Column(
                                               crossAxisAlignment:
                                                   CrossAxisAlignment.stretch,
@@ -5069,126 +5073,6 @@ class _CaixaPageState extends State<CaixaPage> {
                                             const SizedBox(height: 10),
                                           ],
                                           if (!isCompact) ...[
-                                            Row(
-                                              children: [
-                                                Expanded(
-                                                  child: _buildResumoCard(
-                                                    context,
-                                                    label: 'SUBTOTAL PRODUTOS',
-                                                    valor: _formatarMoeda(
-                                                      subtotalProdutos,
-                                                    ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: _buildResumoCard(
-                                                    context,
-                                                    label: 'FRETE',
-                                                    valor: _formatarMoeda(
-                                                      freteSelecionado,
-                                                    ),
-                                                  ),
-                                                ),
-                                                if (descontoPdvOrcamento >
-                                                    0.001) ...[
-                                                  const SizedBox(width: 8),
-                                                  Expanded(
-                                                    child: _buildResumoCard(
-                                                      context,
-                                                      label: 'DESCONTO PDV',
-                                                      valor:
-                                                          '- ${_formatarMoeda(descontoPdvOrcamento)}',
-                                                    ),
-                                                  ),
-                                                ],
-                                                if (_mostrarCampoDescontoCaixa) ...[
-                                                  const SizedBox(width: 8),
-                                                  Expanded(
-                                                    child: _buildResumoCard(
-                                                      context,
-                                                      label:
-                                                          descontoPdvOrcamento >
-                                                                  0.001
-                                                              ? 'DESCONTO CAIXA'
-                                                              : 'DESCONTO',
-                                                      valor: '- ${_formatarMoeda(descontoSelecionado)}',
-                                                    ),
-                                                  ),
-                                                ],
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: _buildResumoCard(
-                                                    context,
-                                                    label: 'TOTAL A PAGAR',
-                                                    valor: _formatarMoeda(
-                                                      totalComDesconto,
-                                                    ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: _buildResumoCard(
-                                                    context,
-                                                    label: selecionado
-                                                                .formaPagamento ==
-                                                            'misto'
-                                                        ? 'SOMA DOS MEIOS'
-                                                        : 'TOTAL RECEBIDO',
-                                                    valor: _formatarMoeda(
-                                                      valorTotalRecebidoCard,
-                                                    ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: _buildResumoCard(
-                                                    context,
-                                                    label: 'TROCO',
-                                                    valor: _formatarMoeda(troco),
-                                                    destaque: true,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            SizedBox(
-                                              height:
-                                                  _caixaPrecisaValorRecebidoDinheiro(
-                                                    selecionado,
-                                                  )
-                                                      ? 16
-                                                      : 10,
-                                            ),
-                                          ],
-                                          if (_caixaPrecisaValorRecebidoDinheiro(
-                                            selecionado,
-                                          ))
-                                            TextField(
-                                              controller:
-                                                  _valorRecebidoController,
-                                              focusNode:
-                                                  _valorRecebidoFocusNode,
-                                              keyboardType:
-                                                  const TextInputType.numberWithOptions(
-                                                    decimal: true,
-                                                  ),
-                                              decoration: InputDecoration(
-                                                labelText:
-                                                    selecionado.formaPagamento ==
-                                                            'misto'
-                                                        ? 'Valor recebido em dinheiro (troco sobre especie)'
-                                                        : 'Valor recebido (dinheiro)',
-                                                hintText: 'Ex.: 100,00',
-                                              ),
-                                              onChanged: (value) {
-                                                setState(() {
-                                                  _valorRecebido = _parseValor(
-                                                    value,
-                                                  );
-                                                });
-                                              },
-                                            ),
-                                          if (!isCompact) ...[
                                             const SizedBox(height: 4),
                                             Align(
                                               alignment: Alignment.centerLeft,
@@ -5199,9 +5083,7 @@ class _CaixaPageState extends State<CaixaPage> {
                                                 ).textTheme.bodySmall,
                                               ),
                                             ),
-                                          ],
-                                          const SizedBox(height: 4),
-                                          if (!isCompact)
+                                            const SizedBox(height: 4),
                                             Container(
                                               width: double.infinity,
                                               padding: const EdgeInsets.all(8),
@@ -5234,53 +5116,29 @@ class _CaixaPageState extends State<CaixaPage> {
                                                 ],
                                               ),
                                             ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                                SafeArea(
-                                                  top: false,
-                                                  minimum: EdgeInsets.zero,
-                                                  child: Padding(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                      top: 6,
+                                          ],
+                                                      ],
                                                     ),
-                                                    child: Material(
-                                                      elevation: 4,
-                                                      shadowColor: Colors.black26,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .surface,
-                                                      child: Padding(
-                                                        padding:
-                                                            const EdgeInsets
-                                                                .symmetric(
-                                                          horizontal: 4,
-                                                          vertical: 8,
-                                                        ),
-                                                        child: SizedBox(
-                                                          width:
-                                                              double.infinity,
-                                                          height: 48,
-                                                          child:
-                                                              ElevatedButton
-                                                                  .icon(
-                                                            onPressed: () =>
-                                                                _finalizarOrcamento(
-                                                              selecionado,
-                                                            ),
-                                                            icon: const Icon(
-                                                              Icons
-                                                                  .check_circle_outline,
-                                                            ),
-                                                            label: const Text(
-                                                              'Finalizar venda (Enter)',
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ),
+                                                  ),
+                                                ),
+                                                _buildRodapeCheckoutCaixa(
+                                                  context,
+                                                  selecionado: selecionado,
+                                                  subtotalProdutos: subtotalProdutos,
+                                                  freteSelecionado: freteSelecionado,
+                                                  descontoPdvOrcamento:
+                                                      descontoPdvOrcamento,
+                                                  descontoSelecionado:
+                                                      descontoSelecionado,
+                                                  totalComDesconto:
+                                                      totalComDesconto,
+                                                  valorTotalRecebidoCard:
+                                                      valorTotalRecebidoCard,
+                                                  troco: troco,
+                                                  isCompact: isCompact,
+                                                  onFinalizar: () =>
+                                                      _finalizarOrcamento(
+                                                    selecionado,
                                                   ),
                                                 ),
                                               ],
@@ -5598,6 +5456,171 @@ class _CaixaPageState extends State<CaixaPage> {
       clienteDaVenda: _clienteDaVenda,
       formatarMoeda: _formatarMoeda,
       onVendaTap: _abrirAcoesVendaFinalizada,
+    );
+  }
+
+  Widget _buildLinhaResumoCheckoutCaixa(
+    BuildContext context, {
+    required Venda selecionado,
+    required double subtotalProdutos,
+    required double freteSelecionado,
+    required double descontoPdvOrcamento,
+    required double descontoSelecionado,
+    required double totalComDesconto,
+    required double valorTotalRecebidoCard,
+    required double troco,
+    required bool compacto,
+  }) {
+    final cards = <Widget>[
+      _buildResumoCard(
+        context,
+        label: compacto ? 'SUBTOTAL' : 'SUBTOTAL PRODUTOS',
+        valor: _formatarMoeda(subtotalProdutos),
+      ),
+      _buildResumoCard(
+        context,
+        label: 'FRETE',
+        valor: _formatarMoeda(freteSelecionado),
+      ),
+      if (descontoPdvOrcamento > 0.001)
+        _buildResumoCard(
+          context,
+          label: compacto ? 'DESC. PDV' : 'DESCONTO PDV',
+          valor: '- ${_formatarMoeda(descontoPdvOrcamento)}',
+        ),
+      if (_mostrarCampoDescontoCaixa)
+        _buildResumoCard(
+          context,
+          label: descontoPdvOrcamento > 0.001
+              ? (compacto ? 'DESC. CX' : 'DESCONTO CAIXA')
+              : (compacto ? 'DESCONTO' : 'DESCONTO'),
+          valor: '- ${_formatarMoeda(descontoSelecionado)}',
+        ),
+      _buildResumoCard(
+        context,
+        label: compacto ? 'A PAGAR' : 'TOTAL A PAGAR',
+        valor: _formatarMoeda(totalComDesconto),
+      ),
+      _buildResumoCard(
+        context,
+        label: selecionado.formaPagamento == 'misto'
+            ? (compacto ? 'SOMA' : 'SOMA DOS MEIOS')
+            : (compacto ? 'RECEBIDO' : 'TOTAL RECEBIDO'),
+        valor: _formatarMoeda(valorTotalRecebidoCard),
+      ),
+      _buildResumoCard(
+        context,
+        label: 'TROCO',
+        valor: _formatarMoeda(troco),
+        destaque: true,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final estreito = constraints.maxWidth < 720;
+        if (estreito) {
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (var i = 0; i < cards.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  SizedBox(width: compacto ? 108 : 128, child: cards[i]),
+                ],
+              ],
+            ),
+          );
+        }
+        return Row(
+          children: [
+            for (var i = 0; i < cards.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              Expanded(child: cards[i]),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRodapeCheckoutCaixa(
+    BuildContext context, {
+    required Venda selecionado,
+    required double subtotalProdutos,
+    required double freteSelecionado,
+    required double descontoPdvOrcamento,
+    required double descontoSelecionado,
+    required double totalComDesconto,
+    required double valorTotalRecebidoCard,
+    required double troco,
+    required bool isCompact,
+    required VoidCallback onFinalizar,
+  }) {
+    return Material(
+      elevation: 6,
+      shadowColor: Colors.black26,
+      color: Theme.of(context).colorScheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildLinhaResumoCheckoutCaixa(
+              context,
+              selecionado: selecionado,
+              subtotalProdutos: subtotalProdutos,
+              freteSelecionado: freteSelecionado,
+              descontoPdvOrcamento: descontoPdvOrcamento,
+              descontoSelecionado: descontoSelecionado,
+              totalComDesconto: totalComDesconto,
+              valorTotalRecebidoCard: valorTotalRecebidoCard,
+              troco: troco,
+              compacto: isCompact,
+            ),
+            SizedBox(
+              height: _caixaPrecisaValorRecebidoDinheiro(selecionado) ? 10 : 6,
+            ),
+            if (_caixaPrecisaValorRecebidoDinheiro(selecionado))
+              TextField(
+                controller: _valorRecebidoController,
+                focusNode: _valorRecebidoFocusNode,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  isDense: true,
+                  labelText: selecionado.formaPagamento == 'misto'
+                      ? 'Valor recebido em dinheiro (troco sobre especie)'
+                      : 'Valor recebido (dinheiro)',
+                  hintText: 'Ex.: 100,00',
+                ),
+                onChanged: (value) {
+                  setState(() {
+                    _valorRecebido = _parseValor(value);
+                  });
+                },
+              ),
+            SafeArea(
+              top: false,
+              minimum: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: onFinalizar,
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Finalizar venda (Enter)'),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

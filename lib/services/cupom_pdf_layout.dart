@@ -1,8 +1,10 @@
 import 'dart:typed_data';
 
+import 'package:barcode/barcode.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../config/fiscal_config.dart';
 import '../model/cliente.dart';
 import '../model/config_layout_impressao.dart';
 
@@ -620,6 +622,731 @@ class CupomPdfLayout {
         pw.SizedBox(height: _margemCorte(layout) * PdfPageFormat.mm),
       ],
     );
+  }
+
+  // --- Layout DANFE NFC-e (contingencia) para cupom nao fiscal ---
+
+  static const String tituloDanfeNfce =
+      'Documento Auxiliar da Nota Fiscal de Consumidor Eletronica';
+
+  static String urlConsultaNfcePorUf([String? uf]) {
+    final u = (uf ?? FiscalConfig.ufEmitente).trim().toUpperCase();
+    return 'http://www.sefaz.$u.gov.br/nfce/consulta';
+  }
+
+  static String formatarCnpjCupom(String cnpj) {
+    final d = cnpj.replaceAll(RegExp(r'\D'), '');
+    if (d.length != 14) return cnpj.trim();
+    return '${d.substring(0, 2)}.${d.substring(2, 5)}.${d.substring(5, 8)}/'
+        '${d.substring(8, 12)}-${d.substring(12)}';
+  }
+
+  static String formatarDocumentoConsumidor(String documento) {
+    final d = documento.replaceAll(RegExp(r'\D'), '');
+    if (d.length == 11) {
+      return '${d.substring(0, 3)}.${d.substring(3, 6)}.${d.substring(6, 9)}-'
+          '${d.substring(9)}';
+    }
+    if (d.length == 14) return formatarCnpjCupom(d);
+    return documento.trim();
+  }
+
+  static String chaveAcessoSomenteDigitos(String chave) =>
+      chave.replaceAll(RegExp(r'\D'), '');
+
+  static String formatarChaveAcessoGrupos(String chave) {
+    final d = chaveAcessoSomenteDigitos(chave);
+    if (d.length != 44) return chave.trim();
+    final grupos = <String>[];
+    for (var i = 0; i < d.length; i += 4) {
+      grupos.add(d.substring(i, i + 4));
+    }
+    return grupos.join(' ');
+  }
+
+  static String textoTributosLei12741(double valorTotal) {
+    final trib = valorTotal * 0.2892;
+    final federal = trib * 0.3847;
+    final estadual = trib - federal;
+    String fmt(double v) => v.toStringAsFixed(2).replaceAll('.', ',');
+    return 'Tributos Totais Incidentes (Lei Federal 12.741/2012): '
+        'Federal R\$ ${fmt(federal)} | Estadual R\$ ${fmt(estadual)}';
+  }
+
+  static pw.Widget _caixaLogoNfeDanfe(ConfigLayoutImpressao layout) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeTipoDocumento;
+    return pw.Container(
+      width: 14 * PdfPageFormat.mm,
+      height: 14 * PdfPageFormat.mm,
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(width: 0.8),
+      ),
+      alignment: pw.Alignment.center,
+      child: pw.Column(
+        mainAxisAlignment: pw.MainAxisAlignment.center,
+        children: [
+          pw.Text(
+            'NF-e',
+            style: estilo(
+              layout,
+              fontSize: fs + 1,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.Text(
+            'NFC-e',
+            style: estilo(
+              layout,
+              fontSize: fs - 1,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static List<pw.Widget> cabecalhoDanfeNfceContingencia({
+    required ConfigLayoutImpressao layout,
+    required String razaoSocial,
+    required String nomeLoja,
+    String cnpj = '',
+    String inscricaoEstadual = '',
+    Uint8List? logoBytes,
+    String? telefone,
+    String? endereco,
+  }) {
+    final logo = logoBytes;
+    final temLogoLoja = layout.exibirLogo && logo != null && logo.isNotEmpty;
+    final fsNome = layout.tamanhoNomeLoja.fontSizeNome - 1.5;
+    final fsCorpo = layout.tamanhoFonteCorpo.fontSizeContato;
+    final hLogo = layout.alturaLogoMm.clamp(14.0, 36.0);
+    final razao = razaoSocial.trim().isNotEmpty
+        ? razaoSocial.trim()
+        : (nomeLoja.trim().isEmpty ? 'Loja' : nomeLoja.trim());
+    final fantasia = nomeLoja.trim();
+
+    final colEmitente = <pw.Widget>[
+      if (cnpj.trim().isNotEmpty)
+        pw.Text(
+          'CNPJ ${formatarCnpjCupom(cnpj)}',
+          style: estilo(layout, fontSize: fsCorpo),
+          textAlign: pw.TextAlign.left,
+        ),
+      pw.Text(
+        razao,
+        style: estilo(
+          layout,
+          fontSize: fsNome,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        textAlign: pw.TextAlign.left,
+        maxLines: 3,
+        softWrap: true,
+      ),
+      if (fantasia.isNotEmpty &&
+          fantasia.toLowerCase() != razao.toLowerCase())
+        pw.Text(
+          fantasia,
+          style: estilo(
+            layout,
+            fontSize: fsCorpo,
+            fontWeight: pw.FontWeight.bold,
+          ),
+          textAlign: pw.TextAlign.left,
+          maxLines: 2,
+          softWrap: true,
+        ),
+      if (layout.exibirEndereco &&
+          endereco != null &&
+          endereco.trim().isNotEmpty)
+        pw.Text(
+          endereco.trim(),
+          style: estilo(layout, fontSize: fsCorpo - 0.5),
+          textAlign: pw.TextAlign.left,
+          maxLines: 3,
+          softWrap: true,
+        ),
+      if (inscricaoEstadual.trim().isNotEmpty)
+        pw.Text(
+          'IE ${inscricaoEstadual.trim()}',
+          style: estilo(layout, fontSize: fsCorpo),
+          textAlign: pw.TextAlign.left,
+        ),
+      if (layout.exibirTelefone &&
+          telefone != null &&
+          telefone.trim().isNotEmpty)
+        pw.Text(
+          'Tel: ${telefone.trim()}',
+          style: estilo(layout, fontSize: fsCorpo - 0.5),
+          textAlign: pw.TextAlign.left,
+        ),
+    ];
+
+    final out = <pw.Widget>[
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          _caixaLogoNfeDanfe(layout),
+          pw.SizedBox(width: 2 * PdfPageFormat.mm),
+          pw.Expanded(child: pw.Column(children: colEmitente)),
+        ],
+      ),
+    ];
+
+    if (temLogoLoja) {
+      out.add(
+        pw.Center(
+          child: pw.Padding(
+            padding: pw.EdgeInsets.only(top: 1.5 * PdfPageFormat.mm),
+            child: pw.Image(pw.MemoryImage(logo), height: hLogo),
+          ),
+        ),
+      );
+    }
+
+    return out;
+  }
+
+  static pw.Widget faixaContingenciaNfce({
+    required ConfigLayoutImpressao layout,
+    String titulo = 'EMITIDA EM CONTINGENCIA',
+    String subtitulo = 'Pendente de autorizacao',
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeCorpo;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        divisoriaSecao(layout: layout, destaque: true),
+        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: titulo,
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        pw.SizedBox(height: 0.8 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: subtitulo,
+          fontSize: fs - 0.5,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+        divisoriaSecao(layout: layout, destaque: true),
+      ],
+    );
+  }
+
+  static pw.Widget blocoConsultaChaveAcessoNfce({
+    required ConfigLayoutImpressao layout,
+    required String chaveAcesso,
+    String? urlConsulta,
+    bool chavePendente = false,
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeContato;
+    final url = (urlConsulta ?? urlConsultaNfcePorUf()).trim();
+    final chaveFmt = formatarChaveAcessoGrupos(chaveAcesso);
+    final temChave = chaveFmt.replaceAll(' ', '').length == 44;
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
+        divisoriaSecao(layout: layout),
+        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: 'Consulta pela Chave de Acesso',
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        pw.SizedBox(height: 0.8 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: url,
+          fontSize: fs - 0.5,
+        ),
+        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+        if (temChave)
+          pw.Text(
+            chaveFmt,
+            style: estilo(layout, fontSize: fs - 0.5),
+            textAlign: pw.TextAlign.center,
+            softWrap: true,
+          )
+        else
+          _textoCentralizado(
+            layout,
+            texto: chavePendente
+                ? 'Chave pendente de autorizacao na SEFAZ'
+                : 'Chave de acesso nao informada',
+            fontSize: fs - 0.5,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        divisoriaSecao(layout: layout),
+      ],
+    );
+  }
+
+  static pw.Widget linhaIdentificacaoNfce({
+    required ConfigLayoutImpressao layout,
+    required String numero,
+    required String serie,
+    required String dataHora,
+    String via = 'Via consumidor',
+    String? linhaExtra,
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeContato;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: 'NFC-e n. $numero  Serie $serie  $dataHora  $via',
+          fontSize: fs,
+        ),
+        if (linhaExtra != null && linhaExtra.trim().isNotEmpty)
+          _textoCentralizado(
+            layout,
+            texto: linhaExtra.trim(),
+            fontSize: fs - 0.5,
+          ),
+      ],
+    );
+  }
+
+  static pw.Widget qrCodeNfceDanfe({
+    required ConfigLayoutImpressao layout,
+    required String payload,
+  }) {
+    final data = payload.trim();
+    if (data.isEmpty) return pw.SizedBox.shrink();
+    final lado = (larguraBobinaMm - layout.margemPaginaMm * 2)
+        .clamp(28.0, 42.0);
+    return pw.Column(
+      children: [
+        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
+        pw.Center(
+          child: pw.BarcodeWidget(
+            barcode: Barcode.qrCode(),
+            data: data,
+            width: lado * PdfPageFormat.mm,
+            height: lado * PdfPageFormat.mm,
+            drawText: false,
+          ),
+        ),
+        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+      ],
+    );
+  }
+
+  static pw.Widget linhaTributosLei12741({
+    required ConfigLayoutImpressao layout,
+    required double valorTotal,
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeContato - 0.5;
+    return pw.Padding(
+      padding: pw.EdgeInsets.symmetric(vertical: 1 * PdfPageFormat.mm),
+      child: pw.Text(
+        textoTributosLei12741(valorTotal),
+        style: estilo(layout, fontSize: fs),
+        textAlign: pw.TextAlign.center,
+        softWrap: true,
+      ),
+    );
+  }
+
+  static List<pw.Widget> cabecalhoEmitenteNfce({
+    required ConfigLayoutImpressao layout,
+    required String razaoSocial,
+    required String nomeLoja,
+    String cnpj = '',
+    String inscricaoEstadual = '',
+    Uint8List? logoBytes,
+    String? telefone,
+    String? endereco,
+  }) {
+    final logo = logoBytes;
+    final temLogo = layout.exibirLogo && logo != null && logo.isNotEmpty;
+    final fsNome = layout.tamanhoNomeLoja.fontSizeNome - 1;
+    final fsCorpo = layout.tamanhoFonteCorpo.fontSizeContato;
+    final hLogo = layout.alturaLogoMm.clamp(18.0, 44.0);
+    final razao = razaoSocial.trim().isNotEmpty
+        ? razaoSocial.trim()
+        : (nomeLoja.trim().isEmpty ? 'Loja' : nomeLoja.trim());
+    final fantasia = nomeLoja.trim();
+    final out = <pw.Widget>[];
+
+    if (temLogo) {
+      out.add(
+        pw.Center(
+          child: pw.Padding(
+            padding: pw.EdgeInsets.only(bottom: 1.5 * PdfPageFormat.mm),
+            child: pw.Image(pw.MemoryImage(logo), height: hLogo),
+          ),
+        ),
+      );
+    }
+
+    if (cnpj.trim().isNotEmpty) {
+      out.add(_textoCentralizado(
+        layout,
+        texto: 'CNPJ ${formatarCnpjCupom(cnpj)}',
+        fontSize: fsCorpo,
+      ));
+    }
+    out.add(_textoCentralizado(
+      layout,
+      texto: razao,
+      fontSize: fsNome,
+      fontWeight: pw.FontWeight.bold,
+    ));
+    if (fantasia.isNotEmpty &&
+        fantasia.toLowerCase() != razao.toLowerCase()) {
+      out.add(_textoCentralizado(
+        layout,
+        texto: fantasia,
+        fontSize: fsCorpo,
+        fontWeight: pw.FontWeight.bold,
+      ));
+    }
+    if (inscricaoEstadual.trim().isNotEmpty) {
+      out.add(_textoCentralizado(
+        layout,
+        texto: 'IE ${inscricaoEstadual.trim()}',
+        fontSize: fsCorpo,
+      ));
+    }
+    if (layout.exibirEndereco &&
+        endereco != null &&
+        endereco.trim().isNotEmpty) {
+      out.add(_textoCentralizado(
+        layout,
+        texto: endereco.trim(),
+        fontSize: fsCorpo,
+      ));
+    }
+    if (layout.exibirTelefone &&
+        telefone != null &&
+        telefone.trim().isNotEmpty) {
+      out.add(_textoCentralizado(
+        layout,
+        texto: 'Tel: ${telefone.trim()}',
+        fontSize: fsCorpo,
+      ));
+    }
+    return out;
+  }
+
+  static pw.Widget faixaTituloDocumentoAuxiliar({
+    required ConfigLayoutImpressao layout,
+    required String titulo,
+  }) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        divisoriaSecao(layout: layout),
+        _textoCentralizado(
+          layout,
+          texto: titulo,
+          fontSize: layout.tamanhoFonteCorpo.fontSizeTipoDocumento,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        divisoriaSecao(layout: layout),
+      ],
+    );
+  }
+
+  static pw.Widget faixaAvisoCentralNfce({
+    required ConfigLayoutImpressao layout,
+    required String titulo,
+    String? subtitulo,
+    bool destaque = false,
+  }) {
+    final fsTitulo = layout.tamanhoFonteCorpo.fontSizeCorpo;
+    final fsSub = layout.tamanhoFonteCorpo.fontSizeContato;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        if (destaque) divisoriaSecao(layout: layout, destaque: true),
+        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: titulo,
+          fontSize: fsTitulo,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        if (subtitulo != null && subtitulo.trim().isNotEmpty) ...[
+          pw.SizedBox(height: 1 * PdfPageFormat.mm),
+          _textoCentralizado(
+            layout,
+            texto: subtitulo.trim(),
+            fontSize: fsSub,
+          ),
+        ],
+        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
+        if (destaque) divisoriaSecao(layout: layout, destaque: true),
+      ],
+    );
+  }
+
+  static pw.TextStyle _estiloCelulaNfce(
+    ConfigLayoutImpressao layout, {
+    bool bold = false,
+  }) {
+    return estilo(
+      layout,
+      fontSize: layout.tamanhoFonteItens.fontSizeItemDetalhe,
+      fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+    );
+  }
+
+  static pw.Widget _celulaNfce(
+    String texto,
+    ConfigLayoutImpressao layout, {
+    pw.TextAlign align = pw.TextAlign.left,
+    bool bold = false,
+    int maxLines = 4,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 0.5, horizontal: 0.5),
+      child: pw.Text(
+        texto,
+        style: _estiloCelulaNfce(layout, bold: bold),
+        textAlign: align,
+        maxLines: maxLines,
+        softWrap: true,
+      ),
+    );
+  }
+
+  static pw.Widget tabelaCabecalhoItensNfce(ConfigLayoutImpressao layout) {
+    return pw.Table(
+      columnWidths: const {
+        0: pw.FlexColumnWidth(1.1),
+        1: pw.FlexColumnWidth(2.6),
+        2: pw.FlexColumnWidth(0.9),
+        3: pw.FlexColumnWidth(0.7),
+        4: pw.FlexColumnWidth(1.2),
+        5: pw.FlexColumnWidth(1.2),
+      },
+      defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
+      children: [
+        pw.TableRow(
+          children: [
+            _celulaNfce('Cod.', layout, bold: true),
+            _celulaNfce('Descricao', layout, bold: true),
+            _celulaNfce('Qtde', layout, bold: true, align: pw.TextAlign.right),
+            _celulaNfce('UN', layout, bold: true, align: pw.TextAlign.center),
+            _celulaNfce('Vl Unit', layout, bold: true, align: pw.TextAlign.right),
+            _celulaNfce('Vl Total', layout, bold: true, align: pw.TextAlign.right),
+          ],
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget tabelaLinhaItemNfce({
+    required ConfigLayoutImpressao layout,
+    required String codigo,
+    required String descricao,
+    required int quantidade,
+    required String unidade,
+    required String valorUnitario,
+    required String valorTotal,
+  }) {
+    return pw.Table(
+      columnWidths: const {
+        0: pw.FlexColumnWidth(1.1),
+        1: pw.FlexColumnWidth(2.6),
+        2: pw.FlexColumnWidth(0.9),
+        3: pw.FlexColumnWidth(0.7),
+        4: pw.FlexColumnWidth(1.2),
+        5: pw.FlexColumnWidth(1.2),
+      },
+      defaultVerticalAlignment: pw.TableCellVerticalAlignment.top,
+      children: [
+        pw.TableRow(
+          children: [
+            _celulaNfce(codigo, layout, maxLines: 2),
+            _celulaNfce(descricao, layout, maxLines: 3),
+            _celulaNfce(
+              '$quantidade',
+              layout,
+              align: pw.TextAlign.right,
+            ),
+            _celulaNfce(unidade, layout, align: pw.TextAlign.center),
+            _celulaNfce(valorUnitario, layout, align: pw.TextAlign.right),
+            _celulaNfce(
+              valorTotal,
+              layout,
+              align: pw.TextAlign.right,
+              bold: true,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget linhaResumoNfce({
+    required ConfigLayoutImpressao layout,
+    required String rotulo,
+    required String valor,
+    bool destaque = false,
+  }) {
+    final fs = destaque
+        ? layout.tamanhoFonteTotais.fontSizeTotalDestaque
+        : layout.tamanhoFonteTotais.fontSizeTotais;
+    return pw.Padding(
+      padding: pw.EdgeInsets.only(
+        top: 0.4 * PdfPageFormat.mm,
+        bottom: 0.4 * PdfPageFormat.mm,
+      ),
+      child: linhaColunas(
+        layout: layout,
+        esquerda: rotulo,
+        direita: valor,
+        fontSize: fs,
+        fontWeight: destaque ? pw.FontWeight.bold : pw.FontWeight.normal,
+        fontWeightDireita: destaque ? pw.FontWeight.bold : pw.FontWeight.normal,
+        flexEsquerda: 6,
+      ),
+    );
+  }
+
+  static pw.Widget blocoPagamentoNfce({
+    required ConfigLayoutImpressao layout,
+    required String formaPagamento,
+    required String valorPago,
+    required String troco,
+    List<String> linhasPagamentoMisto = const [],
+  }) {
+    final fs = layout.tamanhoFonteTotais.fontSizeTotais;
+    final children = <pw.Widget>[
+      pw.SizedBox(height: 1 * PdfPageFormat.mm),
+      linhaColunas(
+        layout: layout,
+        esquerda: 'FORMA PAGAMENTO',
+        direita: formaPagamento,
+        fontSize: fs,
+        fontWeight: pw.FontWeight.bold,
+        flexEsquerda: 5,
+      ),
+    ];
+    if (linhasPagamentoMisto.isNotEmpty) {
+      for (final l in linhasPagamentoMisto) {
+        children.add(
+          pw.Padding(
+            padding: pw.EdgeInsets.only(left: 2 * PdfPageFormat.mm, top: 0.3 * PdfPageFormat.mm),
+            child: textoCorpo(l, layout, fontSize: fs - 0.5),
+          ),
+        );
+      }
+    }
+    children.addAll([
+      linhaColunas(
+        layout: layout,
+        esquerda: 'VALOR PAGO R\$',
+        direita: valorPago,
+        fontSize: fs,
+        flexEsquerda: 5,
+      ),
+      linhaColunas(
+        layout: layout,
+        esquerda: 'Troco R\$',
+        direita: troco,
+        fontSize: fs,
+        fontWeight: layout.destacarTroco ? pw.FontWeight.bold : pw.FontWeight.normal,
+        fontWeightDireita:
+            layout.destacarTroco ? pw.FontWeight.bold : pw.FontWeight.normal,
+        flexEsquerda: 5,
+      ),
+    ]);
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: children,
+    );
+  }
+
+  static pw.Widget blocoConsumidorNfce({
+    required ConfigLayoutImpressao layout,
+    required String textoConsumidor,
+    List<String> linhasExtras = const [],
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeCorpo;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
+        divisoriaSecao(layout: layout),
+        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+        pw.Text(
+          textoConsumidor,
+          style: estilo(layout, fontSize: fs),
+          softWrap: true,
+        ),
+        ...linhasExtras.map(
+          (l) => pw.Padding(
+            padding: pw.EdgeInsets.only(top: 0.5 * PdfPageFormat.mm),
+            child: pw.Text(
+              l,
+              style: estilo(layout, fontSize: fs - 0.5),
+              softWrap: true,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget rodapeIdentificacaoCupomNfce({
+    required ConfigLayoutImpressao layout,
+    required String numeroDocumento,
+    required String dataHora,
+    String via = 'Via consumidor',
+    String? linhaExtra,
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeContato;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: 'Cupom n. $numeroDocumento  $dataHora  $via',
+          fontSize: fs,
+        ),
+        if (linhaExtra != null && linhaExtra.trim().isNotEmpty)
+          _textoCentralizado(
+            layout,
+            texto: linhaExtra.trim(),
+            fontSize: fs,
+          ),
+      ],
+    );
+  }
+
+  static int contarLinhasExtrasNfce({
+    required int qtdItens,
+    bool segundaVia = false,
+    bool temDesconto = false,
+    bool temEntrega = false,
+    bool temFiado = false,
+    int linhasFiado = 0,
+    int linhasRodape = 1,
+    bool temChave = false,
+  }) {
+    var n = 38 + qtdItens * 2;
+    if (segundaVia) n += 3;
+    if (temDesconto) n++;
+    if (temEntrega) n += 2;
+    if (temFiado) n += 2 + linhasFiado;
+    if (temChave) n += 2;
+    n += linhasRodape;
+    return n;
   }
 }
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../data/models/conta_pagar.dart';
+import '../../../data/titulo_receber_repository.dart';
 import '../../../main.dart';
 import '../../../objectbox.g.dart';
 
@@ -86,6 +87,51 @@ ContasPagarVencimentosBuckets computeContasPagarVencimentosBuckets(
   }
 }
 
+/// Agrupa titulos a receber (fiado) em aberto por vencimento.
+ContasPagarVencimentosBuckets computeTitulosReceberVencimentosBuckets(
+  List<TituloReceberResumoLinha> titulos,
+) {
+  final hojeLocal = DateTime.now();
+  final hoje = DateTime.utc(
+    hojeLocal.year,
+    hojeLocal.month,
+    hojeLocal.day,
+  );
+  final fim7 = hoje.add(const Duration(days: 6));
+  final ini8 = hoje.add(const Duration(days: 7));
+  final fim15 = hoje.add(const Duration(days: 14));
+  final ini16 = hoje.add(const Duration(days: 15));
+  final fim30 = hoje.add(const Duration(days: 29));
+
+  DateTime normalizaDia(DateTime d) => DateTime.utc(d.year, d.month, d.day);
+
+  var atras = 0.0;
+  var p7 = 0.0;
+  var p815 = 0.0;
+  var p1630 = 0.0;
+
+  for (final l in titulos) {
+    if (l.titulo.saldo <= 0.001) continue;
+    final v = l.titulo.saldo;
+    final venc = normalizaDia(l.titulo.vencimento);
+    if (venc.isBefore(hoje)) {
+      atras += v;
+    } else if (!venc.isAfter(fim7)) {
+      p7 += v;
+    } else if (!venc.isBefore(ini8) && !venc.isAfter(fim15)) {
+      p815 += v;
+    } else if (!venc.isBefore(ini16) && !venc.isAfter(fim30)) {
+      p1630 += v;
+    }
+  }
+  return ContasPagarVencimentosBuckets(
+    atrasadas: atras,
+    proximos7Dias: p7,
+    de8a15Dias: p815,
+    de16a30Dias: p1630,
+  );
+}
+
 /// Gráfico de barras: vencimentos x saldo de referência em caixa.
 class GraficoVencimentosContasPagar extends StatelessWidget {
   const GraficoVencimentosContasPagar({
@@ -93,11 +139,16 @@ class GraficoVencimentosContasPagar extends StatelessWidget {
     required this.buckets,
     this.saldoCaixaAtual,
     this.altura = 260,
+    this.titulo = 'Fluxo de vencimentos (em aberto)',
+    this.subtituloVazio =
+        'Nenhum valor pendente ou atrasado nas faixas exibidas.',
   });
 
   final ContasPagarVencimentosBuckets buckets;
   final double? saldoCaixaAtual;
   final double altura;
+  final String titulo;
+  final String subtituloVazio;
 
   static final NumberFormat _moedaCurta = NumberFormat.compactSimpleCurrency(
     locale: 'pt_BR',
@@ -144,7 +195,7 @@ class GraficoVencimentosContasPagar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Fluxo de vencimentos (em aberto)',
+              titulo,
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
@@ -160,7 +211,7 @@ class GraficoVencimentosContasPagar extends StatelessWidget {
               child: buckets.somaTotal <= 0.004
                   ? Center(
                       child: Text(
-                        'Nenhum valor pendente ou atrasado nas faixas exibidas.',
+                        subtituloVazio,
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: scheme.onSurface.withValues(alpha: 0.55),

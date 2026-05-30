@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/dashboard_alertas.dart';
+import '../../domain/filtro_contas_pagar.dart';
 import '../../domain/filtro_contas_receber.dart';
 import '../../domain/main_menu_destino.dart';
 
@@ -97,9 +98,14 @@ void navegarDashboardAlerta(
   required DashboardAlerta alerta,
   required void Function(MainMenuDestino destino) irModulo,
   required void Function(FiltroContasReceber filtro) irContasReceber,
+  void Function(FiltroContasPagar filtro)? irContasPagar,
 }) {
   if (alerta.filtroContasReceber != null) {
     irContasReceber(alerta.filtroContasReceber!);
+    return;
+  }
+  if (alerta.filtroContasPagar != null && irContasPagar != null) {
+    irContasPagar(alerta.filtroContasPagar!);
     return;
   }
   if (alerta.destino != null) {

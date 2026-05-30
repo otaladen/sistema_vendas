@@ -6,6 +6,7 @@ import '../data/produto_repository.dart';
 import '../data/titulo_receber_repository.dart';
 import '../data/venda_repository.dart';
 import 'entrega_filtro_util.dart';
+import 'filtro_contas_pagar.dart';
 import 'filtro_contas_receber.dart';
 import 'main_menu_destino.dart';
 
@@ -29,6 +30,7 @@ class DashboardAlerta {
     required this.icone,
     this.destino,
     this.filtroContasReceber,
+    this.filtroContasPagar,
     this.prioridade = 50,
   });
 
@@ -39,6 +41,7 @@ class DashboardAlerta {
   final IconData icone;
   final MainMenuDestino? destino;
   final FiltroContasReceber? filtroContasReceber;
+  final FiltroContasPagar? filtroContasPagar;
   final int prioridade;
 }
 
@@ -110,6 +113,7 @@ class DashboardAlertasService {
             cor: const Color(0xFFAD1457),
             icone: Icons.account_balance_outlined,
             destino: MainMenuDestino.financeiro,
+            filtroContasPagar: FiltroContasPagar.atrasados,
             prioridade: 25,
           ),
         );

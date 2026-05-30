@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
 import '../model/config_layout_impressao.dart';
 import 'cupom_nao_fiscal_venda_pdf.dart';
@@ -48,7 +49,7 @@ class CupomLayoutPreviewPdf {
     final pageFormat = CupomPdfLayout.formatoPagina(
       modelo,
       layout: layout,
-      linhasTexto: orcamento ? 16 : 18,
+      linhasTexto: orcamento ? 16 : 42,
       qtdItens: 2,
       linhasExtras: 4,
       comLogo: comLogo,
@@ -77,6 +78,121 @@ class CupomLayoutPreviewPdf {
           );
           const frete = 15.0;
           final total = subtotal + frete;
+
+          if (!orcamento && layout.estiloCupomNfce) {
+            const chaveExemplo =
+                '29260532662298000191650010000010421000104210';
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                ...CupomPdfLayout.cabecalhoDanfeNfceContingencia(
+                  layout: layout,
+                  razaoSocial: FiscalConfig.razaoSocialEmitente,
+                  nomeLoja: empresa.nomeLoja,
+                  cnpj: FiscalConfig.cnpjEmitente,
+                  inscricaoEstadual: FiscalConfig.inscricaoEstadualEmitente,
+                  telefone: empresa.telefone,
+                  endereco: empresa.endereco,
+                  logoBytes: comLogo ? logoBytes : null,
+                ),
+                CupomPdfLayout.faixaTituloDocumentoAuxiliar(
+                  layout: layout,
+                  titulo: CupomPdfLayout.tituloDanfeNfce,
+                ),
+                CupomPdfLayout.faixaContingenciaNfce(layout: layout),
+                if (FiscalConfig.ambiente == 'homologacao')
+                  CupomPdfLayout.faixaAvisoCentralNfce(
+                    layout: layout,
+                    titulo: 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO',
+                    subtitulo: 'SEM VALOR FISCAL',
+                    destaque: true,
+                  ),
+                CupomPdfLayout.tabelaCabecalhoItensNfce(layout),
+                CupomPdfLayout.tabelaLinhaItemNfce(
+                  layout: layout,
+                  codigo: '001',
+                  descricao: itens[0].nome,
+                  quantidade: itens[0].qtd,
+                  unidade: 'SC',
+                  valorUnitario: _moeda(itens[0].unit),
+                  valorTotal: _moeda(itens[0].qtd * itens[0].unit),
+                ),
+                CupomPdfLayout.tabelaLinhaItemNfce(
+                  layout: layout,
+                  codigo: '002',
+                  descricao: itens[1].nome,
+                  quantidade: itens[1].qtd,
+                  unidade: 'GL',
+                  valorUnitario: _moeda(itens[1].unit),
+                  valorTotal: _moeda(itens[1].qtd * itens[1].unit),
+                ),
+                CupomPdfLayout.divisoriaSecao(layout: layout, destaque: true),
+                CupomPdfLayout.linhaResumoNfce(
+                  layout: layout,
+                  rotulo: 'Qtde. total de itens',
+                  valor: '${itens.length}',
+                ),
+                CupomPdfLayout.linhaResumoNfce(
+                  layout: layout,
+                  rotulo: 'Valor total R\$',
+                  valor: _moeda(subtotal),
+                ),
+                CupomPdfLayout.linhaResumoNfce(
+                  layout: layout,
+                  rotulo: 'Frete R\$',
+                  valor: _moeda(frete),
+                ),
+                CupomPdfLayout.linhaResumoNfce(
+                  layout: layout,
+                  rotulo: 'Valor a Pagar R\$',
+                  valor: _moeda(total),
+                  destaque: true,
+                ),
+                CupomPdfLayout.blocoPagamentoNfce(
+                  layout: layout,
+                  formaPagamento: 'Dinheiro',
+                  valorPago: _moeda(300),
+                  troco: _moeda(300 - total),
+                ),
+                CupomPdfLayout.blocoConsumidorNfce(
+                  layout: layout,
+                  textoConsumidor:
+                      'CONSUMIDOR - CPF 123.456.789-09 - Cliente Exemplo - '
+                      'Rua das Flores, 100 | Centro | Salvador - BA',
+                  linhasExtras: const [
+                    'Entrega: Retirada na loja',
+                    'Vendedor: 01 · Maria',
+                  ],
+                ),
+                CupomPdfLayout.blocoConsultaChaveAcessoNfce(
+                  layout: layout,
+                  chaveAcesso: chaveExemplo,
+                ),
+                CupomPdfLayout.linhaIdentificacaoNfce(
+                  layout: layout,
+                  numero: '1042',
+                  serie: '1',
+                  dataHora: dataHora,
+                ),
+                CupomPdfLayout.qrCodeNfceDanfe(
+                  layout: layout,
+                  payload:
+                      '${CupomPdfLayout.urlConsultaNfcePorUf()}?p=$chaveExemplo',
+                ),
+                CupomPdfLayout.linhaTributosLei12741(
+                  layout: layout,
+                  valorTotal: total,
+                ),
+                CupomPdfLayout.faixaContingenciaNfce(layout: layout),
+                ...CupomPdfLayout.rodapeDocumento(
+                  layout: layout,
+                  textoRodape: empresa.rodapeNota,
+                ),
+                CupomPdfLayout.espacoFinalDocumento(layout),
+              ],
+            );
+          }
 
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,

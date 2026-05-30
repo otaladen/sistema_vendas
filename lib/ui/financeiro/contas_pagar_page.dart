@@ -1,18 +1,41 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
 
+import '../../data/conta_pagar_repository.dart';
 import '../../data/models/conta_pagar.dart';
 import '../../data/objectbox.dart';
-import '../../data/sync/sync_write_trigger.dart';
+import '../../domain/filtro_contas_pagar.dart';
 import '../../main.dart';
-import '../../objectbox.g.dart';
 import 'widgets/grafico_vencimentos.dart';
 
 final NumberFormat _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
 final DateFormat _dataFmt = DateFormat('dd/MM/yyyy');
 
-enum _FiltroStatusConta { todos, pendentes, pagos, atrasados }
+enum _FiltroStatusConta {
+  todos,
+  pendentes,
+  pagos,
+  atrasados;
+
+  static _FiltroStatusConta de(FiltroContasPagar f) {
+    switch (f) {
+      case FiltroContasPagar.todos:
+        return _FiltroStatusConta.todos;
+      case FiltroContasPagar.pendentes:
+        return _FiltroStatusConta.pendentes;
+      case FiltroContasPagar.pagos:
+        return _FiltroStatusConta.pagos;
+      case FiltroContasPagar.atrasados:
+        return _FiltroStatusConta.atrasados;
+    }
+  }
+}
 
 /// Listagem de contas a pagar com KPIs, filtros por status e baixa rápida.
 class ContasPagarPage extends StatefulWidget {
@@ -20,108 +43,66 @@ class ContasPagarPage extends StatefulWidget {
     super.key,
     required this.objectBox,
     this.saldoCaixaReferencia,
+    this.filtroInicial = FiltroContasPagar.todos,
   });
 
   final ObjectBox objectBox;
 
   /// Saldo em caixa para linha de referência no gráfico (opcional).
   final double? saldoCaixaReferencia;
+  final FiltroContasPagar filtroInicial;
 
   @override
   State<ContasPagarPage> createState() => _ContasPagarPageState();
 }
 
 class _ContasPagarPageState extends State<ContasPagarPage> {
-  _FiltroStatusConta _filtro = _FiltroStatusConta.todos;
+  late ContaPagarRepository _repo;
+  late _FiltroStatusConta _filtro;
   List<ContaPagar> _linhas = [];
   ContasPagarVencimentosBuckets _buckets = ContasPagarVencimentosBuckets.zero;
 
   @override
   void initState() {
     super.initState();
+    _repo = ContaPagarRepository(widget.objectBox);
+    _filtro = _FiltroStatusConta.de(widget.filtroInicial);
     _recarregar();
   }
 
-  DateTime _somenteData(DateTime d) => DateTime(d.year, d.month, d.day);
-
-  /// Atualiza [ContaPagarStatus.atrasado] para pendentes já vencidos (data local).
-  void _sincronizarPendenteParaAtrasado() {
-    final hoje = _somenteData(DateTime.now());
-    for (final c in widget.objectBox.contaPagarBox.getAll()) {
-      if (c.status != ContaPagarStatus.pendente) continue;
-      if (_somenteData(c.dataVencimento).isBefore(hoje)) {
-        c.status = ContaPagarStatus.atrasado;
-        final id = widget.objectBox.contaPagarBox.put(c);
-        notificarAlteracaoParaRede(entidade: 'conta_pagar', entidadeId: id);
-      }
+  String? _statusQuery(_FiltroStatusConta f) {
+    switch (f) {
+      case _FiltroStatusConta.todos:
+        return null;
+      case _FiltroStatusConta.pendentes:
+        return ContaPagarStatus.pendente;
+      case _FiltroStatusConta.pagos:
+        return ContaPagarStatus.pago;
+      case _FiltroStatusConta.atrasados:
+        return ContaPagarStatus.atrasado;
     }
   }
 
   void _recarregar() {
-    _sincronizarPendenteParaAtrasado();
+    _repo.sincronizarPendenteParaAtrasado();
     final buckets = computeContasPagarVencimentosBuckets(
       widget.objectBox.contaPagarBox,
     );
-
-    final box = widget.objectBox.contaPagarBox;
-    final Query<ContaPagar> q;
-    switch (_filtro) {
-      case _FiltroStatusConta.todos:
-        q = box.query().order(ContaPagar_.dataVencimento).build();
-        break;
-      case _FiltroStatusConta.pendentes:
-        q = box
-            .query(ContaPagar_.status.equals(ContaPagarStatus.pendente))
-            .order(ContaPagar_.dataVencimento)
-            .build();
-        break;
-      case _FiltroStatusConta.pagos:
-        q = box
-            .query(ContaPagar_.status.equals(ContaPagarStatus.pago))
-            .order(ContaPagar_.dataVencimento, flags: Order.descending)
-            .build();
-        break;
-      case _FiltroStatusConta.atrasados:
-        q = box
-            .query(ContaPagar_.status.equals(ContaPagarStatus.atrasado))
-            .order(ContaPagar_.dataVencimento)
-            .build();
-        break;
-    }
-    try {
-      final lista = q.find();
-      if (!mounted) return;
-      setState(() {
-        _linhas = lista;
-        _buckets = buckets;
-      });
-    } finally {
-      q.close();
-    }
+    final status = _statusQuery(_filtro);
+    final lista = _repo.listar(
+      status: status,
+      ordenarDesc: _filtro == _FiltroStatusConta.pagos,
+    );
+    if (!mounted) return;
+    setState(() {
+      _linhas = lista;
+      _buckets = buckets;
+    });
   }
 
-  double _somaPorStatus(String status) {
-    var t = 0.0;
-    for (final c in widget.objectBox.contaPagarBox.getAll()) {
-      if (c.status == status) {
-        t += c.valorParcela;
-      }
-    }
-    return t;
-  }
-
-  double get _kpiPendente => _somaPorStatus(ContaPagarStatus.pendente);
-  double get _kpiPago {
-    var t = 0.0;
-    for (final c in widget.objectBox.contaPagarBox.getAll()) {
-      if (c.status == ContaPagarStatus.pago) {
-        t += c.valorPago ?? c.valorParcela;
-      }
-    }
-    return t;
-  }
-
-  double get _kpiAtrasado => _somaPorStatus(ContaPagarStatus.atrasado);
+  double get _kpiPendente => _repo.somaPorStatus(ContaPagarStatus.pendente);
+  double get _kpiPago => _repo.somaTotalPago();
+  double get _kpiAtrasado => _repo.somaPorStatus(ContaPagarStatus.atrasado);
 
   String _nomeFornecedor(ContaPagar c) {
     final f = c.fornecedor.target;
@@ -222,11 +203,11 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
       return;
     }
 
-    conta.status = ContaPagarStatus.pago;
-    conta.dataPagamento = dataPg;
-    conta.valorPago = vp;
-    final id = widget.objectBox.contaPagarBox.put(conta);
-    notificarAlteracaoParaRede(entidade: 'conta_pagar', entidadeId: id);
+    await _repo.registrarBaixa(
+      conta: conta,
+      valorPago: vp,
+      dataPagamento: dataPg,
+    );
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -234,6 +215,180 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
     );
     _recarregar();
   }
+
+  Future<void> _abrirLancamentoManual() async {
+    final fornCtrl = TextEditingController();
+    final cnpjCtrl = TextEditingController();
+    final valorCtrl = TextEditingController();
+    final parcelaCtrl = TextEditingController(text: '001/001');
+    final obsCtrl = TextEditingController();
+    var vencimento = DateTime.now().add(const Duration(days: 7));
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Nova despesa / conta manual'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: fornCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Fornecedor / descricao *',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: cnpjCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'CNPJ (opcional)',
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: valorCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Valor *',
+                    prefixText: r'R$ ',
+                  ),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: parcelaCtrl,
+                  decoration: const InputDecoration(labelText: 'Parcela'),
+                ),
+                const SizedBox(height: 8),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Vencimento'),
+                  subtitle: Text(_dataFmt.format(vencimento)),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.calendar_today_outlined),
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: vencimento,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
+                      );
+                      if (picked != null) setLocal(() => vencimento = picked);
+                    },
+                  ),
+                ),
+                TextField(
+                  controller: obsCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Referencia / observacao',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Salvar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (ok != true) {
+      fornCtrl.dispose();
+      cnpjCtrl.dispose();
+      valorCtrl.dispose();
+      parcelaCtrl.dispose();
+      obsCtrl.dispose();
+      return;
+    }
+
+    final nome = fornCtrl.text.trim();
+    final cnpj = cnpjCtrl.text.trim();
+    final valor = double.tryParse(
+      valorCtrl.text.trim().replaceAll('.', '').replaceAll(',', '.'),
+    );
+    final parcela = parcelaCtrl.text.trim();
+    final obs = obsCtrl.text.trim();
+    fornCtrl.dispose();
+    cnpjCtrl.dispose();
+    valorCtrl.dispose();
+    parcelaCtrl.dispose();
+    obsCtrl.dispose();
+
+    if (nome.isEmpty || valor == null || valor <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe fornecedor e valor valido.')),
+      );
+      return;
+    }
+
+    try {
+      await _repo.criarManual(
+        nomeFornecedor: nome,
+        cnpj: cnpj.isEmpty ? null : cnpj,
+        valor: valor,
+        vencimento: vencimento,
+        numeroParcela: parcela.isEmpty ? '001/001' : parcela,
+        observacaoNota: obs.isEmpty ? null : obs,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Conta a pagar registrada.')),
+      );
+      _recarregar();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel salvar: $e')),
+      );
+    }
+  }
+
+  Future<void> _exportarCsv() async {
+    final pasta = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Pasta para salvar CSV de contas a pagar',
+    );
+    if (pasta == null || pasta.trim().isEmpty) return;
+
+    final todas = _repo.listar();
+    final buf = StringBuffer(
+      'Fornecedor;NF_ref;Parcela;Emissao;Vencimento;Valor;Status;Pago_em;Valor_pago\n',
+    );
+    for (final c in todas) {
+      buf.writeln([
+        _csv(_nomeFornecedor(c)),
+        _csv(c.numeroNota ?? c.nfeChave ?? ''),
+        _csv(c.numeroParcela),
+        _dataFmt.format(c.dataEmissao),
+        _dataFmt.format(c.dataVencimento),
+        c.valorParcela.toStringAsFixed(2).replaceAll('.', ','),
+        c.status,
+        c.dataPagamento != null ? _dataFmt.format(c.dataPagamento!) : '',
+        c.valorPago?.toStringAsFixed(2).replaceAll('.', ',') ?? '',
+      ].join(';'));
+    }
+
+    final ts = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+    final path = p.join(pasta, 'contas_a_pagar_$ts.csv');
+    await File(path).writeAsString(buf.toString(), encoding: utf8);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('CSV salvo: $path')),
+    );
+  }
+
+  String _csv(String v) => '"${v.replaceAll('"', '""')}"';
 
   Widget _kpiTile({
     required String titulo,
@@ -393,11 +548,21 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
         title: const Text('Contas a pagar'),
         actions: [
           IconButton(
+            tooltip: 'Exportar CSV',
+            onPressed: _exportarCsv,
+            icon: const Icon(Icons.download_outlined),
+          ),
+          IconButton(
             tooltip: 'Atualizar',
             onPressed: _recarregar,
             icon: const Icon(Icons.refresh_outlined),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _abrirLancamentoManual,
+        icon: const Icon(Icons.add),
+        label: const Text('Despesa manual'),
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {

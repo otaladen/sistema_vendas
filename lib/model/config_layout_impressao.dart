@@ -259,6 +259,7 @@ class ConfigLayoutImpressao {
     this.espacoEntreItensMm = 1.5,
     this.exibirEspacoFinal = true,
     this.modoImpressaoDireta = LayoutModoImpressaoDireta.alturaPdf,
+    this.estiloCupomNfce = true,
   });
 
   final LayoutImpressaoPreset preset;
@@ -311,6 +312,9 @@ class ConfigLayoutImpressao {
   final bool exibirEspacoFinal;
   final LayoutModoImpressaoDireta modoImpressaoDireta;
 
+  /// Layout tabular inspirado na DANFE NFC-e (codigo, qtd, valores alinhados).
+  final bool estiloCupomNfce;
+
   String get tituloDocumentoEfetivoCupom =>
       tituloDocumento.trim().isEmpty ? 'CUPOM NAO FISCAL' : tituloDocumento.trim();
 
@@ -330,6 +334,7 @@ class ConfigLayoutImpressao {
         exibirEntrega: false,
         exibirEnderecoEntrega: false,
         exibirObservacaoEntrega: false,
+        estiloCupomNfce: false,
       );
 
   /// Maxima economia de papel (teste na loja).
@@ -347,6 +352,7 @@ class ConfigLayoutImpressao {
         divisoriaAntesRodape: false,
         colunasEsquerdaDireita: false,
         linhaQuantidadePreco: false,
+        estiloCupomNfce: false,
         espacoCompacto: true,
         margemPaginaMm: 2,
         margemCorteMm: 0,
@@ -369,6 +375,7 @@ class ConfigLayoutImpressao {
         tamanhoFonteTotais: LayoutTamanhoFonte.p,
         comprimentoDivisoria: LayoutComprimentoDivisoria.curto,
         cabecalhoColunasItens: false,
+        estiloCupomNfce: false,
         espacoCompacto: true,
         margemPaginaMm: 2.5,
         margemCorteMm: 2,
@@ -454,6 +461,7 @@ class ConfigLayoutImpressao {
     double? espacoEntreItensMm,
     bool? exibirEspacoFinal,
     LayoutModoImpressaoDireta? modoImpressaoDireta,
+    bool? estiloCupomNfce,
   }) {
     return ConfigLayoutImpressao(
       preset: preset ?? this.preset,
@@ -511,6 +519,7 @@ class ConfigLayoutImpressao {
       espacoEntreItensMm: espacoEntreItensMm ?? this.espacoEntreItensMm,
       exibirEspacoFinal: exibirEspacoFinal ?? this.exibirEspacoFinal,
       modoImpressaoDireta: modoImpressaoDireta ?? this.modoImpressaoDireta,
+      estiloCupomNfce: estiloCupomNfce ?? this.estiloCupomNfce,
     );
   }
 
@@ -558,6 +567,7 @@ class ConfigLayoutImpressao {
         'espacoEntreItensMm': espacoEntreItensMm,
         'exibirEspacoFinal': exibirEspacoFinal,
         'modoImpressaoDireta': modoImpressaoDireta.codigo,
+        'estiloCupomNfce': estiloCupomNfce,
       };
 
   factory ConfigLayoutImpressao.fromJson(
@@ -674,6 +684,8 @@ class ConfigLayoutImpressao {
       modoImpressaoDireta: LayoutModoImpressaoDireta.fromString(
         json['modoImpressaoDireta']?.toString(),
       ),
+      estiloCupomNfce:
+          json['estiloCupomNfce'] as bool? ?? padrao.estiloCupomNfce,
     );
   }
 }
