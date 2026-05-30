@@ -70,15 +70,18 @@ class ReciboRecebimentoFiadoPdf {
     final layout = config.layoutImpressao.cupom;
     final dataLocal = recebimento.data.toLocal();
 
+    final pageFormat = CupomPdfLayout.formatoPagina(
+      modelo,
+      layout: layout,
+      linhasTexto: _contarLinhas(recebimento, alocacoes, saldoRestante),
+      qtdItens: 0,
+      linhasExtras: 2,
+      comLogo: comLogo,
+    );
+
     doc.addPage(
       pw.Page(
-        pageFormat: CupomPdfLayout.formatoPagina(
-          modelo,
-          linhasTexto: _contarLinhas(recebimento, alocacoes, saldoRestante),
-          qtdItens: 0,
-          linhasExtras: 2,
-          comLogo: comLogo,
-        ),
+        pageFormat: pageFormat,
         build: (context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -170,7 +173,7 @@ class ReciboRecebimentoFiadoPdf {
                 layout: layout,
                 textoRodape: config.rodapeNota,
               ),
-              pw.SizedBox(height: CupomPdfLayout.feedCorteMm * PdfPageFormat.mm),
+              CupomPdfLayout.espacoFinalDocumento(layout),
             ],
           );
         },

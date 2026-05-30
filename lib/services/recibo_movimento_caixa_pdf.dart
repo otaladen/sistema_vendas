@@ -52,15 +52,18 @@ class ReciboMovimentoCaixaPdf {
     final dataLocal = dataHora.toLocal();
     final obs = observacao.trim();
 
+    final pageFormat = CupomPdfLayout.formatoPagina(
+      modelo,
+      layout: layout,
+      linhasTexto: _contarLinhas(obs),
+      qtdItens: 0,
+      linhasExtras: 2,
+      comLogo: comLogo,
+    );
+
     doc.addPage(
       pw.Page(
-        pageFormat: CupomPdfLayout.formatoPagina(
-          modelo,
-          linhasTexto: _contarLinhas(obs),
-          qtdItens: 0,
-          linhasExtras: 2,
-          comLogo: comLogo,
-        ),
+        pageFormat: pageFormat,
         build: (context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -128,7 +131,7 @@ class ReciboMovimentoCaixaPdf {
                 layout: layout,
                 textoRodape: config.rodapeNota,
               ),
-              pw.SizedBox(height: CupomPdfLayout.feedCorteMm * PdfPageFormat.mm),
+              CupomPdfLayout.espacoFinalDocumento(layout),
             ],
           );
         },

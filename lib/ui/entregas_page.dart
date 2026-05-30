@@ -24,6 +24,7 @@ import 'entregas/filtros_entrega_sheet.dart';
 import 'entregas/logistica_entregas.dart';
 import 'entregas/planejamento_entrega_dia.dart';
 import 'entregas/agrupar_viagem_dialog.dart';
+import 'entregas/entregas_guia.dart';
 import 'entregas/entregas_montagem_callbacks.dart';
 import 'entregas/montagem_entrega_viagem.dart';
 import 'entregas/painel_montagem_entregas.dart';
@@ -77,9 +78,13 @@ class EntregasPage extends StatefulWidget {
   State<EntregasPage> createState() => _EntregasPageState();
 }
 
-class _EntregasPageState extends State<EntregasPage> {
+class _EntregasPageState extends State<EntregasPage>
+    with SingleTickerProviderStateMixin {
   late final ConferenciaCargaRepository _conferenciaCargaRepository =
       ConferenciaCargaRepository(widget.vendaRepository.objectBox);
+
+  late TabController _tabEntregasController;
+  bool _mostrarDicasEntregas = true;
 
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   final _bairroController = TextEditingController();
@@ -224,6 +229,12 @@ class _EntregasPageState extends State<EntregasPage> {
   @override
   void initState() {
     super.initState();
+    _tabEntregasController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: 1,
+    );
+    _tabEntregasController.addListener(_onTabEntregasAlterada);
     _inicio = null;
     _fim = null;
     _chaveDiaPlanejamentoSelecionado =
@@ -231,6 +242,22 @@ class _EntregasPageState extends State<EntregasPage> {
     SyncRefreshHub.instance.addListener(_onSyncHubNotificado);
     _carregarEntregas();
     unawaited(_prefetchPodFotos());
+    unawaited(_carregarPreferenciaDicasEntregas());
+  }
+
+  void _onTabEntregasAlterada() {
+    if (_tabEntregasController.indexIsChanging) return;
+    setState(() {});
+  }
+
+  Future<void> _carregarPreferenciaDicasEntregas() async {
+    final visivel = await EntregasGuia.dicasVisiveis();
+    if (mounted) setState(() => _mostrarDicasEntregas = visivel);
+  }
+
+  Future<void> _ocultarDicasEntregas() async {
+    await EntregasGuia.setDicasVisiveis(false);
+    if (mounted) setState(() => _mostrarDicasEntregas = false);
   }
 
   void _onSyncHubNotificado() {
@@ -304,6 +331,8 @@ class _EntregasPageState extends State<EntregasPage> {
 
   @override
   void dispose() {
+    _tabEntregasController.removeListener(_onTabEntregasAlterada);
+    _tabEntregasController.dispose();
     SyncRefreshHub.instance.removeListener(_onSyncHubNotificado);
     _kanbanHScrollController.dispose();
     _bairroController.dispose();
@@ -3861,17 +3890,15 @@ class _EntregasPageState extends State<EntregasPage> {
     }
     final gruposLista = groupedLista.keys.toList()
       ..sort((a, b) => a.compareTo(b));
-    return DefaultTabController(
-      length: 3,
-      initialIndex: 0,
-      child: Scaffold(
+    return Scaffold(
         appBar: AppBar(
           title: const Text('Entregas'),
-          bottom: const TabBar(
-            tabs: [
+          bottom: TabBar(
+            controller: _tabEntregasController,
+            tabs: const [
               Tab(
-                icon: Icon(Icons.local_shipping_outlined),
-                text: 'Montagem',
+                icon: Icon(Icons.inventory_2_outlined),
+                text: 'Patio',
               ),
               Tab(
                 icon: Icon(Icons.view_list_outlined),
@@ -3885,6 +3912,11 @@ class _EntregasPageState extends State<EntregasPage> {
           ),
           actions: [
             IconButton(
+              tooltip: 'Como usar Entregas',
+              icon: const Icon(Icons.help_outline),
+              onPressed: () => EntregasGuia.mostrarDialogoCompleto(context),
+            ),
+            IconButton(
               tooltip: 'Atualizar',
               icon: const Icon(Icons.refresh),
               onPressed: _atualizarListaEntregas,
@@ -3895,7 +3927,10 @@ class _EntregasPageState extends State<EntregasPage> {
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
           child: Column(
             children: [
-              EntregasBarraCompacta(
+              Builder(
+                builder: (context) {
+                  final alturaTela = MediaQuery.sizeOf(context).height;
+                  final barra = EntregasBarraCompacta(
               atrasadas: atrasadas,
               pendentesHoje: pendentesHoje,
               filtroAtrasadasAtivo:
@@ -3935,7 +3970,23 @@ class _EntregasPageState extends State<EntregasPage> {
                       !_proximosDiasPlanejamentoExpandido;
                 });
               },
-            ),
+            );
+                  if (alturaTela >= 820) return barra;
+                  return ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: alturaTela < 720 ? 112 : 136,
+                    ),
+                    child: SingleChildScrollView(child: barra),
+                  );
+                },
+              ),
+            if (_mostrarDicasEntregas && _tabEntregasController.index != 0)
+              EntregasFaixaDicaAba(
+                indiceAba: _tabEntregasController.index,
+                onAbrirGuia: () =>
+                    EntregasGuia.mostrarDialogoCompleto(context),
+                onOcultar: _ocultarDicasEntregas,
+              ),
             if (!widget.podeGerenciarStatusEntrega) ...[
               const SizedBox(height: 8),
               MaterialBanner(
@@ -3969,6 +4020,7 @@ class _EntregasPageState extends State<EntregasPage> {
                             ],
                           )
                         : TabBarView(
+                            controller: _tabEntregasController,
                             children: [
                               _buildAbaMontagem(listaExibicao),
                               Column(
@@ -4025,7 +4077,6 @@ class _EntregasPageState extends State<EntregasPage> {
             ),
           ],
         ),
-      ),
       ),
     );
   }

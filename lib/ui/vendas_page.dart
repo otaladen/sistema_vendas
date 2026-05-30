@@ -17,6 +17,7 @@ import 'ponto_de_venda_page.dart';
 import 'relatorios_page.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
+import 'layout/app_layout.dart';
 
 const Color _corPontoDeVenda = Color(0xFF2E7D32);
 const Color _corCaixa = Color(0xFF00897B);
@@ -75,11 +76,8 @@ class VendasPage extends StatelessWidget {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: AdaptiveHubBody(
+        children: [
             HubNavButton(
               icon: Icons.point_of_sale_outlined,
               corDestaque: _corPontoDeVenda,
@@ -103,7 +101,6 @@ class VendasPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.receipt_long_outlined,
               corDestaque: _corCaixa,
@@ -140,7 +137,6 @@ class VendasPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.local_shipping_outlined,
               corDestaque: _corEntregas,
@@ -166,7 +162,6 @@ class VendasPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.view_list_outlined,
               corDestaque: _corListagem,
@@ -191,7 +186,6 @@ class VendasPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.assessment_outlined,
               corDestaque: _corRelatorios,
@@ -271,8 +265,7 @@ class VendasPage extends StatelessWidget {
                 );
               },
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

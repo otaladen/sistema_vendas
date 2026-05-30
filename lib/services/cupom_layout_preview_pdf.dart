@@ -2,12 +2,12 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../data/app_config_repository.dart';
 import '../model/config_layout_impressao.dart';
 import 'cupom_nao_fiscal_venda_pdf.dart';
+import 'cupom_pdf_gerado.dart';
 import 'cupom_pdf_layout.dart';
 
 /// PDF de exemplo para pre-visualizar layout (cupom ou orcamento).
@@ -17,6 +17,19 @@ class CupomLayoutPreviewPdf {
   static String _moeda(double v) => CupomNaoFiscalVendaPdf.formatarMoeda(v);
 
   static Future<Uint8List> gerarBytes({
+    required EmpresaConfig empresa,
+    required ConfigLayoutImpressao layout,
+    required bool orcamento,
+  }) async {
+    return (await gerar(
+      empresa: empresa,
+      layout: layout,
+      orcamento: orcamento,
+    ))
+        .bytes;
+  }
+
+  static Future<CupomPdfGerado> gerar({
     required EmpresaConfig empresa,
     required ConfigLayoutImpressao layout,
     required bool orcamento,
@@ -32,16 +45,19 @@ class CupomLayoutPreviewPdf {
     final modelo = empresaModeloPdfDeString(empresa.modeloPdf);
     final doc = pw.Document();
 
+    final pageFormat = CupomPdfLayout.formatoPagina(
+      modelo,
+      layout: layout,
+      linhasTexto: orcamento ? 16 : 18,
+      qtdItens: 2,
+      linhasExtras: 4,
+      comLogo: comLogo,
+      segundaVia: !orcamento,
+    );
+
     doc.addPage(
       pw.Page(
-        pageFormat: CupomPdfLayout.formatoPagina(
-          modelo,
-          linhasTexto: orcamento ? 16 : 18,
-          qtdItens: 2,
-          linhasExtras: 4,
-          comLogo: comLogo,
-          segundaVia: !orcamento,
-        ),
+        pageFormat: pageFormat,
         build: (context) {
           final itens = [
             (
@@ -181,19 +197,22 @@ class CupomLayoutPreviewPdf {
                   valor: 'A combinar',
                   colunas: layout.alinharPagamentoColunas,
                 ),
-              CupomPdfLayout.espacoBloco(layout),
               ...CupomPdfLayout.rodapeDocumento(
                 layout: layout,
                 textoRodape: orcamento
                     ? empresa.rodapeOrcamento
                     : empresa.rodapeNota,
               ),
-              pw.SizedBox(height: CupomPdfLayout.feedCorteMm * PdfPageFormat.mm),
+              CupomPdfLayout.espacoFinalDocumento(layout),
             ],
           );
         },
       ),
     );
-    return doc.save();
+    return CupomPdfGerado(
+      bytes: await doc.save(),
+      pageFormat: pageFormat,
+      layout: layout,
+    );
   }
 }

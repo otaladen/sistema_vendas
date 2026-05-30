@@ -19,6 +19,8 @@ import 'relatorio_dashboard_executivo_page.dart';
 import 'relatorio_entregas_resumo_page.dart';
 import 'relatorio_estoque_minimo_page.dart';
 import 'relatorio_historico_fechamento_page.dart';
+import 'relatorio_horarios_pico_page.dart';
+import 'relatorio_metas_vendedores_page.dart';
 import 'relatorio_log_sistema_page.dart';
 import 'relatorio_orcamentos_abertos_page.dart';
 import 'relatorio_produtos_mais_vendidos_page.dart';
@@ -219,6 +221,59 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
               vendaRepository: v,
               clienteRepository: c,
               vendedorRepository: vd,
+            ),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'vendas',
+        categoriaTitulo: 'Vendas e faturamento',
+        categoriaIcone: Icons.point_of_sale_outlined,
+        icon: Icons.schedule_outlined,
+        cor: corRelHorariosPico,
+        titulo: 'Horarios de pico',
+        subtitulo:
+            'Horario com maior numero de vendas no periodo — ideal para escala e operacao.',
+        palavrasChave: const [
+          'horario',
+          'pico',
+          'movimento',
+          'fluxo',
+          'hora',
+          'vendas',
+          'escala',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioHorariosPicoPage(vendaRepository: v),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'vendas',
+        categoriaTitulo: 'Vendas e faturamento',
+        categoriaIcone: Icons.point_of_sale_outlined,
+        icon: Icons.flag_outlined,
+        cor: corRelMetasVendedor,
+        titulo: 'Metas de vendedores — hoje',
+        subtitulo:
+            'Acompanhamento diario da meta mensal: realizado, percentual e falta.',
+        palavrasChave: const [
+          'meta',
+          'vendedor',
+          'diario',
+          'objetivo',
+          'acompanhamento',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioMetasVendedoresPage(
+              vendaRepository: v,
+              vendedorRepository: vd,
+              produtoRepository: p,
+              objectBox: p.objectBox,
             ),
           ),
         ),

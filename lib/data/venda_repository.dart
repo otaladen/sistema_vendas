@@ -2490,6 +2490,39 @@ class VendaRepository {
     _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
+  /// Altera forma de pagamento de um orcamento (autorizado no caixa pelo gerente).
+  void alterarPagamentoOrcamento(
+    int vendaId,
+    DadosPagamentoOrcamento pagamento,
+  ) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Orcamento $vendaId nao encontrado.');
+      }
+      if (venda.status != 'orcamento') {
+        throw StateError('Somente orcamentos podem ter pagamento alterado.');
+      }
+      _aplicarPagamentoNoOrcamento(
+        venda,
+        pagamento,
+        totalOrcamento: venda.total,
+      );
+      _exigirClienteParaFiado(
+        clienteId: venda.cliente.targetId,
+        valorFiadoOperacao: LimiteCreditoHelper.valorFiadoNaVenda(venda),
+      );
+      _aplicarPlanoFiadoNoOrcamento(venda, planoFiado: pagamento.planoFiado);
+      _exigirLimiteCredito(
+        clienteId: venda.cliente.targetId,
+        valorFiadoOperacao: LimiteCreditoHelper.valorFiadoNaVenda(venda),
+        ignorarVendaId: vendaId,
+      );
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
   /// Substitui linhas do misto ja com valores finais (ex.: conferidos no caixa).
   /// [linhas] deve somar exatamente [Venda.total] do orcamento no momento da gravacao.
   void substituirPagamentosMistoOrcamento(

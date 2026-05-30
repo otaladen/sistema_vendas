@@ -11,6 +11,7 @@ import '../model/registro_devolucao.dart';
 import '../model/cliente.dart';
 import '../model/fornecedor_nfe.dart';
 import '../model/historico_entrada.dart';
+import '../model/movimento_estoque.dart';
 import '../model/funcionario.dart';
 import '../model/lancamento_funcionario.dart';
 import '../model/recebimento_fiado.dart';
@@ -53,6 +54,7 @@ class ObjectBox {
   late Box<FornecedorNfe> fornecedorNfeBox;
   late Box<VinculoFornecedorProduto> vinculoFornecedorProdutoBox;
   late Box<HistoricoEntrada> historicoEntradaBox;
+  late Box<MovimentoEstoque> movimentoEstoqueBox;
   late Box<NfeImportadaRegistro> nfeImportadaRegistroBox;
   late Box<KitOrcamento> kitOrcamentoBox;
   late Box<KitOrcamentoItem> kitOrcamentoItemBox;
@@ -85,6 +87,7 @@ class ObjectBox {
     fornecedorNfeBox = Box<FornecedorNfe>(store);
     vinculoFornecedorProdutoBox = Box<VinculoFornecedorProduto>(store);
     historicoEntradaBox = Box<HistoricoEntrada>(store);
+    movimentoEstoqueBox = Box<MovimentoEstoque>(store);
     nfeImportadaRegistroBox = Box<NfeImportadaRegistro>(store);
     kitOrcamentoBox = Box<KitOrcamento>(store);
     kitOrcamentoItemBox = Box<KitOrcamentoItem>(store);

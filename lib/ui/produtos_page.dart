@@ -30,6 +30,7 @@ import '../services/trusted_http_client.dart';
 import '../services/produto_imagem_service.dart';
 import 'layout/app_layout.dart';
 import 'widgets/abas_historico_produto_widget.dart';
+import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'widgets/produto_busca_input.dart';
 
 class _CadastroProdutoSalvarIntent extends Intent {
@@ -4057,7 +4058,7 @@ class _ProdutosPageState extends State<ProdutosPage>
         ],
       ),
       body: DefaultTabController(
-        length: 2,
+        length: 3,
         child: Builder(
           builder: (tabCtx) {
             return Shortcuts(
@@ -4114,6 +4115,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                           tabs: const [
                             Tab(text: 'Dados do produto'),
                             Tab(text: 'Historico de compras'),
+                            Tab(text: 'Movimentacoes estoque'),
                           ],
                         ),
                       ),
@@ -5863,6 +5865,11 @@ class _ProdutosPageState extends State<ProdutosPage>
                             ),
                             AbasHistoricoProdutoWidget(
                               key: ValueKey(_historicoVersao),
+                              produtoRepository: widget.produtoRepository,
+                              produtoId: _produtoEmEdicaoId,
+                            ),
+                            ExtratoMovimentoEstoquePanel(
+                              key: ValueKey('mov_${_historicoVersao}_$_produtoEmEdicaoId'),
                               produtoRepository: widget.produtoRepository,
                               produtoId: _produtoEmEdicaoId,
                             ),

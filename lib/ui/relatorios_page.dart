@@ -18,4 +18,5 @@ export 'relatorios/relatorio_comparativo.dart';
 export 'relatorios/relatorio_dashboard_executivo_page.dart';
 export 'relatorios/relatorio_curva_abc_page.dart';
 export 'relatorios/relatorio_historico_fechamento_page.dart';
+export 'relatorios/relatorio_horarios_pico_page.dart';
 export 'relatorios/relatorio_entregas_resumo_page.dart';

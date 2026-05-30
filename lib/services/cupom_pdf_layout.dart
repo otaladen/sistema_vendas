@@ -11,12 +11,25 @@ class CupomPdfLayout {
   CupomPdfLayout._();
 
   static const double larguraBobinaMm = 80;
-  static const double feedCorteMm = 5;
-  static const double margemPaginaMm = 4;
   static const double espacoBlocoMm = 2.5;
 
+  static double _margemPagina(ConfigLayoutImpressao layout) =>
+      layout.margemPaginaMm.clamp(1, 8);
+
+  static double _margemCorte(ConfigLayoutImpressao layout) =>
+      layout.margemCorteMm.clamp(0, 12);
+
+  static double _fatorEspaco(ConfigLayoutImpressao layout) {
+    var f = layout.fatorEspacoVertical.clamp(0.4, 1.3);
+    if (layout.espacoCompacto) f *= 0.65;
+    return f;
+  }
+
   static double _espacoBloco(ConfigLayoutImpressao layout) =>
-      layout.espacoCompacto ? espacoBlocoMm * 0.65 : espacoBlocoMm;
+      espacoBlocoMm * _fatorEspaco(layout);
+
+  static double _espacoItem(ConfigLayoutImpressao layout) =>
+      layout.espacoEntreItensMm.clamp(0.5, 4) * _fatorEspaco(layout);
 
   static pw.Font _fontePdf(ConfigLayoutImpressao layout) {
     switch (layout.familiaFonte) {
@@ -115,7 +128,7 @@ class CupomPdfLayout {
     double? fontSize,
     pw.FontWeight fontWeight = pw.FontWeight.normal,
     pw.FontWeight? fontWeightDireita,
-    int flexEsquerda = 3,
+    int? flexEsquerda,
   }) {
     final fs = fontSize ?? layout.tamanhoFonteItens.fontSizeItem;
     final estiloEsq = estilo(layout, fontSize: fs, fontWeight: fontWeight);
@@ -124,27 +137,65 @@ class CupomPdfLayout {
       fontSize: fs,
       fontWeight: fontWeightDireita ?? fontWeight,
     );
-    final flexDir = (10 - flexEsquerda).clamp(1, 10);
-    return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Expanded(
-          flex: flexEsquerda,
-          child: pw.Text(
-            esquerda,
-            style: estiloEsq,
-            softWrap: false,
-          ),
-        ),
-        if (direita.isNotEmpty)
+
+    if (direita.isEmpty) {
+      return pw.Text(
+        esquerda,
+        style: estiloEsq,
+        softWrap: true,
+        maxLines: 4,
+      );
+    }
+
+    if (layout.reservarColunaValorFixa) {
+      final wValor = layout.larguraColunaValorMm.clamp(20, 40) * PdfPageFormat.mm;
+      return pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
           pw.Expanded(
-            flex: flexDir,
+            child: pw.Text(
+              esquerda,
+              style: estiloEsq,
+              softWrap: true,
+              maxLines: 4,
+            ),
+          ),
+          pw.SizedBox(
+            width: wValor,
             child: pw.Text(
               direita,
               style: estiloDir,
               textAlign: pw.TextAlign.right,
+              softWrap: false,
             ),
           ),
+        ],
+      );
+    }
+
+    final flexEsq = (flexEsquerda ?? layout.flexColunaEsquerda).clamp(2, 7);
+    final flexDir = (10 - flexEsq).clamp(1, 10);
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Expanded(
+          flex: flexEsq,
+          child: pw.Text(
+            esquerda,
+            style: estiloEsq,
+            softWrap: true,
+            maxLines: 3,
+          ),
+        ),
+        pw.Expanded(
+          flex: flexDir,
+          child: pw.Text(
+            direita,
+            style: estiloDir,
+            textAlign: pw.TextAlign.right,
+            softWrap: false,
+          ),
+        ),
       ],
     );
   }
@@ -180,9 +231,10 @@ class CupomPdfLayout {
     final fsNome = layout.tamanhoFonteItens.fontSizeItem;
     final fsDet = layout.tamanhoFonteItens.fontSizeItemDetalhe;
 
+    final padItem = _espacoItem(layout);
     if (!layout.colunasEsquerdaDireita) {
       return pw.Padding(
-        padding: const pw.EdgeInsets.only(bottom: 2.5),
+        padding: pw.EdgeInsets.only(bottom: padItem),
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
@@ -201,7 +253,7 @@ class CupomPdfLayout {
     }
 
     return pw.Padding(
-      padding: const pw.EdgeInsets.only(bottom: 2.5),
+      padding: pw.EdgeInsets.only(bottom: padItem),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
@@ -306,12 +358,13 @@ class CupomPdfLayout {
     final temLogo = layout.exibirLogo && logo != null && logo.isNotEmpty;
     final fsNome = layout.tamanhoNomeLoja.fontSizeNome;
     final fsContato = layout.tamanhoFonteCorpo.fontSizeContato;
+    final hLogo = layout.alturaLogoMm.clamp(20.0, 52.0);
     return [
       if (temLogo)
         pw.Center(
           child: pw.Padding(
-            padding: const pw.EdgeInsets.only(bottom: 3),
-            child: pw.Image(pw.MemoryImage(logo), height: 40),
+            padding: pw.EdgeInsets.only(bottom: 2 * PdfPageFormat.mm),
+            child: pw.Image(pw.MemoryImage(logo), height: hLogo),
           ),
         ),
       _textoCentralizado(
@@ -466,36 +519,42 @@ class CupomPdfLayout {
   }
 
   static PdfPageFormat formatoPaginaTermica({
+    required ConfigLayoutImpressao layout,
     required int linhasTexto,
     required int qtdItens,
     int linhasExtras = 0,
     bool comLogo = false,
     bool segundaVia = false,
   }) {
-    const alturaLinhaMm = 3.6;
-    const alturaItemMm = 7.0;
-    const blocoCabecalhoMm = 26.0;
-    var mm = margemPaginaMm * 2 +
+    final margem = _margemPagina(layout);
+    final corte = _margemCorte(layout);
+    final fatorAltura = layout.fatorAlturaPaginaPdf.clamp(0.75, 1.15);
+    final fatorEsp = _fatorEspaco(layout);
+    final alturaLinhaMm = 3.4 * fatorEsp;
+    final alturaItemMm = (5.5 + layout.espacoEntreItensMm) * fatorEsp;
+    final blocoCabecalhoMm = 22.0 * fatorEsp;
+    var mm = margem * 2 +
         blocoCabecalhoMm +
         linhasTexto * alturaLinhaMm +
         qtdItens * alturaItemMm +
-        linhasExtras * alturaLinhaMm +
-        feedCorteMm;
-    if (comLogo) mm += 14;
-    if (segundaVia) mm += 5;
-    mm = mm.clamp(55.0, 1200.0);
+        linhasExtras * alturaLinhaMm;
+    if (layout.exibirEspacoFinal) mm += corte;
+    if (comLogo) mm += layout.alturaLogoMm.clamp(20, 52) + 4;
+    if (segundaVia) mm += 4;
+    mm = (mm * fatorAltura).clamp(45.0, 1200.0);
     return PdfPageFormat(
       larguraBobinaMm * PdfPageFormat.mm,
       mm * PdfPageFormat.mm,
-      marginTop: margemPaginaMm * PdfPageFormat.mm,
-      marginBottom: margemPaginaMm * PdfPageFormat.mm,
-      marginLeft: margemPaginaMm * PdfPageFormat.mm,
-      marginRight: margemPaginaMm * PdfPageFormat.mm,
+      marginTop: margem * PdfPageFormat.mm,
+      marginBottom: margem * PdfPageFormat.mm,
+      marginLeft: margem * PdfPageFormat.mm,
+      marginRight: margem * PdfPageFormat.mm,
     );
   }
 
   static PdfPageFormat formatoPagina(
     EmpresaModeloPdf modelo, {
+    required ConfigLayoutImpressao layout,
     required int linhasTexto,
     required int qtdItens,
     int linhasExtras = 0,
@@ -506,11 +565,60 @@ class CupomPdfLayout {
       return PdfPageFormat.a4;
     }
     return formatoPaginaTermica(
+      layout: layout,
       linhasTexto: linhasTexto,
       qtdItens: qtdItens,
       linhasExtras: linhasExtras,
       comLogo: comLogo,
       segundaVia: segundaVia,
+    );
+  }
+
+  /// Formato para impressao direta conforme layout (evita papel em branco).
+  static PdfPageFormat formatoImpressaoDireta({
+    required ConfigLayoutImpressao layout,
+    required PdfPageFormat formatoPdf,
+  }) {
+    switch (layout.modoImpressaoDireta) {
+      case LayoutModoImpressaoDireta.driverIlimitado:
+        return PdfPageFormat(
+          larguraBobinaMm * PdfPageFormat.mm,
+          double.infinity,
+          marginTop: _margemPagina(layout) * PdfPageFormat.mm,
+          marginBottom: _margemPagina(layout) * PdfPageFormat.mm,
+          marginLeft: _margemPagina(layout) * PdfPageFormat.mm,
+          marginRight: _margemPagina(layout) * PdfPageFormat.mm,
+        );
+      case LayoutModoImpressaoDireta.altura150:
+      case LayoutModoImpressaoDireta.altura200:
+        final h = layout.modoImpressaoDireta.alturaFixaMm ?? 150;
+        return PdfPageFormat(
+          larguraBobinaMm * PdfPageFormat.mm,
+          h * PdfPageFormat.mm,
+          marginTop: formatoPdf.marginTop,
+          marginBottom: formatoPdf.marginBottom,
+          marginLeft: formatoPdf.marginLeft,
+          marginRight: formatoPdf.marginRight,
+        );
+      case LayoutModoImpressaoDireta.alturaPdf:
+        return formatoPdf;
+    }
+  }
+
+  @Deprecated('Use formatoImpressaoDireta com layout e formatoPdf')
+  static PdfPageFormat formatoImpressaoDiretaBobina() => PdfPageFormat(
+        larguraBobinaMm * PdfPageFormat.mm,
+        double.infinity,
+      );
+
+  static pw.Widget espacoFinalDocumento(ConfigLayoutImpressao layout) {
+    if (!layout.exibirEspacoFinal) return pw.SizedBox();
+    return pw.Column(
+      mainAxisSize: pw.MainAxisSize.min,
+      children: [
+        espacoBloco(layout),
+        pw.SizedBox(height: _margemCorte(layout) * PdfPageFormat.mm),
+      ],
     );
   }
 }

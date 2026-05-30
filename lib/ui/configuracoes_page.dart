@@ -29,6 +29,8 @@ import '../services/print_service.dart';
 import 'widgets/rede_sincronizacao_card.dart';
 import '../model/mensagem_log.dart';
 import '../model/mensagem_template.dart';
+import '../services/cupom_layout_preview_pdf.dart';
+import '../services/cupom_pdf_layout.dart';
 import 'config_impressora_page.dart';
 import 'layout_impressao_page.dart';
 
@@ -61,6 +63,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _rodapeOrcamentoController = TextEditingController();
   final _limiteDivergenciaCaixaController = TextEditingController();
   final _maxDescontoPercentualPdvController = TextEditingController();
+  final _margemMinimaPadraoController = TextEditingController();
+  final _whatsappDonoController = TextEditingController();
+  final _alertasIntervaloController = TextEditingController(text: '120');
   final _whatsApiVersionController = TextEditingController();
   final _whatsPhoneIdController = TextEditingController();
   final _whatsTokenController = TextEditingController();
@@ -91,6 +96,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   int _ultimoBackupAutomaticoMs = 0;
   bool _permitirVendaSemEstoque = false;
   bool _mostrarCampoDescontoCaixa = true;
+  bool _exigirAutorizacaoSegundaViaCupom = true;
+  bool _umCaixaAbertoPorLoja = true;
+  bool _alertasProativosWhatsappAtivos = false;
   List<MensagemTemplate> _templatesMensagem = [];
   int _filaPendente = 0;
   int _logsTotais = 0;
@@ -141,6 +149,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _rodapeOrcamentoController.dispose();
     _limiteDivergenciaCaixaController.dispose();
     _maxDescontoPercentualPdvController.dispose();
+    _margemMinimaPadraoController.dispose();
+    _whatsappDonoController.dispose();
+    _alertasIntervaloController.dispose();
     _whatsApiVersionController.dispose();
     _whatsPhoneIdController.dispose();
     _whatsTokenController.dispose();
@@ -271,9 +282,19 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _logoPath = config.logoPath;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       _mostrarCampoDescontoCaixa = config.mostrarCampoDescontoCaixa;
+      _exigirAutorizacaoSegundaViaCupom =
+          config.exigirAutorizacaoSegundaViaCupom;
       _maxDescontoPercentualPdvController.text = config.maxDescontoPercentualPdv
           .toStringAsFixed(1)
           .replaceAll('.', ',');
+      _margemMinimaPadraoController.text = config.margemMinimaPercentualPadrao
+          .toStringAsFixed(1)
+          .replaceAll('.', ',');
+      _umCaixaAbertoPorLoja = config.umCaixaAbertoPorLoja;
+      _alertasProativosWhatsappAtivos = config.alertasProativosWhatsappAtivos;
+      _whatsappDonoController.text = config.whatsappDonoNumero;
+      _alertasIntervaloController.text =
+          config.alertasProativosIntervaloMinutos.toString();
       _whatsApiVersionController.text = config.whatsappApiVersion;
       _whatsPhoneIdController.text = config.whatsappPhoneNumberId;
       _whatsTokenController.text = config.whatsappAccessToken;
@@ -486,9 +507,20 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           limiteDivergenciaCaixa:
               _parseMoeda(_limiteDivergenciaCaixaController.text) ?? 20,
           mostrarCampoDescontoCaixa: _mostrarCampoDescontoCaixa,
+          exigirAutorizacaoSegundaViaCupom: _exigirAutorizacaoSegundaViaCupom,
           maxDescontoPercentualPdv:
               (_parseMoeda(_maxDescontoPercentualPdvController.text) ?? 15)
                   .clamp(0, 100),
+          margemMinimaPercentualPadrao:
+              (_parseMoeda(_margemMinimaPadraoController.text) ?? 20)
+                  .clamp(0, 99),
+          umCaixaAbertoPorLoja: _umCaixaAbertoPorLoja,
+          alertasProativosWhatsappAtivos: _alertasProativosWhatsappAtivos,
+          whatsappDonoNumero: _whatsappDonoController.text.trim(),
+          alertasProativosIntervaloMinutos: int.tryParse(
+                _alertasIntervaloController.text.trim(),
+              ) ??
+              120,
           permitirVendaSemEstoque: _permitirVendaSemEstoque,
           whatsappApiVersion: _whatsApiVersionController.text,
           whatsappPhoneNumberId: _whatsPhoneIdController.text,
@@ -898,18 +930,51 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         );
         return;
       }
-      final pdfBytes = await _gerarPdfTeste();
-      await Printing.directPrintPdf(
-        printer: printer,
-        onLayout: (_) async => pdfBytes,
-        name: 'Teste Impressao Sistema Vendas',
-        format: _modeloPdf == 'a4'
-            ? PdfPageFormat.a4
-            : PdfPageFormat(80 * PdfPageFormat.mm, double.infinity),
+      final salva = await widget.appConfigRepository.carregarEmpresaConfig();
+      final empresa = salva.copyWith(
+        nomeLoja: _nomeLojaController.text.trim(),
+        telefone: _telefoneController.text.trim(),
+        endereco: _enderecoController.text.trim(),
+        pastaPadraoPdf: _pastaPadraoPdfController.text.trim(),
+        impressoraPadrao: _impressoraPadrao,
+        modeloPdf: _modeloPdf,
+        rodapeNota: _rodapeNotaController.text.trim(),
+        rodapeOrcamento: _rodapeOrcamentoController.text.trim(),
+        logoPath: _logoPath,
       );
+      if (_modeloPdf == 'cupom') {
+        final pdf = await CupomLayoutPreviewPdf.gerar(
+          empresa: empresa,
+          layout: empresa.layoutImpressao.orcamento,
+          orcamento: true,
+        );
+        await Printing.directPrintPdf(
+          printer: printer,
+          onLayout: (_) async => pdf.bytes,
+          name: 'Teste_orcamento_80mm',
+          format: CupomPdfLayout.formatoImpressaoDireta(
+            layout: pdf.layout,
+            formatoPdf: pdf.pageFormat,
+          ),
+        );
+      } else {
+        final pdfBytes = await _gerarPdfTeste();
+        await Printing.directPrintPdf(
+          printer: printer,
+          onLayout: (_) async => pdfBytes,
+          name: 'Teste Impressao Sistema Vendas',
+          format: PdfPageFormat.a4,
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Teste de impressao enviado.')),
+        SnackBar(
+          content: Text(
+            _modeloPdf == 'cupom'
+                ? 'Teste de orcamento (80 mm) enviado. Confira subtotal e total.'
+                : 'Teste de impressao enviado.',
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -1637,6 +1702,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                             MaterialPageRoute<void>(
                               builder: (_) => LayoutImpressaoPage(
                                 appConfigRepository: widget.appConfigRepository,
+                                printService: widget.printService,
                               ),
                             ),
                           );
@@ -1792,6 +1858,83 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         subtitle: const Text(
                           'Desligue para ocultar o campo de desconto na tela do Caixa. '
                           'O total segue sem desconto adicional pelo operador.',
+                        ),
+                      ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _umCaixaAbertoPorLoja,
+                        onChanged: (value) {
+                          setState(() => _umCaixaAbertoPorLoja = value);
+                        },
+                        title: const Text('Um unico caixa aberto por loja'),
+                        subtitle: const Text(
+                          'Impede abrir caixa em outro terminal enquanto '
+                          'ja existir sessao aberta na rede.',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _margemMinimaPadraoController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Margem minima padrao (%)',
+                          hintText: 'Ex.: 20',
+                          helperText:
+                              'Alerta na conferencia de NF-e de entrada quando '
+                              'a margem sobre venda ficar abaixo deste valor.',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _alertasProativosWhatsappAtivos,
+                        onChanged: (value) {
+                          setState(
+                            () => _alertasProativosWhatsappAtivos = value,
+                          );
+                        },
+                        title: const Text('Alertas proativos WhatsApp'),
+                        subtitle: const Text(
+                          'Fiado vencido, estoque zerado e caixa aberto apos 18h '
+                          'para o numero do dono (requer mensageria configurada).',
+                        ),
+                      ),
+                      TextField(
+                        controller: _whatsappDonoController,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          labelText: 'WhatsApp do dono',
+                          hintText: 'Ex.: 5511999999999',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _alertasIntervaloController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Intervalo entre alertas (minutos)',
+                          hintText: '120',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _exigirAutorizacaoSegundaViaCupom,
+                        onChanged: (value) {
+                          setState(() {
+                            _exigirAutorizacaoSegundaViaCupom = value;
+                          });
+                        },
+                        title: const Text(
+                          'Exigir autorizacao para segunda via do cupom',
+                        ),
+                        subtitle: const Text(
+                          'Quando ativo, o operador precisa informar login e senha '
+                          'de um usuario com permissao para imprimir a 2a via. '
+                          'Desligue para permitir a reimpressao direta no Caixa '
+                          'e na listagem de vendas.',
                         ),
                       ),
                       const SizedBox(height: 10),

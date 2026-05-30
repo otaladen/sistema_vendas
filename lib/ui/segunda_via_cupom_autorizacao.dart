@@ -59,6 +59,16 @@ Future<bool> solicitarSenhaAutorizacaoSegundaViaCupom(
   return true;
 }
 
+/// Respeita [exigirAutorizacao] das configuracoes do Caixa.
+Future<bool> autorizarSegundaViaCupomSeConfigurado({
+  required BuildContext context,
+  required UsuarioRepository usuarioRepository,
+  required bool exigirAutorizacao,
+}) {
+  if (!exigirAutorizacao) return Future.value(true);
+  return solicitarSenhaAutorizacaoSegundaViaCupom(context, usuarioRepository);
+}
+
 /// Controllers vivem apenas enquanto o dialogo esta aberto (evita dispose prematuro).
 class _DialogoAutorizacaoSegundaVia extends StatefulWidget {
   const _DialogoAutorizacaoSegundaVia();

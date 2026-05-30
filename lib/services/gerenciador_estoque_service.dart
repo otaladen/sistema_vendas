@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:objectbox/objectbox.dart';
 import 'package:path/path.dart' as p;
 
+import '../data/movimento_estoque_repository.dart';
 import '../data/objectbox.dart';
 import '../data/produto_busca_util.dart';
 import '../domain/complemento_entrega_codec.dart';
@@ -20,21 +21,49 @@ import 'compras_preditivas_service.dart';
 /// Regra: baixa fisica de venda no balcao ocorre no **cupom nao fiscal**, nao na
 /// NFC-e/NF-e de venda. Reservas (carreto / retirada futura) seguem no orcamento
 /// e na finalizacao; saida do carro e retiradas parciais usam tipos proprios.
+/// Snapshot de saldos antes de uma mutacao (kardex).
+typedef EstoqueAntes = ({int fisico, int reserva});
+
 class GerenciadorEstoqueService {
-  GerenciadorEstoqueService(this._db);
+  GerenciadorEstoqueService(this._db)
+      : _movimentos = MovimentoEstoqueRepository(_db);
 
   final ObjectBox _db;
+  final MovimentoEstoqueRepository _movimentos;
   static bool _migracaoBaixadoCupomLegadoOk = false;
+
+  EstoqueAntes _snap(Produto p) =>
+      (fisico: p.estoqueReal, reserva: p.estoqueReservado);
 
   // --- Persistencia e politica ---
 
-  void persistirProduto(Produto produto, TipoMovimentoEstoque tipo) {
+  void persistirProduto(
+    Produto produto,
+    TipoMovimentoEstoque tipo, {
+    EstoqueAntes? antes,
+    String documentoReferencia = '',
+    String motivo = '',
+    String usuarioLogin = '',
+  }) {
     if (tipo == TipoMovimentoEstoque.nfceEmissao ||
         tipo == TipoMovimentoEstoque.nfeVendaEmissao) {
       PoliticaMovimentoEstoque.validarNaoAlteraEstoque(tipo);
     }
     ProdutoEstoqueSync.marcarEstoqueAlterado(produto);
     _db.produtoBox.put(produto);
+    if (antes != null && produto.id > 0) {
+      _movimentos.registrar(
+        produto: produto,
+        tipo: tipo,
+        saldoFisicoAntes: antes.fisico,
+        saldoReservaAntes: antes.reserva,
+        saldoFisicoDepois: produto.estoqueReal,
+        saldoReservaDepois: produto.estoqueReservado,
+        documentoReferencia: documentoReferencia,
+        motivo: motivo,
+        usuarioLogin: usuarioLogin,
+      );
+    }
   }
 
   void garantirDocumentoFiscalNaoAlteraEstoque(TipoMovimentoEstoque tipo) {
@@ -55,7 +84,11 @@ class GerenciadorEstoqueService {
   }
 
   /// Entrada fisica por conferencia/importacao de NF-e de compra.
-  void registrarEntradaPorNotaFiscal(Produto produto, num quantidade) {
+  void registrarEntradaPorNotaFiscal(
+    Produto produto,
+    num quantidade, {
+    String documentoReferencia = '',
+  }) {
     if (produto.id <= 0) {
       throw StateError(
         'Produto sem id: grave o cadastro antes de registrar entrada por NF-e.',
@@ -70,16 +103,26 @@ class GerenciadorEstoqueService {
     if (atual == null) {
       throw StateError('Produto id ${produto.id} nao encontrado.');
     }
+    final antes = _snap(atual);
     atual.estoqueReal += qtd;
     atual.estoqueAtual = atual.estoqueReal;
-    persistirProduto(atual, TipoMovimentoEstoque.entradaNfeCompra);
+    persistirProduto(
+      atual,
+      TipoMovimentoEstoque.entradaNfeCompra,
+      antes: antes,
+      documentoReferencia: documentoReferencia,
+    );
     produto.estoqueReal = atual.estoqueReal;
     produto.estoqueAtual = atual.estoqueAtual;
     produto.estoqueVersao = atual.estoqueVersao;
   }
 
   /// Estorno da entrada de estoque de uma NF-e de compra ja lancada.
-  void estornarEntradaPorNotaFiscal(Produto produto, num quantidade) {
+  void estornarEntradaPorNotaFiscal(
+    Produto produto,
+    num quantidade, {
+    String documentoReferencia = '',
+  }) {
     if (produto.id <= 0) {
       throw StateError('Produto sem id para estornar entrada de NF-e.');
     }
@@ -105,9 +148,15 @@ class GerenciadorEstoqueService {
         'apos o estorno restariam $estoqueApos no fisico.',
       );
     }
+    final antes = _snap(atual);
     atual.estoqueReal = estoqueApos;
     atual.estoqueAtual = atual.estoqueReal;
-    persistirProduto(atual, TipoMovimentoEstoque.estornoEntradaNfeCompra);
+    persistirProduto(
+      atual,
+      TipoMovimentoEstoque.estornoEntradaNfeCompra,
+      antes: antes,
+      documentoReferencia: documentoReferencia,
+    );
     produto.estoqueReal = atual.estoqueReal;
     produto.estoqueAtual = atual.estoqueAtual;
     produto.estoqueVersao = atual.estoqueVersao;
@@ -117,8 +166,9 @@ class GerenciadorEstoqueService {
   void executarAjusteManualInventario(
     Produto produto,
     num novaQuantidadeFisica,
-    String motivo,
-  ) {
+    String motivo, {
+    String usuarioLogin = '',
+  }) {
     if (produto.id <= 0) {
       throw StateError(
         'Produto sem id: inclua o cadastro antes do ajuste de inventario.',
@@ -128,8 +178,15 @@ class GerenciadorEstoqueService {
     if (atual == null) {
       throw StateError('Produto id ${produto.id} nao encontrado.');
     }
+    final antes = _snap(atual);
     prepararAjusteManualInventario(atual, novaQuantidadeFisica, motivo);
-    persistirProduto(atual, TipoMovimentoEstoque.ajusteManual);
+    persistirProduto(
+      atual,
+      TipoMovimentoEstoque.ajusteManual,
+      antes: antes,
+      motivo: motivo,
+      usuarioLogin: usuarioLogin,
+    );
     produto.estoqueReal = atual.estoqueReal;
     produto.estoqueAtual = atual.estoqueAtual;
     produto.estoqueVersao = atual.estoqueVersao;
@@ -231,13 +288,19 @@ class GerenciadorEstoqueService {
         '(livre ${produto.estoqueLivreParaVenda}, necessario $q).',
       );
     }
+    final antes = _snap(produto);
     produto.estoqueReservado += q;
     if (EntregaVendaHelper.tipoEfetivoItem(item) ==
         EntregaVendaHelper.tipoEntregaLoja) {
       item.quantidadeNoCarreto = q;
       _db.itemVendaBox.put(item);
     }
-    persistirProduto(produto, TipoMovimentoEstoque.orcamentoReserva);
+    persistirProduto(
+      produto,
+      TipoMovimentoEstoque.orcamentoReserva,
+      antes: antes,
+      documentoReferencia: _refItemVenda(item),
+    );
   }
 
   void liberarReservaEstoqueItemOrcamento(ItemVenda item) {
@@ -245,6 +308,7 @@ class GerenciadorEstoqueService {
     if (q <= 0) return;
     final produto = item.produto.target;
     if (produto == null) return;
+    final antes = _snap(produto);
     final reservadoAtual = produto.estoqueReservado;
     produto.estoqueReservado =
         (reservadoAtual - q).clamp(0, reservadoAtual).toInt();
@@ -254,7 +318,12 @@ class GerenciadorEstoqueService {
       item.quantidadeNoCarreto = 0;
       _db.itemVendaBox.put(item);
     }
-    persistirProduto(produto, TipoMovimentoEstoque.orcamentoLiberaReserva);
+    persistirProduto(
+      produto,
+      TipoMovimentoEstoque.orcamentoLiberaReserva,
+      antes: antes,
+      documentoReferencia: _refItemVenda(item),
+    );
   }
 
   void liberarReservaEstoqueOrcamento(Venda venda) {
@@ -298,10 +367,13 @@ class GerenciadorEstoqueService {
               'Reserva de estoque insuficiente para ${produto.nome}.',
             );
           }
+          final antes = _snap(produto);
           produto.estoqueReservado += falta;
           persistirProduto(
             produto,
             TipoMovimentoEstoque.finalizacaoAjustaReserva,
+            antes: antes,
+            documentoReferencia: _refItemVenda(item),
           );
         }
         break;
@@ -314,14 +386,20 @@ class GerenciadorEstoqueService {
               'Reserva de estoque insuficiente para ${produto.nome}.',
             );
           }
+          final antes = _snap(produto);
           produto.estoqueReservado += falta;
+          item.quantidadeNoCarreto = q;
+          _db.itemVendaBox.put(item);
+          persistirProduto(
+            produto,
+            TipoMovimentoEstoque.finalizacaoAjustaReserva,
+            antes: antes,
+            documentoReferencia: _refItemVenda(item),
+          );
+        } else {
+          item.quantidadeNoCarreto = q;
+          _db.itemVendaBox.put(item);
         }
-        item.quantidadeNoCarreto = q;
-        _db.itemVendaBox.put(item);
-        persistirProduto(
-          produto,
-          TipoMovimentoEstoque.finalizacaoAjustaReserva,
-        );
         break;
       default:
         break;
@@ -354,10 +432,16 @@ class GerenciadorEstoqueService {
     PoliticaMovimentoEstoque.validarPermiteAlteracaoFisica(
       TipoMovimentoEstoque.cupomNaoFiscalVenda,
     );
+    final antes = _snap(produto);
     produto.estoqueReal -= q;
     item.quantidadeJaRetirada = q;
     _db.itemVendaBox.put(item);
-    persistirProduto(produto, TipoMovimentoEstoque.cupomNaoFiscalVenda);
+    persistirProduto(
+      produto,
+      TipoMovimentoEstoque.cupomNaoFiscalVenda,
+      antes: antes,
+      documentoReferencia: _refItemVenda(item),
+    );
     ComprasPreditivasService(_db).atualizarAposVendaRegistrada(
       produto: produto,
       quantidadeVendida: q,
@@ -409,8 +493,14 @@ class GerenciadorEstoqueService {
     PoliticaMovimentoEstoque.validarPermiteAlteracaoFisica(
       TipoMovimentoEstoque.vendaDiretaLegada,
     );
+    final antes = _snap(produto);
     produto.estoqueReal -= quantidade;
-    persistirProduto(produto, TipoMovimentoEstoque.vendaDiretaLegada);
+    persistirProduto(
+      produto,
+      TipoMovimentoEstoque.vendaDiretaLegada,
+      antes: antes,
+      documentoReferencia: 'Produto ${produto.id}',
+    );
     ComprasPreditivasService(_db).atualizarAposVendaRegistrada(
       produto: produto,
       quantidadeVendida: quantidade,
@@ -473,9 +563,15 @@ class GerenciadorEstoqueService {
           '${produto.estoqueReservado}, precisa $q (fisico ${produto.estoqueReal}).',
         );
       }
+      final antes = _snap(produto);
       produto.estoqueReservado -= q;
       produto.estoqueReal -= q;
-      persistirProduto(produto, TipoMovimentoEstoque.carretoSaida);
+      persistirProduto(
+        produto,
+        TipoMovimentoEstoque.carretoSaida,
+        antes: antes,
+        documentoReferencia: _refItemVenda(item),
+      );
       item.quantidadeJaRetirada += q;
       _db.itemVendaBox.put(item);
     }
@@ -556,9 +652,15 @@ class GerenciadorEstoqueService {
       final qReserva = q.clamp(0, produto.estoqueReservado);
       if (qReserva <= 0) continue;
 
+      final antes = _snap(produto);
       produto.estoqueReservado -= qReserva;
       produto.estoqueReal -= qReserva;
-      persistirProduto(produto, TipoMovimentoEstoque.carretoSaida);
+      persistirProduto(
+        produto,
+        TipoMovimentoEstoque.carretoSaida,
+        antes: antes,
+        documentoReferencia: _refVenda(venda),
+      );
     }
   }
 
@@ -581,9 +683,15 @@ class GerenciadorEstoqueService {
         if (q < 0) q = 0;
       }
       if (q <= 0) continue;
+      final antes = _snap(produto);
       produto.estoqueReal += q;
       produto.estoqueReservado += q;
-      persistirProduto(produto, TipoMovimentoEstoque.carretoEstornoSaida);
+      persistirProduto(
+        produto,
+        TipoMovimentoEstoque.carretoEstornoSaida,
+        antes: antes,
+        documentoReferencia: _refVenda(venda),
+      );
     }
   }
 
@@ -632,9 +740,15 @@ class GerenciadorEstoqueService {
       if (produto == null) {
         throw StateError('Produto do item ${item.id} nao encontrado.');
       }
+      final antes = _snap(produto);
       produto.estoqueReservado += e.value;
       produto.estoqueReal += e.value;
-      persistirProduto(produto, TipoMovimentoEstoque.complementoEntregaFalta);
+      persistirProduto(
+        produto,
+        TipoMovimentoEstoque.complementoEntregaFalta,
+        antes: antes,
+        documentoReferencia: _refVenda(venda),
+      );
     }
   }
 
@@ -677,9 +791,15 @@ class GerenciadorEstoqueService {
           '(real ${produto.estoqueReal}, precisa ${e.value}).',
         );
       }
+      final antes = _snap(produto);
       produto.estoqueReservado -= e.value;
       produto.estoqueReal -= e.value;
-      persistirProduto(produto, TipoMovimentoEstoque.complementoEntregaBaixa);
+      persistirProduto(
+        produto,
+        TipoMovimentoEstoque.complementoEntregaBaixa,
+        antes: antes,
+        documentoReferencia: _refVenda(venda),
+      );
     }
   }
 
@@ -691,9 +811,15 @@ class GerenciadorEstoqueService {
       if (produto == null) {
         throw StateError('Produto do item ${item.id} nao encontrado.');
       }
+      final antes = _snap(produto);
       produto.estoqueReal += item.quantidade;
       produto.estoqueReservado += item.quantidade;
-      persistirProduto(produto, TipoMovimentoEstoque.retiradaTotalImediata);
+      persistirProduto(
+        produto,
+        TipoMovimentoEstoque.retiradaTotalImediata,
+        antes: antes,
+        documentoReferencia: _refVenda(venda),
+      );
     }
   }
 
@@ -721,9 +847,15 @@ class GerenciadorEstoqueService {
       }
     }
     PoliticaMovimentoEstoque.validarPermiteAlteracaoFisica(tipo);
+    final antes = _snap(produto);
     produto.estoqueReal -= quantidade;
     produto.estoqueReservado -= quantidade;
-    persistirProduto(produto, tipo);
+    persistirProduto(
+      produto,
+      tipo,
+      antes: antes,
+      documentoReferencia: _refItemVenda(item),
+    );
   }
 
   // --- Cancelamento ---
@@ -733,28 +865,48 @@ class GerenciadorEstoqueService {
       final produto = item.produto.target;
       if (produto == null) continue;
 
+      final antes = _snap(produto);
+      var alterou = false;
+
       if (venda.entregaPendente) {
         final reservadoAtual = produto.estoqueReservado;
-        produto.estoqueReservado = (reservadoAtual - item.quantidade)
+        final novo = (reservadoAtual - item.quantidade)
             .clamp(0, reservadoAtual)
             .toInt();
+        if (novo != reservadoAtual) {
+          produto.estoqueReservado = novo;
+          alterou = true;
+        }
       } else if (EntregaVendaHelper.vendaTemItensCarreto(venda) &&
           venda.carretoReservaAteSaida) {
         if (venda.cargaSaiu) {
           produto.estoqueReal += item.quantidade;
+          alterou = true;
         } else {
           final qReserva = quantidadeItemParaEstoqueCarreto(item);
           final reservadoAtual = produto.estoqueReservado;
-          produto.estoqueReservado = (reservadoAtual - qReserva)
+          final novo = (reservadoAtual - qReserva)
               .clamp(0, reservadoAtual)
               .toInt();
+          if (novo != reservadoAtual) {
+            produto.estoqueReservado = novo;
+            alterou = true;
+          }
         }
       } else if (venda.estoqueBaixadoCupom ||
           EntregaVendaHelper.tipoEfetivoItem(item) !=
               EntregaVendaHelper.tipoRetirada) {
         produto.estoqueReal += item.quantidade;
+        alterou = true;
       }
-      persistirProduto(produto, TipoMovimentoEstoque.cancelamentoVendaEstorno);
+      if (alterou) {
+        persistirProduto(
+          produto,
+          TipoMovimentoEstoque.cancelamentoVendaEstorno,
+          antes: antes,
+          documentoReferencia: _refVenda(venda),
+        );
+      }
     }
   }
 
@@ -767,6 +919,7 @@ class GerenciadorEstoqueService {
     required int qtd,
   }) {
     if (qtd <= 0) return;
+    final antes = _snap(produto);
     if (venda.entregaPendente) {
       final daReserva = qtd <= item.quantidadePendenteRetirada
           ? qtd
@@ -787,7 +940,12 @@ class GerenciadorEstoqueService {
     } else {
       produto.estoqueReal += qtd;
     }
-    persistirProduto(produto, TipoMovimentoEstoque.devolucaoCliente);
+    persistirProduto(
+      produto,
+      TipoMovimentoEstoque.devolucaoCliente,
+      antes: antes,
+      documentoReferencia: _refVenda(venda),
+    );
   }
 
   void baixarEstoqueSaidaTroca({
@@ -804,7 +962,27 @@ class GerenciadorEstoqueService {
     PoliticaMovimentoEstoque.validarPermiteAlteracaoFisica(
       TipoMovimentoEstoque.devolucaoCliente,
     );
+    final antes = _snap(produto);
     produto.estoqueReal -= quantidade;
-    persistirProduto(produto, TipoMovimentoEstoque.devolucaoCliente);
+    persistirProduto(
+      produto,
+      TipoMovimentoEstoque.devolucaoCliente,
+      antes: antes,
+      documentoReferencia: 'Troca produto ${produto.id}',
+    );
+  }
+
+  String _refVenda(Venda venda) {
+    if (venda.numeroOrcamento > 0) {
+      return 'Venda ${venda.numeroOrcamento}';
+    }
+    return 'Venda id ${venda.id}';
+  }
+
+  String _refItemVenda(ItemVenda item) {
+    final venda = item.venda.target;
+    if (venda != null) return _refVenda(venda);
+    if (item.venda.targetId > 0) return 'Venda id ${item.venda.targetId}';
+    return 'Item ${item.id}';
   }
 }

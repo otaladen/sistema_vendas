@@ -322,7 +322,7 @@ class _MyAppState extends State<MyApp> {
                   widget.objectBox,
                   onAposEscrita: produtoRepository.invalidarCacheBusca,
                 );
-                return MainMenuPage(
+                return MainAppShellPage(
                   objectBox: widget.objectBox,
                   produtoRepository: produtoRepository,
                   clienteRepository: ClienteRepository(widget.objectBox),

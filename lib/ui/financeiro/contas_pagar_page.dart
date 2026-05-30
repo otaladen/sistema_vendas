@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../data/models/conta_pagar.dart';
 import '../../data/objectbox.dart';
+import '../../data/sync/sync_write_trigger.dart';
 import '../../main.dart';
 import '../../objectbox.g.dart';
 import 'widgets/grafico_vencimentos.dart';
@@ -50,7 +51,8 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
       if (c.status != ContaPagarStatus.pendente) continue;
       if (_somenteData(c.dataVencimento).isBefore(hoje)) {
         c.status = ContaPagarStatus.atrasado;
-        widget.objectBox.contaPagarBox.put(c);
+        final id = widget.objectBox.contaPagarBox.put(c);
+        notificarAlteracaoParaRede(entidade: 'conta_pagar', entidadeId: id);
       }
     }
   }
@@ -223,7 +225,8 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
     conta.status = ContaPagarStatus.pago;
     conta.dataPagamento = dataPg;
     conta.valorPago = vp;
-    widget.objectBox.contaPagarBox.put(conta);
+    final id = widget.objectBox.contaPagarBox.put(conta);
+    notificarAlteracaoParaRede(entidade: 'conta_pagar', entidadeId: id);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

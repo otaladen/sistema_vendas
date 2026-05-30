@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -241,10 +243,18 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final estreito = constraints.maxWidth < 720;
+        final estreito = constraints.maxWidth < 720 ||
+            constraints.maxHeight < 680;
         final colViagens = estreito
             ? const BoxConstraints()
             : const BoxConstraints(maxWidth: 280, minWidth: 240);
+        final alturaListaViagens = estreito
+            ? (constraints.maxHeight < 480
+                ? 72.0
+                : constraints.maxHeight < 520
+                    ? 96.0
+                    : 120.0)
+            : null;
 
         final seletorMotorista = _faixaMotoristas(motoristas);
         final alertaSemMotorista = _faixaAlertaSemMotorista();
@@ -283,7 +293,10 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
               ],
               const SizedBox(height: 8),
               if (!_modoAgrupar) ...[
-                SizedBox(height: 120, child: listaViagens),
+                SizedBox(
+                  height: alturaListaViagens ?? 120,
+                  child: listaViagens,
+                ),
                 const Divider(height: 1),
               ],
               Expanded(child: painelPrincipal),
@@ -574,349 +587,388 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
     );
   }
 
+  Widget _cabecalhoViagem(
+    MontagemEntregaViagem viagem,
+    List<Venda> ordenadas, {
+    required bool compacto,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final prog = montagemProgressoCargaViagem(ordenadas);
+    final checklistOk = montagemChecklistViagemCompleto(ordenadas);
+    final densidade = compacto ? VisualDensity.compact : VisualDensity.standard;
+    final padding = compacto
+        ? const EdgeInsets.fromLTRB(8, 6, 8, 6)
+        : const EdgeInsets.fromLTRB(12, 10, 12, 10);
+
+    return Material(
+      color: scheme.primaryContainer.withValues(alpha: 0.35),
+      child: Padding(
+        padding: padding,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              viagem.rotulo,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: compacto ? 15 : null,
+                  ),
+            ),
+            Text(
+              '${ordenadas.length} parada(s) · Motorista: ${viagem.motorista}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            SizedBox(height: compacto ? 6 : 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                FilterChip(
+                  visualDensity: densidade,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  label: const Text('Separado'),
+                  selected: ordenadas.every((v) => v.cargaSeparada),
+                  onSelected: widget.podeGerenciarStatus
+                      ? (v) => _aplicarChecklistViagem(ordenadas, separado: v)
+                      : null,
+                ),
+                FilterChip(
+                  visualDensity: densidade,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  label: const Text('Carregado'),
+                  selected: ordenadas.every((v) => v.cargaCarregada),
+                  onSelected: widget.podeGerenciarStatus
+                      ? (v) => _aplicarChecklistViagem(ordenadas, carregado: v)
+                      : null,
+                ),
+                FilterChip(
+                  visualDensity: densidade,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  label: const Text('Saiu'),
+                  selected: ordenadas.every((v) => v.cargaSaiu),
+                  onSelected: widget.podeGerenciarStatus
+                      ? (v) => _aplicarChecklistViagem(ordenadas, saiu: v)
+                      : null,
+                ),
+                Chip(
+                  visualDensity: densidade,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  avatar: Icon(
+                    checklistOk ? Icons.check_circle : Icons.timelapse,
+                    size: 18,
+                    color: checklistOk ? Colors.green.shade700 : scheme.outline,
+                  ),
+                  label: Text('Carga $prog/3'),
+                ),
+              ],
+            ),
+            SizedBox(height: compacto ? 4 : 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(visualDensity: densidade),
+                  onPressed: () => widget.callbacks.emitirRelatorio(
+                    tipo: RelatorioEntregaTipo.separacaoViagem,
+                    viagem: ordenadas,
+                    salvarPdf: false,
+                  ),
+                  icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                  label: const Text('Separacao (PDF)'),
+                ),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(visualDensity: densidade),
+                  onPressed: motoristaLogisticaDefinido(viagem.motorista)
+                      ? () => widget.callbacks.emitirRelatorio(
+                            tipo: RelatorioEntregaTipo.romaneioMotoristaDia,
+                            motorista: viagem.motorista,
+                            viagem: ordenadas,
+                            salvarPdf: false,
+                          )
+                      : _avisarMotoristaIndefinido,
+                  icon: const Icon(Icons.assignment_outlined, size: 18),
+                  label: const Text('Romaneio'),
+                ),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(visualDensity: densidade),
+                  onPressed: () => _abrirMapaRota(ordenadas),
+                  icon: const Icon(Icons.map_outlined, size: 18),
+                  label: const Text('Mapa rota'),
+                ),
+                if (widget.podeGerenciarStatus)
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(visualDensity: densidade),
+                    onPressed: () {
+                      if (viagem.ehGrupo) {
+                        widget.callbacks.editarMotoristaGrupo(
+                          viagem.grupoId,
+                          viagem.motorista,
+                        );
+                      } else {
+                        widget.callbacks.editarMotoristaPedido(ordenadas.first);
+                      }
+                    },
+                    icon: const Icon(Icons.person_outline, size: 18),
+                    label: const Text('Motorista'),
+                  ),
+                if (widget.podeGerenciarStatus) ...[
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(visualDensity: densidade),
+                    onPressed: () => _statusViagem('roteirizada'),
+                    child: const Text('Roteirizar'),
+                  ),
+                  FilledButton(
+                    style: FilledButton.styleFrom(visualDensity: densidade),
+                    onPressed: checklistOk
+                        ? () => _statusViagem('saiu_entrega')
+                        : null,
+                    child: const Text('Saiu p/ entrega'),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _secaoCargaConsolidada(
+    MontagemEntregaViagem viagem,
+    List<RomaneioCargaConsolidadaLinha> linhas, {
+    EdgeInsetsGeometry margin = const EdgeInsets.fromLTRB(8, 8, 8, 4),
+  }) {
+    return Card(
+      margin: margin,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: Text(
+              'Carga consolidada (patio)',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              'Marque ao separar. Quantidades somadas de todos os pedidos desta viagem.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: ConferenciaCargaConsolidadaLista(
+                linhas: linhas,
+                escopoViagem: viagem.chave,
+                conferenciaRepository: widget.conferenciaRepository,
+                usuarioAtual: widget.usuarioAtual,
+                vendasGrupo: viagem.vendas,
+                quantidadeEntrega: widget.quantidadeItemEntrega,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _secaoRotaParadas(
+    MontagemEntregaViagem viagem,
+    List<Venda> ordenadas, {
+    EdgeInsetsGeometry margin = const EdgeInsets.fromLTRB(8, 4, 8, 8),
+  }) {
+    return Card(
+      margin: margin,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: Text(
+              'Rota — ordem das paradas',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              itemCount: ordenadas.length,
+              itemBuilder: (context, i) => _tileParadaRota(viagem, ordenadas, i),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tileParadaRota(
+    MontagemEntregaViagem viagem,
+    List<Venda> ordenadas,
+    int i,
+  ) {
+    final v = ordenadas[i];
+    final dataFmt = DateFormat('dd/MM/yyyy');
+    final marcada = v.dataEntregaMarcada;
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (viagem.ehGrupo) ...[
+              Column(
+                children: [
+                  IconButton(
+                    tooltip: 'Subir',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 28,
+                    ),
+                    onPressed: i == 0
+                        ? null
+                        : () => widget.callbacks.trocarParada(
+                              viagem.grupoId,
+                              ordenadas,
+                              i,
+                              i - 1,
+                            ),
+                    icon: const Icon(Icons.arrow_upward, size: 20),
+                  ),
+                  IconButton(
+                    tooltip: 'Descer',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 28,
+                    ),
+                    onPressed: i == ordenadas.length - 1
+                        ? null
+                        : () => widget.callbacks.trocarParada(
+                              viagem.grupoId,
+                              ordenadas,
+                              i,
+                              i + 1,
+                            ),
+                    icon: const Icon(Icons.arrow_downward, size: 20),
+                  ),
+                ],
+              ),
+            ],
+            CircleAvatar(
+              radius: 16,
+              child: Text(
+                '${i + 1}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Pedido ${v.numeroOrcamento} · '
+                    '${v.cliente.target?.nomeRazao ?? 'Cliente'}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    v.enderecoEntrega,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  Text(
+                    marcada == null
+                        ? 'Sem data marcada'
+                        : 'Entrega: ${dataFmt.format(marcada.toLocal())}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Itens',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  onPressed: () => widget.callbacks.abrirDetalheItens(v),
+                ),
+                IconButton(
+                  tooltip: 'Navegar',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.directions_rounded),
+                  onPressed: () => widget.callbacks.abrirNavegacao(v),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _painelViagem(
     MontagemEntregaViagem viagem,
     List<RomaneioCargaConsolidadaLinha> linhas,
   ) {
-    final scheme = Theme.of(context).colorScheme;
     final ordenadas = viagem.vendasOrdenadas;
-    final prog = montagemProgressoCargaViagem(ordenadas);
-    final checklistOk = montagemChecklistViagemCompleto(ordenadas);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Material(
-          color: scheme.primaryContainer.withValues(alpha: 0.35),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  viagem.rotulo,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                Text(
-                  '${ordenadas.length} parada(s) · Motorista: ${viagem.motorista}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    FilterChip(
-                      label: const Text('Separado'),
-                      selected: ordenadas.every((v) => v.cargaSeparada),
-                      onSelected: widget.podeGerenciarStatus
-                          ? (v) => _aplicarChecklistViagem(
-                                ordenadas,
-                                separado: v,
-                              )
-                          : null,
-                    ),
-                    FilterChip(
-                      label: const Text('Carregado'),
-                      selected: ordenadas.every((v) => v.cargaCarregada),
-                      onSelected: widget.podeGerenciarStatus
-                          ? (v) => _aplicarChecklistViagem(
-                                ordenadas,
-                                carregado: v,
-                              )
-                          : null,
-                    ),
-                    FilterChip(
-                      label: const Text('Saiu'),
-                      selected: ordenadas.every((v) => v.cargaSaiu),
-                      onSelected: widget.podeGerenciarStatus
-                          ? (v) => _aplicarChecklistViagem(ordenadas, saiu: v)
-                          : null,
-                    ),
-                    Chip(
-                      avatar: Icon(
-                        checklistOk ? Icons.check_circle : Icons.timelapse,
-                        size: 18,
-                        color: checklistOk
-                            ? Colors.green.shade700
-                            : scheme.outline,
-                      ),
-                      label: Text('Carga $prog/3'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    FilledButton.tonalIcon(
-                      onPressed: () => widget.callbacks.emitirRelatorio(
-                        tipo: RelatorioEntregaTipo.separacaoViagem,
-                        viagem: ordenadas,
-                        salvarPdf: false,
-                      ),
-                      icon: const Icon(Icons.inventory_2_outlined, size: 18),
-                      label: const Text('Separacao (PDF)'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: motoristaLogisticaDefinido(viagem.motorista)
-                          ? () => widget.callbacks.emitirRelatorio(
-                                tipo: RelatorioEntregaTipo.romaneioMotoristaDia,
-                                motorista: viagem.motorista,
-                                viagem: ordenadas,
-                                salvarPdf: false,
-                              )
-                          : _avisarMotoristaIndefinido,
-                      icon: const Icon(Icons.assignment_outlined, size: 18),
-                      label: const Text('Romaneio'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _abrirMapaRota(ordenadas),
-                      icon: const Icon(Icons.map_outlined, size: 18),
-                      label: const Text('Mapa rota'),
-                    ),
-                    if (widget.podeGerenciarStatus)
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          if (viagem.ehGrupo) {
-                            widget.callbacks.editarMotoristaGrupo(
-                              viagem.grupoId,
-                              viagem.motorista,
-                            );
-                          } else {
-                            widget.callbacks.editarMotoristaPedido(
-                              ordenadas.first,
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.person_outline, size: 18),
-                        label: const Text('Motorista'),
-                      ),
-                    if (widget.podeGerenciarStatus) ...[
-                      OutlinedButton(
-                        onPressed: () => _statusViagem('roteirizada'),
-                        child: const Text('Roteirizar'),
-                      ),
-                      FilledButton(
-                        onPressed: checklistOk
-                            ? () => _statusViagem('saiu_entrega')
-                            : null,
-                        child: const Text('Saiu p/ entrega'),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        Expanded(
-          flex: 3,
-          child: Card(
-            margin: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final modoScroll = constraints.maxHeight < 580;
+        final cabecalho = _cabecalhoViagem(
+          viagem,
+          ordenadas,
+          compacto: modoScroll,
+        );
+        final carga = _secaoCargaConsolidada(viagem, linhas);
+        final rota = _secaoRotaParadas(viagem, ordenadas);
+
+        if (modoScroll) {
+          final alturaCarga = math.max(180.0, constraints.maxHeight * 0.42);
+          final alturaRota = math.max(160.0, constraints.maxHeight * 0.38);
+          return SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-                  child: Text(
-                    'Carga consolidada (patio)',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(
-                    'Marque ao separar. Quantidades somadas de todos os pedidos desta viagem.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    child: ConferenciaCargaConsolidadaLista(
-                      linhas: linhas,
-                      escopoViagem: viagem.chave,
-                      conferenciaRepository: widget.conferenciaRepository,
-                      usuarioAtual: widget.usuarioAtual,
-                      vendasGrupo: viagem.vendas,
-                      quantidadeEntrega: widget.quantidadeItemEntrega,
-                    ),
-                  ),
-                ),
+                cabecalho,
+                SizedBox(height: alturaCarga, child: carga),
+                SizedBox(height: alturaRota, child: rota),
               ],
             ),
-          ),
-        ),
-        Expanded(
-          flex: 2,
-          child: Card(
-            margin: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-                  child: Text(
-                    'Rota — ordem das paradas',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    itemCount: ordenadas.length,
-                    itemBuilder: (context, i) {
-                      final v = ordenadas[i];
-                      final dataFmt = DateFormat('dd/MM/yyyy');
-                      final marcada = v.dataEntregaMarcada;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (viagem.ehGrupo) ...[
-                                Column(
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Subir',
-                                      visualDensity: VisualDensity.compact,
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(
-                                        minWidth: 32,
-                                        minHeight: 28,
-                                      ),
-                                      onPressed: i == 0
-                                          ? null
-                                          : () => widget.callbacks
-                                              .trocarParada(
-                                                viagem.grupoId,
-                                                ordenadas,
-                                                i,
-                                                i - 1,
-                                              ),
-                                      icon: const Icon(
-                                        Icons.arrow_upward,
-                                        size: 20,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Descer',
-                                      visualDensity: VisualDensity.compact,
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(
-                                        minWidth: 32,
-                                        minHeight: 28,
-                                      ),
-                                      onPressed: i == ordenadas.length - 1
-                                          ? null
-                                          : () => widget.callbacks
-                                              .trocarParada(
-                                                viagem.grupoId,
-                                                ordenadas,
-                                                i,
-                                                i + 1,
-                                              ),
-                                      icon: const Icon(
-                                        Icons.arrow_downward,
-                                        size: 20,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                              CircleAvatar(
-                                radius: 16,
-                                child: Text(
-                                  '${i + 1}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Pedido ${v.numeroOrcamento} · '
-                                      '${v.cliente.target?.nomeRazao ?? 'Cliente'}',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    Text(
-                                      v.enderecoEntrega,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall,
-                                    ),
-                                    Text(
-                                      marcada == null
-                                          ? 'Sem data marcada'
-                                          : 'Entrega: ${dataFmt.format(marcada.toLocal())}',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Itens',
-                                    icon: const Icon(
-                                      Icons.receipt_long_outlined,
-                                    ),
-                                    onPressed: () => widget.callbacks
-                                        .abrirDetalheItens(v),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Navegar',
-                                    icon: const Icon(
-                                      Icons.directions_rounded,
-                                    ),
-                                    onPressed: () => widget.callbacks
-                                        .abrirNavegacao(v),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            cabecalho,
+            Expanded(flex: 3, child: carga),
+            Expanded(flex: 2, child: rota),
+          ],
+        );
+      },
     );
   }
 }

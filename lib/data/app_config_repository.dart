@@ -18,6 +18,7 @@ class EmpresaConfig {
     this.logoPath = '',
     this.limiteDivergenciaCaixa = 20,
     this.mostrarCampoDescontoCaixa = true,
+    this.exigirAutorizacaoSegundaViaCupom = true,
 
     /// Limite de desconto (%) sobre o subtotal de produtos no PDV ao enviar ao caixa (0 = desabilitado).
     this.maxDescontoPercentualPdv = 15,
@@ -37,6 +38,11 @@ class EmpresaConfig {
     this.ultimoBackupAutomaticoMs = 0,
     this.layoutImpressaoJson = '',
     this.auditoriaRetencaoDias = 90,
+    this.margemMinimaPercentualPadrao = 20,
+    this.umCaixaAbertoPorLoja = true,
+    this.alertasProativosWhatsappAtivos = false,
+    this.whatsappDonoNumero = '',
+    this.alertasProativosIntervaloMinutos = 120,
   });
 
   final String nomeLoja;
@@ -52,6 +58,9 @@ class EmpresaConfig {
 
   /// Quando falso, o painel de desconto rapido some na tela do Caixa.
   final bool mostrarCampoDescontoCaixa;
+
+  /// Quando falso, segunda via do cupom nao exige login/senha de supervisor.
+  final bool exigirAutorizacaoSegundaViaCupom;
 
   /// 0 = vendedor nao pode informar desconto no dialog "Enviar ao caixa"; ate 100 (% sobre subtotal dos produtos).
   final double maxDescontoPercentualPdv;
@@ -94,6 +103,17 @@ class EmpresaConfig {
   /// Retencao do log do sistema: 0 = sem auto-limpeza; 90 ou 180 dias.
   final int auditoriaRetencaoDias;
 
+  /// Margem minima padrao (%) para alerta ao importar NF-e de entrada.
+  final double margemMinimaPercentualPadrao;
+
+  /// Quando ativo, so um terminal pode ter caixa aberto na rede.
+  final bool umCaixaAbertoPorLoja;
+
+  /// Alertas WhatsApp proativos para o dono (fiado, estoque, caixa).
+  final bool alertasProativosWhatsappAtivos;
+  final String whatsappDonoNumero;
+  final int alertasProativosIntervaloMinutos;
+
   LayoutImpressaoEmpresa get layoutImpressao =>
       LayoutImpressaoEmpresa.fromJsonString(layoutImpressaoJson);
 
@@ -109,6 +129,7 @@ class EmpresaConfig {
     String? logoPath,
     double? limiteDivergenciaCaixa,
     bool? mostrarCampoDescontoCaixa,
+    bool? exigirAutorizacaoSegundaViaCupom,
     double? maxDescontoPercentualPdv,
     bool? permitirVendaSemEstoque,
     String? whatsappApiVersion,
@@ -127,6 +148,11 @@ class EmpresaConfig {
     String? layoutImpressaoJson,
     LayoutImpressaoEmpresa? layoutImpressao,
     int? auditoriaRetencaoDias,
+    double? margemMinimaPercentualPadrao,
+    bool? umCaixaAbertoPorLoja,
+    bool? alertasProativosWhatsappAtivos,
+    String? whatsappDonoNumero,
+    int? alertasProativosIntervaloMinutos,
   }) {
     return EmpresaConfig(
       nomeLoja: nomeLoja ?? this.nomeLoja,
@@ -142,6 +168,8 @@ class EmpresaConfig {
           limiteDivergenciaCaixa ?? this.limiteDivergenciaCaixa,
       mostrarCampoDescontoCaixa:
           mostrarCampoDescontoCaixa ?? this.mostrarCampoDescontoCaixa,
+      exigirAutorizacaoSegundaViaCupom: exigirAutorizacaoSegundaViaCupom ??
+          this.exigirAutorizacaoSegundaViaCupom,
       maxDescontoPercentualPdv:
           maxDescontoPercentualPdv ?? this.maxDescontoPercentualPdv,
       permitirVendaSemEstoque:
@@ -171,6 +199,15 @@ class EmpresaConfig {
           : (layoutImpressaoJson ?? this.layoutImpressaoJson),
       auditoriaRetencaoDias:
           auditoriaRetencaoDias ?? this.auditoriaRetencaoDias,
+      margemMinimaPercentualPadrao: margemMinimaPercentualPadrao ??
+          this.margemMinimaPercentualPadrao,
+      umCaixaAbertoPorLoja:
+          umCaixaAbertoPorLoja ?? this.umCaixaAbertoPorLoja,
+      alertasProativosWhatsappAtivos: alertasProativosWhatsappAtivos ??
+          this.alertasProativosWhatsappAtivos,
+      whatsappDonoNumero: whatsappDonoNumero ?? this.whatsappDonoNumero,
+      alertasProativosIntervaloMinutos: alertasProativosIntervaloMinutos ??
+          this.alertasProativosIntervaloMinutos,
     );
   }
 }
@@ -189,6 +226,8 @@ class AppConfigRepository {
   static const _kLimiteDivergenciaCaixa = 'config_limite_divergencia_caixa';
   static const _kMostrarCampoDescontoCaixa =
       'config_mostrar_campo_desconto_caixa';
+  static const _kExigirAutorizacaoSegundaViaCupom =
+      'config_exigir_autorizacao_segunda_via_cupom';
   static const _kMaxDescontoPercentualPdv =
       'config_max_desconto_percentual_pdv';
   static const _kPermitirVendaSemEstoque = 'config_permitir_venda_sem_estoque';
@@ -211,6 +250,14 @@ class AppConfigRepository {
       'config_migracao_motorista_entrega_concluida';
   static const _kLayoutImpressaoJson = 'config_layout_impressao_json';
   static const _kAuditoriaRetencaoDias = 'config_auditoria_retencao_dias';
+  static const _kMargemMinimaPercentualPadrao =
+      'config_margem_minima_percentual_padrao';
+  static const _kUmCaixaAbertoPorLoja = 'config_um_caixa_aberto_por_loja';
+  static const _kAlertasProativosWhatsapp =
+      'config_alertas_proativos_whatsapp';
+  static const _kWhatsappDonoNumero = 'config_whatsapp_dono_numero';
+  static const _kAlertasProativosIntervaloMin =
+      'config_alertas_proativos_intervalo_min';
   static const _kModoImplantacaoLocal = 'sync_modo_implantacao_local_v1';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
@@ -233,6 +280,8 @@ class AppConfigRepository {
       limiteDivergenciaCaixa: prefs.getDouble(_kLimiteDivergenciaCaixa) ?? 20,
       mostrarCampoDescontoCaixa:
           prefs.getBool(_kMostrarCampoDescontoCaixa) ?? true,
+      exigirAutorizacaoSegundaViaCupom:
+          prefs.getBool(_kExigirAutorizacaoSegundaViaCupom) ?? true,
       maxDescontoPercentualPdv: () {
         final v = prefs.getDouble(_kMaxDescontoPercentualPdv);
         if (v == null) return 15.0;
@@ -267,6 +316,20 @@ class AppConfigRepository {
         if (d <= 0) return 0;
         if (d <= 120) return 90;
         return 180;
+      }(),
+      margemMinimaPercentualPadrao: () {
+        final v = prefs.getDouble(_kMargemMinimaPercentualPadrao);
+        if (v == null) return 20.0;
+        return v.clamp(0, 99).toDouble();
+      }(),
+      umCaixaAbertoPorLoja: prefs.getBool(_kUmCaixaAbertoPorLoja) ?? true,
+      alertasProativosWhatsappAtivos:
+          prefs.getBool(_kAlertasProativosWhatsapp) ?? false,
+      whatsappDonoNumero: prefs.getString(_kWhatsappDonoNumero) ?? '',
+      alertasProativosIntervaloMinutos: () {
+        final m = prefs.getInt(_kAlertasProativosIntervaloMin);
+        if (m == null || m < 15) return 120;
+        return m.clamp(15, 1440);
       }(),
     );
     return SyncLocalConfig.aplicarSobre(base);
@@ -308,6 +371,10 @@ class AppConfigRepository {
     await prefs.setBool(
       _kMostrarCampoDescontoCaixa,
       config.mostrarCampoDescontoCaixa,
+    );
+    await prefs.setBool(
+      _kExigirAutorizacaoSegundaViaCupom,
+      config.exigirAutorizacaoSegundaViaCupom,
     );
     await prefs.setDouble(
       _kMaxDescontoPercentualPdv,
@@ -366,6 +433,23 @@ class AppConfigRepository {
     await prefs.setInt(
       _kAuditoriaRetencaoDias,
       AuditoriaRetencaoOpcoes.normalizar(config.auditoriaRetencaoDias),
+    );
+    await prefs.setDouble(
+      _kMargemMinimaPercentualPadrao,
+      config.margemMinimaPercentualPadrao.clamp(0, 99),
+    );
+    await prefs.setBool(_kUmCaixaAbertoPorLoja, config.umCaixaAbertoPorLoja);
+    await prefs.setBool(
+      _kAlertasProativosWhatsapp,
+      config.alertasProativosWhatsappAtivos,
+    );
+    await prefs.setString(
+      _kWhatsappDonoNumero,
+      config.whatsappDonoNumero.trim(),
+    );
+    await prefs.setInt(
+      _kAlertasProativosIntervaloMin,
+      config.alertasProativosIntervaloMinutos.clamp(15, 1440),
     );
     await SyncLocalConfig.salvarCamposLocais(config);
     if (propagarRede) {

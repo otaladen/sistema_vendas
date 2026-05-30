@@ -2357,10 +2357,89 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "29:3686530102017877759",
+      "lastPropertyId": "13:7424392575387537870",
+      "name": "MovimentoEstoque",
+      "properties": [
+        {
+          "id": "1:6948926826467679371",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:6614997286561418186",
+          "name": "tipoMovimento",
+          "indexId": "46:6685175261848784578",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "3:7399288039529159274",
+          "name": "deltaFisico",
+          "type": 6
+        },
+        {
+          "id": "4:4362853126205548170",
+          "name": "deltaReserva",
+          "type": 6
+        },
+        {
+          "id": "5:7928822987339248159",
+          "name": "saldoFisicoAntes",
+          "type": 6
+        },
+        {
+          "id": "6:1630780274418580190",
+          "name": "saldoFisicoDepois",
+          "type": 6
+        },
+        {
+          "id": "7:4651891965166483346",
+          "name": "saldoReservaAntes",
+          "type": 6
+        },
+        {
+          "id": "8:9212609660023341662",
+          "name": "saldoReservaDepois",
+          "type": 6
+        },
+        {
+          "id": "9:4978076644546200699",
+          "name": "documentoReferencia",
+          "type": 9
+        },
+        {
+          "id": "10:5090143619687961048",
+          "name": "motivo",
+          "type": 9
+        },
+        {
+          "id": "11:6312926329192893342",
+          "name": "usuarioLogin",
+          "type": 9
+        },
+        {
+          "id": "12:7970734927993251108",
+          "name": "registradoEm",
+          "type": 10
+        },
+        {
+          "id": "13:7424392575387537870",
+          "name": "produtoId",
+          "indexId": "47:7539215899859775418",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Produto"
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "28:798716117790928223",
-  "lastIndexId": "45:3226659383948146918",
+  "lastEntityId": "29:3686530102017877759",
+  "lastIndexId": "47:7539215899859775418",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

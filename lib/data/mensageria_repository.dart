@@ -540,6 +540,38 @@ class MensageriaRepository {
     final n = DateTime.now().millisecondsSinceEpoch % 10000;
     return n.toString().padLeft(4, '0');
   }
+
+  String normalizarDestinoWhatsapp(String whatsapp, [String telefone = '']) =>
+      _normalizarDestinoWhatsapp(whatsapp, telefone);
+
+  Future<void> garantirTemplateTextoLivre() async {
+    final templates = await listarTemplates();
+    if (templates.any((t) => t.id == 'sistema_texto_livre')) return;
+    await salvarTemplate(
+      MensagemTemplate(
+        id: 'sistema_texto_livre',
+        nome: 'Texto livre (sistema)',
+        canal: 'whatsapp',
+        evento: 'alerta_sistema',
+        textoBase: '{{texto}}',
+        ativo: true,
+        criadoEm: DateTime.now(),
+      ),
+    );
+  }
+
+  Future<void> enfileirarWhatsappTextoLivre({
+    required String destino,
+    required String texto,
+  }) async {
+    await garantirTemplateTextoLivre();
+    await enfileirarMensagem(
+      clienteId: 0,
+      templateId: 'sistema_texto_livre',
+      destino: destino,
+      variaveis: {'texto': texto},
+    );
+  }
 }
 
 class _EnvioResultado {

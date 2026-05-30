@@ -24,6 +24,7 @@ import 'sync_cursor_storage.dart';
 import 'sync_delete_outbox.dart';
 import 'sync_dirty_outbox.dart';
 import 'sync_entity_codec.dart';
+import 'sync_entity_codec_operacional.dart';
 import 'sync_entity_codec_extras.dart';
 
 /// Monta push e aplica pull para todas as entidades de negocio.
@@ -130,6 +131,10 @@ class SyncFullSync {
     'mensageria_templates',
     'usuarios_sistema',
     'caixa_sessoes',
+    'movimento_estoque',
+    'conta_pagar',
+    'reajuste_preco',
+    'auditoria_evento',
   ];
 
   Future<void> _montarEntidadeCompleta(
@@ -294,6 +299,45 @@ class SyncFullSync {
           1,
           CaixaSessaoRepository.pacoteParaSync(sessoes),
         );
+      case 'movimento_estoque':
+        for (final mv in _db.movimentoEstoqueBox.getAll()) {
+          mv.produto.target;
+          _add(
+            m,
+            entity,
+            mv.id,
+            SyncEntityCodecOperacional.movimentoEstoqueParaMap(mv),
+          );
+        }
+      case 'conta_pagar':
+        for (final c in _db.contaPagarBox.getAll()) {
+          c.fornecedor.target;
+          _add(
+            m,
+            entity,
+            c.id,
+            SyncEntityCodecOperacional.contaPagarParaMap(c),
+          );
+        }
+      case 'reajuste_preco':
+        for (final r in _db.reajustePrecoBox.getAll()) {
+          r.itens.length;
+          _add(
+            m,
+            entity,
+            r.id,
+            SyncEntityCodecOperacional.reajustePrecoParaMap(r),
+          );
+        }
+      case 'auditoria_evento':
+        for (final e in _db.auditoriaEventoBox.getAll()) {
+          _add(
+            m,
+            entity,
+            e.id,
+            SyncEntityCodecOperacional.auditoriaEventoParaMap(e),
+          );
+        }
     }
   }
 
@@ -474,6 +518,49 @@ class SyncFullSync {
           1,
           CaixaSessaoRepository.pacoteParaSync(sessoes),
         );
+      case 'movimento_estoque':
+        final mv = _db.movimentoEstoqueBox.get(localId);
+        if (mv != null) {
+          mv.produto.target;
+          _add(
+            m,
+            entity,
+            mv.id,
+            SyncEntityCodecOperacional.movimentoEstoqueParaMap(mv),
+          );
+        }
+      case 'conta_pagar':
+        final cp = _db.contaPagarBox.get(localId);
+        if (cp != null) {
+          cp.fornecedor.target;
+          _add(
+            m,
+            entity,
+            cp.id,
+            SyncEntityCodecOperacional.contaPagarParaMap(cp),
+          );
+        }
+      case 'reajuste_preco':
+        final r = _db.reajustePrecoBox.get(localId);
+        if (r != null) {
+          r.itens.length;
+          _add(
+            m,
+            entity,
+            r.id,
+            SyncEntityCodecOperacional.reajustePrecoParaMap(r),
+          );
+        }
+      case 'auditoria_evento':
+        final ev = _db.auditoriaEventoBox.get(localId);
+        if (ev != null) {
+          _add(
+            m,
+            entity,
+            ev.id,
+            SyncEntityCodecOperacional.auditoriaEventoParaMap(ev),
+          );
+        }
     }
   }
 
@@ -597,6 +684,22 @@ class SyncFullSync {
       case 'caixa_sessoes':
         await CaixaSessaoRepository().aplicarPacoteRede(payload);
         break;
+      case 'movimento_estoque':
+        _db.movimentoEstoqueBox.put(
+          SyncEntityCodecOperacional.movimentoEstoqueDeMap(payload),
+        );
+        break;
+      case 'conta_pagar':
+        await _aplicarContaPagar(payload);
+        break;
+      case 'reajuste_preco':
+        await _aplicarReajustePreco(payload);
+        break;
+      case 'auditoria_evento':
+        _db.auditoriaEventoBox.put(
+          SyncEntityCodecOperacional.auditoriaEventoDeMap(payload),
+        );
+        break;
     }
   }
 
@@ -696,7 +799,64 @@ class SyncFullSync {
       case 'registro_devolucao':
         _removerRegistroDevolucao(id);
         break;
+      case 'movimento_estoque':
+        _db.movimentoEstoqueBox.remove(id);
+        break;
+      case 'conta_pagar':
+        _db.contaPagarBox.remove(id);
+        break;
+      case 'reajuste_preco':
+        _removerReajustePreco(id);
+        break;
+      case 'auditoria_evento':
+        _db.auditoriaEventoBox.remove(id);
+        break;
     }
+  }
+
+  Future<void> _aplicarContaPagar(Map<String, dynamic> payload) async {
+    final c = SyncEntityCodecOperacional.contaPagarDeMap(payload);
+    final fid = (payload['fornecedorId'] as num?)?.toInt() ?? 0;
+    if (fid > 0) {
+      final f = _db.fornecedorNfeBox.get(fid);
+      if (f != null) c.fornecedor.target = f;
+    }
+    _db.contaPagarBox.put(c);
+  }
+
+  Future<void> _aplicarReajustePreco(Map<String, dynamic> payload) async {
+    final r = SyncEntityCodecOperacional.reajustePrecoDeMap(payload);
+    final rid = r.id;
+    if (rid > 0) {
+      final existente = _db.reajustePrecoBox.get(rid);
+      if (existente != null) {
+        for (final i in existente.itens.toList()) {
+          _db.reajustePrecoItemBox.remove(i.id);
+        }
+      }
+    }
+    final novoId = _db.reajustePrecoBox.put(r);
+    final rawItens = payload['itens'];
+    if (rawItens is List) {
+      for (final raw in rawItens) {
+        if (raw is! Map) continue;
+        final item = SyncEntityCodecOperacional.reajustePrecoItemDeMap(
+          raw.cast<String, dynamic>(),
+        );
+        item.reajuste.targetId = novoId;
+        _db.reajustePrecoItemBox.put(item);
+      }
+    }
+  }
+
+  void _removerReajustePreco(int id) {
+    final r = _db.reajustePrecoBox.get(id);
+    if (r != null) {
+      for (final i in r.itens.toList()) {
+        _db.reajustePrecoItemBox.remove(i.id);
+      }
+    }
+    _db.reajustePrecoBox.remove(id);
   }
 
   Future<void> _aplicarVinculo(Map<String, dynamic> payload) async {

@@ -39,6 +39,7 @@ import '../model/kit_orcamento.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import '../services/cupom_pdf_gerado.dart';
 import '../services/cupom_pdf_layout.dart';
 import '../services/print_service.dart';
 import 'clientes_page.dart';
@@ -4761,7 +4762,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     return codigo.isNotEmpty ? '$codigo · $nome' : nome;
   }
 
-  Future<Uint8List> _gerarOrcamentoPdfBytes(Venda venda) async {
+  Future<CupomPdfGerado> _gerarOrcamentoPdfBytes(Venda venda) async {
     final cliente = _clienteDaVenda(venda);
     final empresa = await widget.appConfigRepository.carregarEmpresaConfig();
     final logoBytes = empresa.logoPath.trim().isNotEmpty
@@ -4798,15 +4799,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       venda.itens.map((i) => i.nomeProduto),
     );
 
+    final pageFormat = CupomPdfLayout.formatoPagina(
+      modelo,
+      layout: layout,
+      linhasTexto: linhasTexto,
+      qtdItens: unidadesItens > 0 ? unidadesItens : venda.itens.length,
+      linhasExtras: linhasExtras,
+      comLogo: comLogo,
+    );
+
     doc.addPage(
       pw.Page(
-        pageFormat: CupomPdfLayout.formatoPagina(
-          modelo,
-          linhasTexto: linhasTexto,
-          qtdItens: unidadesItens > 0 ? unidadesItens : venda.itens.length,
-          linhasExtras: linhasExtras,
-          comLogo: comLogo,
-        ),
+        pageFormat: pageFormat,
         build: (context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -4917,18 +4921,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 layout,
                 fontSize: layout.tamanhoFonteCorpo.fontSizeContato,
               ),
-              CupomPdfLayout.espacoBloco(layout),
               ...CupomPdfLayout.rodapeDocumento(
                 layout: layout,
                 textoRodape: empresa.rodapeOrcamento,
               ),
-              pw.SizedBox(height: CupomPdfLayout.feedCorteMm * PdfPageFormat.mm),
+              CupomPdfLayout.espacoFinalDocumento(layout),
             ],
           );
         },
       ),
     );
-    return doc.save();
+    return CupomPdfGerado(
+      bytes: await doc.save(),
+      pageFormat: pageFormat,
+      layout: layout,
+    );
   }
 
   Future<String?> _escolherSalvarPdf({
@@ -5060,9 +5067,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
     if (!mounted || acao == null || acao == 'fechar') return;
     try {
-      final pdfBytes = await _gerarOrcamentoPdfBytes(venda);
+      final pdf = await _gerarOrcamentoPdfBytes(venda);
       if (acao == 'imprimir') {
-        await Printing.layoutPdf(onLayout: (_) async => pdfBytes);
+        await Printing.layoutPdf(onLayout: (_) async => pdf.bytes);
         return;
       }
       if (acao == 'direto') {
@@ -5079,19 +5086,19 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         }
         await Printing.directPrintPdf(
           printer: printer,
-          onLayout: (_) async => pdfBytes,
+          onLayout: (_) async => pdf.bytes,
           name: 'Orcamento ${venda.numeroOrcamento}',
           format: config.modeloPdf == 'a4'
               ? PdfPageFormat.a4
-              : PdfPageFormat(
-                  CupomPdfLayout.larguraBobinaMm * PdfPageFormat.mm,
-                  280 * PdfPageFormat.mm,
+              : CupomPdfLayout.formatoImpressaoDireta(
+                  layout: pdf.layout,
+                  formatoPdf: pdf.pageFormat,
                 ),
         );
         return;
       }
       final path = await _escolherSalvarPdf(
-        bytes: pdfBytes,
+        bytes: pdf.bytes,
         suggestedFileName: 'orcamento_${venda.numeroOrcamento}.pdf',
         initialDirectory: config.pastaPadraoPdf.trim().isEmpty
             ? null

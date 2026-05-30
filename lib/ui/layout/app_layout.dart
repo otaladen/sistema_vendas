@@ -56,6 +56,112 @@ class AdaptivePageBody extends StatelessWidget {
   }
 }
 
+/// Corpo do menu principal com largura maxima e rolagem.
+class MainMenuBody extends StatelessWidget {
+  const MainMenuBody({
+    super.key,
+    required this.child,
+    this.maxContentWidth = 1080,
+  });
+
+  final Widget child;
+  final double maxContentWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = context.isCompactLayout
+        ? const EdgeInsets.fromLTRB(12, 12, 12, 20)
+        : const EdgeInsets.fromLTRB(20, 16, 20, 28);
+
+    return SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: padding,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxContentWidth),
+                child: child,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Grade responsiva para tiles do menu (1, 2 ou 3 colunas).
+class MainMenuTileGrid extends StatelessWidget {
+  const MainMenuTileGrid({
+    super.key,
+    required this.tiles,
+    this.spacing = 12,
+  });
+
+  final List<Widget> tiles;
+  final double spacing;
+
+  int _colunas(double largura) {
+    if (largura >= AppBreakpoints.desktop) return 3;
+    if (largura >= AppBreakpoints.compact) return 2;
+    return 1;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cols = _colunas(constraints.maxWidth);
+        if (cols == 1) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < tiles.length; i++) ...[
+                if (i > 0) SizedBox(height: spacing),
+                tiles[i],
+              ],
+            ],
+          );
+        }
+
+        final rows = <Widget>[];
+        for (var i = 0; i < tiles.length; i += cols) {
+          final slice = tiles.sublist(
+            i,
+            i + cols > tiles.length ? tiles.length : i + cols,
+          );
+          rows.add(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var j = 0; j < cols; j++)
+                  Expanded(
+                    child: j < slice.length
+                        ? Padding(
+                            padding: EdgeInsets.only(
+                              right: j < cols - 1 ? spacing / 2 : 0,
+                              left: j > 0 ? spacing / 2 : 0,
+                            ),
+                            child: slice[j],
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+              ],
+            ),
+          );
+          if (i + cols < tiles.length) {
+            rows.add(SizedBox(height: spacing));
+          }
+        }
+        return Column(children: rows);
+      },
+    );
+  }
+}
+
 /// Lista de hub (menu, cadastros): coluna com rolagem quando a altura nao cabe.
 class AdaptiveHubBody extends StatelessWidget {
   const AdaptiveHubBody({
@@ -91,6 +197,9 @@ class AdaptiveHubBody extends StatelessWidget {
     return SafeArea(
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final larguraMax = context.isDesktopLayout
+              ? constraints.maxWidth
+              : maxContentWidth;
           return SingleChildScrollView(
             padding: padding,
             child: ConstrainedBox(
@@ -98,7 +207,7 @@ class AdaptiveHubBody extends StatelessWidget {
               child: Align(
                 alignment: Alignment.topCenter,
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: maxContentWidth),
+                  constraints: BoxConstraints(maxWidth: larguraMax),
                   child: column,
                 ),
               ),

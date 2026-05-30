@@ -118,6 +118,10 @@ class ReajustePrecoRepository {
     if (gravados > 0) {
       _produtoRepository.invalidarCacheBusca();
       notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+      notificarAlteracaoParaRede(
+        entidade: 'reajuste_preco',
+        entidadeId: reajusteId,
+      );
       AuditoriaRegistrar.registrar(
         modulo: AuditoriaModulo.estoque,
         acao: AuditoriaAcao.reajustePrecoLote,
@@ -194,6 +198,10 @@ class ReajustePrecoRepository {
     if (gravados > 0) {
       _produtoRepository.invalidarCacheBusca();
       notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+      notificarAlteracaoParaRede(
+        entidade: 'reajuste_preco',
+        entidadeId: reajusteId,
+      );
       AuditoriaRegistrar.registrar(
         modulo: AuditoriaModulo.estoque,
         acao: AuditoriaAcao.reajustePrecoEstorno,

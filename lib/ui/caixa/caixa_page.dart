@@ -50,6 +50,8 @@ import '../../services/recibo_movimento_caixa_pdf.dart';
 import '../../services/recibo_recebimento_fiado_pdf.dart';
 import '../fiscal/nfe_gerenciamento_page.dart';
 import '../../model/usuario_sistema.dart';
+import 'alterar_pagamento_caixa_dialog.dart';
+import 'autorizacao_gerente_caixa.dart';
 import 'caixa_feedback.dart';
 import 'caixa_ultimas_vendas_list.dart';
 
@@ -118,6 +120,7 @@ class _CaixaPageState extends State<CaixaPage> {
   double _totalSangrias = 0;
   double _limiteDivergenciaSemSupervisor = 20;
   bool _mostrarCampoDescontoCaixa = true;
+  bool _exigirAutorizacaoSegundaViaCupom = true;
   bool _permitirVendaSemEstoque = false;
   int? _mistoPreparadoParaId;
   List<PagamentoOrcamentoLinha> _mistoLinhasModelo = [];
@@ -197,6 +200,8 @@ class _CaixaPageState extends State<CaixaPage> {
     setState(() {
       _limiteDivergenciaSemSupervisor = config.limiteDivergenciaCaixa;
       _mostrarCampoDescontoCaixa = config.mostrarCampoDescontoCaixa;
+      _exigirAutorizacaoSegundaViaCupom =
+          config.exigirAutorizacaoSegundaViaCupom;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       if (!_mostrarCampoDescontoCaixa) {
         _descontoController.clear();
@@ -973,6 +978,32 @@ class _CaixaPageState extends State<CaixaPage> {
       ).showSnackBar(const SnackBar(content: Text('O caixa ja esta aberto.')));
       return;
     }
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (config.umCaixaAbertoPorLoja) {
+      final outra =
+          await CaixaSessaoRepository().obterSessaoAbertaEmOutroTerminal();
+      if (outra != null && mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Caixa ja aberto na rede'),
+            content: Text(
+              'Somente um caixa pode ficar aberto por loja. '
+              'Terminal ${outra.terminalId} esta aberto '
+              '(operador: ${outra.operador}). '
+              'Feche o caixa na outra maquina ou desative a regra em Configuracoes.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Entendi'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
     final operadorController = TextEditingController(text: widget.usuarioAtual);
     final fundoController = TextEditingController(text: '0,00');
     final confirmar = await showDialog<bool>(
@@ -1168,18 +1199,27 @@ class _CaixaPageState extends State<CaixaPage> {
       content: 'Deseja imprimir o comprovante desta $tipo?',
       suggestedFileName:
           '${tipoArquivo}_caixa_${DateFormat('yyyyMMdd_HHmmss').format(dataHora)}.pdf',
-      gerarPdfBytes: () => ReciboMovimentoCaixaPdf.gerarBytes(
-        suprimento: suprimento,
-        valor: valor,
-        observacao: obs,
-        operadorCaixa: _operadorCaixa,
-        terminalId: _terminalId,
-        dataHora: dataHora,
-        config: config,
-        fundoInicial: _fundoTrocoAbertura,
-        totalSuprimentos: _totalSuprimentos,
-        totalSangrias: _totalSangrias,
-      ),
+      gerarPdf: () async {
+        final layout = config.layoutImpressao.cupom;
+        final bytes = await ReciboMovimentoCaixaPdf.gerarBytes(
+          suprimento: suprimento,
+          valor: valor,
+          observacao: obs,
+          operadorCaixa: _operadorCaixa,
+          terminalId: _terminalId,
+          dataHora: dataHora,
+          config: config,
+          fundoInicial: _fundoTrocoAbertura,
+          totalSuprimentos: _totalSuprimentos,
+          totalSangrias: _totalSangrias,
+        );
+        return cupomPdfLegado(
+          bytes: bytes,
+          config: config,
+          layout: layout,
+          linhasTexto: 18,
+        );
+      },
     );
   }
 
@@ -1350,13 +1390,22 @@ class _CaixaPageState extends State<CaixaPage> {
       content: 'Deseja imprimir o recibo para o cliente?',
       suggestedFileName:
           'recibo_fiado_${resultado.cliente.id}_${rec.id}.pdf',
-      gerarPdfBytes: () => ReciboRecebimentoFiadoPdf.gerarBytes(
-        recebimento: rec,
-        cliente: resultado.cliente,
-        vendaRepository: widget.vendaRepository,
-        config: config,
-        operadorCaixa: _operadorCaixa,
-      ),
+      gerarPdf: () async {
+        final layout = config.layoutImpressao.cupom;
+        final bytes = await ReciboRecebimentoFiadoPdf.gerarBytes(
+          recebimento: rec,
+          cliente: resultado.cliente,
+          vendaRepository: widget.vendaRepository,
+          config: config,
+          operadorCaixa: _operadorCaixa,
+        );
+        return cupomPdfLegado(
+          bytes: bytes,
+          config: config,
+          layout: layout,
+          linhasTexto: 20,
+        );
+      },
     );
   }
 
@@ -1970,11 +2019,6 @@ class _CaixaPageState extends State<CaixaPage> {
     for (var i = 0; i < esperado.length; i++) {
       final linhaEsperada = esperado[i];
       final linhaInformada = informado[i];
-      final mesmoMeio = linhaEsperada.meio == linhaInformada.meio;
-      final mesmasParcelas = linhaEsperada.parcelas == linhaInformada.parcelas;
-      if (!mesmoMeio || !mesmasParcelas) {
-        return 'Forma de pagamento alterada no caixa. Use o mesmo resumo do pedido.';
-      }
       if (linhaEsperada.meio == 'fiado') {
         continue;
       }
@@ -1987,6 +2031,49 @@ class _CaixaPageState extends State<CaixaPage> {
       }
     }
     return null;
+  }
+
+  Future<void> _alterarFormaPagamentoCaixa(Venda venda) async {
+    final autorizado = await solicitarAutorizacaoGerenteCaixa(
+      context,
+      _usuarioRepository,
+    );
+    if (!autorizado || !mounted) return;
+
+    final totalExibido = _totalComDesconto(venda);
+    final resultado = await showDialog<DadosPagamentoOrcamento>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlterarPagamentoCaixaDialog(
+        venda: venda,
+        totalExibidoCaixa: totalExibido,
+        totalGravacaoOrcamento: venda.total,
+        clienteVinculado: venda.cliente.targetId > 0,
+        formatarMoeda: _formatarMoeda,
+      ),
+    );
+    if (resultado == null || !mounted) return;
+
+    try {
+      widget.vendaRepository.alterarPagamentoOrcamento(venda.id, resultado);
+      _carregarOrcamentos();
+      if (!mounted) return;
+      final atualizado = widget.vendaRepository.obterPorId(venda.id);
+      if (atualizado != null) {
+        setState(() {
+          _selecionado = atualizado;
+          _prepararEdicaoMisto(atualizado);
+          _sincronizarRecebidoPdVComOrcamento();
+        });
+      }
+      CaixaFeedback.sucesso(
+        context,
+        'Forma de pagamento atualizada. Confira os valores e finalize.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(context, 'Nao foi possivel alterar pagamento: $e');
+    }
   }
 
   static const double _tolMistoPagamento = 0.05;
@@ -2904,7 +2991,7 @@ class _CaixaPageState extends State<CaixaPage> {
       context,
       printService: widget.printService,
       config: config,
-      gerarPdfBytes: () => CupomNaoFiscalVendaPdf.gerarBytes(
+      gerarPdf: () => CupomNaoFiscalVendaPdf.gerar(
         venda: vendaAtualizada,
         config: config,
         cliente: _clienteDaVenda(vendaAtualizada),
@@ -3382,9 +3469,10 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _abrirAcoesVendaFinalizada(Venda vIn) async {
-    final autorizado = await solicitarSenhaAutorizacaoSegundaViaCupom(
-      context,
-      _usuarioRepository,
+    final autorizado = await autorizarSegundaViaCupomSeConfigurado(
+      context: context,
+      usuarioRepository: _usuarioRepository,
+      exigirAutorizacao: _exigirAutorizacaoSegundaViaCupom,
     );
     if (!mounted || !autorizado) return;
     await _aguardarEntreDialogos();
@@ -3548,7 +3636,7 @@ class _CaixaPageState extends State<CaixaPage> {
       config: config,
       title: 'Segunda via do cupom',
       content: 'Deseja imprimir ou gerar PDF da segunda via?',
-      gerarPdfBytes: () => CupomNaoFiscalVendaPdf.gerarBytes(
+      gerarPdf: () => CupomNaoFiscalVendaPdf.gerar(
         venda: vendaAtualizada,
         config: config,
         cliente: _clienteDaVenda(vendaAtualizada),
@@ -4410,6 +4498,32 @@ class _CaixaPageState extends State<CaixaPage> {
                                                         'Pagamento: ${_rotuloPagamentoCabecalho(selecionado)}',
                                                       ),
                                                     ),
+                                                    TextButton.icon(
+                                                      onPressed: () =>
+                                                          _alterarFormaPagamentoCaixa(
+                                                            selecionado,
+                                                          ),
+                                                      icon: const Icon(
+                                                        Icons.edit_outlined,
+                                                        size: 18,
+                                                      ),
+                                                      label: const Text(
+                                                        'Alterar forma',
+                                                      ),
+                                                      style: TextButton.styleFrom(
+                                                        visualDensity:
+                                                            VisualDensity.compact,
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                          horizontal: 8,
+                                                          vertical: 4,
+                                                        ),
+                                                        tapTargetSize:
+                                                            MaterialTapTargetSize
+                                                                .shrinkWrap,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
                                                     Text(
                                                       'TOTAL: ${_formatarMoeda(totalComDesconto)}',
                                                       style: Theme.of(context)

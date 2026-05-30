@@ -3,6 +3,7 @@ import 'dart:convert';
 /// Presets de layout (cupom/orcamento).
 enum LayoutImpressaoPreset {
   padrao,
+  economico,
   compacto,
   destaque,
   personalizado,
@@ -122,6 +123,57 @@ enum LayoutTamanhoFonte {
   }
 }
 
+/// Como a impressao direta define a altura da pagina na bobina.
+enum LayoutModoImpressaoDireta {
+  /// Usa a altura calculada do PDF (recomendado — menos papel em branco).
+  alturaPdf,
+  /// Altura fixa curta (impressoras que ignoram o PDF).
+  altura150,
+  altura200,
+  /// Deixa o driver decidir (pode avancar muito papel).
+  driverIlimitado;
+
+  String get rotulo {
+    switch (this) {
+      case LayoutModoImpressaoDireta.alturaPdf:
+        return 'Altura do PDF (economico)';
+      case LayoutModoImpressaoDireta.altura150:
+        return 'Altura fixa 150 mm';
+      case LayoutModoImpressaoDireta.altura200:
+        return 'Altura fixa 200 mm';
+      case LayoutModoImpressaoDireta.driverIlimitado:
+        return 'Driver automatico (pode gastar papel)';
+    }
+  }
+
+  double? get alturaFixaMm {
+    switch (this) {
+      case LayoutModoImpressaoDireta.altura150:
+        return 150;
+      case LayoutModoImpressaoDireta.altura200:
+        return 200;
+      case LayoutModoImpressaoDireta.alturaPdf:
+      case LayoutModoImpressaoDireta.driverIlimitado:
+        return null;
+    }
+  }
+
+  static LayoutModoImpressaoDireta fromString(String? v) {
+    switch (v) {
+      case 'altura150':
+        return LayoutModoImpressaoDireta.altura150;
+      case 'altura200':
+        return LayoutModoImpressaoDireta.altura200;
+      case 'driverIlimitado':
+        return LayoutModoImpressaoDireta.driverIlimitado;
+      default:
+        return LayoutModoImpressaoDireta.alturaPdf;
+    }
+  }
+
+  String get codigo => name;
+}
+
 enum LayoutComprimentoDivisoria {
   curto,
   medio,
@@ -196,6 +248,17 @@ class ConfigLayoutImpressao {
     this.destacarTroco = true,
     this.divisoriaAntesRodape = true,
     this.espacoCompacto = false,
+    this.flexColunaEsquerda = 4,
+    this.larguraColunaValorMm = 28,
+    this.reservarColunaValorFixa = true,
+    this.margemPaginaMm = 3,
+    this.margemCorteMm = 2,
+    this.fatorEspacoVertical = 1,
+    this.fatorAlturaPaginaPdf = 0.92,
+    this.alturaLogoMm = 36,
+    this.espacoEntreItensMm = 1.5,
+    this.exibirEspacoFinal = true,
+    this.modoImpressaoDireta = LayoutModoImpressaoDireta.alturaPdf,
   });
 
   final LayoutImpressaoPreset preset;
@@ -231,6 +294,23 @@ class ConfigLayoutImpressao {
   final bool divisoriaAntesRodape;
   final bool espacoCompacto;
 
+  /// Proporcao da coluna esquerda em modo flex (2–7; padrao 4 = 40%).
+  final int flexColunaEsquerda;
+
+  /// Largura reservada para valores (R$) em bobina 80 mm.
+  final double larguraColunaValorMm;
+
+  /// Reserva espaco fixo para valores — evita texto da esquerda “comer” o preco.
+  final bool reservarColunaValorFixa;
+  final double margemPaginaMm;
+  final double margemCorteMm;
+  final double fatorEspacoVertical;
+  final double fatorAlturaPaginaPdf;
+  final double alturaLogoMm;
+  final double espacoEntreItensMm;
+  final bool exibirEspacoFinal;
+  final LayoutModoImpressaoDireta modoImpressaoDireta;
+
   String get tituloDocumentoEfetivoCupom =>
       tituloDocumento.trim().isEmpty ? 'CUPOM NAO FISCAL' : tituloDocumento.trim();
 
@@ -252,6 +332,34 @@ class ConfigLayoutImpressao {
         exibirObservacaoEntrega: false,
       );
 
+  /// Maxima economia de papel (teste na loja).
+  static ConfigLayoutImpressao economico({required bool orcamento}) =>
+      ConfigLayoutImpressao(
+        preset: LayoutImpressaoPreset.economico,
+        tamanhoNomeLoja: LayoutTamanhoFonte.p,
+        tamanhoFonteCorpo: LayoutTamanhoFonte.p,
+        tamanhoFonteItens: LayoutTamanhoFonte.p,
+        tamanhoFonteTotais: LayoutTamanhoFonte.p,
+        comprimentoDivisoria: LayoutComprimentoDivisoria.curto,
+        cabecalhoColunasItens: false,
+        faixaComDivisorias: false,
+        divisoriaDestaqueAntesTotais: false,
+        divisoriaAntesRodape: false,
+        colunasEsquerdaDireita: false,
+        linhaQuantidadePreco: false,
+        espacoCompacto: true,
+        margemPaginaMm: 2,
+        margemCorteMm: 0,
+        fatorEspacoVertical: 0.5,
+        fatorAlturaPaginaPdf: 0.85,
+        alturaLogoMm: 28,
+        espacoEntreItensMm: 1,
+        exibirEspacoFinal: false,
+        exibirValidadeOrcamento: orcamento,
+        exibirObservacaoEntrega: false,
+        exibirEntrega: !orcamento ? false : false,
+      );
+
   static ConfigLayoutImpressao compacto({required bool orcamento}) =>
       ConfigLayoutImpressao(
         preset: LayoutImpressaoPreset.compacto,
@@ -262,6 +370,12 @@ class ConfigLayoutImpressao {
         comprimentoDivisoria: LayoutComprimentoDivisoria.curto,
         cabecalhoColunasItens: false,
         espacoCompacto: true,
+        margemPaginaMm: 2.5,
+        margemCorteMm: 2,
+        fatorEspacoVertical: 0.65,
+        fatorAlturaPaginaPdf: 0.9,
+        alturaLogoMm: 32,
+        espacoEntreItensMm: 1.2,
         exibirValidadeOrcamento: orcamento,
         exibirObservacaoEntrega: orcamento,
       );
@@ -283,6 +397,8 @@ class ConfigLayoutImpressao {
     required bool orcamento,
   }) {
     switch (preset) {
+      case LayoutImpressaoPreset.economico:
+        return economico(orcamento: orcamento);
       case LayoutImpressaoPreset.compacto:
         return compacto(orcamento: orcamento);
       case LayoutImpressaoPreset.destaque:
@@ -327,6 +443,17 @@ class ConfigLayoutImpressao {
     bool? destacarTroco,
     bool? divisoriaAntesRodape,
     bool? espacoCompacto,
+    int? flexColunaEsquerda,
+    double? larguraColunaValorMm,
+    bool? reservarColunaValorFixa,
+    double? margemPaginaMm,
+    double? margemCorteMm,
+    double? fatorEspacoVertical,
+    double? fatorAlturaPaginaPdf,
+    double? alturaLogoMm,
+    double? espacoEntreItensMm,
+    bool? exibirEspacoFinal,
+    LayoutModoImpressaoDireta? modoImpressaoDireta,
   }) {
     return ConfigLayoutImpressao(
       preset: preset ?? this.preset,
@@ -372,6 +499,18 @@ class ConfigLayoutImpressao {
       destacarTroco: destacarTroco ?? this.destacarTroco,
       divisoriaAntesRodape: divisoriaAntesRodape ?? this.divisoriaAntesRodape,
       espacoCompacto: espacoCompacto ?? this.espacoCompacto,
+      flexColunaEsquerda: flexColunaEsquerda ?? this.flexColunaEsquerda,
+      larguraColunaValorMm: larguraColunaValorMm ?? this.larguraColunaValorMm,
+      reservarColunaValorFixa:
+          reservarColunaValorFixa ?? this.reservarColunaValorFixa,
+      margemPaginaMm: margemPaginaMm ?? this.margemPaginaMm,
+      margemCorteMm: margemCorteMm ?? this.margemCorteMm,
+      fatorEspacoVertical: fatorEspacoVertical ?? this.fatorEspacoVertical,
+      fatorAlturaPaginaPdf: fatorAlturaPaginaPdf ?? this.fatorAlturaPaginaPdf,
+      alturaLogoMm: alturaLogoMm ?? this.alturaLogoMm,
+      espacoEntreItensMm: espacoEntreItensMm ?? this.espacoEntreItensMm,
+      exibirEspacoFinal: exibirEspacoFinal ?? this.exibirEspacoFinal,
+      modoImpressaoDireta: modoImpressaoDireta ?? this.modoImpressaoDireta,
     );
   }
 
@@ -408,6 +547,17 @@ class ConfigLayoutImpressao {
         'destacarTroco': destacarTroco,
         'divisoriaAntesRodape': divisoriaAntesRodape,
         'espacoCompacto': espacoCompacto,
+        'flexColunaEsquerda': flexColunaEsquerda,
+        'larguraColunaValorMm': larguraColunaValorMm,
+        'reservarColunaValorFixa': reservarColunaValorFixa,
+        'margemPaginaMm': margemPaginaMm,
+        'margemCorteMm': margemCorteMm,
+        'fatorEspacoVertical': fatorEspacoVertical,
+        'fatorAlturaPaginaPdf': fatorAlturaPaginaPdf,
+        'alturaLogoMm': alturaLogoMm,
+        'espacoEntreItensMm': espacoEntreItensMm,
+        'exibirEspacoFinal': exibirEspacoFinal,
+        'modoImpressaoDireta': modoImpressaoDireta.codigo,
       };
 
   factory ConfigLayoutImpressao.fromJson(
@@ -488,6 +638,42 @@ class ConfigLayoutImpressao {
           padrao.divisoriaAntesRodape,
       espacoCompacto:
           json['espacoCompacto'] as bool? ?? padrao.espacoCompacto,
+      flexColunaEsquerda: ((json['flexColunaEsquerda'] as num?) ??
+              padrao.flexColunaEsquerda)
+          .toInt()
+          .clamp(2, 7),
+      larguraColunaValorMm: ((json['larguraColunaValorMm'] as num?) ??
+              padrao.larguraColunaValorMm)
+          .toDouble()
+          .clamp(20, 40),
+      reservarColunaValorFixa: json['reservarColunaValorFixa'] as bool? ??
+          padrao.reservarColunaValorFixa,
+      margemPaginaMm: ((json['margemPaginaMm'] as num?) ?? padrao.margemPaginaMm)
+          .toDouble()
+          .clamp(1, 8),
+      margemCorteMm: ((json['margemCorteMm'] as num?) ?? padrao.margemCorteMm)
+          .toDouble()
+          .clamp(0, 12),
+      fatorEspacoVertical:
+          ((json['fatorEspacoVertical'] as num?) ?? padrao.fatorEspacoVertical)
+              .toDouble()
+              .clamp(0.4, 1.3),
+      fatorAlturaPaginaPdf:
+          ((json['fatorAlturaPaginaPdf'] as num?) ?? padrao.fatorAlturaPaginaPdf)
+              .toDouble()
+              .clamp(0.75, 1.15),
+      alturaLogoMm: ((json['alturaLogoMm'] as num?) ?? padrao.alturaLogoMm)
+          .toDouble()
+          .clamp(20, 52),
+      espacoEntreItensMm:
+          ((json['espacoEntreItensMm'] as num?) ?? padrao.espacoEntreItensMm)
+              .toDouble()
+              .clamp(0.5, 4),
+      exibirEspacoFinal:
+          json['exibirEspacoFinal'] as bool? ?? padrao.exibirEspacoFinal,
+      modoImpressaoDireta: LayoutModoImpressaoDireta.fromString(
+        json['modoImpressaoDireta']?.toString(),
+      ),
     );
   }
 }

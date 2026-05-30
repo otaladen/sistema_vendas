@@ -353,7 +353,11 @@ class NfeEntradaRepository {
         if (produto == null) continue;
         final qtd = h.quantidadeEntradaEstoque;
         if (qtd > 0) {
-          _estoque.estornarEntradaPorNotaFiscal(produto, qtd);
+          _estoque.estornarEntradaPorNotaFiscal(
+            produto,
+            qtd,
+            documentoReferencia: 'NF-e $chaveNorm',
+          );
         }
         _db.historicoEntradaBox.remove(h.id);
 
@@ -552,7 +556,11 @@ class NfeEntradaRepository {
           }
           _estoque.persistirProdutoMetadados(produto);
           if (qtdInterna > 0) {
-            _estoque.registrarEntradaPorNotaFiscal(produto, qtdInterna);
+            _estoque.registrarEntradaPorNotaFiscal(
+              produto,
+              qtdInterna,
+              documentoReferencia: 'NF-e $chaveNorm',
+            );
           }
         } else {
           final codigoInterno = _gerarCodigoInterno(nfe, linha.item);
@@ -583,7 +591,11 @@ class NfeEntradaRepository {
           );
           produto.id = _db.produtoBox.put(produto);
           if (qtdInterna > 0) {
-            _estoque.registrarEntradaPorNotaFiscal(produto, qtdInterna);
+            _estoque.registrarEntradaPorNotaFiscal(
+              produto,
+              qtdInterna,
+              documentoReferencia: 'NF-e $chaveNorm',
+            );
           }
         }
 
@@ -685,7 +697,8 @@ class NfeEntradaRepository {
         valorPago: total,
       );
       conta.fornecedor.target = fornecedorPersistido;
-      _db.contaPagarBox.put(conta);
+      final id = _db.contaPagarBox.put(conta);
+      notificarAlteracaoParaRede(entidade: 'conta_pagar', entidadeId: id);
       return;
     }
 
@@ -705,7 +718,8 @@ class NfeEntradaRepository {
         status: ContaPagarStatus.pendente,
       );
       conta.fornecedor.target = fornecedorPersistido;
-      _db.contaPagarBox.put(conta);
+      final idParc = _db.contaPagarBox.put(conta);
+      notificarAlteracaoParaRede(entidade: 'conta_pagar', entidadeId: idParc);
     }
   }
 

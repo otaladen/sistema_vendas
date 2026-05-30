@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../domain/produto_unidade_exibicao.dart';
 import '../../model/produto.dart';
 import '../pdv_texto_destaque_busca.dart';
+import 'pdv_estoque_resumo_panel.dart';
 import 'promocao_badge.dart';
 
 /// Linha compacta da consulta de produtos (1 linha = mais itens na tela).
@@ -40,17 +41,6 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
           color: scheme.onSecondaryContainer,
         ) ??
         const TextStyle(fontWeight: FontWeight.w800);
-    final corEstoque = estoqueCritico ? scheme.error : scheme.onSurfaceVariant;
-    final estiloEstoque = Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: corEstoque,
-          fontWeight: FontWeight.w600,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        );
-
-    final livre = produto.estoqueLivreParaVenda;
-    final fisico = produto.estoqueReal;
-    final reservado = produto.estoqueReservado;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: Row(
@@ -80,18 +70,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
               ),
             ),
           ),
-          Tooltip(
-            message:
-                'Livre: $livre · Fisico: $fisico · Reservado: $reservado',
-            waitDuration: const Duration(milliseconds: 400),
-            child: Padding(
-              padding: const EdgeInsets.only(left: 6, right: 8),
-              child: Text(
-                'L$livre F$fisico R$reservado',
-                style: estiloEstoque,
-              ),
-            ),
-          ),
+          PdvEstoqueResumoPanel(produto: produto, compacto: true),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,

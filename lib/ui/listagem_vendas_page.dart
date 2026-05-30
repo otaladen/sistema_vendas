@@ -591,13 +591,14 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       );
       return;
     }
-    final autorizado = await solicitarSenhaAutorizacaoSegundaViaCupom(
-      context,
-      _usuarioRepository,
-    );
-    if (!mounted || !autorizado) return;
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
+    final autorizado = await autorizarSegundaViaCupomSeConfigurado(
+      context: context,
+      usuarioRepository: _usuarioRepository,
+      exigirAutorizacao: config.exigirAutorizacaoSegundaViaCupom,
+    );
+    if (!mounted || !autorizado) return;
     final infer = CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(v);
     final nomeArquivo =
         'venda_${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}_2via.pdf';
@@ -607,7 +608,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       config: config,
       title: 'Segunda via do cupom',
       content: 'Deseja imprimir ou gerar PDF da segunda via?',
-      gerarPdfBytes: () => CupomNaoFiscalVendaPdf.gerarBytes(
+      gerarPdf: () => CupomNaoFiscalVendaPdf.gerar(
         venda: v,
         config: config,
         cliente: _clienteDaVenda(v),

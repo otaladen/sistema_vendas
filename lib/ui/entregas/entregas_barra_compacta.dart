@@ -125,6 +125,13 @@ class EntregasBarraCompacta extends StatelessWidget {
               ],
             ),
             if (mostrarPlanejamento) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Dia da entrega',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 4),
               BarraPlanejamentoEntregaDia(
                 resumoPorDia: resumoPorDia,

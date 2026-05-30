@@ -15,6 +15,7 @@ import 'fiscal/exportar_fechamento_page.dart';
 import 'fiscal/nfe_gerenciamento_page.dart';
 import 'fiscal/relatorio_fiscal_mensal_page.dart';
 import 'nfe_importadas_page.dart';
+import 'layout/app_layout.dart';
 import 'widgets/hub_nav_button.dart';
 
 /// Entrada de NF-e por XML e consulta do log de importacoes.
@@ -66,6 +67,7 @@ class NotasFiscaisPage extends StatelessWidget {
             nfe: nfe,
             nfeRepository: repo,
             produtoRepository: produtoRepository,
+            appConfigRepository: appConfigRepository,
             xmlOriginal: xml,
           ),
         ),
@@ -89,11 +91,8 @@ class NotasFiscaisPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Notas Fiscais'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: AdaptiveHubBody(
+        children: [
             HubNavButton(
               icon: Icons.receipt_long_outlined,
               corDestaque: HubNavColors.menuNotasFiscais,
@@ -102,7 +101,6 @@ class NotasFiscaisPage extends StatelessWidget {
                   'Leia o XML da nota, confira os itens e lance a entrada no estoque.',
               onTap: () => _importarNfeXml(context),
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.fact_check_outlined,
               corDestaque: HubNavColors.menuNotasFiscais,
@@ -117,7 +115,6 @@ class NotasFiscaisPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.description_outlined,
               corDestaque: HubNavColors.menuNotasFiscais,
@@ -137,7 +134,6 @@ class NotasFiscaisPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.analytics_outlined,
               corDestaque: HubNavColors.menuNotasFiscais,
@@ -154,7 +150,6 @@ class NotasFiscaisPage extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
             HubNavButton(
               icon: Icons.folder_zip_outlined,
               corDestaque: HubNavColors.menuNotasFiscais,
@@ -171,8 +166,7 @@ class NotasFiscaisPage extends StatelessWidget {
                 );
               },
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

@@ -456,6 +456,7 @@ class SyncEntityCodecExtras {
         'rodapeOrcamento': c.rodapeOrcamento,
         'limiteDivergenciaCaixa': c.limiteDivergenciaCaixa,
         'mostrarCampoDescontoCaixa': c.mostrarCampoDescontoCaixa,
+        'exigirAutorizacaoSegundaViaCupom': c.exigirAutorizacaoSegundaViaCupom,
         'maxDescontoPercentualPdv': c.maxDescontoPercentualPdv,
         'permitirVendaSemEstoque': c.permitirVendaSemEstoque,
         'whatsappApiVersion': c.whatsappApiVersion,
@@ -466,6 +467,11 @@ class SyncEntityCodecExtras {
         'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
         'layoutImpressaoJson': c.layoutImpressaoJson,
         'auditoriaRetencaoDias': c.auditoriaRetencaoDias,
+        'margemMinimaPercentualPadrao': c.margemMinimaPercentualPadrao,
+        'umCaixaAbertoPorLoja': c.umCaixaAbertoPorLoja,
+        'alertasProativosWhatsappAtivos': c.alertasProativosWhatsappAtivos,
+        'whatsappDonoNumero': c.whatsappDonoNumero,
+        'alertasProativosIntervaloMinutos': c.alertasProativosIntervaloMinutos,
       };
 
   static EmpresaConfig empresaConfigDeMap(
@@ -484,6 +490,9 @@ class SyncEntityCodecExtras {
               base.limiteDivergenciaCaixa,
       mostrarCampoDescontoCaixa:
           m['mostrarCampoDescontoCaixa'] as bool? ?? base.mostrarCampoDescontoCaixa,
+      exigirAutorizacaoSegundaViaCupom:
+          m['exigirAutorizacaoSegundaViaCupom'] as bool? ??
+              base.exigirAutorizacaoSegundaViaCupom,
       maxDescontoPercentualPdv:
           (m['maxDescontoPercentualPdv'] as num?)?.toDouble() ??
               base.maxDescontoPercentualPdv,
@@ -508,6 +517,23 @@ class SyncEntityCodecExtras {
         (m['auditoriaRetencaoDias'] as num?)?.toInt() ??
             base.auditoriaRetencaoDias,
       ),
+      margemMinimaPercentualPadrao: () {
+        final v = (m['margemMinimaPercentualPadrao'] as num?)?.toDouble();
+        if (v == null) return base.margemMinimaPercentualPadrao;
+        return v.clamp(0, 99).toDouble();
+      }(),
+      umCaixaAbertoPorLoja:
+          m['umCaixaAbertoPorLoja'] as bool? ?? base.umCaixaAbertoPorLoja,
+      alertasProativosWhatsappAtivos:
+          m['alertasProativosWhatsappAtivos'] as bool? ??
+              base.alertasProativosWhatsappAtivos,
+      whatsappDonoNumero:
+          (m['whatsappDonoNumero'] ?? base.whatsappDonoNumero).toString(),
+      alertasProativosIntervaloMinutos: () {
+        final v = (m['alertasProativosIntervaloMinutos'] as num?)?.toInt();
+        if (v == null) return base.alertasProativosIntervaloMinutos;
+        return v.clamp(15, 1440);
+      }(),
     );
   }
 

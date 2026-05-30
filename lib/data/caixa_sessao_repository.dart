@@ -88,6 +88,17 @@ class CaixaSessaoRepository {
     return todas[terminalId] ?? CaixaSessao.vazia(terminalId);
   }
 
+  Future<CaixaSessao?> obterSessaoAbertaEmOutroTerminal() async {
+    final meu = await obterTerminalId();
+    final todas = await listarTodasSessoes();
+    for (final e in todas.entries) {
+      if (e.key != meu && e.value.aberto) {
+        return e.value;
+      }
+    }
+    return null;
+  }
+
   Future<void> salvarSessaoLocal(CaixaSessao sessao, {bool propagarRede = true}) async {
     await _serializar(() async {
       final todas = await _listarTodasSessoesInterno(migrarLegado: false);

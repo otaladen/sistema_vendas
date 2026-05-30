@@ -7,8 +7,35 @@ import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
+import '../model/config_layout_impressao.dart';
+import '../services/cupom_pdf_gerado.dart';
 import '../services/cupom_pdf_layout.dart';
 import '../services/print_service.dart';
+
+/// Envelope para PDFs legados que ainda retornam apenas bytes.
+Future<CupomPdfGerado> cupomPdfLegado({
+  required Uint8List bytes,
+  required EmpresaConfig config,
+  required ConfigLayoutImpressao layout,
+  int linhasTexto = 16,
+  int qtdItens = 0,
+  int linhasExtras = 2,
+  bool comLogo = false,
+}) async {
+  final pageFormat = CupomPdfLayout.formatoPagina(
+    empresaModeloPdfDeString(config.modeloPdf),
+    layout: layout,
+    linhasTexto: linhasTexto,
+    qtdItens: qtdItens,
+    linhasExtras: linhasExtras,
+    comLogo: comLogo,
+  );
+  return CupomPdfGerado(
+    bytes: bytes,
+    pageFormat: pageFormat,
+    layout: layout,
+  );
+}
 
 Future<String?> escolherSalvarPdfCupomVenda({
   required Uint8List bytes,
@@ -38,7 +65,7 @@ Future<void> mostrarFluxoImpressaoCupomVenda(
   BuildContext context, {
   required PrintService printService,
   required EmpresaConfig config,
-  required Future<Uint8List> Function() gerarPdfBytes,
+  required Future<CupomPdfGerado> Function() gerarPdf,
   required String suggestedFileName,
   String title = 'Cupom da venda',
   String content = 'Deseja imprimir o cupom agora ou gerar PDF?',
@@ -76,10 +103,10 @@ Future<void> mostrarFluxoImpressaoCupomVenda(
   );
   if (!context.mounted || acao == null || acao == 'fechar') return;
   try {
-    final pdfBytes = await gerarPdfBytes();
+    final pdf = await gerarPdf();
     if (!context.mounted) return;
     if (acao == 'imprimir') {
-      await Printing.layoutPdf(onLayout: (_) async => pdfBytes);
+      await Printing.layoutPdf(onLayout: (_) async => pdf.bytes);
       return;
     }
     if (acao == 'direto') {
@@ -96,19 +123,19 @@ Future<void> mostrarFluxoImpressaoCupomVenda(
       }
       await Printing.directPrintPdf(
         printer: printer,
-        onLayout: (_) async => pdfBytes,
+        onLayout: (_) async => pdf.bytes,
         name: suggestedFileName.replaceAll('.pdf', ''),
         format: config.modeloPdf == 'a4'
             ? PdfPageFormat.a4
-            : PdfPageFormat(
-                CupomPdfLayout.larguraBobinaMm * PdfPageFormat.mm,
-                280 * PdfPageFormat.mm,
+            : CupomPdfLayout.formatoImpressaoDireta(
+                layout: pdf.layout,
+                formatoPdf: pdf.pageFormat,
               ),
       );
       return;
     }
     final path = await escolherSalvarPdfCupomVenda(
-      bytes: pdfBytes,
+      bytes: pdf.bytes,
       suggestedFileName: suggestedFileName,
       initialDirectory: config.pastaPadraoPdf.trim().isEmpty
           ? null

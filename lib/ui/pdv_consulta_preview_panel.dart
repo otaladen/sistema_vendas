@@ -7,6 +7,7 @@ import '../domain/promocao_info_vigente.dart';
 import '../domain/promocao_preco_result.dart';
 import '../model/produto.dart';
 import 'produto_detalhe_venda_page.dart';
+import 'widgets/pdv_estoque_resumo_panel.dart';
 import 'widgets/promocao_badge.dart';
 
 /// Tres listas de preco do produto (ativo em destaque).
@@ -242,15 +243,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 8),
-              Text(
-                'Livre: ${produto.estoqueLivreParaVenda} · '
-                'Fis: ${produto.estoqueReal} · '
-                'Res: ${produto.estoqueReservado}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: estoqueCritico ? scheme.error : scheme.tertiary,
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
+              PdvEstoqueResumoPanel(produto: produto, compacto: compacto),
               if (mostrarDescricaoInline) ...[
                 const SizedBox(height: 10),
                 ProdutoDescricaoTecnicaInline(

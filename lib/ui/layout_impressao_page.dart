@@ -4,14 +4,18 @@ import 'package:printing/printing.dart';
 import '../data/app_config_repository.dart';
 import '../model/config_layout_impressao.dart';
 import '../services/cupom_layout_preview_pdf.dart';
+import '../services/cupom_pdf_layout.dart';
+import '../services/print_service.dart';
 
 class LayoutImpressaoPage extends StatefulWidget {
   const LayoutImpressaoPage({
     super.key,
     required this.appConfigRepository,
+    this.printService,
   });
 
   final AppConfigRepository appConfigRepository;
+  final PrintService? printService;
 
   @override
   State<LayoutImpressaoPage> createState() => _LayoutImpressaoPageState();
@@ -86,6 +90,75 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
       );
     } finally {
       if (mounted) setState(() => _salvando = false);
+    }
+  }
+
+  Future<void> _imprimirTesteBobina() async {
+    final empresa = _empresa;
+    final printService = widget.printService;
+    if (empresa == null || printService == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Abra esta tela em Configuracoes > Impressao para usar o teste na impressora.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (empresa.modeloPdf == 'a4') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Modelo A4 ativo. Altere para Cupom (80 mm) em Configuracoes > Impressao.',
+          ),
+        ),
+      );
+      return;
+    }
+    final printer =
+        await printService.resolverImpressoraPorNome(empresa.impressoraPadrao);
+    if (printer == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Configure a impressora padrao em Configuracoes.'),
+        ),
+      );
+      return;
+    }
+    try {
+      final pdf = await CupomLayoutPreviewPdf.gerar(
+        empresa: empresa,
+        layout: _layoutAtual,
+        orcamento: _orcamento,
+      );
+      await Printing.directPrintPdf(
+        printer: printer,
+        onLayout: (_) async => pdf.bytes,
+        name: _orcamento ? 'Teste_orcamento_80mm' : 'Teste_cupom_80mm',
+        format: CupomPdfLayout.formatoImpressaoDireta(
+          layout: pdf.layout,
+          formatoPdf: pdf.pageFormat,
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _orcamento
+                ? 'Teste de orcamento enviado a ${empresa.impressoraPadrao}.'
+                : 'Teste de cupom enviado a ${empresa.impressoraPadrao}.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Falha no teste de impressao: $e')),
+      );
     }
   }
 
@@ -196,6 +269,14 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
                           icon: const Icon(Icons.visibility_outlined),
                           label: const Text('Preview'),
                         ),
+                        if (widget.printService != null) ...[
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: _imprimirTesteBobina,
+                            icon: const Icon(Icons.print_outlined),
+                            label: const Text('Teste 80 mm'),
+                          ),
+                        ],
                         const SizedBox(width: 8),
                         Expanded(
                           child: FilledButton.icon(
@@ -241,6 +322,10 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
                 DropdownMenuItem(
                   value: LayoutImpressaoPreset.padrao,
                   child: Text('Padrao'),
+                ),
+                DropdownMenuItem(
+                  value: LayoutImpressaoPreset.economico,
+                  child: Text('Economico (minimo de papel)'),
                 ),
                 DropdownMenuItem(
                   value: LayoutImpressaoPreset.compacto,
@@ -387,6 +472,170 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
             'Linha qtd x preco',
             l.linhaQuantidadePreco,
             (c, v) => c.copyWith(linhaQuantidadePreco: v),
+          ),
+        ]),
+        _secao('Papel vertical (bobina 80 mm)', [
+          _campoDropdown<double>(
+            rotulo: 'Margem da pagina (mm)',
+            value: l.margemPaginaMm,
+            items: const [
+              DropdownMenuItem(value: 2, child: Text('2 mm')),
+              DropdownMenuItem(value: 3, child: Text('3 mm (padrao)')),
+              DropdownMenuItem(value: 4, child: Text('4 mm')),
+            ],
+            onChanged: (v) {
+              if (v != null) _patchLayout((c) => c.copyWith(margemPaginaMm: v));
+            },
+          ),
+          _campoDropdown<double>(
+            rotulo: 'Avanco apos corte (mm)',
+            value: l.margemCorteMm,
+            items: const [
+              DropdownMenuItem(value: 0, child: Text('0 mm (economico)')),
+              DropdownMenuItem(value: 2, child: Text('2 mm (padrao)')),
+              DropdownMenuItem(value: 5, child: Text('5 mm')),
+              DropdownMenuItem(value: 8, child: Text('8 mm')),
+            ],
+            onChanged: (v) {
+              if (v != null) _patchLayout((c) => c.copyWith(margemCorteMm: v));
+            },
+          ),
+          _campoDropdown<double>(
+            rotulo: 'Espaco entre linhas/blocos',
+            value: l.fatorEspacoVertical,
+            items: const [
+              DropdownMenuItem(value: 0.5, child: Text('Minimo (50%)')),
+              DropdownMenuItem(value: 0.65, child: Text('Compacto (65%)')),
+              DropdownMenuItem(value: 1, child: Text('Normal (100%)')),
+              DropdownMenuItem(value: 1.15, child: Text('Folga (115%)')),
+            ],
+            onChanged: (v) {
+              if (v != null) {
+                _patchLayout((c) => c.copyWith(fatorEspacoVertical: v));
+              }
+            },
+          ),
+          _campoDropdown<double>(
+            rotulo: 'Altura calculada da pagina PDF',
+            value: l.fatorAlturaPaginaPdf,
+            items: const [
+              DropdownMenuItem(value: 0.85, child: Text('Apertada (85%)')),
+              DropdownMenuItem(value: 0.92, child: Text('Normal (92%)')),
+              DropdownMenuItem(value: 1, child: Text('Com folga (100%)')),
+            ],
+            onChanged: (v) {
+              if (v != null) {
+                _patchLayout((c) => c.copyWith(fatorAlturaPaginaPdf: v));
+              }
+            },
+          ),
+          _campoDropdown<double>(
+            rotulo: 'Altura do logo (mm)',
+            value: l.alturaLogoMm,
+            items: const [
+              DropdownMenuItem(value: 28, child: Text('28 mm')),
+              DropdownMenuItem(value: 36, child: Text('36 mm (padrao)')),
+              DropdownMenuItem(value: 44, child: Text('44 mm')),
+            ],
+            onChanged: (v) {
+              if (v != null) _patchLayout((c) => c.copyWith(alturaLogoMm: v));
+            },
+          ),
+          _campoDropdown<double>(
+            rotulo: 'Espaco entre itens (mm)',
+            value: l.espacoEntreItensMm,
+            items: const [
+              DropdownMenuItem(value: 1, child: Text('1 mm')),
+              DropdownMenuItem(value: 1.5, child: Text('1,5 mm (padrao)')),
+              DropdownMenuItem(value: 2.5, child: Text('2,5 mm')),
+            ],
+            onChanged: (v) {
+              if (v != null) {
+                _patchLayout((c) => c.copyWith(espacoEntreItensMm: v));
+              }
+            },
+          ),
+          _switch(
+            'Espaco extra no final (corte)',
+            l.exibirEspacoFinal,
+            (c, v) => c.copyWith(exibirEspacoFinal: v),
+          ),
+          _campoDropdown<LayoutModoImpressaoDireta>(
+            rotulo: 'Impressao direta — altura da pagina',
+            value: l.modoImpressaoDireta,
+            items: LayoutModoImpressaoDireta.values
+                .map(
+                  (m) => DropdownMenuItem(
+                    value: m,
+                    child: Text(m.rotulo),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v != null) {
+                _patchLayout((c) => c.copyWith(modoImpressaoDireta: v));
+              }
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Para gastar menos papel: preset Economico, avanco 0 mm, altura PDF 85%, '
+              'desligue divisorias extras e use Preview + Teste 80 mm antes de salvar.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ]),
+        _secao('Colunas e valores (bobina)', [
+          _switch(
+            'Reservar coluna fixa para valores (R\$)',
+            l.reservarColunaValorFixa,
+            (c, v) => c.copyWith(reservarColunaValorFixa: v),
+          ),
+          _campoDropdown<double>(
+            rotulo: 'Largura da coluna de valores (mm)',
+            value: l.larguraColunaValorMm,
+            items: const [
+              DropdownMenuItem(value: 24, child: Text('24 mm')),
+              DropdownMenuItem(value: 26, child: Text('26 mm')),
+              DropdownMenuItem(value: 28, child: Text('28 mm (recomendado)')),
+              DropdownMenuItem(value: 30, child: Text('30 mm')),
+              DropdownMenuItem(value: 32, child: Text('32 mm')),
+            ],
+            onChanged: (v) {
+              if (v != null) {
+                _patchLayout((c) => c.copyWith(larguraColunaValorMm: v));
+              }
+            },
+          ),
+          _campoDropdown<int>(
+            rotulo: 'Proporcao esquerda/direita (modo flex)',
+            value: l.flexColunaEsquerda,
+            items: const [
+              DropdownMenuItem(value: 2, child: Text('20% esquerda (mais espaco p/ valor)')),
+              DropdownMenuItem(value: 3, child: Text('30% esquerda')),
+              DropdownMenuItem(value: 4, child: Text('40% esquerda (padrao)')),
+              DropdownMenuItem(value: 5, child: Text('50% esquerda')),
+            ],
+            onChanged: (v) {
+              if (v != null) {
+                _patchLayout((c) => c.copyWith(flexColunaEsquerda: v));
+              }
+            },
+          ),
+          _switch(
+            'Espacamento compacto (menos papel)',
+            l.espacoCompacto,
+            (c, v) => c.copyWith(espacoCompacto: v),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Se os valores saem cortados na impressora, mantenha "coluna fixa" ativa, '
+              'use Courier e largura 28–30 mm. Desative "colunas E/D" nos itens se '
+              'nomes longos ainda empurrarem o preco.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
         ]),
         _secao('Totais e pagamento', [

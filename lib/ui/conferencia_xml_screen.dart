@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../data/app_config_repository.dart';
 import '../data/nfe_entrada_repository.dart';
 import '../data/produto_repository.dart';
 import '../domain/produto_unidade_exibicao.dart';
@@ -16,12 +17,14 @@ class ConferenciaXmlScreen extends StatefulWidget {
     required this.nfe,
     required this.nfeRepository,
     required this.produtoRepository,
+    this.appConfigRepository,
     this.xmlOriginal = '',
   });
 
   final NfeXmlParseResult nfe;
   final NfeEntradaRepository nfeRepository;
   final ProdutoRepository produtoRepository;
+  final AppConfigRepository? appConfigRepository;
   final String xmlOriginal;
 
   @override
@@ -58,6 +61,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   List<_LinhaEdicao> _linhas = [];
   String? _initError;
   bool _confirmando = false;
+  double _margemMinimaPadrao = 20;
 
   static final NumberFormat _nfQtd = NumberFormat('#,##0.###', 'pt_BR');
   static final NumberFormat _nfMoeda = NumberFormat('#,##0.00', 'pt_BR');
@@ -106,6 +110,69 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         return true;
       }());
     }
+    _carregarMargemMinima();
+  }
+
+  Future<void> _carregarMargemMinima() async {
+    final repo = widget.appConfigRepository;
+    if (repo == null) return;
+    final config = await repo.carregarEmpresaConfig();
+    if (!mounted) return;
+    setState(() {
+      _margemMinimaPadrao = config.margemMinimaPercentualPadrao.clamp(0, 99);
+    });
+  }
+
+  static double _margemSobreVenda(double precoVenda, double custo) {
+    if (precoVenda <= 0) return 0;
+    return ((precoVenda - custo) / precoVenda) * 100;
+  }
+
+  static double? _precoVendaSugerido(double custo, double margemMinPercent) {
+    if (custo <= 0 || margemMinPercent <= 0 || margemMinPercent >= 99.9) {
+      return null;
+    }
+    return custo / (1 - margemMinPercent / 100);
+  }
+
+  Future<void> _aplicarCustoXmlNoCadastro(_LinhaEdicao linha) async {
+    final id = linha.produtoDestinoId();
+    final custoXml = _custoUnitarioXmlConvertidoInterno(linha);
+    if (id == null || custoXml == null) return;
+    final p = widget.produtoRepository.obterPorId(id);
+    if (p == null) return;
+    p.precoCusto = custoXml;
+    widget.produtoRepository.salvar(p);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Custo atualizado para ${_formatarReais(custoXml)} / ${linha.unidade.trim()}.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _aplicarPrecoSugeridoMargem(
+    _LinhaEdicao linha,
+    double precoSugerido,
+  ) async {
+    final id = linha.produtoDestinoId();
+    if (id == null) return;
+    final p = widget.produtoRepository.obterPorId(id);
+    if (p == null) return;
+    p.precoVenda = precoSugerido;
+    widget.produtoRepository.salvar(p);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Preco de venda ajustado para ${_formatarReais(precoSugerido)}.',
+        ),
+      ),
+    );
   }
 
   static String _formatarFator(double v) {
@@ -306,55 +373,161 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         ),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          child: LayoutBuilder(
-            builder: (context, c) {
-              final maxW = c.maxWidth;
-              final titulo = Text(
-                'Custo vs cadastro',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.2,
-                    ),
-              );
-
-              if (maxW >= _custoPainelBreakpoint2Col) {
-                final colW = (maxW - _erpGap16) / 2;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    titulo,
-                    const SizedBox(height: _erpGap8),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(
-                          width: colW,
-                          child: textoCustoCadastro,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              LayoutBuilder(
+                builder: (context, c) {
+                  final maxW = c.maxWidth;
+                  final titulo = Text(
+                    'Custo vs cadastro',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
                         ),
-                        const SizedBox(width: _erpGap16),
-                        SizedBox(
-                          width: colW,
-                          child: blocoXmlEIndicador(colW),
+                  );
+
+                  if (maxW >= _custoPainelBreakpoint2Col) {
+                    final colW = (maxW - _erpGap16) / 2;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        titulo,
+                        const SizedBox(height: _erpGap8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: colW,
+                              child: textoCustoCadastro,
+                            ),
+                            const SizedBox(width: _erpGap16),
+                            SizedBox(
+                              width: colW,
+                              child: blocoXmlEIndicador(colW),
+                            ),
+                          ],
                         ),
                       ],
-                    ),
-                  ],
-                );
-              }
+                    );
+                  }
 
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  titulo,
-                  const SizedBox(height: _erpGap8),
-                  textoCustoCadastro,
-                  const SizedBox(height: _erpGap8),
-                  blocoXmlEIndicador(maxW),
-                ],
-              );
-            },
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      titulo,
+                      const SizedBox(height: _erpGap8),
+                      textoCustoCadastro,
+                      const SizedBox(height: _erpGap8),
+                      blocoXmlEIndicador(maxW),
+                    ],
+                  );
+                },
+              ),
+              _buildMargemCustoSection(context, p, custoXml, linha),
+            ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildMargemCustoSection(
+    BuildContext context,
+    Produto produto,
+    double custoXml,
+    _LinhaEdicao linha,
+  ) {
+    final cs = Theme.of(context).colorScheme;
+    final precoVenda = produto.precoVenda;
+    if (precoVenda <= 1e-9) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Text(
+          'Cadastre preco de venda para avaliar margem. '
+          'O custo do XML sera aplicado ao confirmar a entrada.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontStyle: FontStyle.italic,
+                color: cs.onSurfaceVariant,
+              ),
+        ),
+      );
+    }
+
+    final margemAtual = _margemSobreVenda(precoVenda, produto.precoCusto);
+    final margemApos = _margemSobreVenda(precoVenda, custoXml);
+    final abaixoMin = margemApos + 0.05 < _margemMinimaPadrao;
+    final sugerido = _precoVendaSugerido(custoXml, _margemMinimaPadrao);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Divider(height: 20),
+          Text(
+            'Margem sobre venda (${_formatarReais(precoVenda)})',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Atual: ${margemAtual.toStringAsFixed(1)}% · '
+            'Apos XML: ${margemApos.toStringAsFixed(1)}% '
+            '(min. ${_margemMinimaPadrao.toStringAsFixed(0)}%)',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          if (abaixoMin) ...[
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.warning_amber_rounded, color: cs.error, size: 18),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Margem apos o custo do XML ficaria abaixo do minimo configurado.',
+                    style: TextStyle(
+                      color: cs.error,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (sugerido != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Preco sugerido para ${_margemMinimaPadrao.toStringAsFixed(0)}%: '
+                '${_formatarReais(sugerido)}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
+          ],
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _aplicarCustoXmlNoCadastro(linha),
+                icon: const Icon(Icons.price_change_outlined, size: 18),
+                label: const Text('Aplicar custo do XML'),
+              ),
+              if (abaixoMin && sugerido != null)
+                FilledButton.tonalIcon(
+                  onPressed: () =>
+                      _aplicarPrecoSugeridoMargem(linha, sugerido),
+                  icon: const Icon(Icons.trending_up, size: 18),
+                  label: const Text('Aplicar preco sugerido'),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -28,6 +28,7 @@ import 'model/lancamento_funcionario.dart';
 import 'model/linha_devolucao_entrada.dart';
 import 'model/linha_troca_saida.dart';
 import 'model/motorista.dart';
+import 'model/movimento_estoque.dart';
 import 'model/nfe_importada_registro.dart';
 import 'model/produto.dart';
 import 'model/promocao.dart';
@@ -2855,6 +2856,98 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(29, 3686530102017877759),
+    name: 'MovimentoEstoque',
+    lastPropertyId: const obx_int.IdUid(13, 7424392575387537870),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 6948926826467679371),
+        name: 'id',
+        type: 6,
+        flags: 129,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 6614997286561418186),
+        name: 'tipoMovimento',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(46, 6685175261848784578),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 7399288039529159274),
+        name: 'deltaFisico',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 4362853126205548170),
+        name: 'deltaReserva',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 7928822987339248159),
+        name: 'saldoFisicoAntes',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 1630780274418580190),
+        name: 'saldoFisicoDepois',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 4651891965166483346),
+        name: 'saldoReservaAntes',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 9212609660023341662),
+        name: 'saldoReservaDepois',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 4978076644546200699),
+        name: 'documentoReferencia',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 5090143619687961048),
+        name: 'motivo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 6312926329192893342),
+        name: 'usuarioLogin',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 7970734927993251108),
+        name: 'registradoEm',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(13, 7424392575387537870),
+        name: 'produtoId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(47, 7539215899859775418),
+        relationField: 'produto',
+        relationTarget: 'Produto',
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -2900,8 +2993,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(28, 798716117790928223),
-    lastIndexId: const obx_int.IdUid(45, 3226659383948146918),
+    lastEntityId: const obx_int.IdUid(29, 3686530102017877759),
+    lastIndexId: const obx_int.IdUid(47, 7539215899859775418),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -6514,6 +6607,123 @@ obx_int.ModelDefinition getObjectBoxModel() {
             return object;
           },
         ),
+    MovimentoEstoque: obx_int.EntityDefinition<MovimentoEstoque>(
+      model: _entities[28],
+      toOneRelations: (MovimentoEstoque object) => [object.produto],
+      toManyRelations: (MovimentoEstoque object) => {},
+      getId: (MovimentoEstoque object) => object.id,
+      setId: (MovimentoEstoque object, int id) {
+        object.id = id;
+      },
+      objectToFB: (MovimentoEstoque object, fb.Builder fbb) {
+        final tipoMovimentoOffset = fbb.writeString(object.tipoMovimento);
+        final documentoReferenciaOffset = fbb.writeString(
+          object.documentoReferencia,
+        );
+        final motivoOffset = fbb.writeString(object.motivo);
+        final usuarioLoginOffset = fbb.writeString(object.usuarioLogin);
+        fbb.startTable(14);
+        fbb.addInt64(0, object.id);
+        fbb.addOffset(1, tipoMovimentoOffset);
+        fbb.addInt64(2, object.deltaFisico);
+        fbb.addInt64(3, object.deltaReserva);
+        fbb.addInt64(4, object.saldoFisicoAntes);
+        fbb.addInt64(5, object.saldoFisicoDepois);
+        fbb.addInt64(6, object.saldoReservaAntes);
+        fbb.addInt64(7, object.saldoReservaDepois);
+        fbb.addOffset(8, documentoReferenciaOffset);
+        fbb.addOffset(9, motivoOffset);
+        fbb.addOffset(10, usuarioLoginOffset);
+        fbb.addInt64(11, object.registradoEm.millisecondsSinceEpoch);
+        fbb.addInt64(12, object.produto.targetId);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final tipoMovimentoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 6, '');
+        final deltaFisicoParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          8,
+          0,
+        );
+        final deltaReservaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          10,
+          0,
+        );
+        final saldoFisicoAntesParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          12,
+          0,
+        );
+        final saldoFisicoDepoisParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          14,
+          0,
+        );
+        final saldoReservaAntesParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        final saldoReservaDepoisParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          18,
+          0,
+        );
+        final documentoReferenciaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 20, '');
+        final motivoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 22, '');
+        final usuarioLoginParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 24, '');
+        final registradoEmParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 26, 0),
+          isUtc: true,
+        );
+        final object = MovimentoEstoque(
+          id: idParam,
+          tipoMovimento: tipoMovimentoParam,
+          deltaFisico: deltaFisicoParam,
+          deltaReserva: deltaReservaParam,
+          saldoFisicoAntes: saldoFisicoAntesParam,
+          saldoFisicoDepois: saldoFisicoDepoisParam,
+          saldoReservaAntes: saldoReservaAntesParam,
+          saldoReservaDepois: saldoReservaDepoisParam,
+          documentoReferencia: documentoReferenciaParam,
+          motivo: motivoParam,
+          usuarioLogin: usuarioLoginParam,
+          registradoEm: registradoEmParam,
+        );
+        object.produto.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          28,
+          0,
+        );
+        object.produto.attach(store);
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -8641,5 +8851,73 @@ class ConferenciaCargaRomaneio_ {
   /// See [ConferenciaCargaRomaneio.atualizadoEm].
   static final atualizadoEm = obx.QueryDateProperty<ConferenciaCargaRomaneio>(
     _entities[27].properties[5],
+  );
+}
+
+/// [MovimentoEstoque] entity fields to define ObjectBox queries.
+class MovimentoEstoque_ {
+  /// See [MovimentoEstoque.id].
+  static final id = obx.QueryIntegerProperty<MovimentoEstoque>(
+    _entities[28].properties[0],
+  );
+
+  /// See [MovimentoEstoque.tipoMovimento].
+  static final tipoMovimento = obx.QueryStringProperty<MovimentoEstoque>(
+    _entities[28].properties[1],
+  );
+
+  /// See [MovimentoEstoque.deltaFisico].
+  static final deltaFisico = obx.QueryIntegerProperty<MovimentoEstoque>(
+    _entities[28].properties[2],
+  );
+
+  /// See [MovimentoEstoque.deltaReserva].
+  static final deltaReserva = obx.QueryIntegerProperty<MovimentoEstoque>(
+    _entities[28].properties[3],
+  );
+
+  /// See [MovimentoEstoque.saldoFisicoAntes].
+  static final saldoFisicoAntes = obx.QueryIntegerProperty<MovimentoEstoque>(
+    _entities[28].properties[4],
+  );
+
+  /// See [MovimentoEstoque.saldoFisicoDepois].
+  static final saldoFisicoDepois = obx.QueryIntegerProperty<MovimentoEstoque>(
+    _entities[28].properties[5],
+  );
+
+  /// See [MovimentoEstoque.saldoReservaAntes].
+  static final saldoReservaAntes = obx.QueryIntegerProperty<MovimentoEstoque>(
+    _entities[28].properties[6],
+  );
+
+  /// See [MovimentoEstoque.saldoReservaDepois].
+  static final saldoReservaDepois = obx.QueryIntegerProperty<MovimentoEstoque>(
+    _entities[28].properties[7],
+  );
+
+  /// See [MovimentoEstoque.documentoReferencia].
+  static final documentoReferencia = obx.QueryStringProperty<MovimentoEstoque>(
+    _entities[28].properties[8],
+  );
+
+  /// See [MovimentoEstoque.motivo].
+  static final motivo = obx.QueryStringProperty<MovimentoEstoque>(
+    _entities[28].properties[9],
+  );
+
+  /// See [MovimentoEstoque.usuarioLogin].
+  static final usuarioLogin = obx.QueryStringProperty<MovimentoEstoque>(
+    _entities[28].properties[10],
+  );
+
+  /// See [MovimentoEstoque.registradoEm].
+  static final registradoEm = obx.QueryDateProperty<MovimentoEstoque>(
+    _entities[28].properties[11],
+  );
+
+  /// See [MovimentoEstoque.produto].
+  static final produto = obx.QueryRelationToOne<MovimentoEstoque, Produto>(
+    _entities[28].properties[12],
   );
 }

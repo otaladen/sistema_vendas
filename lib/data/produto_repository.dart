@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../model/historico_entrada.dart';
+import '../model/movimento_estoque.dart';
 import '../model/produto.dart';
 import '../services/gerenciador_estoque_service.dart';
+import 'movimento_estoque_repository.dart';
 import 'produto_busca_sinonimos.dart';
 import 'produto_busca_util.dart';
 import '../objectbox.g.dart';
@@ -887,6 +889,7 @@ class ProdutoRepository extends ChangeNotifier {
   int salvar(
     Produto produto, {
     String motivoAjusteEstoque = 'Ajuste manual cadastro produto',
+    String usuarioAjusteEstoque = '',
   }) {
     final id = _db.store.runInTransaction(TxMode.write, () {
       if (produto.id > 0) {
@@ -894,16 +897,20 @@ class ProdutoRepository extends ChangeNotifier {
         if (existente == null) {
           throw StateError('Produto id ${produto.id} nao encontrado.');
         }
-        if (produto.estoqueReal != existente.estoqueReal) {
-          _estoque.prepararAjusteManualInventario(
-            existente,
-            produto.estoqueReal,
-            motivoAjusteEstoque,
-          );
-        }
+        final novoEstoque = produto.estoqueReal;
         _copiarCamposCadastro(existente, produto);
-        existente.estoqueAtual = existente.estoqueReal;
-        return _db.produtoBox.put(existente);
+        if (novoEstoque != existente.estoqueReal) {
+          _estoque.executarAjusteManualInventario(
+            existente,
+            novoEstoque,
+            motivoAjusteEstoque,
+            usuarioLogin: usuarioAjusteEstoque,
+          );
+        } else {
+          existente.estoqueAtual = existente.estoqueReal;
+          _db.produtoBox.put(existente);
+        }
+        return existente.id;
       }
 
       final estoqueInicial = produto.estoqueReal;
@@ -912,12 +919,12 @@ class ProdutoRepository extends ChangeNotifier {
       final novoId = _db.produtoBox.put(produto);
       produto.id = novoId;
       if (estoqueInicial > 0) {
-        _estoque.prepararAjusteManualInventario(
+        _estoque.executarAjusteManualInventario(
           produto,
           estoqueInicial,
           motivoAjusteEstoque,
+          usuarioLogin: usuarioAjusteEstoque,
         );
-        _db.produtoBox.put(produto);
       }
       return novoId;
     });
@@ -989,6 +996,39 @@ class ProdutoRepository extends ChangeNotifier {
     } finally {
       q.close();
     }
+  }
+
+  /// Kardex de movimentacoes de estoque, mais recentes primeiro.
+  List<MovimentoEstoque> listarMovimentosEstoquePorProduto(
+    int produtoId, {
+    int limite = 200,
+  }) =>
+      MovimentoEstoqueRepository(_db).listarPorProduto(
+        produtoId,
+        limite: limite,
+      );
+
+  /// Ajuste manual de inventario com registro no kardex.
+  void ajustarEstoqueManual({
+    required int produtoId,
+    required int novaQuantidadeFisica,
+    required String motivo,
+    String usuarioLogin = '',
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final produto = _db.produtoBox.get(produtoId);
+      if (produto == null) {
+        throw StateError('Produto id $produtoId nao encontrado.');
+      }
+      _estoque.executarAjusteManualInventario(
+        produto,
+        novaQuantidadeFisica,
+        motivo,
+        usuarioLogin: usuarioLogin,
+      );
+    });
+    invalidarCacheBusca();
+    notificarAlteracaoParaRede(entidade: 'produto', entidadeId: produtoId);
   }
 
   /// Media ponderada das entradas de NF-e; null se nao houver historico valido.

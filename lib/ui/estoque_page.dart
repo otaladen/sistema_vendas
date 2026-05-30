@@ -11,6 +11,7 @@ import '../data/reajuste_preco_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../data/usuario_repository.dart';
 import '../main.dart';
+import '../domain/estoque/filtro_estoque_operacional.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../domain/usuario_permissao_helper.dart';
@@ -21,6 +22,8 @@ import '../services/pdf_tabela_produtos_texto.dart';
 import 'reajuste_preco_autorizacao.dart';
 import 'reajuste_preco_historico_page.dart';
 import 'reajuste_preco_lote_page.dart';
+import 'estoque/ajuste_estoque_dialog.dart';
+import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'sugestao_compra_page.dart';
 import 'widgets/produto_busca_input.dart';
 
@@ -50,9 +53,12 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
 
   final TextEditingController _buscaController = TextEditingController();
   String _filtroBusca = '';
-  bool _somenteCriticosPp = false;
+  FiltroEstoqueOperacional _filtroOperacional = FiltroEstoqueOperacional.todos;
+  String? _filtroCategoria;
+  String? _filtroFornecedor;
   List<Produto> _produtos = [];
   Map<int, bool> _criticoPpPorProdutoId = {};
+  Map<int, int> _consumo60dPorProdutoId = {};
   int _qtdCriticosPp = 0;
 
   ComprasPreditivasService get _comprasSvc =>
@@ -78,18 +84,149 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   void _recarregarProdutos() {
     if (!mounted) return;
     final produtos = widget.produtoRepository.listarTodos();
-    final consumo = _comprasSvc.montarConsumoPorProdutoNoPeriodo();
+    final consumo = _comprasSvc.montarConsumoPorProdutoNoPeriodo(dias: 60);
     final criticos = _comprasSvc.mapaProdutosAtivosCriticos(
       consumoPrecalculado: consumo,
     );
     setState(() {
       _produtos = produtos;
+      _consumo60dPorProdutoId = consumo;
       _criticoPpPorProdutoId = criticos;
       _qtdCriticosPp = criticos.length;
-      if (_somenteCriticosPp && _qtdCriticosPp == 0) {
-        _somenteCriticosPp = false;
+      if (_filtroOperacional == FiltroEstoqueOperacional.ppCritico &&
+          _qtdCriticosPp == 0) {
+        _filtroOperacional = FiltroEstoqueOperacional.todos;
       }
     });
+  }
+
+  List<String> _categoriasDisponiveis() {
+    final set = <String>{};
+    for (final p in _produtos) {
+      final c = p.categoria.trim();
+      if (c.isNotEmpty) set.add(c);
+    }
+    final lista = set.toList()..sort();
+    return lista;
+  }
+
+  List<String> _fornecedoresDisponiveis() {
+    final set = <String>{};
+    for (final p in _produtos) {
+      final f = p.fornecedor.trim();
+      if (f.isNotEmpty) set.add(f);
+    }
+    final lista = set.toList()..sort();
+    return lista;
+  }
+
+  bool _produtoSemGiro(Produto p, int dias) {
+    final consumo = _consumo60dPorProdutoId[p.id] ?? 0;
+    if (consumo > 0 && dias <= 60) return false;
+    final ref = p.ultimaVendaEm ?? p.criadoEm;
+    return DateTime.now().difference(ref.toLocal()).inDays >= dias;
+  }
+
+  double _valorEstoqueTotal(Iterable<Produto> produtos) {
+    return produtos.where((p) => p.ativo).fold<double>(0, (s, p) {
+      final custo = p.custoMedio > 0 ? p.custoMedio : p.precoCusto;
+      return s + p.estoqueReal * custo;
+    });
+  }
+
+  int _totalReservado(Iterable<Produto> produtos) =>
+      produtos.fold<int>(0, (s, p) => s + p.estoqueReservado);
+
+  Future<void> _abrirAjusteEstoque(Produto produto) async {
+    final resultado = await showAjusteEstoqueDialog(
+      context: context,
+      produto: produto,
+    );
+    if (resultado == null || !mounted) return;
+    try {
+      widget.produtoRepository.ajustarEstoqueManual(
+        produtoId: produto.id,
+        novaQuantidadeFisica: resultado.novaQuantidadeFisica,
+        motivo: resultado.motivo,
+        usuarioLogin: widget.usuarioLogado.login,
+      );
+      _recarregarProdutos();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Estoque de "${produto.nome}" ajustado para '
+            '${resultado.novaQuantidadeFisica}.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao ajustar estoque: $e')),
+      );
+    }
+  }
+
+  Future<void> _abrirExtratoEstoque(Produto produto) {
+    return showExtratoMovimentoEstoque(
+      context: context,
+      tituloProduto: produto.nome,
+      child: ExtratoMovimentoEstoquePanel(
+        produtoRepository: widget.produtoRepository,
+        produtoId: produto.id,
+      ),
+    );
+  }
+
+  Widget _kpiCard({
+    required String titulo,
+    required String valor,
+    required Color bg,
+    required Color border,
+    required Color fg,
+    VoidCallback? onTap,
+  }) {
+    final tile = Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bg,
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titulo,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: fg.withValues(alpha: 0.9),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            valor,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: fg,
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onTap == null) return tile;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: tile,
+      ),
+    );
   }
 
   Future<void> _abrirSugestaoCompra() async {
@@ -124,7 +261,9 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     if (_filtroBusca.trim().isNotEmpty) {
       filtros.add('busca "${_filtroBusca.trim()}"');
     }
-    if (_somenteCriticosPp) filtros.add('PP critico');
+    if (_filtroOperacional != FiltroEstoqueOperacional.todos) {
+      filtros.add(_filtroOperacional.rotulo);
+    }
     final tituloEscopo = filtros.isEmpty
         ? 'Todos os itens visiveis na Estoque (${escopo.length}).'
         : 'Filtros: ${filtros.join(' · ')} (${escopo.length} itens).';
@@ -333,8 +472,30 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             somenteAtivos: false,
           );
     return porBusca.where((p) {
-      if (_somenteCriticosPp && !(_criticoPpPorProdutoId[p.id] ?? false)) {
+      if (_filtroCategoria != null &&
+          p.categoria.trim() != _filtroCategoria) {
         return false;
+      }
+      if (_filtroFornecedor != null &&
+          p.fornecedor.trim() != _filtroFornecedor) {
+        return false;
+      }
+      switch (_filtroOperacional) {
+        case FiltroEstoqueOperacional.todos:
+          break;
+        case FiltroEstoqueOperacional.abaixoMinimo:
+          if (!(p.ativo && p.estoque <= p.quantidadeMinima)) return false;
+        case FiltroEstoqueOperacional.ppCritico:
+          if (!(_criticoPpPorProdutoId[p.id] ?? false)) return false;
+        case FiltroEstoqueOperacional.comReserva:
+          if (p.estoqueReservado <= 0) return false;
+        case FiltroEstoqueOperacional.estoqueNegativo:
+          if (p.estoqueReal >= 0 && p.estoqueLivreParaVenda >= 0) return false;
+        case FiltroEstoqueOperacional.semGiro30:
+        case FiltroEstoqueOperacional.semGiro60:
+        case FiltroEstoqueOperacional.semGiro90:
+          final dias = _filtroOperacional.diasSemGiro!;
+          if (!_produtoSemGiro(p, dias)) return false;
       }
       return true;
     }).toList();
@@ -344,9 +505,18 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   Widget build(BuildContext context) {
     final produtos = _produtos;
     final produtosFiltrados = _aplicarFiltrosLista(produtos);
+    final produtosAtivos = produtos.where((p) => p.ativo).length;
     final totalAbaixoMinimo = produtos
         .where((p) => p.ativo && p.estoque <= p.quantidadeMinima)
         .length;
+    final valorEstoque = _valorEstoqueTotal(produtos);
+    final totalReservado = _totalReservado(produtos);
+    final verCusto = UsuarioPermissaoHelper.tem(
+      widget.usuarioLogado,
+      PermissaoUsuario.verCustoMargem,
+    );
+    final categorias = _categoriasDisponiveis();
+    final fornecedores = _fornecedoresDisponiveis();
     final theme = Theme.of(context);
     final semantic = theme.extension<AppSemanticColors>();
 
@@ -456,15 +626,104 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                 TextButton(
                   onPressed: () {
                     setState(() {
-                      _somenteCriticosPp = !_somenteCriticosPp;
+                      _filtroOperacional = FiltroEstoqueOperacional.ppCritico;
                     });
                   },
-                  child: Text(
-                    _somenteCriticosPp ? 'Ver todos' : 'Filtrar lista',
-                  ),
+                  child: const Text('Filtrar lista'),
                 ),
               ],
             ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: LayoutBuilder(
+              builder: (context, c) {
+                final estreito = c.maxWidth < 900;
+                final infoBg = semantic?.infoBg ?? const Color(0xFFEAF2FF);
+                final infoBorder = semantic?.infoBorder ?? const Color(0xFF9EC0FF);
+                final infoFg = semantic?.infoFg ?? const Color(0xFF1E3A8A);
+                final errBg = semantic?.errorBg ?? const Color(0xFFFDECEC);
+                final errBorder = semantic?.errorBorder ?? const Color(0xFFF1A3A3);
+                final errFg = semantic?.errorFg ?? const Color(0xFF9B1C1C);
+                final warnBg = semantic?.warningBg ?? const Color(0xFFFFF8E6);
+                final warnBorder = semantic?.warningBorder ?? const Color(0xFFF2CC7A);
+                final warnFg = semantic?.warningFg ?? const Color(0xFF8A5B00);
+                final kpis = [
+                  _kpiCard(
+                    titulo: 'SKUs ativos',
+                    valor: '$produtosAtivos',
+                    bg: infoBg,
+                    border: infoBorder,
+                    fg: infoFg,
+                  ),
+                  _kpiCard(
+                    titulo: 'Abaixo minimo',
+                    valor: '$totalAbaixoMinimo',
+                    bg: errBg,
+                    border: errBorder,
+                    fg: errFg,
+                    onTap: () => setState(
+                      () => _filtroOperacional =
+                          FiltroEstoqueOperacional.abaixoMinimo,
+                    ),
+                  ),
+                  _kpiCard(
+                    titulo: 'PP critico',
+                    valor: '$_qtdCriticosPp',
+                    bg: warnBg,
+                    border: warnBorder,
+                    fg: warnFg,
+                    onTap: _qtdCriticosPp > 0
+                        ? () => setState(
+                              () => _filtroOperacional =
+                                  FiltroEstoqueOperacional.ppCritico,
+                            )
+                        : null,
+                  ),
+                  if (verCusto)
+                    _kpiCard(
+                      titulo: 'Valor em estoque',
+                      valor: _formatarMoedaBRL(valorEstoque),
+                      bg: infoBg,
+                      border: infoBorder,
+                      fg: infoFg,
+                    ),
+                  _kpiCard(
+                    titulo: 'Total reservado',
+                    valor: '$totalReservado un.',
+                    bg: warnBg,
+                    border: warnBorder,
+                    fg: warnFg,
+                    onTap: () => setState(
+                      () => _filtroOperacional =
+                          FiltroEstoqueOperacional.comReserva,
+                    ),
+                  ),
+                ];
+                if (estreito) {
+                  return Column(
+                    children: [
+                      for (var i = 0; i < kpis.length; i++) ...[
+                        if (i > 0) const SizedBox(height: 8),
+                        kpis[i],
+                      ],
+                    ],
+                  );
+                }
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final k in kpis)
+                      SizedBox(
+                        width: ((c.maxWidth - 8 * (kpis.length - 1)) / kpis.length)
+                            .clamp(120.0, 280.0),
+                        child: k,
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Column(
@@ -486,6 +745,70 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                   onChanged: (value) => setState(() => _filtroBusca = value),
                 ),
                 const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: FiltroEstoqueOperacional.values.map((f) {
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: Text(f.rotulo),
+                          selected: _filtroOperacional == f,
+                          onSelected: (_) {
+                            setState(() => _filtroOperacional = f);
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                if (categorias.isNotEmpty || fornecedores.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (categorias.isNotEmpty)
+                        DropdownMenu<String?>(
+                          label: const Text('Categoria'),
+                          initialSelection: _filtroCategoria,
+                          dropdownMenuEntries: [
+                            const DropdownMenuEntry<String?>(
+                              value: null,
+                              label: 'Todas',
+                            ),
+                            for (final c in categorias)
+                              DropdownMenuEntry<String?>(
+                                value: c,
+                                label: c,
+                              ),
+                          ],
+                          onSelected: (v) =>
+                              setState(() => _filtroCategoria = v),
+                        ),
+                      if (fornecedores.isNotEmpty)
+                        DropdownMenu<String?>(
+                          label: const Text('Fornecedor'),
+                          initialSelection: _filtroFornecedor,
+                          dropdownMenuEntries: [
+                            const DropdownMenuEntry<String?>(
+                              value: null,
+                              label: 'Todos',
+                            ),
+                            for (final f in fornecedores)
+                              DropdownMenuEntry<String?>(
+                                value: f,
+                                label: f,
+                              ),
+                          ],
+                          onSelected: (v) =>
+                              setState(() => _filtroFornecedor = v),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -495,35 +818,14 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                         'Itens: ${produtosFiltrados.length}/${produtos.length}',
                       ),
                     ),
-                    Chip(
-                      avatar: Icon(
-                        Icons.warning_amber_outlined,
-                        color: totalAbaixoMinimo > 0 ? Colors.red : Colors.green,
-                      ),
-                      label: Text('Abaixo minimo: $totalAbaixoMinimo'),
-                    ),
-                    ActionChip(
-                      avatar: Icon(
-                        Icons.trending_down,
-                        size: 18,
-                        color: _qtdCriticosPp > 0
-                            ? (semantic?.warningFg ?? theme.colorScheme.error)
-                            : Colors.green,
-                      ),
-                      label: Text('PP critico: $_qtdCriticosPp'),
-                      tooltip: _qtdCriticosPp > 0
-                          ? 'Abrir sugestao de compra'
-                          : 'Nenhum item no ponto de pedido',
-                      onPressed:
-                          _qtdCriticosPp > 0 ? _abrirSugestaoCompra : null,
-                    ),
-                    if (_qtdCriticosPp > 0)
-                      FilterChip(
-                        label: const Text('Somente PP critico'),
-                        selected: _somenteCriticosPp,
-                        onSelected: (v) {
-                          setState(() => _somenteCriticosPp = v);
-                        },
+                    if (_filtroOperacional != FiltroEstoqueOperacional.todos)
+                      ActionChip(
+                        avatar: const Icon(Icons.filter_alt_off, size: 18),
+                        label: const Text('Limpar filtro'),
+                        onPressed: () => setState(
+                          () => _filtroOperacional =
+                              FiltroEstoqueOperacional.todos,
+                        ),
                       ),
                   ],
                 ),
@@ -611,11 +913,13 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                               style: theme.textTheme.bodySmall,
                             ),
                             const SizedBox(height: 2),
+                            if (produto.localizacao.trim().isNotEmpty)
+                              Text(
+                                'Local: ${produto.localizacao}',
+                                style: theme.textTheme.bodySmall,
+                              ),
                             Text(
-                              UsuarioPermissaoHelper.tem(
-                                widget.usuarioLogado,
-                                PermissaoUsuario.verCustoMargem,
-                              )
+                              verCusto
                                   ? 'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | '
                                         'Medio: ${_formatarMoedaBRL(produto.custoMedio)} | '
                                         'Venda: ${_formatarMoedaBRL(produto.precoVenda)}'
@@ -627,13 +931,46 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        statusTexto,
-                        style: TextStyle(
-                          color: statusCor,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            statusTexto,
+                            style: TextStyle(
+                              color: statusCor,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          PopupMenuButton<String>(
+                            tooltip: 'Acoes',
+                            onSelected: (v) {
+                              if (v == 'ajustar') {
+                                _abrirAjusteEstoque(produto);
+                              } else if (v == 'extrato') {
+                                _abrirExtratoEstoque(produto);
+                              }
+                            },
+                            itemBuilder: (ctx) => [
+                              const PopupMenuItem(
+                                value: 'ajustar',
+                                child: ListTile(
+                                  dense: true,
+                                  leading: Icon(Icons.edit_outlined),
+                                  title: Text('Ajustar estoque'),
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'extrato',
+                                child: ListTile(
+                                  dense: true,
+                                  leading: Icon(Icons.receipt_long_outlined),
+                                  title: Text('Ver movimentacoes'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ],
                   ),

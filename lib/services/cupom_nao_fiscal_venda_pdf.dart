@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../data/app_config_repository.dart';
@@ -12,6 +11,7 @@ import '../domain/plano_fiado.dart';
 import '../model/cliente.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import 'cupom_pdf_gerado.dart';
 import 'cupom_pdf_layout.dart';
 
 /// PDF do cupom nao fiscal (venda finalizada), reutilizado no Caixa e na listagem.
@@ -126,6 +126,29 @@ class CupomNaoFiscalVendaPdf {
     bool segundaVia = false,
     DateTime? dataCabecalhoVenda,
   }) async {
+    return (await gerar(
+      venda: venda,
+      config: config,
+      cliente: cliente,
+      vendedor: vendedor,
+      totalRecebido: totalRecebido,
+      troco: troco,
+      segundaVia: segundaVia,
+      dataCabecalhoVenda: dataCabecalhoVenda,
+    ))
+        .bytes;
+  }
+
+  static Future<CupomPdfGerado> gerar({
+    required Venda venda,
+    required EmpresaConfig config,
+    Cliente? cliente,
+    Vendedor? vendedor,
+    required double totalRecebido,
+    required double troco,
+    bool segundaVia = false,
+    DateTime? dataCabecalhoVenda,
+  }) async {
     final logoBytes = config.logoPath.trim().isNotEmpty
         ? await File(
             config.logoPath,
@@ -144,16 +167,19 @@ class CupomNaoFiscalVendaPdf {
     final comLogo = logoBytes.isNotEmpty;
     final layout = config.layoutImpressao.cupom;
 
+    final pageFormat = CupomPdfLayout.formatoPagina(
+      modelo,
+      layout: layout,
+      linhasTexto: _contarLinhasCupom(venda, cliente, segundaVia),
+      qtdItens: venda.itens.length,
+      linhasExtras: 2,
+      comLogo: comLogo,
+      segundaVia: segundaVia,
+    );
+
     doc.addPage(
       pw.Page(
-        pageFormat: CupomPdfLayout.formatoPagina(
-          modelo,
-          linhasTexto: _contarLinhasCupom(venda, cliente, segundaVia),
-          qtdItens: venda.itens.length,
-          linhasExtras: 2,
-          comLogo: comLogo,
-          segundaVia: segundaVia,
-        ),
+        pageFormat: pageFormat,
         build: (context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -317,17 +343,20 @@ class CupomNaoFiscalVendaPdf {
                   layout,
                   fontSize: layout.tamanhoFonteCorpo.fontSizeContato - 1,
                 ),
-              CupomPdfLayout.espacoBloco(layout),
               ...CupomPdfLayout.rodapeDocumento(
                 layout: layout,
                 textoRodape: config.rodapeNota,
               ),
-              pw.SizedBox(height: CupomPdfLayout.feedCorteMm * PdfPageFormat.mm),
+              CupomPdfLayout.espacoFinalDocumento(layout),
             ],
           );
         },
       ),
     );
-    return doc.save();
+    return CupomPdfGerado(
+      bytes: await doc.save(),
+      pageFormat: pageFormat,
+      layout: layout,
+    );
   }
 }
