@@ -1,3 +1,4 @@
+import 'fechamento_rh_repository.dart';
 import '../model/funcionario.dart';
 import '../objectbox.g.dart';
 import 'lancamento_funcionario_repository.dart';
@@ -10,6 +11,9 @@ class FuncionarioRepository {
 
   final ObjectBox _db;
   final LancamentoFuncionarioRepository _lancamentos;
+  FechamentoRhRepository? _fechamentos;
+
+  ObjectBox get objectBox => _db;
 
   List<Funcionario> listarTodos() {
     final query = _db.funcionarioBox
@@ -52,6 +56,7 @@ class FuncionarioRepository {
 
   bool remover(int id) {
     _lancamentos.removerPorFuncionario(id);
+    fechamentos.removerPorFuncionario(id);
     final ok = _db.funcionarioBox.remove(id);
     if (ok) {
       registrarDeleteParaRede('funcionario', id);
@@ -60,6 +65,9 @@ class FuncionarioRepository {
   }
 
   LancamentoFuncionarioRepository get lancamentos => _lancamentos;
+
+  FechamentoRhRepository get fechamentos =>
+      _fechamentos ??= FechamentoRhRepository(_db);
 
   Funcionario? obterPorId(int id) => _db.funcionarioBox.get(id);
 
@@ -89,6 +97,29 @@ class FuncionarioRepository {
       if (f.id != ignorarId && f.codigoInterno.trim().toLowerCase() == c) {
         return true;
       }
+    }
+    return false;
+  }
+
+  bool existeMotoristaParaOutro({
+    required int motoristaId,
+    required int ignorarId,
+  }) {
+    if (motoristaId <= 0) return false;
+    for (final f in listarTodos()) {
+      if (f.id != ignorarId && f.motoristaId == motoristaId) return true;
+    }
+    return false;
+  }
+
+  bool existeUsuarioParaOutro({
+    required String usuarioId,
+    required int ignorarId,
+  }) {
+    final id = usuarioId.trim();
+    if (id.isEmpty) return false;
+    for (final f in listarTodos()) {
+      if (f.id != ignorarId && f.usuarioSistemaId == id) return true;
     }
     return false;
   }

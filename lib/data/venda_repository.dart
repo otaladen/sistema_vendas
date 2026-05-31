@@ -2289,6 +2289,42 @@ class VendaRepository {
     }
   }
 
+  void registrarNfceCancelada({
+    required int vendaId,
+    String statusFocus = 'cancelado',
+    String urlXmlCancelamento = '',
+    String protocolo = '',
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      venda.nfceStatusFocus = statusFocus.trim().isEmpty
+          ? 'cancelado'
+          : statusFocus.trim();
+      if (protocolo.trim().isNotEmpty) {
+        venda.nfceProtocolo = protocolo.trim();
+      }
+      venda.nfceUrlXmlCancelamento = urlXmlCancelamento.trim();
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+    final venda = _db.vendaBox.get(vendaId);
+    final chave = venda?.nfceChaveAcesso.trim() ?? '';
+    final xmlCancel = urlXmlCancelamento.trim();
+    if (chave.length >= 44 && xmlCancel.isNotEmpty) {
+      unawaited(
+        NfceXmlLocalService.arquivarOuEnfileirar(
+          storeDirectoryPath: _db.storeDirectoryPath,
+          chaveAcesso: chave,
+          urlXml: xmlCancel,
+          cancelada: true,
+        ),
+      );
+    }
+  }
+
   /// NFC-e enviada a Focus com status `processando_autorizacao` (reconsulta depois).
   void registrarNfcePendenteFocus({
     required int vendaId,

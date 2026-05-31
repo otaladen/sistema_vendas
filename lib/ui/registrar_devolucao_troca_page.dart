@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../data/app_config_repository.dart';
+import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
@@ -9,6 +10,8 @@ import '../domain/usuario_permissao_helper.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
+import '../services/venda_fiscal_service.dart';
+import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
 import 'widgets/produto_busca_input.dart';
 
 /// Fluxo de devolucao (estoque de volta) ou troca (devolucao + saida de produtos).
@@ -16,6 +19,7 @@ class RegistrarDevolucaoTrocaPage extends StatefulWidget {
   const RegistrarDevolucaoTrocaPage({
     super.key,
     required this.vendaRepository,
+    required this.clienteRepository,
     required this.produtoRepository,
     required this.vendaId,
     required this.usuarioAtual,
@@ -23,6 +27,7 @@ class RegistrarDevolucaoTrocaPage extends StatefulWidget {
   });
 
   final VendaRepository vendaRepository;
+  final ClienteRepository clienteRepository;
   final ProdutoRepository produtoRepository;
   final int vendaId;
   final String usuarioAtual;
@@ -275,8 +280,90 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       return;
     }
 
+    final fiscalSvc = VendaFiscalService(
+      vendaRepository: widget.vendaRepository,
+      clienteRepository: widget.clienteRepository,
+    );
+
+    VendaFiscalOperacaoResultado? fiscalRes;
+    if (fiscalSvc.vendaExigeNfeDevolucao(v)) {
+      final confirmaFiscal = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Devolucao fiscal'),
+          content: Text(
+            _modoTroca
+                ? 'Esta venda possui NFC-e/NF-e autorizada.\n\n'
+                    'Sera emitida NF-e de devolucao (finalidade 4) na SEFAZ '
+                    'para os itens devolvidos.\n\n'
+                    'Os produtos da troca (saida) exigem nova venda/NFC-e '
+                    'separada.'
+                : 'Esta venda possui NFC-e/NF-e autorizada.\n\n'
+                    'Sera emitida NF-e de devolucao (finalidade 4) na SEFAZ '
+                    'referenciando a nota original, antes de dar entrada no estoque.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Emitir e continuar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmaFiscal != true || !mounted) return;
+
+      final itensFiscais = <({ItemVenda item, int quantidade})>[];
+      for (final e in entradas) {
+        final item = v.itens.firstWhere((i) => i.id == e.itemVendaId);
+        itensFiscais.add((item: item, quantidade: e.quantidade));
+      }
+
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Expanded(child: Text('Emitindo NF-e de devolucao na SEFAZ...')),
+            ],
+          ),
+        ),
+      );
+
+      fiscalRes = await fiscalSvc.emitirNfeDevolucaoVenda(
+        venda: v,
+        itensDevolvidos: itensFiscais,
+        motivo: motivo,
+        registroDevolucaoId: 0,
+      );
+
+      if (mounted) Navigator.of(context).pop();
+
+      if (!fiscalRes.sucesso) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              fiscalRes.mensagem.isNotEmpty
+                  ? fiscalRes.mensagem
+                  : 'Falha na devolucao fiscal.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    int registroId;
     try {
-      widget.vendaRepository.registrarDevolucaoOuTroca(
+      registroId = widget.vendaRepository.registrarDevolucaoOuTroca(
         vendaOrigemId: v.id,
         tipo: _modoTroca ? 'troca' : 'devolucao',
         motivo: motivo,
@@ -294,9 +381,36 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       return;
     }
 
+    if (fiscalRes != null &&
+        fiscalRes.sucesso &&
+        fiscalRes.referenciaDevolucao.isNotEmpty) {
+      fiscalSvc.salvarDevolucaoFiscalLocal(
+        registroDevolucaoId: registroId,
+        vendaId: v.id,
+        referenciaFocus: fiscalRes.referenciaDevolucao,
+        chaveNfe: fiscalRes.chaveDevolucao,
+        numero: fiscalRes.numeroDevolucao,
+        serie: fiscalRes.serieDevolucao,
+        urlDanfe: fiscalRes.urlDanfeDevolucao,
+        urlXml: fiscalRes.urlXmlDevolucao,
+        statusFocus: fiscalRes.statusFocusDevolucao,
+        motivo: motivo,
+      );
+    }
+
+    if (!mounted) return;
+    if (fiscalRes != null && fiscalRes.sucesso) {
+      await mostrarDialogoDevolucaoFiscalSucesso(context, resultado: fiscalRes);
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Registro salvo com sucesso.')),
+      SnackBar(
+        content: Text(
+          fiscalRes != null && fiscalRes.nfeDevolucaoAutorizada
+              ? 'Registro salvo. NF-e de devolucao autorizada.'
+              : 'Registro salvo com sucesso.',
+        ),
+      ),
     );
     Navigator.pop(context, true);
   }
@@ -392,6 +506,11 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     final v = _venda!;
     final registros =
         widget.vendaRepository.listarRegistrosDevolucaoPorVenda(v.id);
+    final fiscalSvc = VendaFiscalService(
+      vendaRepository: widget.vendaRepository,
+      clienteRepository: widget.clienteRepository,
+    );
+    final fiscaisMap = mapaFiscalPorRegistro(fiscalSvc, registros);
 
     return Scaffold(
       appBar: AppBar(
@@ -406,14 +525,15 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                 : 'Venda ${v.id}',
             style: Theme.of(context).textTheme.titleLarge,
           ),
-          if (registros.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                '${registros.length} registro(s) anterior(es) nesta venda.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+          const SizedBox(height: 12),
+          DevolucaoFiscalAvisoBanner(venda: v),
+          if (registros.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            DevolucaoFiscalHistoricoPanel(
+              registros: registros,
+              fiscaisPorRegistro: fiscaisMap,
             ),
+          ],
           const SizedBox(height: 16),
           SegmentedButton<bool>(
             segments: const [

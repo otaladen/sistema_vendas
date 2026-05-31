@@ -166,6 +166,10 @@ class CadastrosPage extends StatelessWidget {
                       funcionarioRepository: funcionarioRepository,
                       vendedorRepository: vendedorRepository,
                       vendaRepository: vendaRepository,
+                      motoristaRepository: motoristaRepository,
+                      usuarioRepository: UsuarioRepository(),
+                      usuarioLogado: usuarioLogado,
+                      onLogout: onLogout,
                     ),
                   ),
                 );

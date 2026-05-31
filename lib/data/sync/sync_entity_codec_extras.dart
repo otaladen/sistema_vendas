@@ -1,4 +1,5 @@
 import '../../model/fornecedor_nfe.dart';
+import '../../model/fechamento_rh_funcionario.dart';
 import '../../model/funcionario.dart';
 import '../../model/lancamento_funcionario.dart';
 import '../../model/historico_entrada.dart';
@@ -63,6 +64,18 @@ class SyncEntityCodecExtras {
         'dataAdmissao': _dt(f.dataAdmissao),
         'dataDemissao': _dt(f.dataDemissao),
         'vendedorId': f.vendedorId,
+        'motoristaId': f.motoristaId,
+        'usuarioSistemaId': f.usuarioSistemaId,
+        'tipoVinculo': f.tipoVinculo,
+        'cnhNumero': f.cnhNumero,
+        'cnhCategoria': f.cnhCategoria,
+        'cnhValidade': _dt(f.cnhValidade),
+        'asoData': _dt(f.asoData),
+        'asoValidade': _dt(f.asoValidade),
+        'tamanhoUniforme': f.tamanhoUniforme,
+        'epiObservacoes': f.epiObservacoes,
+        'podeOperarEmpilhadeira': f.podeOperarEmpilhadeira,
+        'podeOperarTranspalete': f.podeOperarTranspalete,
         'criadoEm': _dt(f.criadoEm),
       };
 
@@ -103,6 +116,18 @@ class SyncEntityCodecExtras {
         dataAdmissao: _parseDt((m['dataAdmissao'] ?? '').toString()),
         dataDemissao: _parseDt((m['dataDemissao'] ?? '').toString()),
         vendedorId: (m['vendedorId'] as num?)?.toInt() ?? 0,
+        motoristaId: (m['motoristaId'] as num?)?.toInt() ?? 0,
+        usuarioSistemaId: (m['usuarioSistemaId'] ?? '').toString(),
+        tipoVinculo: (m['tipoVinculo'] ?? 'clt').toString(),
+        cnhNumero: (m['cnhNumero'] ?? '').toString(),
+        cnhCategoria: (m['cnhCategoria'] ?? '').toString(),
+        cnhValidade: _parseDt((m['cnhValidade'] ?? '').toString()),
+        asoData: _parseDt((m['asoData'] ?? '').toString()),
+        asoValidade: _parseDt((m['asoValidade'] ?? '').toString()),
+        tamanhoUniforme: (m['tamanhoUniforme'] ?? '').toString(),
+        epiObservacoes: (m['epiObservacoes'] ?? '').toString(),
+        podeOperarEmpilhadeira: m['podeOperarEmpilhadeira'] == true,
+        podeOperarTranspalete: m['podeOperarTranspalete'] == true,
         criadoEm: _parseDt((m['criadoEm'] ?? '').toString()),
       );
 
@@ -139,6 +164,43 @@ class SyncEntityCodecExtras {
     }
     return l;
   }
+
+  // --- FechamentoRhFuncionario ---
+  static Map<String, dynamic> fechamentoRhParaMap(FechamentoRhFuncionario f) =>
+      {
+        'id': f.id,
+        'funcionarioId': f.funcionarioId,
+        'mesReferencia': _dt(f.mesReferencia),
+        'salarioBase': f.salarioBase,
+        'descontoFixo': f.descontoFixo,
+        'totalVales': f.totalVales,
+        'totalDescontosLancados': f.totalDescontosLancados,
+        'totalBonus': f.totalBonus,
+        'liquidoApagar': f.liquidoApagar,
+        'qtdVales': f.qtdVales,
+        'contaPagarId': f.contaPagarId,
+        'fechadoPorLogin': f.fechadoPorLogin,
+        'fechadoEm': _dt(f.fechadoEm),
+      };
+
+  static FechamentoRhFuncionario fechamentoRhDeMap(Map<String, dynamic> m) =>
+      FechamentoRhFuncionario(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        funcionarioId: (m['funcionarioId'] as num?)?.toInt() ?? 0,
+        mesReferencia:
+            _parseDt((m['mesReferencia'] ?? '').toString()) ?? DateTime.now(),
+        salarioBase: (m['salarioBase'] as num?)?.toDouble() ?? 0,
+        descontoFixo: (m['descontoFixo'] as num?)?.toDouble() ?? 0,
+        totalVales: (m['totalVales'] as num?)?.toDouble() ?? 0,
+        totalDescontosLancados:
+            (m['totalDescontosLancados'] as num?)?.toDouble() ?? 0,
+        totalBonus: (m['totalBonus'] as num?)?.toDouble() ?? 0,
+        liquidoApagar: (m['liquidoApagar'] as num?)?.toDouble() ?? 0,
+        qtdVales: (m['qtdVales'] as num?)?.toInt() ?? 0,
+        contaPagarId: (m['contaPagarId'] as num?)?.toInt() ?? 0,
+        fechadoPorLogin: (m['fechadoPorLogin'] ?? '').toString(),
+        fechadoEm: _parseDt((m['fechadoEm'] ?? '').toString()),
+      );
 
   // --- Motorista ---
   static Map<String, dynamic> motoristaParaMap(Motorista m) => {

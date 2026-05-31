@@ -208,6 +208,13 @@ class Venda {
   bool get nfceEmitida =>
       nfceChaveAcesso.trim().isNotEmpty || nfceUrlDanfe.trim().isNotEmpty;
 
+  bool get nfceCancelada =>
+      nfceStatusFocus == 'cancelado' ||
+      nfceUrlXmlCancelamento.trim().isNotEmpty;
+
+  /// NFC-e autorizada e ainda nao cancelada na SEFAZ.
+  bool get nfceAutorizadaAtiva => nfceEmitida && !nfceCancelada;
+
   bool get nfe55Cancelada =>
       nfeStatusFocus == 'cancelado' ||
       nfeUrlXmlCancelamento.trim().isNotEmpty;

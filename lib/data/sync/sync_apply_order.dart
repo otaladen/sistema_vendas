@@ -11,6 +11,7 @@ abstract final class SyncApplyOrder {
     'funcionario': 50,
     'motorista': 60,
     'lancamento_funcionario': 70,
+    'fechamento_rh_funcionario': 75,
     'vinculo_fornecedor': 80,
     'historico_entrada': 90,
     'nfe_importada': 100,

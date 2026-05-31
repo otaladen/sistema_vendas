@@ -26,8 +26,11 @@ import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
-import 'registrar_devolucao_troca_page.dart';
+import '../services/venda_fiscal_service.dart';
 import 'fiscal/abrir_documento_fiscal.dart';
+import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
+import 'fiscal/widgets/nfe_historico_acoes_dialog.dart';
+import 'registrar_devolucao_troca_page.dart';
 
 /// Lista vendas já finalizadas no Caixa (`status == finalizada`), com filtros e busca.
 class ListagemVendasPage extends StatefulWidget {
@@ -164,6 +167,32 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     return v.itens.any((i) => i.quantidade - i.quantidadeDevolvida > 0);
   }
 
+  Future<void> _abrirDevolucoesFiscais(Venda v) async {
+    final fiscalSvc = VendaFiscalService(
+      vendaRepository: widget.vendaRepository,
+      clienteRepository: widget.clienteRepository,
+    );
+    final fiscais = fiscalSvc.listarDevolucoesFiscaisPorVenda(v.id);
+    if (fiscais.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nenhuma NF-e de devolucao vinculada a esta venda.'),
+        ),
+      );
+      return;
+    }
+    await mostrarDialogoListaDevolucoesFiscais(context, fiscais: fiscais);
+  }
+
+  bool _temDevolucaoFiscal(Venda v) {
+    final fiscalSvc = VendaFiscalService(
+      vendaRepository: widget.vendaRepository,
+      clienteRepository: widget.clienteRepository,
+    );
+    return fiscalSvc.listarDevolucoesFiscaisPorVenda(v.id).isNotEmpty;
+  }
+
   Future<void> _abrirRegistrarDevolucaoTroca(Venda v) async {
     if (!_podeRegistrarDevolucaoTroca(v)) {
       if (!mounted) return;
@@ -181,6 +210,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       MaterialPageRoute(
         builder: (_) => RegistrarDevolucaoTrocaPage(
           vendaRepository: widget.vendaRepository,
+          clienteRepository: widget.clienteRepository,
           produtoRepository: widget.produtoRepository,
           vendaId: v.id,
           usuarioAtual: widget.usuarioAtual,
@@ -1013,6 +1043,20 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       }
       return;
     }
+
+    final vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    final fiscalSvc = VendaFiscalService(
+      vendaRepository: widget.vendaRepository,
+      clienteRepository: widget.clienteRepository,
+    );
+    final exigeFiscal = fiscalSvc.vendaExigeCancelamentoFiscal(vendaAtual);
+
+    String justificativaFiscal = '';
+    if (exigeFiscal) {
+      justificativaFiscal = await showNfeCancelamentoDialog(context) ?? '';
+      if (!mounted || justificativaFiscal.isEmpty) return;
+    }
+
     final motivoController = TextEditingController();
     final confirmar = await showDialog<bool>(
       context: context,
@@ -1023,16 +1067,35 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
             width: 460,
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Cancelar ${_rotuloVendaUsuario(venda)}?',
+                  'Cancelar ${_rotuloVendaUsuario(vendaAtual)}?',
                 ),
+                if (exigeFiscal) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    vendaAtual.nfceAutorizadaAtiva && vendaAtual.nfe55Autorizada
+                        ? 'A NFC-e e a NF-e serao canceladas na SEFAZ antes '
+                            'de estornar estoque e fiado.'
+                        : vendaAtual.nfceAutorizadaAtiva
+                            ? 'A NFC-e sera cancelada na SEFAZ antes de estornar '
+                                'estoque e fiado.'
+                            : 'A NF-e sera cancelada na SEFAZ antes de estornar '
+                                'estoque e fiado.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 TextField(
                   controller: motivoController,
                   maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Motivo (opcional)',
+                  decoration: InputDecoration(
+                    labelText: exigeFiscal
+                        ? 'Observacao interna (opcional)'
+                        : 'Motivo (opcional)',
                   ),
                 ),
               ],
@@ -1051,12 +1114,56 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         );
       },
     );
-    final motivo = motivoController.text.trim();
+    final motivoExtra = motivoController.text.trim();
     motivoController.dispose();
     if (confirmar != true) return;
+
+    if (exigeFiscal) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Expanded(child: Text('Cancelando documento fiscal na SEFAZ...')),
+            ],
+          ),
+        ),
+      );
+
+      final fiscalRes = await fiscalSvc.cancelarDocumentosFiscaisVenda(
+        venda: vendaAtual,
+        justificativa: justificativaFiscal,
+      );
+
+      if (mounted) Navigator.of(context).pop();
+
+      if (!fiscalRes.sucesso) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              fiscalRes.mensagem.isNotEmpty
+                  ? fiscalRes.mensagem
+                  : 'Nao foi possivel cancelar o documento fiscal.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    final motivo = [
+      if (justificativaFiscal.isNotEmpty) justificativaFiscal,
+      if (motivoExtra.isNotEmpty) motivoExtra,
+    ].join(' | ');
+
     try {
       widget.vendaRepository.cancelarVenda(
-        venda.id,
+        vendaAtual.id,
         motivo: motivo,
         canceladaPor: autorizado.$2,
       );
@@ -1066,7 +1173,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${_rotuloVendaUsuario(venda)} cancelada por ${autorizado.$2}.$sufixoMotivo',
+            '${_rotuloVendaUsuario(vendaAtual)} cancelada por ${autorizado.$2}.$sufixoMotivo',
           ),
         ),
       );
@@ -1692,6 +1799,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                         _abrirPagarFreteCarreto(v);
                                       } else if (value == 'devolucao') {
                                         _abrirRegistrarDevolucaoTroca(v);
+                                      } else if (value == 'devolucao_fiscal') {
+                                        _abrirDevolucoesFiscais(v);
                                       } else if (value == 'danfe_nfce') {
                                         _verDanfeNfce(v);
                                       } else if (value == 'danfe_nfe55') {
@@ -1748,6 +1857,11 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                         const PopupMenuItem<String>(
                                           value: 'devolucao',
                                           child: Text('Devolucao / troca'),
+                                        ),
+                                      if (_temDevolucaoFiscal(v))
+                                        const PopupMenuItem<String>(
+                                          value: 'devolucao_fiscal',
+                                          child: Text('NF-e de devolucao (DANFE)'),
                                         ),
                                       PopupMenuItem<String>(
                                         value: 'cancelar',

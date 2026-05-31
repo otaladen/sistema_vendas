@@ -26,6 +26,15 @@ class UsuarioRepository {
         .toList();
   }
 
+  Future<UsuarioSistema?> obterPorId(String id) async {
+    final alvo = id.trim();
+    if (alvo.isEmpty) return null;
+    for (final u in await listarTodos()) {
+      if (u.id == alvo) return u;
+    }
+    return null;
+  }
+
   /// Normaliza perfil/senha de todos os usuarios (legado).
   Future<int> migrarTodosLegado({UsuarioSistema? alteradoPor}) async {
     final lista = await listarTodos();

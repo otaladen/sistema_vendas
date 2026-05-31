@@ -989,7 +989,7 @@
     },
     {
       "id": "7:3249171710221978790",
-      "lastPropertyId": "36:3017231887720912664",
+      "lastPropertyId": "48:230757213201281030",
       "name": "Funcionario",
       "properties": [
         {
@@ -1172,6 +1172,66 @@
           "id": "36:3017231887720912664",
           "name": "vendedorId",
           "type": 6
+        },
+        {
+          "id": "37:1017101285481219340",
+          "name": "motoristaId",
+          "type": 6
+        },
+        {
+          "id": "38:1073965322940013406",
+          "name": "usuarioSistemaId",
+          "type": 9
+        },
+        {
+          "id": "39:3988178941312982646",
+          "name": "tipoVinculo",
+          "type": 9
+        },
+        {
+          "id": "40:1042897537144848172",
+          "name": "cnhNumero",
+          "type": 9
+        },
+        {
+          "id": "41:7048753712392823789",
+          "name": "cnhCategoria",
+          "type": 9
+        },
+        {
+          "id": "42:4210990064386070718",
+          "name": "tamanhoUniforme",
+          "type": 9
+        },
+        {
+          "id": "43:4016173752008066704",
+          "name": "epiObservacoes",
+          "type": 9
+        },
+        {
+          "id": "44:1673257605219920249",
+          "name": "podeOperarEmpilhadeira",
+          "type": 1
+        },
+        {
+          "id": "45:4724687774836417411",
+          "name": "podeOperarTranspalete",
+          "type": 1
+        },
+        {
+          "id": "46:4787703924429965522",
+          "name": "cnhValidade",
+          "type": 10
+        },
+        {
+          "id": "47:4077209897944422546",
+          "name": "asoData",
+          "type": 10
+        },
+        {
+          "id": "48:230757213201281030",
+          "name": "asoValidade",
+          "type": 10
         }
       ],
       "relations": []
@@ -2436,9 +2496,83 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "30:8087683908323979464",
+      "lastPropertyId": "13:5616394915265000723",
+      "name": "FechamentoRhFuncionario",
+      "properties": [
+        {
+          "id": "1:351107256480995374",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:6297619881368289879",
+          "name": "funcionarioId",
+          "type": 6
+        },
+        {
+          "id": "3:3372522328224276418",
+          "name": "mesReferencia",
+          "type": 10
+        },
+        {
+          "id": "4:2759987294478168109",
+          "name": "salarioBase",
+          "type": 8
+        },
+        {
+          "id": "5:5284620074322307064",
+          "name": "descontoFixo",
+          "type": 8
+        },
+        {
+          "id": "6:867493384973227319",
+          "name": "totalVales",
+          "type": 8
+        },
+        {
+          "id": "7:2011257595513857320",
+          "name": "totalDescontosLancados",
+          "type": 8
+        },
+        {
+          "id": "8:1012078364141096875",
+          "name": "totalBonus",
+          "type": 8
+        },
+        {
+          "id": "9:2895441359147103051",
+          "name": "liquidoApagar",
+          "type": 8
+        },
+        {
+          "id": "10:283902455666493847",
+          "name": "qtdVales",
+          "type": 6
+        },
+        {
+          "id": "11:5216550334672462635",
+          "name": "contaPagarId",
+          "type": 6
+        },
+        {
+          "id": "12:2373333943492813883",
+          "name": "fechadoPorLogin",
+          "type": 9
+        },
+        {
+          "id": "13:5616394915265000723",
+          "name": "fechadoEm",
+          "type": 10
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "29:3686530102017877759",
+  "lastEntityId": "30:8087683908323979464",
   "lastIndexId": "47:7539215899859775418",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",

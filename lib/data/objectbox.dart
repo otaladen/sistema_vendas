@@ -12,6 +12,7 @@ import '../model/cliente.dart';
 import '../model/fornecedor_nfe.dart';
 import '../model/historico_entrada.dart';
 import '../model/movimento_estoque.dart';
+import '../model/fechamento_rh_funcionario.dart';
 import '../model/funcionario.dart';
 import '../model/lancamento_funcionario.dart';
 import '../model/recebimento_fiado.dart';
@@ -51,6 +52,7 @@ class ObjectBox {
   late Box<Vendedor> vendedorBox;
   late Box<Funcionario> funcionarioBox;
   late Box<LancamentoFuncionario> lancamentoFuncionarioBox;
+  late Box<FechamentoRhFuncionario> fechamentoRhFuncionarioBox;
   late Box<FornecedorNfe> fornecedorNfeBox;
   late Box<VinculoFornecedorProduto> vinculoFornecedorProdutoBox;
   late Box<HistoricoEntrada> historicoEntradaBox;
@@ -84,6 +86,7 @@ class ObjectBox {
     vendedorBox = Box<Vendedor>(store);
     funcionarioBox = Box<Funcionario>(store);
     lancamentoFuncionarioBox = Box<LancamentoFuncionario>(store);
+    fechamentoRhFuncionarioBox = Box<FechamentoRhFuncionario>(store);
     fornecedorNfeBox = Box<FornecedorNfe>(store);
     vinculoFornecedorProdutoBox = Box<VinculoFornecedorProduto>(store);
     historicoEntradaBox = Box<HistoricoEntrada>(store);

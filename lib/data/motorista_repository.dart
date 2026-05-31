@@ -28,6 +28,8 @@ class MotoristaRepository {
     }).toList();
   }
 
+  Motorista? obterPorId(int id) => _db.motoristaBox.get(id);
+
   int salvar(Motorista motorista) {
     final id = _db.motoristaBox.put(motorista);
     notificarAlteracaoParaRede(entidade: 'motorista', entidadeId: id);

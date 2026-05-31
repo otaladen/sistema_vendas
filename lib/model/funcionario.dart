@@ -35,7 +35,19 @@ class Funcionario {
     this.motivoDemissao = '',
     this.motivoDemissaoOutro = '',
     this.vendedorId = 0,
+    this.motoristaId = 0,
+    this.usuarioSistemaId = '',
+    this.tipoVinculo = 'clt',
+    this.cnhNumero = '',
+    this.cnhCategoria = '',
+    this.tamanhoUniforme = '',
+    this.epiObservacoes = '',
+    this.podeOperarEmpilhadeira = false,
+    this.podeOperarTranspalete = false,
     DateTime? dataNascimento,
+    DateTime? cnhValidade,
+    DateTime? asoData,
+    DateTime? asoValidade,
     DateTime? dataAdmissao,
     DateTime? dataDemissao,
     DateTime? criadoEm,
@@ -82,6 +94,31 @@ class Funcionario {
 
   /// Vinculo opcional com [Vendedor] no PDV (0 = sem vinculo).
   int vendedorId;
+
+  /// Vinculo opcional com [Motorista] nas entregas (0 = sem vinculo).
+  int motoristaId;
+
+  /// Vinculo opcional com [UsuarioSistema] (id string; vazio = sem login).
+  String usuarioSistemaId;
+
+  /// clt, pj, temporario, aprendiz.
+  String tipoVinculo;
+
+  String cnhNumero;
+  String cnhCategoria;
+  String tamanhoUniforme;
+  String epiObservacoes;
+  bool podeOperarEmpilhadeira;
+  bool podeOperarTranspalete;
+
+  @Property(type: PropertyType.dateUtc)
+  DateTime? cnhValidade;
+
+  @Property(type: PropertyType.dateUtc)
+  DateTime? asoData;
+
+  @Property(type: PropertyType.dateUtc)
+  DateTime? asoValidade;
 
   @Property(type: PropertyType.dateUtc)
   DateTime dataNascimento;

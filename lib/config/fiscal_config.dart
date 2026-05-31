@@ -47,6 +47,15 @@ class FiscalConfig {
   /// NF-e interestadual — ST (substituicao tributaria).
   static const String cfopInterestadualSt = '6403';
 
+  /// Devolucao de venda (cliente devolve) — mesma UF (entrada).
+  static const String cfopDevolucaoVendaEstadual = '1202';
+
+  /// Devolucao de venda — interestadual (entrada).
+  static const String cfopDevolucaoVendaInterestadual = '2202';
+
+  /// Devolucao de venda com ST — mesma UF.
+  static const String cfopDevolucaoVendaEstadualSt = '1411';
+
   /// Origem da mercadoria padrao (0 = nacional) quando o produto nao informar.
   static const String icmsOrigemPadrao = '0';
 

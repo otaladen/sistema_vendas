@@ -18,6 +18,7 @@ import 'data/models/conta_pagar.dart';
 import 'model/auditoria_evento.dart';
 import 'model/cliente.dart';
 import 'model/conferencia_carga_romaneio.dart';
+import 'model/fechamento_rh_funcionario.dart';
 import 'model/fornecedor_nfe.dart';
 import 'model/funcionario.dart';
 import 'model/historico_entrada.dart';
@@ -1218,7 +1219,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(7, 3249171710221978790),
     name: 'Funcionario',
-    lastPropertyId: const obx_int.IdUid(36, 3017231887720912664),
+    lastPropertyId: const obx_int.IdUid(48, 230757213201281030),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -1435,6 +1436,78 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(36, 3017231887720912664),
         name: 'vendedorId',
         type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(37, 1017101285481219340),
+        name: 'motoristaId',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(38, 1073965322940013406),
+        name: 'usuarioSistemaId',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(39, 3988178941312982646),
+        name: 'tipoVinculo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(40, 1042897537144848172),
+        name: 'cnhNumero',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(41, 7048753712392823789),
+        name: 'cnhCategoria',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(42, 4210990064386070718),
+        name: 'tamanhoUniforme',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(43, 4016173752008066704),
+        name: 'epiObservacoes',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(44, 1673257605219920249),
+        name: 'podeOperarEmpilhadeira',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(45, 4724687774836417411),
+        name: 'podeOperarTranspalete',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(46, 4787703924429965522),
+        name: 'cnhValidade',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(47, 4077209897944422546),
+        name: 'asoData',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(48, 230757213201281030),
+        name: 'asoValidade',
+        type: 10,
         flags: 0,
       ),
     ],
@@ -2948,6 +3021,94 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(30, 8087683908323979464),
+    name: 'FechamentoRhFuncionario',
+    lastPropertyId: const obx_int.IdUid(13, 5616394915265000723),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 351107256480995374),
+        name: 'id',
+        type: 6,
+        flags: 129,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 6297619881368289879),
+        name: 'funcionarioId',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 3372522328224276418),
+        name: 'mesReferencia',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 2759987294478168109),
+        name: 'salarioBase',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 5284620074322307064),
+        name: 'descontoFixo',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 867493384973227319),
+        name: 'totalVales',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 2011257595513857320),
+        name: 'totalDescontosLancados',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 1012078364141096875),
+        name: 'totalBonus',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 2895441359147103051),
+        name: 'liquidoApagar',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 283902455666493847),
+        name: 'qtdVales',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 5216550334672462635),
+        name: 'contaPagarId',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 2373333943492813883),
+        name: 'fechadoPorLogin',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(13, 5616394915265000723),
+        name: 'fechadoEm',
+        type: 10,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -2993,7 +3154,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(29, 3686530102017877759),
+    lastEntityId: const obx_int.IdUid(30, 8087683908323979464),
     lastIndexId: const obx_int.IdUid(47, 7539215899859775418),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
@@ -4485,7 +4646,13 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final motivoDemissaoOutroOffset = fbb.writeString(
           object.motivoDemissaoOutro,
         );
-        fbb.startTable(37);
+        final usuarioSistemaIdOffset = fbb.writeString(object.usuarioSistemaId);
+        final tipoVinculoOffset = fbb.writeString(object.tipoVinculo);
+        final cnhNumeroOffset = fbb.writeString(object.cnhNumero);
+        final cnhCategoriaOffset = fbb.writeString(object.cnhCategoria);
+        final tamanhoUniformeOffset = fbb.writeString(object.tamanhoUniforme);
+        final epiObservacoesOffset = fbb.writeString(object.epiObservacoes);
+        fbb.startTable(49);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, codigoInternoOffset);
         fbb.addOffset(2, nomeCompletoOffset);
@@ -4522,6 +4689,18 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(33, motivoDemissaoOutroOffset);
         fbb.addInt64(34, object.dataDemissao?.millisecondsSinceEpoch);
         fbb.addInt64(35, object.vendedorId);
+        fbb.addInt64(36, object.motoristaId);
+        fbb.addOffset(37, usuarioSistemaIdOffset);
+        fbb.addOffset(38, tipoVinculoOffset);
+        fbb.addOffset(39, cnhNumeroOffset);
+        fbb.addOffset(40, cnhCategoriaOffset);
+        fbb.addOffset(41, tamanhoUniformeOffset);
+        fbb.addOffset(42, epiObservacoesOffset);
+        fbb.addBool(43, object.podeOperarEmpilhadeira);
+        fbb.addBool(44, object.podeOperarTranspalete);
+        fbb.addInt64(45, object.cnhValidade?.millisecondsSinceEpoch);
+        fbb.addInt64(46, object.asoData?.millisecondsSinceEpoch);
+        fbb.addInt64(47, object.asoValidade?.millisecondsSinceEpoch);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -4532,6 +4711,21 @@ obx_int.ModelDefinition getObjectBoxModel() {
           buffer,
           rootOffset,
           72,
+        );
+        final cnhValidadeValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          94,
+        );
+        final asoDataValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          96,
+        );
+        final asoValidadeValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          98,
         );
         final idParam = const fb.Int64Reader().vTableGet(
           buffer,
@@ -4650,10 +4844,61 @@ obx_int.ModelDefinition getObjectBoxModel() {
           74,
           0,
         );
+        final motoristaIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          76,
+          0,
+        );
+        final usuarioSistemaIdParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 78, '');
+        final tipoVinculoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 80, '');
+        final cnhNumeroParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 82, '');
+        final cnhCategoriaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 84, '');
+        final tamanhoUniformeParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 86, '');
+        final epiObservacoesParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 88, '');
+        final podeOperarEmpilhadeiraParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          90,
+          false,
+        );
+        final podeOperarTranspaleteParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          92,
+          false,
+        );
         final dataNascimentoParam = DateTime.fromMillisecondsSinceEpoch(
           const fb.Int64Reader().vTableGet(buffer, rootOffset, 44, 0),
           isUtc: true,
         );
+        final cnhValidadeParam = cnhValidadeValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                cnhValidadeValue,
+                isUtc: true,
+              );
+        final asoDataParam = asoDataValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(asoDataValue, isUtc: true);
+        final asoValidadeParam = asoValidadeValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                asoValidadeValue,
+                isUtc: true,
+              );
         final dataAdmissaoParam = DateTime.fromMillisecondsSinceEpoch(
           const fb.Int64Reader().vTableGet(buffer, rootOffset, 46, 0),
           isUtc: true,
@@ -4701,7 +4946,19 @@ obx_int.ModelDefinition getObjectBoxModel() {
           motivoDemissao: motivoDemissaoParam,
           motivoDemissaoOutro: motivoDemissaoOutroParam,
           vendedorId: vendedorIdParam,
+          motoristaId: motoristaIdParam,
+          usuarioSistemaId: usuarioSistemaIdParam,
+          tipoVinculo: tipoVinculoParam,
+          cnhNumero: cnhNumeroParam,
+          cnhCategoria: cnhCategoriaParam,
+          tamanhoUniforme: tamanhoUniformeParam,
+          epiObservacoes: epiObservacoesParam,
+          podeOperarEmpilhadeira: podeOperarEmpilhadeiraParam,
+          podeOperarTranspalete: podeOperarTranspaleteParam,
           dataNascimento: dataNascimentoParam,
+          cnhValidade: cnhValidadeParam,
+          asoData: asoDataParam,
+          asoValidade: asoValidadeParam,
           dataAdmissao: dataAdmissaoParam,
           dataDemissao: dataDemissaoParam,
           criadoEm: criadoEmParam,
@@ -6724,6 +6981,126 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    FechamentoRhFuncionario: obx_int.EntityDefinition<FechamentoRhFuncionario>(
+      model: _entities[29],
+      toOneRelations: (FechamentoRhFuncionario object) => [],
+      toManyRelations: (FechamentoRhFuncionario object) => {},
+      getId: (FechamentoRhFuncionario object) => object.id,
+      setId: (FechamentoRhFuncionario object, int id) {
+        object.id = id;
+      },
+      objectToFB: (FechamentoRhFuncionario object, fb.Builder fbb) {
+        final fechadoPorLoginOffset = fbb.writeString(object.fechadoPorLogin);
+        fbb.startTable(14);
+        fbb.addInt64(0, object.id);
+        fbb.addInt64(1, object.funcionarioId);
+        fbb.addInt64(2, object.mesReferencia.millisecondsSinceEpoch);
+        fbb.addFloat64(3, object.salarioBase);
+        fbb.addFloat64(4, object.descontoFixo);
+        fbb.addFloat64(5, object.totalVales);
+        fbb.addFloat64(6, object.totalDescontosLancados);
+        fbb.addFloat64(7, object.totalBonus);
+        fbb.addFloat64(8, object.liquidoApagar);
+        fbb.addInt64(9, object.qtdVales);
+        fbb.addInt64(10, object.contaPagarId);
+        fbb.addOffset(11, fechadoPorLoginOffset);
+        fbb.addInt64(12, object.fechadoEm.millisecondsSinceEpoch);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final funcionarioIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          6,
+          0,
+        );
+        final mesReferenciaParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 8, 0),
+          isUtc: true,
+        );
+        final salarioBaseParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          10,
+          0,
+        );
+        final descontoFixoParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          12,
+          0,
+        );
+        final totalValesParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          14,
+          0,
+        );
+        final totalDescontosLancadosParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        final totalBonusParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          18,
+          0,
+        );
+        final liquidoApagarParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          20,
+          0,
+        );
+        final qtdValesParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          22,
+          0,
+        );
+        final contaPagarIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          24,
+          0,
+        );
+        final fechadoPorLoginParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 26, '');
+        final fechadoEmParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 28, 0),
+          isUtc: true,
+        );
+        final object = FechamentoRhFuncionario(
+          id: idParam,
+          funcionarioId: funcionarioIdParam,
+          mesReferencia: mesReferenciaParam,
+          salarioBase: salarioBaseParam,
+          descontoFixo: descontoFixoParam,
+          totalVales: totalValesParam,
+          totalDescontosLancados: totalDescontosLancadosParam,
+          totalBonus: totalBonusParam,
+          liquidoApagar: liquidoApagarParam,
+          qtdVales: qtdValesParam,
+          contaPagarId: contaPagarIdParam,
+          fechadoPorLogin: fechadoPorLoginParam,
+          fechadoEm: fechadoEmParam,
+        );
+
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -7824,6 +8201,66 @@ class Funcionario_ {
   static final vendedorId = obx.QueryIntegerProperty<Funcionario>(
     _entities[6].properties[35],
   );
+
+  /// See [Funcionario.motoristaId].
+  static final motoristaId = obx.QueryIntegerProperty<Funcionario>(
+    _entities[6].properties[36],
+  );
+
+  /// See [Funcionario.usuarioSistemaId].
+  static final usuarioSistemaId = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[37],
+  );
+
+  /// See [Funcionario.tipoVinculo].
+  static final tipoVinculo = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[38],
+  );
+
+  /// See [Funcionario.cnhNumero].
+  static final cnhNumero = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[39],
+  );
+
+  /// See [Funcionario.cnhCategoria].
+  static final cnhCategoria = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[40],
+  );
+
+  /// See [Funcionario.tamanhoUniforme].
+  static final tamanhoUniforme = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[41],
+  );
+
+  /// See [Funcionario.epiObservacoes].
+  static final epiObservacoes = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[42],
+  );
+
+  /// See [Funcionario.podeOperarEmpilhadeira].
+  static final podeOperarEmpilhadeira = obx.QueryBooleanProperty<Funcionario>(
+    _entities[6].properties[43],
+  );
+
+  /// See [Funcionario.podeOperarTranspalete].
+  static final podeOperarTranspalete = obx.QueryBooleanProperty<Funcionario>(
+    _entities[6].properties[44],
+  );
+
+  /// See [Funcionario.cnhValidade].
+  static final cnhValidade = obx.QueryDateProperty<Funcionario>(
+    _entities[6].properties[45],
+  );
+
+  /// See [Funcionario.asoData].
+  static final asoData = obx.QueryDateProperty<Funcionario>(
+    _entities[6].properties[46],
+  );
+
+  /// See [Funcionario.asoValidade].
+  static final asoValidade = obx.QueryDateProperty<Funcionario>(
+    _entities[6].properties[47],
+  );
 }
 
 /// [Motorista] entity fields to define ObjectBox queries.
@@ -8919,5 +9356,76 @@ class MovimentoEstoque_ {
   /// See [MovimentoEstoque.produto].
   static final produto = obx.QueryRelationToOne<MovimentoEstoque, Produto>(
     _entities[28].properties[12],
+  );
+}
+
+/// [FechamentoRhFuncionario] entity fields to define ObjectBox queries.
+class FechamentoRhFuncionario_ {
+  /// See [FechamentoRhFuncionario.id].
+  static final id = obx.QueryIntegerProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[0],
+  );
+
+  /// See [FechamentoRhFuncionario.funcionarioId].
+  static final funcionarioId =
+      obx.QueryIntegerProperty<FechamentoRhFuncionario>(
+        _entities[29].properties[1],
+      );
+
+  /// See [FechamentoRhFuncionario.mesReferencia].
+  static final mesReferencia = obx.QueryDateProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[2],
+  );
+
+  /// See [FechamentoRhFuncionario.salarioBase].
+  static final salarioBase = obx.QueryDoubleProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[3],
+  );
+
+  /// See [FechamentoRhFuncionario.descontoFixo].
+  static final descontoFixo = obx.QueryDoubleProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[4],
+  );
+
+  /// See [FechamentoRhFuncionario.totalVales].
+  static final totalVales = obx.QueryDoubleProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[5],
+  );
+
+  /// See [FechamentoRhFuncionario.totalDescontosLancados].
+  static final totalDescontosLancados =
+      obx.QueryDoubleProperty<FechamentoRhFuncionario>(
+        _entities[29].properties[6],
+      );
+
+  /// See [FechamentoRhFuncionario.totalBonus].
+  static final totalBonus = obx.QueryDoubleProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[7],
+  );
+
+  /// See [FechamentoRhFuncionario.liquidoApagar].
+  static final liquidoApagar = obx.QueryDoubleProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[8],
+  );
+
+  /// See [FechamentoRhFuncionario.qtdVales].
+  static final qtdVales = obx.QueryIntegerProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[9],
+  );
+
+  /// See [FechamentoRhFuncionario.contaPagarId].
+  static final contaPagarId = obx.QueryIntegerProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[10],
+  );
+
+  /// See [FechamentoRhFuncionario.fechadoPorLogin].
+  static final fechadoPorLogin =
+      obx.QueryStringProperty<FechamentoRhFuncionario>(
+        _entities[29].properties[11],
+      );
+
+  /// See [FechamentoRhFuncionario.fechadoEm].
+  static final fechadoEm = obx.QueryDateProperty<FechamentoRhFuncionario>(
+    _entities[29].properties[12],
   );
 }

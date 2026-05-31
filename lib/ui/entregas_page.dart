@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/cliente_repository.dart';
 import '../data/conferencia_carga_repository.dart';
 import '../data/motorista_repository.dart';
 import '../data/produto_repository.dart';
@@ -414,6 +415,7 @@ class _EntregasPageState extends State<EntregasPage>
       MaterialPageRoute(
         builder: (_) => RegistrarDevolucaoTrocaPage(
           vendaRepository: widget.vendaRepository,
+          clienteRepository: ClienteRepository(widget.vendaRepository.objectBox),
           produtoRepository: widget.produtoRepository,
           vendaId: v.id,
           usuarioAtual: widget.usuarioAtual,

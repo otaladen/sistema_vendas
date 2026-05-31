@@ -36,6 +36,27 @@ class LancamentoFuncionarioRepository {
     }
   }
 
+  List<LancamentoFuncionario> listarPorFuncionarioAno(
+    int funcionarioId,
+    int ano,
+  ) {
+    if (funcionarioId <= 0) return [];
+    final inicio = DateTime(ano, 1, 1);
+    final fim = DateTime(ano, 12, 31, 23, 59, 59);
+    var cond = LancamentoFuncionario_.funcionario.equals(funcionarioId) &
+        LancamentoFuncionario_.data.greaterOrEqualDate(inicio) &
+        LancamentoFuncionario_.data.lessOrEqualDate(fim);
+    final q = _db.lancamentoFuncionarioBox
+        .query(cond)
+        .order(LancamentoFuncionario_.data, flags: Order.descending)
+        .build();
+    try {
+      return q.find();
+    } finally {
+      q.close();
+    }
+  }
+
   LancamentoFuncionario? obterPorId(int id) =>
       _db.lancamentoFuncionarioBox.get(id);
 

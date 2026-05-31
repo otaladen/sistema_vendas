@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
@@ -6,18 +7,35 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import '../data/conta_pagar_repository.dart';
 import '../data/funcionario_repository.dart';
 import '../data/lancamento_funcionario_repository.dart';
+import '../data/motorista_repository.dart';
+import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../domain/funcionario_cadastro_catalogo.dart';
+import '../domain/funcionario_folha_resumo.dart';
+import '../domain/funcionario_folha_service.dart';
 import '../domain/lancamento_funcionario_catalogo.dart';
+import '../domain/perfil_usuario_preset.dart';
 import '../main.dart';
 import '../model/funcionario.dart';
 import '../model/lancamento_funcionario.dart';
+import '../model/motorista.dart';
 import '../model/vendedor.dart';
+import '../model/usuario_sistema.dart';
 import '../services/funcionario_extrato_pdf.dart';
+import '../services/funcionario_folha_csv_export.dart';
 import '../services/brasil_api_cep_service.dart';
+import 'funcionarios/funcionario_layout.dart';
+import 'funcionarios/widgets/funcionario_atalhos_bar.dart';
+import 'funcionarios/widgets/funcionario_equipe_kpis.dart';
+import 'funcionarios/widgets/funcionario_folha_painel.dart';
+import 'funcionarios/widgets/funcionario_lista_sidebar.dart';
+import 'funcionarios/widgets/funcionario_resumo_header.dart';
+import 'layout/app_layout.dart';
+import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/mascaras_cadastro_input.dart';
 
 class _FuncionarioSalvarIntent extends Intent {
@@ -38,11 +56,19 @@ class FuncionariosPage extends StatefulWidget {
     required this.funcionarioRepository,
     required this.vendedorRepository,
     required this.vendaRepository,
+    required this.motoristaRepository,
+    required this.usuarioRepository,
+    this.usuarioLogado,
+    this.onLogout,
   });
 
   final FuncionarioRepository funcionarioRepository;
   final VendedorRepository vendedorRepository;
   final VendaRepository vendaRepository;
+  final MotoristaRepository motoristaRepository;
+  final UsuarioRepository usuarioRepository;
+  final UsuarioSistema? usuarioLogado;
+  final VoidCallback? onLogout;
 
   @override
   State<FuncionariosPage> createState() => _FuncionariosPageState();
@@ -50,6 +76,16 @@ class FuncionariosPage extends StatefulWidget {
 
 class _FuncionariosPageState extends State<FuncionariosPage>
     with SingleTickerProviderStateMixin {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  final _listaScrollController = ScrollController();
+  late final FuncionarioFolhaService _folhaService = FuncionarioFolhaService(
+    funcionarioRepository: widget.funcionarioRepository,
+    fechamentoRepository: widget.funcionarioRepository.fechamentos,
+    contaPagarRepository: ContaPagarRepository(
+      widget.funcionarioRepository.objectBox,
+    ),
+  );
+
   static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -76,9 +112,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   static const double _wMoeda = 176;
   static const double _wDiaPag = 132;
   static const double _wPct = 120;
-  static const double _erpGap8 = 8;
-  static const double _erpGap12 = 12;
-  static const double _erpGap16 = 16;
+  static const double _wCnh = 200;
 
   final _cpfFormatter = CpfInputFormatter();
   final _cepFormatter = CepInputFormatter();
@@ -109,6 +143,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   final _vendedorComissaoController = TextEditingController();
   final _vendedorMetaController = TextEditingController();
   final _observacoesController = TextEditingController();
+  final _cnhNumeroController = TextEditingController();
+  final _epiObservacoesController = TextEditingController();
   final _pesquisaController = TextEditingController();
   final _filtroListaController = TextEditingController();
   final _scrollAbaIdent = ScrollController();
@@ -130,6 +166,19 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   DateTime? _dataDemissao;
   bool _tambemVendedorPdv = false;
   int _vendedorVinculadoId = 0;
+  bool _tambemMotoristaEntrega = false;
+  int _motoristaVinculadoId = 0;
+  bool _temUsuarioSistema = false;
+  String _usuarioVinculadoId = '';
+  List<UsuarioSistema> _usuariosCache = [];
+  String _tipoVinculo = 'clt';
+  String _cnhCategoria = '';
+  DateTime? _cnhValidade;
+  DateTime? _asoData;
+  DateTime? _asoValidade;
+  String _tamanhoUniforme = '';
+  bool _podeOperarEmpilhadeira = false;
+  bool _podeOperarTranspalete = false;
   DateTime _dataNascimento = DateTime(2000, 1, 1);
   DateTime _dataAdmissao = DateTime.now();
   String _status = '';
@@ -139,11 +188,14 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   List<LancamentoFuncionario> _lancamentos = [];
   late DateTime _mesFiltroLancamentos =
       DateTime(DateTime.now().year, DateTime.now().month, 1);
+  bool _somenteAtivosLista = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _nomeController.addListener(_onCamposResumoChanged);
+    unawaited(_carregarUsuariosCache());
     _preencherCodigoAutomaticoSeNovo();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -156,13 +208,25 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     _nomeFocus.requestFocus();
   }
 
+  void _onCamposResumoChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _carregarUsuariosCache() async {
+    final lista = await widget.usuarioRepository.listarTodos();
+    if (!mounted) return;
+    setState(() => _usuariosCache = lista);
+  }
+
   @override
   void dispose() {
+    _nomeController.removeListener(_onCamposResumoChanged);
     _tabController.dispose();
     _scrollAbaIdent.dispose();
     _scrollAbaDocs.dispose();
     _scrollAbaFin.dispose();
     _scrollAbaOp.dispose();
+    _listaScrollController.dispose();
     _debounceConsultaCep?.cancel();
     _nomeFocus.dispose();
     _cepFocus.dispose();
@@ -191,6 +255,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     _vendedorComissaoController.dispose();
     _vendedorMetaController.dispose();
     _observacoesController.dispose();
+    _cnhNumeroController.dispose();
+    _epiObservacoesController.dispose();
     _pesquisaController.dispose();
     _filtroListaController.dispose();
     super.dispose();
@@ -222,6 +288,100 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     );
     if (escolhida == null) return;
     setState(() => _dataAdmissao = escolhida);
+  }
+
+  Future<void> _selecionarCnhValidade() async {
+    final escolhida = await showDatePicker(
+      context: context,
+      initialDate: _cnhValidade ?? DateTime.now().add(const Duration(days: 365)),
+      firstDate: DateTime(2000, 1, 1),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 15)),
+    );
+    if (escolhida == null) return;
+    setState(() => _cnhValidade = escolhida);
+  }
+
+  Future<void> _selecionarAsoData() async {
+    final escolhida = await showDatePicker(
+      context: context,
+      initialDate: _asoData ?? _dataAdmissao,
+      firstDate: DateTime(2000, 1, 1),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+    );
+    if (escolhida == null) return;
+    setState(() => _asoData = escolhida);
+  }
+
+  Future<void> _selecionarAsoValidade() async {
+    final escolhida = await showDatePicker(
+      context: context,
+      initialDate: _asoValidade ?? DateTime.now().add(const Duration(days: 365)),
+      firstDate: DateTime(2000, 1, 1),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 3)),
+    );
+    if (escolhida == null) return;
+    setState(() => _asoValidade = escolhida);
+  }
+
+  bool _documentoVencido(DateTime? data) {
+    if (data == null) return false;
+    final hoje = DateTime.now();
+    final ref = DateTime(hoje.year, hoje.month, hoje.day);
+    final limite = DateTime(data.year, data.month, data.day);
+    return limite.isBefore(ref);
+  }
+
+  bool get _cnhVencida => _documentoVencido(_cnhValidade);
+
+  bool get _asoVencido => _documentoVencido(_asoValidade);
+
+  PerfilUsuarioPreset _perfilSugeridoUsuario() {
+    if (_setorSelecionado == 'motorista' ||
+        _funcaoSelecionada == 'motorista' ||
+        _funcaoSelecionada == 'ajudante') {
+      return PerfilUsuarioPreset.motorista;
+    }
+    if (_setorSelecionado == 'caixa' || _funcaoSelecionada == 'caixa') {
+      return PerfilUsuarioPreset.caixa;
+    }
+    if (_setorSelecionado == 'expedicao' ||
+        _funcaoSelecionada == 'conferente' ||
+        _funcaoSelecionada == 'estoquista') {
+      return PerfilUsuarioPreset.separador;
+    }
+    if (_setorSelecionado == 'compras' || _funcaoSelecionada == 'comprador') {
+      return PerfilUsuarioPreset.comprador;
+    }
+    if (_funcaoSelecionada == 'gerente') {
+      return PerfilUsuarioPreset.gerente;
+    }
+    return PerfilUsuarioPreset.vendedor;
+  }
+
+  String _sugerirLoginFromNome() {
+    final partes = _nomeController.text
+        .trim()
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (partes.isEmpty) return '';
+    if (partes.length == 1) return partes.first;
+    return '${partes.first}.${partes.last}';
+  }
+
+  void _sugerirVinculosOperacionaisPorSetor() {
+    if (_setorSelecionado == 'motorista' ||
+        _funcaoSelecionada == 'motorista' ||
+        _funcaoSelecionada == 'ajudante') {
+      _tambemMotoristaEntrega = true;
+    }
+    if (_setorSelecionado == 'balcao' ||
+        _setorSelecionado == 'caixa' ||
+        _funcaoSelecionada == 'vendedor' ||
+        _funcaoSelecionada == 'caixa') {
+      // Nao forca usuario — apenas motorista quando aplicavel.
+    }
   }
 
   void _limparFormulario() {
@@ -256,6 +416,20 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       _vendedorMetaController.clear();
       _tambemVendedorPdv = false;
       _vendedorVinculadoId = 0;
+      _tambemMotoristaEntrega = false;
+      _motoristaVinculadoId = 0;
+      _temUsuarioSistema = false;
+      _usuarioVinculadoId = '';
+      _tipoVinculo = 'clt';
+      _cnhNumeroController.clear();
+      _cnhCategoria = '';
+      _cnhValidade = null;
+      _asoData = null;
+      _asoValidade = null;
+      _tamanhoUniforme = '';
+      _epiObservacoesController.clear();
+      _podeOperarEmpilhadeira = false;
+      _podeOperarTranspalete = false;
       _lancamentos = [];
       _mesFiltroLancamentos =
           DateTime(DateTime.now().year, DateTime.now().month, 1);
@@ -347,6 +521,24 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         cargoLegado: f.cargo,
       );
 
+  List<Funcionario> _listaFiltrada() {
+    var lista =
+        widget.funcionarioRepository.pesquisar(_filtroListaController.text);
+    if (_somenteAtivosLista) {
+      lista = lista.where((f) => f.ativo).toList();
+    }
+    return lista;
+  }
+
+  ({int total, int ativos, double folha}) _calcularKpisEquipe() {
+    final todos = widget.funcionarioRepository.listarTodos();
+    final ativos = todos.where((f) => f.ativo).length;
+    final folha = todos
+        .where((f) => f.ativo)
+        .fold<double>(0, (acc, f) => acc + f.salario);
+    return (total: todos.length, ativos: ativos, folha: folha);
+  }
+
   void _carregarRhFromFuncionario(Funcionario f) {
     var setor = f.setor;
     var funcao = f.funcao;
@@ -431,7 +623,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     setState(() => _dataDemissao = escolhida);
   }
 
-  void _salvar() {
+  Future<void> _salvar() async {
     final codigo = _codigoController.text.trim().isEmpty
         ? widget.funcionarioRepository.proximoCodigoInterno()
         : _codigoController.text.trim();
@@ -514,6 +706,58 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       }
     }
 
+    int motoristaId = 0;
+    if (_tambemMotoristaEntrega) {
+      try {
+        motoristaId = _sincronizarMotoristaVinculo();
+        _motoristaVinculadoId = motoristaId;
+      } catch (e) {
+        setState(
+          () => _status = 'Nao foi possivel vincular motorista: $e',
+        );
+        return;
+      }
+    }
+
+    var usuarioSistemaId = '';
+    if (_temUsuarioSistema) {
+      if (_usuarioVinculadoId.trim().isEmpty) {
+        setState(
+          () => _status =
+              'Selecione um usuario existente ou crie um login rapido.',
+        );
+        return;
+      }
+      if (widget.funcionarioRepository.existeUsuarioParaOutro(
+        usuarioId: _usuarioVinculadoId,
+        ignorarId: idAtual,
+      )) {
+        setState(
+          () => _status = 'Este login ja esta vinculado a outro funcionario.',
+        );
+        return;
+      }
+      try {
+        usuarioSistemaId = await _sincronizarUsuarioVinculo();
+      } catch (e) {
+        setState(
+          () => _status = 'Nao foi possivel vincular usuario do sistema: $e',
+        );
+        return;
+      }
+    }
+
+    if (motoristaId > 0 &&
+        widget.funcionarioRepository.existeMotoristaParaOutro(
+          motoristaId: motoristaId,
+          ignorarId: idAtual,
+        )) {
+      setState(
+        () => _status = 'Este motorista ja esta vinculado a outro funcionario.',
+      );
+      return;
+    }
+
     final funcionario = Funcionario(
       id: existente?.id ?? 0,
       codigoInterno: codigo,
@@ -554,6 +798,18 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       dataAdmissao: _dataAdmissao,
       dataDemissao: _ativo ? null : _dataDemissao,
       vendedorId: vendedorId,
+      motoristaId: motoristaId,
+      usuarioSistemaId: usuarioSistemaId,
+      tipoVinculo: _tipoVinculo,
+      cnhNumero: _cnhNumeroController.text.trim(),
+      cnhCategoria: _cnhCategoria,
+      cnhValidade: _cnhValidade,
+      asoData: _asoData,
+      asoValidade: _asoValidade,
+      tamanhoUniforme: _tamanhoUniforme,
+      epiObservacoes: _epiObservacoesController.text.trim(),
+      podeOperarEmpilhadeira: _podeOperarEmpilhadeira,
+      podeOperarTranspalete: _podeOperarTranspalete,
       criadoEm: existente?.criadoEm,
     );
     var id = widget.funcionarioRepository.salvar(funcionario);
@@ -574,8 +830,11 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       _funcionarioEmEdicaoId = id;
       _codigoController.text = codigo;
       _vendedorVinculadoId = vendedorId;
+      _motoristaVinculadoId = motoristaId;
+      _usuarioVinculadoId = usuarioSistemaId;
       _status = 'Funcionario salvo com sucesso.';
     });
+    unawaited(_carregarUsuariosCache());
   }
 
   void _editar(Funcionario f) {
@@ -608,11 +867,32 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           : f.descontoAtual.toStringAsFixed(2).replaceAll('.', ',');
       _diaPagamentoController.text = f.diaPagamento.toString();
       _carregarVendedorFromFuncionario(f);
+      _carregarMotoristaFromFuncionario(f);
+      _carregarUsuarioFromFuncionario(f);
       widget.funcionarioRepository.lancamentos.migrarLegadoSeNecessario(f);
       _mesFiltroLancamentos =
           DateTime(DateTime.now().year, DateTime.now().month, 1);
       _carregarLancamentos(f.id);
       _observacoesController.text = f.observacoes;
+      _tipoVinculo = FuncionarioCadastroCatalogo.idsTiposVinculo
+              .contains(f.tipoVinculo)
+          ? f.tipoVinculo
+          : 'clt';
+      _cnhNumeroController.text = f.cnhNumero;
+      _cnhCategoria = FuncionarioCadastroCatalogo.idsCategoriasCnh
+              .contains(f.cnhCategoria)
+          ? f.cnhCategoria
+          : '';
+      _cnhValidade = f.cnhValidade?.toLocal();
+      _asoData = f.asoData?.toLocal();
+      _asoValidade = f.asoValidade?.toLocal();
+      _tamanhoUniforme = FuncionarioCadastroCatalogo.idsTamanhosUniforme
+              .contains(f.tamanhoUniforme)
+          ? f.tamanhoUniforme
+          : '';
+      _epiObservacoesController.text = f.epiObservacoes;
+      _podeOperarEmpilhadeira = f.podeOperarEmpilhadeira;
+      _podeOperarTranspalete = f.podeOperarTranspalete;
       _dataNascimento = f.dataNascimento.toLocal();
       _dataAdmissao = f.dataAdmissao.toLocal();
       _ativo = f.ativo;
@@ -660,6 +940,279 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       _totalVales() -
       _totalDescontosLancados() +
       _totalBonus();
+
+  bool _mesEstaFechado() {
+    final fid = _funcionarioEmEdicaoId;
+    if (fid == null || fid <= 0) return false;
+    return _folhaService.mesEstaFechado(fid, _mesFiltroLancamentos);
+  }
+
+  FuncionarioMesResumo? _resumoMesAtual() {
+    final fid = _funcionarioEmEdicaoId;
+    if (fid == null || fid <= 0) return null;
+    final f = widget.funcionarioRepository.obterPorId(fid);
+    if (f == null) return null;
+    return _folhaService.calcularMes(
+      funcionario: f,
+      mesReferencia: _mesFiltroLancamentos,
+      salarioBaseOverride: _salarioValor(),
+      descontoFixoOverride: _descontoValor(),
+    );
+  }
+
+  List<FuncionarioFolhaAlerta> _alertasEquipeMes() =>
+      _folhaService.alertasEquipe(_mesFiltroLancamentos);
+
+  List<FolhaMesHistoricoItem> _historico12Meses() {
+    final fid = _funcionarioEmEdicaoId;
+    if (fid == null || fid <= 0) return const [];
+    final f = widget.funcionarioRepository.obterPorId(fid);
+    if (f == null) return const [];
+    return _folhaService.historicoUltimosMeses(
+      funcionario: f,
+      salarioBaseOverride: _salarioValor(),
+      descontoFixoOverride: _descontoValor(),
+    );
+  }
+
+  Future<void> _salvarArquivoCsv({
+    required String tituloDialogo,
+    required String nomeArquivo,
+    required String conteudo,
+  }) async {
+    final bytes = Uint8List.fromList([
+      0xEF,
+      0xBB,
+      0xBF,
+      ...utf8.encode(conteudo),
+    ]);
+    final selectedPath = await FilePicker.platform.saveFile(
+      dialogTitle: tituloDialogo,
+      fileName: nomeArquivo,
+      type: FileType.custom,
+      allowedExtensions: const ['csv'],
+      bytes: bytes,
+    );
+    if (selectedPath == null || !mounted) return;
+    final path = selectedPath.toLowerCase().endsWith('.csv')
+        ? selectedPath
+        : '$selectedPath.csv';
+    await File(path).writeAsBytes(bytes, flush: true);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Arquivo salvo em: $path')),
+    );
+  }
+
+  Future<void> _fecharMesRh() async {
+    final fid = _funcionarioEmEdicaoId;
+    if (fid == null || fid <= 0) {
+      setState(() => _status = 'Salve o funcionario antes de fechar o mes.');
+      return;
+    }
+    if (_mesEstaFechado()) {
+      setState(() => _status = 'Mes ja esta fechado.');
+      return;
+    }
+    final f = widget.funcionarioRepository.obterPorId(fid);
+    if (f == null) return;
+    final resumo = _resumoMesAtual();
+    if (resumo == null) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Fechar mes RH'),
+        content: Text(
+          'Fechar ${_mesAnoFormat.format(_mesFiltroLancamentos)} para '
+          '${f.nomeCompleto}?\n\n'
+          'Liquido estimado: ${_formatMoeda(resumo.liquidoApagar)}\n'
+          'Vales: ${_formatMoeda(resumo.totalVales)}\n\n'
+          'Sera gerado titulo em Contas a Pagar (se liquido > 0) e '
+          'lancamentos do mes ficarao bloqueados.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Fechar mes'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      final fechamento = await _folhaService.fecharMes(
+        funcionario: f,
+        mesReferencia: _mesFiltroLancamentos,
+        usuarioLogin: widget.usuarioLogado?.login ?? 'sistema',
+        salarioBaseOverride: _salarioValor(),
+        descontoFixoOverride: _descontoValor(),
+      );
+      setState(() {
+        _status = fechamento.contaPagarId > 0
+            ? 'Mes fechado. Titulo AP #${fechamento.contaPagarId} gerado.'
+            : 'Mes fechado (sem titulo AP — liquido zero ou negativo).';
+      });
+    } catch (e) {
+      setState(() => _status = 'Falha ao fechar mes: $e');
+    }
+  }
+
+  Future<void> _reabrirMesRh() async {
+    final fid = _funcionarioEmEdicaoId;
+    if (fid == null || fid <= 0) return;
+    if (!_mesEstaFechado()) {
+      setState(() => _status = 'Mes nao esta fechado.');
+      return;
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reabrir mes RH'),
+        content: const Text(
+          'Reabrir o mes permite novos lancamentos. '
+          'Se existir titulo pendente em Contas a Pagar, ele sera removido.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Reabrir'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      await _folhaService.reabrirMes(
+        funcionarioId: fid,
+        mesReferencia: _mesFiltroLancamentos,
+      );
+      setState(() => _status = 'Mes reaberto para lancamentos.');
+    } catch (e) {
+      setState(() => _status = 'Falha ao reabrir mes: $e');
+    }
+  }
+
+  Future<void> _exportarFolhaEquipeCsv() async {
+    final mes = _mesFiltroLancamentos;
+    final funcionarios = widget.funcionarioRepository.listarTodos();
+    final resumos = _folhaService.resumoEquipeMes(mes);
+    final fechamentos = widget.funcionarioRepository.fechamentos.listarPorMes(mes);
+    final csv = gerarCsvFolhaEquipeMes(
+      mesReferencia: mes,
+      funcionarios: funcionarios,
+      resumos: resumos,
+      fechamentos: fechamentos,
+    );
+    final slug = DateFormat('yyyyMM').format(mes);
+    await _salvarArquivoCsv(
+      tituloDialogo: 'Exportar folha da equipe',
+      nomeArquivo: 'folha_equipe_$slug.csv',
+      conteudo: csv,
+    );
+  }
+
+  Future<void> _exportarLancamentosAnoCsv() async {
+    final fid = _funcionarioEmEdicaoId;
+    if (fid == null || fid <= 0) {
+      setState(() => _status = 'Selecione um funcionario salvo para exportar.');
+      return;
+    }
+    final f = widget.funcionarioRepository.obterPorId(fid);
+    if (f == null) return;
+    final ano = _mesFiltroLancamentos.year;
+    final lancamentos = _lancRepo.listarPorFuncionarioAno(fid, ano);
+    final csv = gerarCsvLancamentosAno(
+      funcionario: f,
+      ano: ano,
+      lancamentos: lancamentos,
+    );
+    await _salvarArquivoCsv(
+      tituloDialogo: 'Exportar lancamentos do ano',
+      nomeArquivo: 'lancamentos_${f.codigoInterno}_$ano.csv',
+      conteudo: csv,
+    );
+  }
+
+  Future<void> _mostrarRelatorioFolhaSetor() async {
+    final mes = _mesFiltroLancamentos;
+    final linhas = _folhaService.relatorioPorSetor(mes);
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(
+            'Folha por setor — ${_mesAnoFormat.format(mes)}',
+          ),
+          content: SizedBox(
+            width: 560,
+            child: linhas.isEmpty
+                ? const Text('Nenhum funcionario cadastrado.')
+                : SingleChildScrollView(
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Setor')),
+                        DataColumn(label: Text('Ativos')),
+                        DataColumn(label: Text('Folha')),
+                        DataColumn(label: Text('Vales')),
+                        DataColumn(label: Text('Liquido')),
+                      ],
+                      rows: linhas
+                          .map(
+                            (l) => DataRow(
+                              cells: [
+                                DataCell(Text(l.setorRotulo)),
+                                DataCell(Text('${l.qtdAtivos}')),
+                                DataCell(Text(_formatMoeda(l.folhaBase))),
+                                DataCell(Text(_formatMoeda(l.totalVales))),
+                                DataCell(Text(_formatMoeda(l.liquidoEstimado))),
+                              ],
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fechar'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.pop(context);
+                final csv = gerarCsvRelatorioSetor(
+                  mesReferencia: mes,
+                  linhas: linhas,
+                );
+                await _salvarArquivoCsv(
+                  tituloDialogo: 'Exportar folha por setor',
+                  nomeArquivo:
+                      'folha_setor_${DateFormat('yyyyMM').format(mes)}.csv',
+                  conteudo: csv,
+                );
+              },
+              icon: const Icon(Icons.download_outlined, size: 18),
+              label: const Text('CSV'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   int _diaPagamentoAtual() {
     final d = int.tryParse(_diaPagamentoController.text.trim()) ?? 5;
@@ -748,6 +1301,237 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     v.metaMensalValor = _parseBr(_vendedorMetaController.text);
     v.ativo = _ativo;
     return widget.vendedorRepository.salvar(v);
+  }
+
+  Motorista? _localizarMotoristaPorNomeFuncionario() {
+    final nome = _nomeController.text.trim().toLowerCase();
+    if (nome.isEmpty) return null;
+    for (final m in widget.motoristaRepository.listarTodos()) {
+      if (m.nome.trim().toLowerCase() == nome) return m;
+    }
+    return null;
+  }
+
+  int _sincronizarMotoristaVinculo() {
+    final nome = _nomeController.text.trim();
+    if (nome.isEmpty) {
+      throw StateError('Informe o nome antes de vincular motorista.');
+    }
+
+    Motorista? m;
+    if (_motoristaVinculadoId > 0) {
+      m = widget.motoristaRepository.obterPorId(_motoristaVinculadoId);
+    }
+    m ??= _localizarMotoristaPorNomeFuncionario();
+
+    final tel = somenteDigitos(_whatsappController.text).isNotEmpty
+        ? somenteDigitos(_whatsappController.text)
+        : somenteDigitos(_telefoneController.text);
+
+    m ??= Motorista(nome: nome, telefone: tel, ativo: _ativo);
+
+    if (widget.motoristaRepository.existeNomeParaOutro(
+      nomeNormalizado: nome,
+      ignorarId: m.id,
+    )) {
+      throw StateError('Ja existe outro motorista com este nome.');
+    }
+
+    m.nome = nome;
+    m.telefone = tel;
+    m.ativo = _ativo;
+    return widget.motoristaRepository.salvar(m);
+  }
+
+  void _carregarMotoristaFromFuncionario(Funcionario f) {
+    _motoristaVinculadoId = f.motoristaId;
+    _tambemMotoristaEntrega = f.motoristaId > 0;
+  }
+
+  Future<String> _sincronizarUsuarioVinculo() async {
+    final id = _usuarioVinculadoId.trim();
+    if (id.isEmpty) return '';
+
+    final anterior = await widget.usuarioRepository.obterPorId(id);
+    if (anterior == null) {
+      throw StateError('Usuario vinculado nao encontrado.');
+    }
+
+    var atualizado = anterior.copyWith(
+      nome: _nomeController.text.trim().isEmpty
+          ? anterior.nome
+          : _nomeController.text.trim(),
+      ativo: _ativo,
+    );
+
+    if (_tambemMotoristaEntrega) {
+      final mot = _motoristaVinculadoId > 0
+          ? widget.motoristaRepository.obterPorId(_motoristaVinculadoId)
+          : null;
+      if (mot != null) {
+        atualizado = atualizado.copyWith(
+          podeModoMotorista: true,
+          motoristaEntregaNome: mot.nome,
+        );
+      }
+    }
+
+    await widget.usuarioRepository.salvar(
+      atualizado,
+      alteradoPor: widget.usuarioLogado,
+      anterior: anterior,
+      resumoExtra: 'Vinculo via cadastro de funcionarios',
+    );
+    return id;
+  }
+
+  void _carregarUsuarioFromFuncionario(Funcionario f) {
+    _usuarioVinculadoId = f.usuarioSistemaId;
+    _temUsuarioSistema = f.usuarioSistemaId.trim().isNotEmpty;
+  }
+
+  UsuarioSistema? _usuarioVinculadoAtual() {
+    final id = _usuarioVinculadoId.trim();
+    if (id.isEmpty) return null;
+    for (final u in _usuariosCache) {
+      if (u.id == id) return u;
+    }
+    return null;
+  }
+
+  Future<void> _criarLoginRapido() async {
+    final nome = _nomeController.text.trim();
+    if (nome.isEmpty) {
+      setState(() => _status = 'Informe o nome antes de criar o login.');
+      return;
+    }
+
+    final loginController = TextEditingController(text: _sugerirLoginFromNome());
+    final senhaController = TextEditingController();
+    var perfil = _perfilSugeridoUsuario();
+
+    final criado = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Criar login rapido'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: loginController,
+                      decoration: const InputDecoration(
+                        labelText: 'Login',
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: senhaController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Senha inicial',
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<PerfilUsuarioPreset>(
+                      initialValue: perfil,
+                      decoration: const InputDecoration(
+                        labelText: 'Perfil sugerido',
+                        isDense: true,
+                      ),
+                      items: PerfilUsuarioPreset.values
+                          .where((p) => p != PerfilUsuarioPreset.dono)
+                          .map(
+                            (p) => DropdownMenuItem(
+                              value: p,
+                              child: Text(p.rotulo),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setDialogState(() => perfil = v);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Criar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    final login = loginController.text.trim();
+    final senha = senhaController.text;
+    loginController.dispose();
+    senhaController.dispose();
+    if (criado != true || !mounted) return;
+
+    if (login.isEmpty || senha.isEmpty) {
+      setState(() => _status = 'Informe login e senha para criar usuario.');
+      return;
+    }
+    if (await widget.usuarioRepository.loginJaExiste(login)) {
+      setState(() => _status = 'Ja existe usuario com este login.');
+      return;
+    }
+
+    final id = DateTime.now().millisecondsSinceEpoch.toString();
+    var base = UsuarioSistema(
+      id: id,
+      nome: nome,
+      login: login,
+      senha: '',
+      ativo: _ativo,
+      perfil: perfil.id,
+    );
+    var usuario = PerfilUsuarioPresetAplicador.aplicar(base, perfil);
+    if (_tambemMotoristaEntrega && _motoristaVinculadoId > 0) {
+      final mot = widget.motoristaRepository.obterPorId(_motoristaVinculadoId);
+      if (mot != null) {
+        usuario = usuario.copyWith(
+          podeModoMotorista: true,
+          motoristaEntregaNome: mot.nome,
+        );
+      }
+    }
+
+    try {
+      await widget.usuarioRepository.salvar(
+        usuario,
+        alteradoPor: widget.usuarioLogado,
+        senhaPlainNova: senha,
+        resumoExtra: 'Criado a partir do cadastro de funcionarios',
+      );
+    } catch (e) {
+      setState(() => _status = 'Falha ao criar login: $e');
+      return;
+    }
+
+    await _carregarUsuariosCache();
+    if (!mounted) return;
+    setState(() {
+      _temUsuarioSistema = true;
+      _usuarioVinculadoId = id;
+      _status = 'Login criado e vinculado ao funcionario.';
+    });
   }
 
   Widget _buildLinhaKpiFinanceiro({
@@ -975,6 +1759,388 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     );
   }
 
+  Widget _buildSecaoMotoristaEntregas(BuildContext context) {
+    final theme = Theme.of(context);
+    return _buildSectionCard(
+      context: context,
+      title: 'Motorista de entregas',
+      icon: Icons.local_shipping_outlined,
+      children: [
+        SwitchListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Cadastrado como motorista (romaneio / entregas)'),
+          subtitle: const Text(
+            'Cria ou atualiza o cadastro de motoristas usado na expedicao.',
+          ),
+          value: _tambemMotoristaEntrega,
+          onChanged: (v) => setState(() {
+            _tambemMotoristaEntrega = v;
+            if (!v) return;
+            if (_motoristaVinculadoId <= 0) {
+              final existente = _localizarMotoristaPorNomeFuncionario();
+              if (existente != null) {
+                _motoristaVinculadoId = existente.id;
+              }
+            }
+          }),
+        ),
+        if (_tambemMotoristaEntrega) ...[
+          if (_motoristaVinculadoId > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                'Motorista #$_motoristaVinculadoId'
+                '${_cnhVencida ? ' · CNH vencida' : ''}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: _cnhVencida
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          if (_cnhNumeroController.text.trim().isEmpty)
+            Text(
+              'Preencha CNH na aba Documentos para motoristas.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.tertiary,
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSecaoUsuarioSistema(BuildContext context) {
+    final theme = Theme.of(context);
+    final vinculado = _usuarioVinculadoAtual();
+    final usuariosAtivos = _usuariosCache.where((u) => u.ativo).toList();
+
+    return _buildSectionCard(
+      context: context,
+      title: 'Login no ERP',
+      icon: Icons.manage_accounts_outlined,
+      children: [
+        SwitchListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Possui usuario no sistema'),
+          subtitle: const Text(
+            'Vincula permissoes de acesso (PDV, caixa, entregas, etc.).',
+          ),
+          value: _temUsuarioSistema,
+          onChanged: (v) => setState(() {
+            _temUsuarioSistema = v;
+            if (!v) _usuarioVinculadoId = '';
+          }),
+        ),
+        if (_temUsuarioSistema) ...[
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _usuarioVinculadoId.isEmpty
+                      ? null
+                      : _usuarioVinculadoId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Usuario vinculado',
+                    isDense: true,
+                  ),
+                  items: usuariosAtivos
+                      .map(
+                        (u) => DropdownMenuItem(
+                          value: u.id,
+                          child: Text('${u.nome} (${u.login})'),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => setState(() => _usuarioVinculadoId = v ?? ''),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                style: _estiloBotaoContornoCompacto,
+                onPressed: () => unawaited(_criarLoginRapido()),
+                icon: const Icon(Icons.person_add_alt_1, size: 18),
+                label: const Text('Criar login'),
+              ),
+            ],
+          ),
+          if (vinculado != null) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text(
+                    perfilUsuarioFromId(vinculado.perfil).rotulo,
+                  ),
+                ),
+                if (vinculado.podeModoMotorista)
+                  const Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text('Modo motorista'),
+                  ),
+                if (vinculado.podeAcessarPdv)
+                  const Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text('PDV'),
+                  ),
+                if (vinculado.podeAcessarCaixa)
+                  const Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text('Caixa'),
+                  ),
+              ],
+            ),
+          ] else if (_usuarioVinculadoId.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Usuario nao encontrado na lista. Recarregue ou selecione outro.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildCampoCategoriaCnh() {
+    return DropdownButtonFormField<String>(
+      isExpanded: true,
+      initialValue: FuncionarioCadastroCatalogo.idsCategoriasCnh
+              .contains(_cnhCategoria)
+          ? _cnhCategoria
+          : '',
+      decoration: const InputDecoration(
+        labelText: 'Categoria',
+        isDense: true,
+      ),
+      items: FuncionarioCadastroCatalogo.categoriasCnh.entries
+          .map(
+            (e) => DropdownMenuItem(
+              value: e.key,
+              child: Text(
+                e.value,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          )
+          .toList(),
+      selectedItemBuilder: (context) {
+        return FuncionarioCadastroCatalogo.categoriasCnh.entries
+            .map(
+              (e) => Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  e.key.isEmpty ? 'N/A' : e.key,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            )
+            .toList();
+      },
+      onChanged: (v) => setState(() => _cnhCategoria = v ?? ''),
+    );
+  }
+
+  Widget _buildSecaoCnh(BuildContext context) {
+    final theme = Theme.of(context);
+    return _buildSectionCard(
+      context: context,
+      title: 'CNH (motoristas / entregas)',
+      icon: Icons.directions_car_outlined,
+      children: [
+        if (_cnhVencida)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'CNH vencida em ${_dateFormat.format(_cnhValidade!)}.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final empilhar = constraints.maxWidth < 560;
+            final numero = TextField(
+              controller: _cnhNumeroController,
+              decoration: const InputDecoration(
+                labelText: 'Numero CNH',
+                isDense: true,
+              ),
+            );
+            final categoria = _buildCampoCategoriaCnh();
+            final validade = OutlinedButton.icon(
+              style: _estiloBotaoContornoCompacto,
+              onPressed: () => unawaited(_selecionarCnhValidade()),
+              icon: const Icon(Icons.event_outlined, size: 18),
+              label: Text(
+                _cnhValidade == null
+                    ? 'Validade CNH'
+                    : 'Val.: ${_dateFormat.format(_cnhValidade!)}',
+                overflow: TextOverflow.ellipsis,
+              ),
+            );
+            final limparValidade = _cnhValidade == null
+                ? null
+                : TextButton(
+                    onPressed: () => setState(() => _cnhValidade = null),
+                    child: const Text('Limpar validade'),
+                  );
+
+            if (empilhar) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  numero,
+                  const SizedBox(height: 8),
+                  categoria,
+                  const SizedBox(height: 8),
+                  validade,
+                  ?limparValidade,
+                ],
+              );
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: _wCnh, child: numero),
+                    const SizedBox(width: 10),
+                    Expanded(child: categoria),
+                    const SizedBox(width: 10),
+                    SizedBox(width: _wData, child: validade),
+                  ],
+                ),
+                if (limparValidade != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: limparValidade,
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSecaoSst(BuildContext context) {
+    final theme = Theme.of(context);
+    return _buildSectionCard(
+      context: context,
+      title: 'SST — saude e seguranca',
+      icon: Icons.health_and_safety_outlined,
+      children: [
+        if (_asoVencido)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'ASO vencido em ${_dateFormat.format(_asoValidade!)}.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            SizedBox(
+              width: _wData,
+              child: OutlinedButton.icon(
+                style: _estiloBotaoContornoCompacto,
+                onPressed: () => unawaited(_selecionarAsoData()),
+                icon: const Icon(Icons.medical_services_outlined, size: 18),
+                label: Text(
+                  _asoData == null
+                      ? 'Exame / ASO'
+                      : 'ASO: ${_dateFormat.format(_asoData!)}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: _wData,
+              child: OutlinedButton.icon(
+                style: _estiloBotaoContornoCompacto,
+                onPressed: () => unawaited(_selecionarAsoValidade()),
+                icon: const Icon(Icons.event_available_outlined, size: 18),
+                label: Text(
+                  _asoValidade == null
+                      ? 'Validade ASO'
+                      : 'Val.: ${_dateFormat.format(_asoValidade!)}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: 220,
+          child: DropdownButtonFormField<String>(
+            initialValue: FuncionarioCadastroCatalogo.idsTamanhosUniforme
+                    .contains(_tamanhoUniforme)
+                ? _tamanhoUniforme
+                : '',
+            decoration: const InputDecoration(
+              labelText: 'Uniforme / bota',
+              isDense: true,
+            ),
+            items: FuncionarioCadastroCatalogo.tamanhosUniforme.entries
+                .map(
+                  (e) => DropdownMenuItem(
+                    value: e.key,
+                    child: Text(e.value),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) => setState(() => _tamanhoUniforme = v ?? ''),
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _epiObservacoesController,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'EPIs e observacoes de seguranca',
+            hintText: 'Capacete, luva, oculos, colete...',
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 4),
+        SwitchListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Autorizado a operar empilhadeira'),
+          value: _podeOperarEmpilhadeira,
+          onChanged: (v) => setState(() => _podeOperarEmpilhadeira = v),
+        ),
+        SwitchListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Autorizado a operar transpalete'),
+          value: _podeOperarTranspalete,
+          onChanged: (v) => setState(() => _podeOperarTranspalete = v),
+        ),
+      ],
+    );
+  }
+
   Future<void> _selecionarMesFiltro() async {
     final escolhida = await showDatePicker(
       context: context,
@@ -994,6 +2160,13 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   }
 
   Future<void> _incluirLancamento() async {
+    if (_mesEstaFechado()) {
+      setState(
+        () => _status =
+            'Mes fechado. Reabra o mes RH para incluir lancamentos.',
+      );
+      return;
+    }
     final valorController = TextEditingController();
     final obsController = TextEditingController();
     var tipo = LancamentoFuncionarioCatalogo.vale;
@@ -1117,6 +2290,13 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   }
 
   Future<void> _estornarLancamento(LancamentoFuncionario lanc) async {
+    if (_mesEstaFechado()) {
+      setState(
+        () => _status =
+            'Mes fechado. Reabra o mes RH para estornar lancamentos.',
+      );
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1544,7 +2724,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     );
   }
 
-  Widget _buildCorpoAbas(BuildContext context) {
+  Widget _buildCorpoAbas(BuildContext context, {bool compactUi = false}) {
     final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1554,6 +2734,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           child: TabBar(
             controller: _tabController,
             isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            labelPadding: EdgeInsets.symmetric(
+              horizontal: compactUi ? 12 : 16,
+            ),
             tabs: const [
               Tab(text: 'Identificacao'),
               Tab(text: 'Documentos'),
@@ -1626,7 +2810,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                 .toList(),
             onChanged: (v) {
               if (v == null) return;
-              setState(() => _setorSelecionado = v);
+              setState(() {
+                _setorSelecionado = v;
+                _sugerirVinculosOperacionaisPorSetor();
+              });
             },
           );
           final funcao = DropdownButtonFormField<String>(
@@ -1649,6 +2836,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
               setState(() {
                 _funcaoSelecionada = v;
                 if (v != 'outro') _funcaoOutroController.clear();
+                _sugerirVinculosOperacionaisPorSetor();
               });
             },
           );
@@ -1683,6 +2871,30 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           ),
         ),
       ],
+      const SizedBox(height: 6),
+      DropdownButtonFormField<String>(
+        initialValue: FuncionarioCadastroCatalogo.idsTiposVinculo
+                .contains(_tipoVinculo)
+            ? _tipoVinculo
+            : 'clt',
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'Tipo de vinculo',
+          isDense: true,
+        ),
+        items: FuncionarioCadastroCatalogo.tiposVinculo.entries
+            .map(
+              (e) => DropdownMenuItem(
+                value: e.key,
+                child: Text(e.value),
+              ),
+            )
+            .toList(),
+        onChanged: (v) {
+          if (v == null) return;
+          setState(() => _tipoVinculo = v);
+        },
+      ),
       const SizedBox(height: 6),
       Align(
         alignment: Alignment.centerLeft,
@@ -1861,10 +3073,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             ],
           );
 
-          const limiarDuasColunas = 700.0;
           final largura = constraints.maxWidth;
-          final usarDuasColunas =
-              constraints.hasBoundedWidth && largura >= limiarDuasColunas;
+          final usarDuasColunas = constraints.hasBoundedWidth &&
+              FuncionarioLayout.documentosDuasColunas(largura);
           if (!usarDuasColunas) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1885,6 +3096,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           );
         },
       ),
+      const SizedBox(height: 8),
+      _buildSecaoCnh(context),
+      const SizedBox(height: 8),
+      _buildSecaoSst(context),
       const SizedBox(height: 8),
       _buildSectionCard(
         context: context,
@@ -1997,7 +3212,32 @@ class _FuncionariosPageState extends State<FuncionariosPage>
 
   List<Widget> _conteudoAbaFinanceiro(BuildContext context) {
     final theme = Theme.of(context);
+    final compactUi = context.isFuncionarioCompactDesktop;
+    final resumoMes = _resumoMesAtual();
+    final mesFechado = _mesEstaFechado();
+    final fechamento = _funcionarioEmEdicaoId != null
+        ? _folhaService.fechamentoDe(
+            _funcionarioEmEdicaoId!,
+            _mesFiltroLancamentos,
+          )
+        : null;
+
     return [
+      FuncionarioFolhaPainel(
+        mesReferencia: _mesFiltroLancamentos,
+        resumoMes: resumoMes,
+        mesFechado: mesFechado,
+        contaPagarId: fechamento?.contaPagarId ?? resumoMes?.contaPagarId ?? 0,
+        alertasEquipe: _alertasEquipeMes(),
+        historico12Meses: _historico12Meses(),
+        onFecharMes: () => unawaited(_fecharMesRh()),
+        onReabrirMes: () => unawaited(_reabrirMesRh()),
+        onExportarFolhaEquipe: () => unawaited(_exportarFolhaEquipeCsv()),
+        onExportarLancamentosAno: () => unawaited(_exportarLancamentosAnoCsv()),
+        onRelatorioSetor: () => unawaited(_mostrarRelatorioFolhaSetor()),
+        compact: compactUi,
+      ),
+      const SizedBox(height: 8),
       _buildSectionCard(
         context: context,
         title: 'Financeiro',
@@ -2057,36 +3297,48 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             ),
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: _estiloBotaoContornoCompacto,
-                  onPressed: _selecionarMesFiltro,
-                  icon: const Icon(Icons.calendar_month_outlined, size: 18),
-                  label: Text(
-                    'Mes: ${_mesAnoFormat.format(_mesFiltroLancamentos)}',
-                    overflow: TextOverflow.ellipsis,
-                  ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final acoesWrap =
+                  FuncionarioLayout.acoesEmWrap(constraints.maxWidth);
+              final mesBtn = OutlinedButton.icon(
+                style: _estiloBotaoContornoCompacto,
+                onPressed: _selecionarMesFiltro,
+                icon: const Icon(Icons.calendar_month_outlined, size: 18),
+                label: Text(
+                  'Mes: ${_mesAnoFormat.format(_mesFiltroLancamentos)}',
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: _estiloBotaoContornoCompacto,
-                  onPressed: _incluirLancamento,
-                  icon: const Icon(Icons.add_card_outlined, size: 18),
-                  label: const Text('Lancamento'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
+              );
+              final lancBtn = OutlinedButton.icon(
+                style: _estiloBotaoContornoCompacto,
+                onPressed: mesFechado ? null : _incluirLancamento,
+                icon: const Icon(Icons.add_card_outlined, size: 18),
+                label: const Text('Lancamento'),
+              );
+              final pdfBtn = OutlinedButton.icon(
                 style: _estiloBotaoContornoCompacto,
                 onPressed: () => unawaited(_exportarExtratoPdf()),
                 icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                 label: const Text('PDF'),
-              ),
-            ],
+              );
+              if (acoesWrap) {
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [mesBtn, lancBtn, pdfBtn],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: mesBtn),
+                  const SizedBox(width: 8),
+                  Expanded(child: lancBtn),
+                  const SizedBox(width: 8),
+                  pdfBtn,
+                ],
+              );
+            },
           ),
           const SizedBox(height: 8),
           if (_lancamentos.isEmpty)
@@ -2146,6 +3398,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     return [
       _buildSecaoVendedorPdv(context),
       const SizedBox(height: 8),
+      _buildSecaoMotoristaEntregas(context),
+      const SizedBox(height: 8),
+      _buildSecaoUsuarioSistema(context),
+      const SizedBox(height: 8),
       _buildSectionCard(
         context: context,
         title: 'Observacoes RH',
@@ -2164,154 +3420,244 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     ];
   }
 
-  Widget _buildCabecalhoFixo(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final codigo = _codigoController.text.trim();
-    final rh = _resumoSetorFuncaoAtual();
-    final diaPag = int.tryParse(_diaPagamentoController.text.trim()) ?? 5;
+  Widget _buildResumoHeader(BuildContext context, {required bool compactUi}) {
+    return FuncionarioResumoHeader(
+      codigoController: _codigoController,
+      nomeController: _nomeController,
+      nomeFocus: _nomeFocus,
+      resumoRh: _resumoSetorFuncaoAtual(),
+      tempoCasa: _rotuloTempoCasa(),
+      liquidoFormatado: _formatMoeda(_liquidoReferencia()),
+      proximoPagamentoFormatado: _dateFormat.format(_dataProximoPagamento()),
+      ativo: _ativo,
+      onAtivoChanged: (v) => unawaited(_onAtivoChanged(v)),
+      emEdicaoId: _funcionarioEmEdicaoId,
+      tambemVendedorPdv: _tambemVendedorPdv,
+      vendedorVinculadoId: _vendedorVinculadoId,
+      tambemMotoristaEntrega: _tambemMotoristaEntrega,
+      motoristaVinculadoId: _motoristaVinculadoId,
+      temUsuarioSistema: _temUsuarioSistema,
+      usuarioLogin: _usuarioVinculadoAtual()?.login,
+      cnhVencida: _cnhVencida,
+      asoVencido: _asoVencido,
+      dataDemissaoFormatada: _dataDemissao != null
+          ? _dateFormat.format(_dataDemissao!)
+          : null,
+      larguraCodigo: compactUi ? 112 : _wCodigo,
+      compact: compactUi,
+    );
+  }
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-        border: Border(
-          bottom: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.45),
-          ),
-        ),
+  Widget _buildListaSidebar({required bool compact}) {
+    final kpis = _calcularKpisEquipe();
+    final mostrarKpis = !compact && context.funcionarioKpisNaSidebar;
+
+    return FuncionarioListaSidebar(
+      compact: compact,
+      funcionarios: _listaFiltrada(),
+      selectedId: _funcionarioEmEdicaoId,
+      filtroController: _filtroListaController,
+      somenteAtivos: _somenteAtivosLista,
+      scrollController: compact ? null : _listaScrollController,
+      resumoRh: _resumoRhDe,
+      mostrarKpisEquipe: mostrarKpis,
+      totalCadastrados: kpis.total,
+      totalAtivos: kpis.ativos,
+      folhaBaseAtivos: kpis.folha,
+      onFiltroChanged: () => setState(() {}),
+      onSomenteAtivosChanged: (v) => setState(() => _somenteAtivosLista = v),
+      onSelect: (f) {
+        if (!compact) {
+          Navigator.of(context).maybePop();
+        }
+        _editar(f);
+      },
+    );
+  }
+
+  Widget _buildPainelDetalhe(BuildContext context, {required bool compact}) {
+    final theme = Theme.of(context);
+    final emEdicao = _funcionarioEmEdicaoId != null;
+    final compactUi = compact || context.isFuncionarioCompactDesktop;
+    final kpisNaSidebar = !compact && context.funcionarioKpisNaSidebar;
+    final kpis = _calcularKpisEquipe();
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        compactUi ? 10 : 12,
+        compactUi ? 6 : 8,
+        compactUi ? 10 : 12,
+        compactUi ? 8 : 12,
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          _erpGap16,
-          _erpGap12,
-          _erpGap16,
-          _erpGap12,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final empilhar = constraints.maxWidth < 720;
-                final campoCodigo = SizedBox(
-                  width: _wCodigo,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_status.isNotEmpty) ...[
+            _buildStatusBanner(context, _status),
+            SizedBox(height: compactUi ? 6 : 8),
+          ],
+          if (!kpisNaSidebar) ...[
+            FuncionarioEquipeKpis(
+              totalCadastrados: kpis.total,
+              totalAtivos: kpis.ativos,
+              folhaBaseAtivos: kpis.folha,
+            ),
+            SizedBox(height: compactUi ? 6 : 8),
+          ],
+          FuncionarioAtalhosBar(
+            compact: compactUi,
+            mostrarNavegacao: !compact,
+            onPrimeiro: _irPrimeiroFuncionario,
+            onAnterior: _irFuncionarioAnterior,
+            onProximo: _irProximoFuncionario,
+            onUltimo: _irUltimoFuncionario,
+            onPesquisar: _abrirPesquisaFuncionario,
+            onNovo: _limparFormulario,
+          ),
+          if (compact) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
                   child: TextField(
-                    controller: _codigoController,
+                    controller: _pesquisaController,
                     decoration: const InputDecoration(
-                      labelText: 'Codigo interno',
-                      hintText: 'Ex.: 01',
+                      labelText: 'Busca rapida',
+                      prefixIcon: Icon(Icons.search),
                       isDense: true,
                     ),
-                  ),
-                );
-                final campoNome = TextField(
-                  focusNode: _nomeFocus,
-                  controller: _nomeController,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Nome completo',
-                    isDense: true,
-                  ),
-                );
-                if (empilhar) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      campoCodigo,
-                      const SizedBox(height: _erpGap8),
-                      campoNome,
-                    ],
-                  );
-                }
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    campoCodigo,
-                    const SizedBox(width: _erpGap16),
-                    Expanded(child: campoNome),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: _erpGap8),
-            Wrap(
-              spacing: _erpGap8,
-              runSpacing: _erpGap8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text(
-                    codigo.isEmpty ? 'Codigo ao salvar' : 'Cod. $codigo',
+                    onSubmitted: (t) {
+                      final r = widget.funcionarioRepository.pesquisar(t);
+                      if (r.isNotEmpty) _editar(r.first);
+                    },
                   ),
                 ),
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text(_ativo ? 'Ativo' : 'Inativo'),
-                  backgroundColor: _ativo
-                      ? scheme.primaryContainer.withValues(alpha: 0.55)
-                      : scheme.errorContainer.withValues(alpha: 0.4),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  style: _estiloBotaoContornoCompacto,
+                  onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+                  icon: const Icon(Icons.list_alt, size: 18),
+                  label: const Text('Equipe'),
                 ),
-                if (rh.isNotEmpty)
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text(rh),
-                  ),
-                if (!_ativo && _dataDemissao != null)
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text(
-                      'Demissao ${_dateFormat.format(_dataDemissao!)}',
-                    ),
-                    backgroundColor:
-                        scheme.errorContainer.withValues(alpha: 0.35),
-                  ),
-                if (_funcionarioEmEdicaoId != null)
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text('Edicao #${_funcionarioEmEdicaoId!}'),
-                  ),
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text(_rotuloTempoCasa()),
-                ),
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text('Pag. dia $diaPag'),
-                ),
-                if (_tambemVendedorPdv)
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text(
-                      _vendedorVinculadoId > 0
-                          ? 'PDV #$_vendedorVinculadoId'
-                          : 'PDV (ao salvar)',
-                    ),
-                    backgroundColor:
-                        scheme.tertiaryContainer.withValues(alpha: 0.5),
-                  ),
               ],
             ),
-            SwitchListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Funcionario ativo'),
-              value: _ativo,
-              onChanged: (v) => unawaited(_onAtivoChanged(v)),
-            ),
           ],
-        ),
+          SizedBox(height: compactUi ? 6 : 8),
+          _buildResumoHeader(context, compactUi: compactUi),
+          SizedBox(height: compactUi ? 6 : 8),
+          Expanded(child: _buildCorpoAbas(context, compactUi: compactUi)),
+          SizedBox(height: compactUi ? 6 : 8),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final acoesWrap =
+                  FuncionarioLayout.acoesEmWrap(constraints.maxWidth);
+              final salvarBtn = Expanded(
+                child: FilledButton.icon(
+                  style: _estiloBotaoPrimarioCompacto,
+                  onPressed: () => unawaited(_salvar()),
+                  icon: const Icon(Icons.save_outlined, size: 18),
+                  label: Text(
+                    emEdicao ? 'Atualizar (F5)' : 'Salvar (F5 · F10)',
+                  ),
+                ),
+              );
+              final novoBtn = OutlinedButton.icon(
+                style: _estiloBotaoContornoCompacto,
+                onPressed: _limparFormulario,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Novo (Esc)'),
+              );
+              final apagarBtn = OutlinedButton.icon(
+                style: _estiloBotaoContornoCompacto,
+                onPressed: () {
+                  final atualId = _funcionarioEmEdicaoId;
+                  if (atualId == null) return;
+                  final atual =
+                      widget.funcionarioRepository.obterPorId(atualId);
+                  if (atual == null) return;
+                  _confirmarRemocao(atual);
+                },
+                icon: Icon(
+                  Icons.delete_outline,
+                  size: 18,
+                  color: theme.colorScheme.error,
+                ),
+                label: Text(
+                  'Apagar',
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              );
+
+              if (acoesWrap) {
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    SizedBox(
+                      width: constraints.maxWidth,
+                      child: FilledButton.icon(
+                        style: _estiloBotaoPrimarioCompacto,
+                        onPressed: () => unawaited(_salvar()),
+                        icon: const Icon(Icons.save_outlined, size: 18),
+                        label: Text(
+                          emEdicao ? 'Atualizar (F5)' : 'Salvar (F5 · F10)',
+                        ),
+                      ),
+                    ),
+                    novoBtn,
+                    if (emEdicao) apagarBtn,
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  salvarBtn,
+                  const SizedBox(width: 8),
+                  novoBtn,
+                  if (emEdicao) ...[
+                    const SizedBox(width: 8),
+                    apagarBtn,
+                  ],
+                ],
+              );
+            },
+          ),
+        ],
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final lista = widget.funcionarioRepository.pesquisar(_filtroListaController.text);
-    final emEdicao = _funcionarioEmEdicaoId != null;
+    final isDesktop = context.isDesktopLayout;
+    final sessaoActions = widget.usuarioLogado != null && widget.onLogout != null
+        ? ContaSessaoAppBarActions(
+            login: widget.usuarioLogado!.login,
+            onLogout: widget.onLogout!,
+          )
+        : null;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Cadastro de funcionarios')),
+      key: _scaffoldKey,
+      appBar: AppBar(
+        title: const Text('Funcionarios'),
+        actions: [
+          if (!isDesktop)
+            IconButton(
+              tooltip: 'Lista da equipe',
+              onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+              icon: const Icon(Icons.list_alt),
+            ),
+          ?sessaoActions,
+        ],
+      ),
+      endDrawer: isDesktop
+          ? null
+          : Drawer(
+              width: math.min(MediaQuery.sizeOf(context).width * 0.88, 360),
+              child: SafeArea(child: _buildListaSidebar(compact: true)),
+            ),
       body: Shortcuts(
         shortcuts: const <ShortcutActivator, Intent>{
           SingleActivator(LogicalKeyboardKey.f5): _FuncionarioSalvarIntent(),
@@ -2323,7 +3669,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           actions: <Type, Action<Intent>>{
             _FuncionarioSalvarIntent: CallbackAction<_FuncionarioSalvarIntent>(
               onInvoke: (_) {
-                _salvar();
+                unawaited(_salvar());
                 return null;
               },
             ),
@@ -2341,191 +3687,30 @@ class _FuncionariosPageState extends State<FuncionariosPage>
               },
             ),
           },
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-              if (_status.isNotEmpty) ...[
-                _buildStatusBanner(context, _status),
-                const SizedBox(height: 8),
-              ],
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: _irPrimeiroFuncionario,
-                      child: const Text('|< Primeiro'),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: OutlinedButton(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: _irFuncionarioAnterior,
-                      child: const Text('< Anterior'),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: OutlinedButton(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: _irProximoFuncionario,
-                      child: const Text('Proximo >'),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: OutlinedButton(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: _irUltimoFuncionario,
-                      child: const Text('Ultimo >|'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _pesquisaController,
-                      decoration: const InputDecoration(
-                        labelText: 'Busca rapida (F3 abre lista)',
-                        prefixIcon: Icon(Icons.search),
-                        isDense: true,
-                      ),
-                      onSubmitted: (t) {
-                        final r = widget.funcionarioRepository.pesquisar(t);
-                        if (r.isNotEmpty) _editar(r.first);
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _abrirPesquisaFuncionario,
-                    icon: const Icon(Icons.manage_search, size: 18),
-                    label: const Text('Lista (F3)'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              _buildCabecalhoFixo(context),
-              Expanded(child: _buildCorpoAbas(context)),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      style: _estiloBotaoPrimarioCompacto,
-                      onPressed: _salvar,
-                      icon: const Icon(Icons.save_outlined, size: 18),
-                      label: Text(
-                        emEdicao ? 'Atualizar (F5)' : 'Salvar (F5 · F10)',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    style: _estiloBotaoContornoCompacto,
-                    onPressed: _limparFormulario,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Novo (Esc)'),
-                  ),
-                  if (emEdicao) ...[
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: () {
-                        final atualId = _funcionarioEmEdicaoId;
-                        if (atualId == null) return;
-                        final atual = widget.funcionarioRepository.obterPorId(atualId);
-                        if (atual == null) return;
-                        _confirmarRemocao(atual);
-                      },
-                      icon: Icon(
-                        Icons.delete_outline,
-                        size: 18,
-                        color: theme.colorScheme.error,
-                      ),
-                      label: Text(
-                        'Apagar',
-                        style: TextStyle(color: theme.colorScheme.error),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 12),
-              ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: Text(
-                  'Funcionarios cadastrados (${lista.length})',
-                  style: theme.textTheme.titleMedium,
-                ),
-                initiallyExpanded: false,
-                children: [
-                  TextField(
-                    controller: _filtroListaController,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(
-                      labelText: 'Filtrar lista rapida',
-                      prefixIcon: Icon(Icons.search),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (lista.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 10),
-                      child: Center(child: Text('Nenhum funcionario cadastrado.')),
-                    )
-                  else
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 260),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: lista.length,
-                        itemBuilder: (context, index) {
-                          final f = lista[index];
-                          return Card(
-                            child: ListTile(
-                              dense: true,
-                              title: Text(f.nomeCompleto),
-                              subtitle: Text(
-                                '${f.codigoInterno} · ${_resumoRhDe(f)}'
-                                '${f.ativo ? '' : ' · inativo'}',
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Editar',
-                                    onPressed: () => _editar(f),
-                                    icon: const Icon(Icons.edit_outlined),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Remover',
-                                    onPressed: () => _confirmarRemocao(f),
-                                    icon: Icon(
-                                      Icons.delete_outline,
-                                      color: theme.colorScheme.error,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              onTap: () => _editar(f),
+          child: isDesktop
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      width: context.funcionarioSidebarWidth,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            right: BorderSide(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .outlineVariant
+                                  .withValues(alpha: 0.55),
                             ),
-                          );
-                        },
+                          ),
+                        ),
+                        child: _buildListaSidebar(compact: false),
                       ),
                     ),
-                ],
-              ),
-            ],
-            ),
-          ),
+                    Expanded(child: _buildPainelDetalhe(context, compact: false)),
+                  ],
+                )
+              : _buildPainelDetalhe(context, compact: true),
         ),
       ),
     );

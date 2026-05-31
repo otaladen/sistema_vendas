@@ -159,4 +159,12 @@ class ContaPagarRepository {
     sincronizarPendenteParaAtrasado();
     return conta;
   }
+
+  bool remover(int id) {
+    final ok = _box.remove(id);
+    if (ok) {
+      registrarDeleteParaRede('conta_pagar', id);
+    }
+    return ok;
+  }
 }

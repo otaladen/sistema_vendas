@@ -18,6 +18,7 @@ import 'package:intl/intl.dart';
 
 import '../config/fiscal_config.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
+import '../domain/fiscal/nfe_cfop_devolucao_resolver.dart';
 import '../domain/fiscal/nfe_cfop_resolver.dart';
 import '../domain/fiscal/nfe_cobranca_helper.dart';
 import '../domain/fiscal/produto_fiscal_catalog.dart';
@@ -220,6 +221,21 @@ class FocusNfeDadosLogistica {
   final int volumes;
   final double pesoBrutoKg;
   final String especieVolumes;
+}
+
+/// Item para NF-e de devolucao (quantidade devolvida + preco da venda original).
+class FocusNfeItemDevolucao {
+  const FocusNfeItemDevolucao({
+    required this.produto,
+    required this.descricao,
+    required this.quantidade,
+    required this.valorUnitario,
+  });
+
+  final Produto produto;
+  final String descricao;
+  final int quantidade;
+  final double valorUnitario;
 }
 
 /// Destinatario completo exigido para NF-e modelo 55 (carga / construtora).
@@ -689,6 +705,33 @@ class FocusNfeService {
     String referencia, {
     required String justificativa,
   }) async {
+    return _cancelarDocumentoFocus(
+      segmento: 'nfe',
+      referencia: referencia,
+      justificativa: justificativa,
+      rotulo: 'NF-e',
+    );
+  }
+
+  /// Cancela NFC-e autorizada (DELETE /v2/nfce/{referencia}).
+  Future<FocusNfeEmissaoResultado> cancelarNfce(
+    String referencia, {
+    required String justificativa,
+  }) async {
+    return _cancelarDocumentoFocus(
+      segmento: 'nfce',
+      referencia: referencia,
+      justificativa: justificativa,
+      rotulo: 'NFC-e',
+    );
+  }
+
+  Future<FocusNfeEmissaoResultado> _cancelarDocumentoFocus({
+    required String segmento,
+    required String referencia,
+    required String justificativa,
+    required String rotulo,
+  }) async {
     validarConfiguracao();
     final just = justificativa.trim();
     if (just.length < 15 || just.length > 255) {
@@ -698,10 +741,10 @@ class FocusNfeService {
     }
     final ref = referencia.trim();
     if (ref.isEmpty) {
-      return FocusNfeEmissaoResultado.erro('Referencia da NF-e invalida.');
+      return FocusNfeEmissaoResultado.erro('Referencia da $rotulo invalida.');
     }
     final base = _config.baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
-    final uri = Uri.parse('$base/v2/nfe/${Uri.encodeComponent(ref)}');
+    final uri = Uri.parse('$base/v2/$segmento/${Uri.encodeComponent(ref)}');
     try {
       final request = http.Request('DELETE', uri)
         ..headers.addAll(_headers())
@@ -712,7 +755,9 @@ class FocusNfeService {
       final response = await http.Response.fromStream(streamed);
       return _interpretarRespostaJsonHttp(response, referencia: ref);
     } catch (e) {
-      return FocusNfeEmissaoResultado.erro('Falha ao cancelar NF-e na Focus: $e');
+      return FocusNfeEmissaoResultado.erro(
+        'Falha ao cancelar $rotulo na Focus: $e',
+      );
     }
   }
 
@@ -1329,6 +1374,193 @@ class FocusNfeService {
     }
 
     return payload;
+  }
+
+  /// Referencia estavel para NF-e de devolucao vinculada a um registro interno.
+  static String referenciaDevolucaoVenda({
+    required int vendaId,
+    required int registroDevolucaoId,
+  }) =>
+      'venda_${vendaId}_dev_$registroDevolucaoId';
+
+  /// Emite NF-e modelo 55 de devolucao (finalidade 4) referenciando a nota original.
+  Future<FocusNfeEmissaoResultado> emitirNfeDevolucao({
+    required String referencia,
+    required String chaveNotaOriginal,
+    required FocusNfeDestinatarioNfe destinatario,
+    required List<FocusNfeItemDevolucao> itensDevolucao,
+    String motivo = '',
+  }) async {
+    validarConfiguracao();
+    final ref = referencia.trim();
+    if (ref.isEmpty) {
+      return FocusNfeEmissaoResultado.erro('Referencia da devolucao invalida.');
+    }
+    final chave = chaveNotaOriginal.replaceAll(RegExp(r'\D'), '');
+    if (chave.length != 44) {
+      return FocusNfeEmissaoResultado.erro(
+        'Chave da nota original invalida para devolucao fiscal.',
+      );
+    }
+    if (itensDevolucao.isEmpty) {
+      return FocusNfeEmissaoResultado.erro(
+        'Informe ao menos um item na devolucao fiscal.',
+      );
+    }
+
+    final payload = montarPayloadNfeDevolucao(
+      chaveNotaOriginal: chave,
+      destinatario: destinatario,
+      itensDevolucao: itensDevolucao,
+      motivo: motivo,
+    );
+    return _postDocumento(
+      uri: Uri.parse(_config.endpointNfe(ref)),
+      payload: payload,
+      referencia: ref,
+    );
+  }
+
+  Map<String, dynamic> montarPayloadNfeDevolucao({
+    required String chaveNotaOriginal,
+    required FocusNfeDestinatarioNfe destinatario,
+    required List<FocusNfeItemDevolucao> itensDevolucao,
+    String motivo = '',
+  }) {
+    destinatario.validar();
+
+    final ufDestino = destinatario.uf.trim().toUpperCase();
+    final consumidorFinal = _consumidorFinalNfe(destinatario);
+    final itens = <Map<String, dynamic>>[];
+    var numero = 1;
+    for (final linha in itensDevolucao) {
+      if (linha.quantidade <= 0) continue;
+      itens.add(
+        _itemFocusDevolucao(
+          numeroItem: numero++,
+          produto: linha.produto,
+          descricao: linha.descricao,
+          quantidade: linha.quantidade,
+          valorUnitario: linha.valorUnitario,
+          ufDestino: ufDestino,
+        ),
+      );
+    }
+    if (itens.isEmpty) {
+      throw FocusNfeValidacaoException('Itens de devolucao invalidos.');
+    }
+
+    final valorProdutos = _somaValorBrutoItens(itens);
+    final valorTotal = valorProdutos.clamp(0, double.infinity).toDouble();
+    final doc = destinatario.documento.replaceAll(RegExp(r'\D'), '');
+    final ieDest = destinatario.inscricaoEstadual.replaceAll(RegExp(r'\D'), '');
+    final obs = motivo.trim().isEmpty
+        ? 'Devolucao de mercadoria conforme registro interno.'
+        : motivo.trim();
+
+    final payload = <String, dynamic>{
+      ..._camposEmitenteFocus(),
+      ..._camposTipoEmissao(tipoEmissao: FocusNfeEmissaoSefaz.tipoEmissaoNormal),
+      'natureza_operacao': 'Devolucao de venda de mercadoria',
+      'data_emissao': _isoEmissao.format(DateTime.now()),
+      'tipo_documento': '0',
+      'local_destino': _localDestino(
+        ufDestino,
+        ufDestinatario: ufDestino,
+      ),
+      'finalidade_emissao': '4',
+      'consumidor_final': consumidorFinal ? '1' : '0',
+      'presenca_comprador': '1',
+      'nome_destinatario': destinatario.nome,
+      if (ieDest.isNotEmpty) 'inscricao_estadual_destinatario': ieDest,
+      'indicador_inscricao_estadual_destinatario':
+          destinatario.indicadorInscricaoEstadual,
+      'logradouro_destinatario': destinatario.logradouro,
+      'numero_destinatario': destinatario.numero,
+      'bairro_destinatario': destinatario.bairro,
+      'municipio_destinatario': destinatario.municipio,
+      'codigo_municipio_destinatario': destinatario.codigoMunicipioIbge,
+      'uf_destinatario': destinatario.uf,
+      'cep_destinatario': destinatario.cep.replaceAll(RegExp(r'\D'), ''),
+      'pais_destinatario': 'Brasil',
+      'modalidade_frete': '9',
+      'valor_produtos': _formatarDecimal(valorProdutos),
+      'valor_desconto': _formatarDecimal(0),
+      'valor_frete': _formatarDecimal(0),
+      'valor_total': _formatarDecimal(valorTotal),
+      'items': itens,
+      'formas_pagamento': [
+        {
+          'forma_pagamento': '90',
+          'valor_pagamento': _formatarDecimal(0),
+        },
+      ],
+      'informacoes_adicionais_contribuinte': obs,
+      'notas_referenciadas': [
+        {'chave_nfe': chaveNotaOriginal},
+      ],
+    };
+
+    if (doc.length == 11) {
+      payload['cpf_destinatario'] = doc;
+    } else {
+      payload['cnpj_destinatario'] = doc;
+    }
+    if (destinatario.telefone.isNotEmpty) {
+      payload['telefone_destinatario'] = destinatario.telefone;
+    }
+    if (destinatario.email.isNotEmpty) {
+      payload['email_destinatario'] = destinatario.email;
+    }
+    if (destinatario.complemento.isNotEmpty) {
+      payload['complemento_destinatario'] = destinatario.complemento;
+    }
+
+    return payload;
+  }
+
+  Map<String, dynamic> _itemFocusDevolucao({
+    required int numeroItem,
+    required Produto produto,
+    required String descricao,
+    required int quantidade,
+    required double valorUnitario,
+    required String ufDestino,
+  }) {
+    final ncm = _resolverNcm(produto);
+    final cfop = NfeCfopDevolucaoResolver.resolver(
+      produto: produto,
+      ufDestinatario: ufDestino,
+      ufEmitente: _config.ufEmitente,
+    );
+    final unidade = FiscalService.normalizarUnidadeFiscal(produto.unidade);
+    final valorBruto = quantidade * valorUnitario;
+    final codigo = produto.codigoInterno.trim().isEmpty
+        ? 'ID-${produto.id}'
+        : produto.codigoInterno.trim();
+    final gtin = _codigoBarrasFocus(produto);
+    final trib = _tributacaoItemPadrao(produto);
+    final cest = FiscalService.normalizarCest(produto.cest);
+
+    return {
+      'numero_item': numeroItem.toString(),
+      'codigo_produto': codigo,
+      'descricao': descricao.trim().isEmpty ? produto.nome : descricao.trim(),
+      'codigo_barras_comercial': gtin,
+      'codigo_barras_tributavel': gtin,
+      'cfop': cfop,
+      'unidade_comercial': unidade.toLowerCase(),
+      'quantidade_comercial': _formatarQuantidade(quantidade),
+      'valor_unitario_comercial': _formatarDecimal(valorUnitario),
+      'unidade_tributavel': unidade.toLowerCase(),
+      'quantidade_tributavel': _formatarQuantidade(quantidade),
+      'valor_unitario_tributavel': _formatarDecimal(valorUnitario),
+      'codigo_ncm': ncm,
+      if (cest.length == 7) 'cest': cest,
+      'valor_bruto': _formatarDecimal(valorBruto),
+      'inclui_no_total': '1',
+      ...trib,
+    };
   }
 
   Map<String, dynamic> _camposEmitenteFocus() {

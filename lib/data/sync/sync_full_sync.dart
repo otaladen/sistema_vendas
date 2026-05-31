@@ -115,6 +115,7 @@ class SyncFullSync {
     'vendedor',
     'funcionario',
     'lancamento_funcionario',
+    'fechamento_rh_funcionario',
     'motorista',
     'vinculo_fornecedor',
     'historico_entrada',
@@ -175,6 +176,15 @@ class SyncFullSync {
             entity,
             l.id,
             SyncEntityCodecExtras.lancamentoFuncionarioParaMap(l),
+          );
+        }
+      case 'fechamento_rh_funcionario':
+        for (final fe in _db.fechamentoRhFuncionarioBox.getAll()) {
+          _add(
+            m,
+            entity,
+            fe.id,
+            SyncEntityCodecExtras.fechamentoRhParaMap(fe),
           );
         }
       case 'motorista':
@@ -382,6 +392,16 @@ class SyncFullSync {
             entity,
             l.id,
             SyncEntityCodecExtras.lancamentoFuncionarioParaMap(l),
+          );
+        }
+      case 'fechamento_rh_funcionario':
+        final fe = _db.fechamentoRhFuncionarioBox.get(localId);
+        if (fe != null) {
+          _add(
+            m,
+            entity,
+            fe.id,
+            SyncEntityCodecExtras.fechamentoRhParaMap(fe),
           );
         }
       case 'motorista':
@@ -627,6 +647,11 @@ class SyncFullSync {
           SyncEntityCodecExtras.lancamentoFuncionarioDeMap(payload),
         );
         break;
+      case 'fechamento_rh_funcionario':
+        _db.fechamentoRhFuncionarioBox.put(
+          SyncEntityCodecExtras.fechamentoRhDeMap(payload),
+        );
+        break;
       case 'motorista':
         _db.motoristaBox.put(SyncEntityCodecExtras.motoristaDeMap(payload));
         break;
@@ -757,6 +782,9 @@ class SyncFullSync {
         break;
       case 'lancamento_funcionario':
         _db.lancamentoFuncionarioBox.remove(id);
+        break;
+      case 'fechamento_rh_funcionario':
+        _db.fechamentoRhFuncionarioBox.remove(id);
         break;
       case 'motorista':
         _db.motoristaBox.remove(id);

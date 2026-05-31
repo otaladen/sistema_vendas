@@ -38,6 +38,59 @@ class FuncionarioCadastroCatalogo {
     'outro': 'Outro',
   };
 
+  static const Map<String, String> tiposVinculo = {
+    'clt': 'CLT',
+    'pj': 'PJ / prestador',
+    'temporario': 'Temporario',
+    'aprendiz': 'Aprendiz / estagiario',
+  };
+
+  static const Map<String, String> categoriasCnh = {
+    '': 'Nao informada',
+    'A': 'A — moto',
+    'B': 'B — carro',
+    'AB': 'AB — moto + carro',
+    'C': 'C — caminhao',
+    'D': 'D — onibus / van',
+    'E': 'E — carreta',
+  };
+
+  static const Map<String, String> tamanhosUniforme = {
+    '': 'Nao informado',
+    'PP': 'PP',
+    'P': 'P',
+    'M': 'M',
+    'G': 'G',
+    'GG': 'GG',
+    'XG': 'XG',
+    'XXG': 'XXG',
+    'calca_38': 'Calca 38',
+    'calca_40': 'Calca 40',
+    'calca_42': 'Calca 42',
+    'calca_44': 'Calca 44',
+    'calca_46': 'Calca 46',
+    'calca_48': 'Calca 48',
+    'bota_38': 'Bota 38',
+    'bota_40': 'Bota 40',
+    'bota_42': 'Bota 42',
+    'bota_44': 'Bota 44',
+  };
+
+  static List<String> get idsTiposVinculo => tiposVinculo.keys.toList();
+
+  static List<String> get idsCategoriasCnh => categoriasCnh.keys.toList();
+
+  static List<String> get idsTamanhosUniforme => tamanhosUniforme.keys.toList();
+
+  static String rotuloTipoVinculo(String id) =>
+      tiposVinculo[id.trim().isEmpty ? 'clt' : id] ?? id;
+
+  static String rotuloCategoriaCnh(String id) =>
+      categoriasCnh[id] ?? (id.isEmpty ? 'Nao informada' : id);
+
+  static String rotuloTamanhoUniforme(String id) =>
+      tamanhosUniforme[id] ?? (id.isEmpty ? 'Nao informado' : id);
+
   static List<String> get idsSetores => setores.keys.toList();
 
   static List<String> get idsFuncoes => funcoes.keys.toList();
