@@ -2194,7 +2194,9 @@ class VendaRepository {
         item: item,
         permitirVendaSemEstoque: permitirVendaSemEstoque,
       );
+      final totalAntes = venda.total;
       _recalcularTotaisVenda(venda);
+      _reescalarPagamentosMistoAposMudancaTotal(venda, totalAntes);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
   }
@@ -2218,7 +2220,76 @@ class VendaRepository {
       if (venda.itens.isEmpty) {
         throw StateError('O orcamento precisa manter ao menos 1 item.');
       }
+      final totalAntes = venda.total;
       _recalcularTotaisVenda(venda);
+      _reescalarPagamentosMistoAposMudancaTotal(venda, totalAntes);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  /// Inclui produto no orcamento pendente (caixa/PDV). Mescla linha se mesmo produto,
+  /// [precoTipo] e [tipoEntregaItem].
+  void adicionarItemAoOrcamento(
+    int vendaId,
+    ItemVendaInput input, {
+    bool permitirVendaSemEstoque = false,
+  }) {
+    if (input.quantidade <= 0) {
+      throw StateError('Quantidade deve ser maior que zero.');
+    }
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Orcamento $vendaId nao encontrado.');
+      }
+      if (venda.status != 'orcamento') {
+        throw StateError('Somente orcamentos podem ser alterados.');
+      }
+      if (venda.cancelada) {
+        throw StateError('Nao e possivel alterar orcamento cancelado.');
+      }
+
+      final produto = _db.produtoBox.get(input.produtoId);
+      if (produto == null) {
+        throw StateError('Produto ${input.produtoId} nao encontrado.');
+      }
+
+      final tipoNorm =
+          EntregaVendaHelper.normalizarTipoItem(input.tipoEntregaItem);
+      final totalAntes = venda.total;
+
+      ItemVenda? existente;
+      for (final item in venda.itens) {
+        if (item.produto.targetId == input.produtoId &&
+            item.precoTipo == input.precoTipo &&
+            EntregaVendaHelper.normalizarTipoItem(item.tipoEntregaItem) ==
+                tipoNorm) {
+          existente = item;
+          break;
+        }
+      }
+
+      if (existente != null) {
+        _estoque.liberarReservaEstoqueItemOrcamento(existente);
+        existente.quantidade += input.quantidade;
+        _db.itemVendaBox.put(existente);
+        _estoque.reservarEstoqueItemOrcamento(
+          item: existente,
+          permitirVendaSemEstoque: permitirVendaSemEstoque,
+        );
+      } else {
+        final item = _criarItemVendaFromInput(input, produto);
+        item.produto.target = produto;
+        item.venda.target = venda;
+        _db.itemVendaBox.put(item);
+        _estoque.reservarEstoqueItemOrcamento(
+          item: item,
+          permitirVendaSemEstoque: permitirVendaSemEstoque,
+        );
+      }
+
+      _recalcularTotaisVenda(venda);
+      _reescalarPagamentosMistoAposMudancaTotal(venda, totalAntes);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
   }
@@ -2491,36 +2562,7 @@ class VendaRepository {
           .clamp(0, double.infinity)
           .toDouble();
       venda.lucroTotal = venda.total - venda.custoTotal;
-      if (venda.formaPagamento == 'misto' &&
-          venda.pagamentosJson.trim().isNotEmpty &&
-          totalAntesDesconto > 0) {
-        final linhas = PagamentoOrcamentoCodec.decode(venda.pagamentosJson);
-        if (linhas.length >= 2) {
-          final fator = venda.total / totalAntesDesconto;
-          final escaladas = linhas
-              .map(
-                (l) => PagamentoOrcamentoLinha(
-                  meio: l.meio,
-                  valor: (l.valor * fator),
-                  parcelas: l.parcelas,
-                ),
-              )
-              .toList();
-          var soma = PagamentoOrcamentoCodec.soma(escaladas);
-          final diff = venda.total - soma;
-          if (escaladas.isNotEmpty && diff.abs() > 0.001) {
-            final i = escaladas.length - 1;
-            final u = escaladas[i];
-            escaladas[i] = PagamentoOrcamentoLinha(
-              meio: u.meio,
-              valor: (u.valor + diff).clamp(0, double.infinity),
-              parcelas: u.parcelas,
-            );
-            soma = PagamentoOrcamentoCodec.soma(escaladas);
-          }
-          venda.pagamentosJson = PagamentoOrcamentoCodec.encode(escaladas);
-        }
-      }
+      _reescalarPagamentosMistoAposMudancaTotal(venda, totalAntesDesconto);
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
@@ -3275,6 +3317,43 @@ class VendaRepository {
     venda.total = total + (venda.valorFrete > 0 ? venda.valorFrete : 0);
     venda.custoTotal = custoTotal;
     venda.lucroTotal = venda.total - custoTotal;
+    _db.vendaBox.put(venda);
+  }
+
+  /// Mantem soma do misto alinhada ao novo [Venda.total] apos ajuste de itens/desconto.
+  void _reescalarPagamentosMistoAposMudancaTotal(
+    Venda venda,
+    double totalAntes,
+  ) {
+    if (totalAntes <= 0.001 ||
+        venda.formaPagamento != 'misto' ||
+        venda.pagamentosJson.trim().isEmpty) {
+      return;
+    }
+    final linhas = PagamentoOrcamentoCodec.decode(venda.pagamentosJson);
+    if (linhas.length < 2) return;
+    final fator = venda.total / totalAntes;
+    final escaladas = linhas
+        .map(
+          (l) => PagamentoOrcamentoLinha(
+            meio: l.meio,
+            valor: l.valor * fator,
+            parcelas: l.parcelas,
+          ),
+        )
+        .toList();
+    var soma = PagamentoOrcamentoCodec.soma(escaladas);
+    final diff = venda.total - soma;
+    if (escaladas.isNotEmpty && diff.abs() > 0.001) {
+      final i = escaladas.length - 1;
+      final u = escaladas[i];
+      escaladas[i] = PagamentoOrcamentoLinha(
+        meio: u.meio,
+        valor: (u.valor + diff).clamp(0, double.infinity),
+        parcelas: u.parcelas,
+      );
+    }
+    venda.pagamentosJson = PagamentoOrcamentoCodec.encode(escaladas);
     _db.vendaBox.put(venda);
   }
 

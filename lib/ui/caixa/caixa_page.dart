@@ -24,6 +24,9 @@ import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/entrega_venda_helper.dart';
+import '../../domain/promocao_cadastro.dart';
+import '../../domain/promocao_preco_result.dart';
+import '../../domain/promocao_preco_service.dart';
 import '../../config/fiscal_config.dart';
 import '../../domain/fiscal/cliente_fiscal_helper.dart';
 import '../../config/focus_nfe_runtime.dart';
@@ -31,6 +34,9 @@ import '../../domain/pagamento_orcamento.dart';
 import '../../domain/plano_fiado.dart';
 import '../../model/caixa_sessao.dart';
 import '../../model/cliente.dart';
+import '../../data/promocao_repository.dart';
+import '../../model/item_venda.dart';
+import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../../model/vendedor.dart';
 import '../../services/auditoria_registrar.dart';
@@ -50,6 +56,9 @@ import '../widgets/receber_fiado_panel.dart';
 import '../../services/recibo_movimento_caixa_pdf.dart';
 import '../../services/recibo_recebimento_fiado_pdf.dart';
 import '../fiscal/nfe_gerenciamento_page.dart';
+import '../pdv_consulta_produtos_page.dart';
+import '../pdv_pesquisa_comando.dart';
+import '../promocao_margem_autorizacao.dart';
 import '../../model/usuario_sistema.dart';
 import 'alterar_pagamento_caixa_dialog.dart';
 import 'autorizacao_gerente_caixa.dart';
@@ -118,6 +127,10 @@ class _CaixaPageState extends State<CaixaPage> {
   final ScrollController _itensScrollController = ScrollController();
   late final MensageriaRepository _mensageriaRepository;
   final _usuarioRepository = UsuarioRepository();
+  PromocaoPrecoService? _promoPrecoCache;
+  final _pesquisaProdutoConferenciaController = TextEditingController();
+  final _pesquisaProdutoConferenciaFocus = FocusNode();
+  final List<int> _produtosRecentesConferencia = [];
   GavetaEscPosService? _gavetaService;
   double? _valorRecebido;
   bool _posVendaProcessando = false;
@@ -146,6 +159,10 @@ class _CaixaPageState extends State<CaixaPage> {
   late final NfceReconciliacaoService _nfceReconciliacao;
   Timer? _timerReconciliacaoNfce;
   String? _deviceIdSync;
+
+  PromocaoPrecoService get _promoPreco => _promoPrecoCache ??= PromocaoPrecoService(
+        PromocaoRepository(widget.produtoRepository.objectBox),
+      );
 
   @override
   void initState() {
@@ -2083,6 +2100,466 @@ class _CaixaPageState extends State<CaixaPage> {
       }
     }
     return null;
+  }
+
+  void _recarregarOrcamentoSelecionadoAposAjusteItens() {
+    final id = _selecionado?.id;
+    if (id == null) return;
+    _carregarOrcamentos();
+    final atualizado = widget.vendaRepository.obterPorId(id);
+    if (atualizado == null || !mounted) return;
+    final avisoPagamento = atualizado.formaPagamento == 'misto' ||
+        (atualizado.formaPagamento == 'fiado' &&
+            atualizado.planoFiadoJson.trim().isNotEmpty);
+    setState(() {
+      _selecionado = atualizado;
+      _prepararEdicaoMisto(atualizado);
+      _sincronizarRecebidoPdVComOrcamento();
+    });
+    if (avisoPagamento) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Total atualizado. Revise valores de pagamento na cobranca.',
+          ),
+          duration: Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  Future<void> _alterarQuantidadeItemConferencia(
+    Venda venda,
+    ItemVenda item,
+    int delta,
+  ) async {
+    if (_etapaCaixa != CaixaEtapa.conferencia) return;
+    final novaQtd = item.quantidade + delta;
+    if (novaQtd <= 0) {
+      await _removerItemConferencia(venda, item);
+      return;
+    }
+    try {
+      widget.vendaRepository.atualizarQuantidadeItemOrcamento(
+        venda.id,
+        item.id,
+        novaQtd,
+        permitirVendaSemEstoque: _permitirVendaSemEstoque,
+      );
+      await _registrarAuditoriaCaixa(
+        'ajuste_quantidade_item_orcamento',
+        detalhes: {
+          'vendaId': venda.id,
+          'numeroOrcamento': venda.numeroOrcamento,
+          'itemId': item.id,
+          'produto': item.nomeProduto,
+          'quantidadeAnterior': item.quantidade,
+          'quantidadeNova': novaQtd,
+        },
+      );
+      if (!mounted) return;
+      _recarregarOrcamentoSelecionadoAposAjusteItens();
+      CaixaFeedback.sucesso(
+        context,
+        'Quantidade atualizada: ${item.nomeProduto} ($novaQtd).',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(context, 'Nao foi possivel alterar quantidade: $e');
+    }
+  }
+
+  Future<void> _removerItemConferencia(Venda venda, ItemVenda item) async {
+    if (_etapaCaixa != CaixaEtapa.conferencia) return;
+    if (venda.itens.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('O orcamento precisa manter ao menos um item.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover item do orcamento?'),
+        content: Text(
+          '${item.nomeProduto}\n\n'
+          'Quantidade: ${item.quantidade}\n'
+          'Valor da linha: ${_formatarMoeda(item.subtotal)}\n\n'
+          'O total sera recalculado automaticamente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+
+    final autorizado = await solicitarAutorizacaoGerenteCaixa(
+      context,
+      _usuarioRepository,
+    );
+    if (!autorizado || !mounted) return;
+
+    try {
+      widget.vendaRepository.removerItemOrcamento(venda.id, item.id);
+      await _registrarAuditoriaCaixa(
+        'remover_item_orcamento_caixa',
+        detalhes: {
+          'vendaId': venda.id,
+          'numeroOrcamento': venda.numeroOrcamento,
+          'itemId': item.id,
+          'produto': item.nomeProduto,
+          'quantidade': item.quantidade,
+          'subtotal': item.subtotal,
+        },
+      );
+      if (!mounted) return;
+      _recarregarOrcamentoSelecionadoAposAjusteItens();
+      CaixaFeedback.sucesso(
+        context,
+        'Item removido. Total do orcamento atualizado.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(context, 'Nao foi possivel remover item: $e');
+    }
+  }
+
+  String? get _segmentoClienteConferencia {
+    final id = _selecionado?.cliente.targetId ?? 0;
+    if (id <= 0) return null;
+    return _clienteDaVenda(_selecionado!)?.segmento;
+  }
+
+  String _precoListaPadraoConferencia(Venda venda) {
+    if (venda.itens.isEmpty) return 'preco1';
+    final t = venda.itens.first.precoTipo.trim();
+    if (t == PromocaoCadastro.precoTipoPromo) return 'preco1';
+    return t.isEmpty ? 'preco1' : t;
+  }
+
+  String _tipoEntregaPadraoConferencia(Venda venda) {
+    if (venda.itens.isEmpty) {
+      return EntregaVendaHelper.tipoRetirada;
+    }
+    return EntregaVendaHelper.normalizarTipoItem(
+      venda.itens.first.tipoEntregaItem,
+    );
+  }
+
+  String _rotuloPrecoConferencia(String precoTipo) => switch (precoTipo) {
+        PromocaoCadastro.precoTipoPromo => 'Promocao',
+        'preco2' => 'A Vista',
+        'preco3' => 'Atacado',
+        _ => 'A Prazo',
+      };
+
+  double _precoExibicaoConsultaConferencia(Produto produto, String precoTipo) {
+    return _promoPreco
+        .resolver(
+          produto,
+          dataReferencia: DateTime.now(),
+          precoTipoLista: precoTipo,
+          segmentoCliente: _segmentoClienteConferencia,
+        )
+        .precoFinal;
+  }
+
+  int _quantidadeProdutoNoOrcamentoSelecionado(int produtoId) {
+    final v = _selecionado;
+    if (v == null) return 0;
+    var soma = 0;
+    for (final item in v.itens) {
+      if (item.produto.targetId == produtoId) {
+        soma += item.quantidade;
+      }
+    }
+    return soma;
+  }
+
+  void _registrarProdutoRecenteConferencia(int produtoId) {
+    if (produtoId <= 0) return;
+    _produtosRecentesConferencia.remove(produtoId);
+    _produtosRecentesConferencia.insert(0, produtoId);
+    if (_produtosRecentesConferencia.length > 30) {
+      _produtosRecentesConferencia.removeRange(30, _produtosRecentesConferencia.length);
+    }
+  }
+
+  Future<void> _abrirConsultaProdutoConferencia({String? termo}) async {
+    final venda = _selecionado;
+    if (venda == null || _etapaCaixa != CaixaEtapa.conferencia) return;
+
+    final texto = (termo ?? _pesquisaProdutoConferenciaController.text).trim();
+    final precoLista = _precoListaPadraoConferencia(venda);
+    final clienteId = venda.cliente.targetId;
+    final cid = clienteId > 0 ? clienteId : null;
+
+    final result = await Navigator.of(context).push<PdvConsultaProdutoResult>(
+      MaterialPageRoute(
+        builder: (_) => PdvConsultaProdutosPage(
+          produtoRepository: widget.produtoRepository,
+          vendaRepository: widget.vendaRepository,
+          termoInicial: texto,
+          precoListaAtivoInicial: precoLista,
+          clienteId: cid,
+          produtosRecentesIds: List<int>.from(_produtosRecentesConferencia),
+          formatarMoeda: _formatarMoeda,
+          rotuloPreco: _rotuloPrecoConferencia,
+          precoUnitarioDe: _precoExibicaoConsultaConferencia,
+          resolverPromocao: (p, t) => _promoPreco.resolver(
+            p,
+            dataReferencia: DateTime.now(),
+            precoTipoLista: t,
+            segmentoCliente: _segmentoClienteConferencia,
+          ),
+          campanhasVigentesDe: (p) => _promoPreco.listarCampanhasVigentesParaProduto(
+            p,
+            dataReferencia: DateTime.now(),
+            segmentoCliente: _segmentoClienteConferencia,
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    _pesquisaProdutoConferenciaController.clear();
+    if (result == null) {
+      _pesquisaProdutoConferenciaFocus.requestFocus();
+      return;
+    }
+
+    await _aplicarProdutoConsultaConferencia(venda, result, precoLista);
+  }
+
+  Future<void> _aplicarProdutoConsultaConferencia(
+    Venda venda,
+    PdvConsultaProdutoResult result,
+    String precoLista,
+  ) async {
+    _registrarProdutoRecenteConferencia(result.produto.id);
+
+    if (result.adicaoDireta) {
+      await _adicionarProdutoAoOrcamentoConferencia(
+        venda,
+        result.produto,
+        1,
+        precoLista: result.precoListaAtivo.isNotEmpty
+            ? result.precoListaAtivo
+            : precoLista,
+      );
+      return;
+    }
+    if (result.quantidadeDireta != null && result.quantidadeDireta! > 0) {
+      await _adicionarProdutoAoOrcamentoConferencia(
+        venda,
+        result.produto,
+        result.quantidadeDireta!,
+        precoLista: result.precoListaAtivo.isNotEmpty
+            ? result.precoListaAtivo
+            : precoLista,
+      );
+      return;
+    }
+
+    final qtd = await _perguntarQuantidadeProdutoConferencia(
+      result.produto,
+      quantidadeSugerida: 1,
+    );
+    if (qtd == null || !mounted) return;
+    await _adicionarProdutoAoOrcamentoConferencia(
+      venda,
+      result.produto,
+      qtd,
+      precoLista: result.precoListaAtivo.isNotEmpty
+          ? result.precoListaAtivo
+          : precoLista,
+    );
+  }
+
+  Future<int?> _perguntarQuantidadeProdutoConferencia(
+    Produto produto, {
+    required int quantidadeSugerida,
+  }) async {
+    final ctrl = TextEditingController(text: '$quantidadeSugerida');
+    final qtd = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Quantidade — ${produto.nome}'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Quantidade',
+            hintText: 'Ex.: 1',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final q = int.tryParse(ctrl.text.trim());
+              if (q == null || q <= 0) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Informe quantidade valida.')),
+                );
+                return;
+              }
+              Navigator.pop(ctx, q);
+            },
+            child: const Text('Adicionar'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return qtd;
+  }
+
+  Future<void> _adicionarProdutoAoOrcamentoConferencia(
+    Venda venda,
+    Produto produto,
+    int quantidade, {
+    required String precoLista,
+  }) async {
+    if (quantidade <= 0) return;
+
+    final resPreco = _promoPreco.resolver(
+      produto,
+      dataReferencia: DateTime.now(),
+      quantidade: quantidade,
+      precoTipoLista: precoLista,
+      segmentoCliente: _segmentoClienteConferencia,
+    );
+
+    if (resPreco.emPromocao) {
+      if (resPreco.quantidadeMaximaPorVenda > 0 &&
+          quantidade > resPreco.quantidadeMaximaPorVenda) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Limite da promocao: max. ${resPreco.quantidadeMaximaPorVenda} '
+              'un. para ${produto.nome}.',
+            ),
+          ),
+        );
+        return;
+      }
+      if (resPreco.margemMinimaPercentual > 0) {
+        final margem = PromocaoCadastro.margemSobrePrecoVenda(
+          precoCusto: produto.precoCusto,
+          precoVenda: resPreco.precoFinal,
+        );
+        if (margem + 0.05 < resPreco.margemMinimaPercentual) {
+          final ok = await solicitarAutorizacaoMargemPromocao(
+            context,
+            _usuarioRepository,
+            margemAtual: margem,
+            margemMinima: resPreco.margemMinimaPercentual,
+            nomeProduto: produto.nome,
+          );
+          if (!ok || !mounted) return;
+        }
+      }
+    }
+
+    if (!_permitirVendaSemEstoque) {
+      final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
+      final disp = fresh.estoqueLivreParaVenda;
+      final ja = _quantidadeProdutoNoOrcamentoSelecionado(produto.id);
+      if (ja + quantidade > disp) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Estoque insuficiente para ${produto.nome}. '
+              'Disponivel: $disp (ja no orcamento: $ja).',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    try {
+      widget.vendaRepository.adicionarItemAoOrcamento(
+        venda.id,
+        ItemVendaInput(
+          produtoId: produto.id,
+          quantidade: quantidade,
+          precoUnitario: resPreco.precoFinal,
+          precoTipo: resPreco.precoTipo,
+          tipoEntregaItem: _tipoEntregaPadraoConferencia(venda),
+          promocaoId: resPreco.promocaoId,
+          promocaoNomeSnapshot: resPreco.promocaoNome,
+        ),
+        permitirVendaSemEstoque: _permitirVendaSemEstoque,
+      );
+      await _registrarAuditoriaCaixa(
+        'adicionar_item_orcamento_caixa',
+        detalhes: {
+          'vendaId': venda.id,
+          'numeroOrcamento': venda.numeroOrcamento,
+          'produtoId': produto.id,
+          'produto': produto.nome,
+          'quantidade': quantidade,
+          'precoUnitario': resPreco.precoFinal,
+        },
+      );
+      if (!mounted) return;
+      _recarregarOrcamentoSelecionadoAposAjusteItens();
+      CaixaFeedback.sucesso(
+        context,
+        '${produto.nome} adicionado ($quantidade un.).',
+      );
+      _pesquisaProdutoConferenciaFocus.requestFocus();
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(context, 'Nao foi possivel adicionar produto: $e');
+    }
+  }
+
+  Widget _buildBarraBuscaProdutoConferencia(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _pesquisaProdutoConferenciaController,
+            focusNode: _pesquisaProdutoConferenciaFocus,
+            decoration: const InputDecoration(
+              isDense: true,
+              labelText: 'Adicionar produto',
+              hintText: 'Nome, codigo, barras — Enter ou F5',
+              prefixIcon: Icon(Icons.search, size: 20),
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (v) => unawaited(_abrirConsultaProdutoConferencia(termo: v)),
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton.tonalIcon(
+          onPressed: () => unawaited(_abrirConsultaProdutoConferencia()),
+          icon: const Icon(Icons.add_shopping_cart_outlined),
+          label: const Text('Buscar (F5)'),
+        ),
+      ],
+    );
   }
 
   Future<void> _alterarFormaPagamentoCaixa(Venda venda) async {
@@ -4266,10 +4743,13 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
-  Widget _buildTabelaItensSomenteLeitura(
+  Widget _buildTabelaItensConferencia(
     BuildContext context,
     Venda selecionado,
   ) {
+    final scheme = Theme.of(context).colorScheme;
+    final podeRemover = selecionado.itens.length > 1;
+
     return Card(
       elevation: 0,
       color: Colors.grey.shade50,
@@ -4294,8 +4774,13 @@ class _CaixaPageState extends State<CaixaPage> {
                   flex: 4,
                   child: Text('Produto', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
-                Expanded(
-                  child: Text('Qtd', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(
+                  width: 132,
+                  child: Text(
+                    'Qtd',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
                 Expanded(
                   child: Text('Vlr Unit', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -4307,6 +4792,7 @@ class _CaixaPageState extends State<CaixaPage> {
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
+                SizedBox(width: 44),
               ],
             ),
           ),
@@ -4324,7 +4810,7 @@ class _CaixaPageState extends State<CaixaPage> {
                 itemBuilder: (context, index) {
                   final item = selecionado.itens[index];
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                     child: Row(
                       children: [
                         SizedBox(width: 32, child: Text('${index + 1}')),
@@ -4333,9 +4819,70 @@ class _CaixaPageState extends State<CaixaPage> {
                           child: Text(
                             '${item.nomeProduto} '
                             '(${EntregaVendaHelper.abreviacaoTipoItem(item.tipoEntregaItem)})',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        Expanded(child: Text(item.quantidade.toString())),
+                        SizedBox(
+                          width: 132,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 36,
+                                  minHeight: 36,
+                                ),
+                                tooltip: item.quantidade <= 1
+                                    ? 'Remover item'
+                                    : 'Diminuir quantidade',
+                                icon: const Icon(Icons.remove_circle_outline),
+                                onPressed: item.quantidade <= 1
+                                    ? (podeRemover
+                                        ? () => unawaited(
+                                              _removerItemConferencia(
+                                                selecionado,
+                                                item,
+                                              ),
+                                            )
+                                        : null)
+                                    : () => unawaited(
+                                          _alterarQuantidadeItemConferencia(
+                                            selecionado,
+                                            item,
+                                            -1,
+                                          ),
+                                        ),
+                              ),
+                              Text(
+                                '${item.quantidade}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 36,
+                                  minHeight: 36,
+                                ),
+                                tooltip: 'Aumentar quantidade',
+                                icon: const Icon(Icons.add_circle_outline),
+                                onPressed: () => unawaited(
+                                  _alterarQuantidadeItemConferencia(
+                                    selecionado,
+                                    item,
+                                    1,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                         Expanded(
                           child: Text(_formatarMoeda(item.precoUnitario)),
                         ),
@@ -4343,6 +4890,27 @@ class _CaixaPageState extends State<CaixaPage> {
                           child: Text(
                             _formatarMoeda(item.subtotal),
                             textAlign: TextAlign.right,
+                          ),
+                        ),
+                        SizedBox(
+                          width: 44,
+                          child: IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            tooltip: podeRemover
+                                ? 'Remover item (gerente)'
+                                : 'Ultimo item — nao pode remover',
+                            icon: Icon(
+                              Icons.delete_outline,
+                              color: podeRemover
+                                  ? scheme.error
+                                  : scheme.onSurface.withValues(alpha: 0.3),
+                            ),
+                            onPressed: podeRemover
+                                ? () => unawaited(
+                                      _removerItemConferencia(selecionado, item),
+                                    )
+                                : null,
                           ),
                         ),
                       ],
@@ -4357,64 +4925,19 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
-  Widget _buildResumoPagamentoOrcamento(
+  /// Rodape fixo da conferencia: pagamento + total em destaque (padrao PDV).
+  Widget _buildRodapeConferenciaPagamentoTotal(
     BuildContext context, {
     required Venda selecionado,
     required double totalComDesconto,
     required double descontoPdvOrcamento,
-    bool mostrarAlterarForma = false,
   }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Pagamento: ${_rotuloPagamentoCabecalho(selecionado)}',
-                ),
-              ),
-              if (mostrarAlterarForma)
-                TextButton.icon(
-                  onPressed: () => _alterarFormaPagamentoCaixa(selecionado),
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text('Alterar forma'),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
-              const SizedBox(width: 8),
-              Text(
-                'TOTAL: ${_formatarMoeda(totalComDesconto)}',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ],
-          ),
-          if (descontoPdvOrcamento > 0.001)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                'Desconto (PDV): -${_formatarMoeda(descontoPdvOrcamento)}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.tertiary,
-                    ),
-              ),
-            ),
-        ],
-      ),
+    return CaixaRodapeTotalDestaque(
+      tituloSecaoPagamento: 'Pagamento previsto',
+      rotuloPagamento: _rotuloPagamentoCabecalho(selecionado),
+      totalFormatado: _formatarMoeda(totalComDesconto),
+      formatarMoeda: _formatarMoeda,
+      descontoPdvOrcamento: descontoPdvOrcamento,
     );
   }
 
@@ -4439,13 +4962,6 @@ class _CaixaPageState extends State<CaixaPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _buildResumoPagamentoOrcamento(
-                    context,
-                    selecionado: selecionado,
-                    totalComDesconto: totalComDesconto,
-                    descontoPdvOrcamento: descontoPdvOrcamento,
-                  ),
-                  const SizedBox(height: 8),
                   Text(
                     [
                       'Entrega: ${_textoEntregaCaixa(selecionado)}',
@@ -4471,22 +4987,30 @@ class _CaixaPageState extends State<CaixaPage> {
                     ],
                   ),
                   Padding(
-                    padding: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.only(top: 6, bottom: 6),
                     child: Text(
                       'Vendedor: ${_rotuloVendedorUmLinha(selecionado)} (PDV)',
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  Expanded(child: _buildTabelaItensSomenteLeitura(context, selecionado)),
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Atalhos: Enter = ir para cobranca | Esc = voltar ao inicio | F4 = vincular cliente',
-                      style: Theme.of(context).textTheme.bodySmall,
+                  _buildBarraBuscaProdutoConferencia(context),
+                  const SizedBox(height: 8),
+                  Expanded(child: _buildTabelaItensConferencia(context, selecionado)),
+                  _buildRodapeConferenciaPagamentoTotal(
+                    context,
+                    selecionado: selecionado,
+                    totalComDesconto: totalComDesconto,
+                    descontoPdvOrcamento: descontoPdvOrcamento,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Atalhos: Enter = cobranca | F5 = buscar produto | Esc = inicio | F4 = cliente | +/- = qtd',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
                     height: 48,
@@ -4565,11 +5089,8 @@ class _CaixaPageState extends State<CaixaPage> {
     BuildContext context, {
     required Venda selecionado,
     required Cliente? clienteSelecionado,
-    required double descontoSelecionado,
     required double totalComDesconto,
     required double descontoPdvOrcamento,
-    required double freteSelecionado,
-    required double subtotalProdutos,
     required List<PagamentoOrcamentoLinha> linhasMistoCaixa,
     required double valorTotalRecebidoCard,
     required double troco,
@@ -4582,59 +5103,46 @@ class _CaixaPageState extends State<CaixaPage> {
         CaixaEtapasBar(etapaAtual: _etapaCaixa),
         const SizedBox(height: 10),
         Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isCompact = constraints.maxHeight < 700;
-              return CaixaCobrancaPainel(
-                numeroOrcamento: selecionado.numeroOrcamento > 0
-                    ? selecionado.numeroOrcamento
-                    : selecionado.id,
-                clienteNome:
-                    clienteSelecionado?.nomeRazao ?? 'Sem cliente',
-                qtdItens: selecionado.itens.length,
-                rotuloPagamento: _rotuloPagamentoCabecalho(selecionado),
-                totalComDesconto: totalComDesconto,
-                descontoPdvOrcamento: descontoPdvOrcamento,
-                formatarMoeda: _formatarMoeda,
-                onAlterarForma: () => _alterarFormaPagamentoCaixa(selecionado),
-                recebimento: _buildCorpoRecebimentoCobranca(
-                  context,
-                  selecionado: selecionado,
-                  totalComDesconto: totalComDesconto,
-                  troco: troco,
-                  linhasMistoCaixa: linhasMistoCaixa,
+          child: CaixaCobrancaPainel(
+            numeroOrcamento: selecionado.numeroOrcamento > 0
+                ? selecionado.numeroOrcamento
+                : selecionado.id,
+            clienteNome: clienteSelecionado?.nomeRazao ?? 'Sem cliente',
+            qtdItens: selecionado.itens.length,
+            rotuloPagamento: _rotuloPagamentoCabecalho(selecionado),
+            totalComDesconto: totalComDesconto,
+            descontoPdvOrcamento: descontoPdvOrcamento,
+            formatarMoeda: _formatarMoeda,
+            onAlterarForma: () => _alterarFormaPagamentoCaixa(selecionado),
+            recebimento: _buildCorpoRecebimentoCobranca(
+              context,
+              selecionado: selecionado,
+              totalComDesconto: totalComDesconto,
+              troco: troco,
+              linhasMistoCaixa: linhasMistoCaixa,
+            ),
+            valorRecebidoExibicao: valorTotalRecebidoCard,
+            troco: troco,
+            acaoConfirmar: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Atalhos: Enter = confirmar | Esc = conferencia',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
-                rodape: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (!isCompact)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Text(
-                          'Atalhos: Enter = confirmar | Esc = conferencia',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ),
-                    _buildRodapeCheckoutCaixa(
-                      context,
-                      selecionado: selecionado,
-                      subtotalProdutos: subtotalProdutos,
-                      freteSelecionado: freteSelecionado,
-                      descontoPdvOrcamento: descontoPdvOrcamento,
-                      descontoSelecionado: descontoSelecionado,
-                      totalComDesconto: totalComDesconto,
-                      valorTotalRecebidoCard: valorTotalRecebidoCard,
-                      troco: troco,
-                      isCompact: isCompact,
-                      incluirCampoDinheiro: false,
-                      onFinalizar: () =>
-                          unawaited(_finalizarOrcamento(selecionado)),
-                      labelFinalizar: 'Confirmar pagamento (Enter)',
-                    ),
-                  ],
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: FilledButton.icon(
+                    onPressed: () =>
+                        unawaited(_finalizarOrcamento(selecionado)),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Confirmar pagamento (Enter)'),
+                  ),
                 ),
-              );
-            },
+              ],
+            ),
           ),
         ),
       ],
@@ -4730,11 +5238,8 @@ class _CaixaPageState extends State<CaixaPage> {
           context,
           selecionado: selecionado,
           clienteSelecionado: clienteSelecionado,
-          descontoSelecionado: descontoSelecionado,
           totalComDesconto: totalComDesconto,
           descontoPdvOrcamento: descontoPdvOrcamento,
-          freteSelecionado: freteSelecionado,
-          subtotalProdutos: subtotalProdutos,
           linhasMistoCaixa: linhasMistoCaixa,
           valorTotalRecebidoCard: valorTotalRecebidoCard,
           troco: troco,
@@ -4757,6 +5262,8 @@ class _CaixaPageState extends State<CaixaPage> {
     _valorRecebidoController.dispose();
     _valorRecebidoFocusNode.dispose();
     _itensScrollController.dispose();
+    _pesquisaProdutoConferenciaController.dispose();
+    _pesquisaProdutoConferenciaFocus.dispose();
     _disposeMistoEdicao();
     super.dispose();
   }
@@ -4770,6 +5277,7 @@ class _CaixaPageState extends State<CaixaPage> {
         LogicalKeySet(LogicalKeyboardKey.f2): const _SegundaViaCupomIntent(),
         LogicalKeySet(LogicalKeyboardKey.f3): const _ReceberFiadoIntent(),
         LogicalKeySet(LogicalKeyboardKey.f4): const _VincularClienteIntent(),
+        LogicalKeySet(LogicalKeyboardKey.f5): const _BuscarProdutoConferenciaIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -4806,6 +5314,18 @@ class _CaixaPageState extends State<CaixaPage> {
                       _etapaCaixa == CaixaEtapa.cobranca)) {
                 _vincularClienteAgora();
               }
+              return null;
+            },
+          ),
+          _BuscarProdutoConferenciaIntent:
+              CallbackAction<_BuscarProdutoConferenciaIntent>(
+            onInvoke: (intent) {
+              if (!_atalhoCaixaAtivo()) return null;
+              if (_etapaCaixa != CaixaEtapa.conferencia ||
+                  _selecionado == null) {
+                return null;
+              }
+              unawaited(_abrirConsultaProdutoConferencia());
               return null;
             },
           ),
@@ -5890,4 +6410,8 @@ class _ReceberFiadoIntent extends Intent {
 
 class _VincularClienteIntent extends Intent {
   const _VincularClienteIntent();
+}
+
+class _BuscarProdutoConferenciaIntent extends Intent {
+  const _BuscarProdutoConferenciaIntent();
 }

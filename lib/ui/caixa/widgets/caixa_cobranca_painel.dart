@@ -1,6 +1,167 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+/// Rodape com total em destaque (padrao PDV), compartilhado entre etapas do caixa.
+class CaixaRodapeTotalDestaque extends StatelessWidget {
+  const CaixaRodapeTotalDestaque({
+    super.key,
+    this.tituloSecaoPagamento = 'Pagamento',
+    required this.rotuloPagamento,
+    required this.totalFormatado,
+    required this.formatarMoeda,
+    this.descontoPdvOrcamento = 0,
+    this.valorRecebido,
+    this.troco,
+  });
+
+  final String tituloSecaoPagamento;
+  final String rotuloPagamento;
+  final String totalFormatado;
+  final String Function(double) formatarMoeda;
+  final double descontoPdvOrcamento;
+  final double? valorRecebido;
+  final double? troco;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final exibirRecebido = valorRecebido != null;
+    final trocoValor = troco ?? 0;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+        border: Border(
+          top: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.9)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            tituloSecaoPagamento,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            rotuloPagamento,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (descontoPdvOrcamento > 0.001) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Desconto (PDV): -${formatarMoeda(descontoPdvOrcamento)}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: scheme.tertiary,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  'TOTAL',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurfaceVariant,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                totalFormatado,
+                style: theme.textTheme.displaySmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: scheme.primary,
+                  height: 1.0,
+                ),
+              ),
+            ],
+          ),
+          if (exibirRecebido) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _chipValor(
+                    context,
+                    rotulo: 'Recebido',
+                    valor: formatarMoeda(valorRecebido!),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _chipValor(
+                    context,
+                    rotulo: 'Troco',
+                    valor: formatarMoeda(trocoValor),
+                    destaque: trocoValor > 0.009,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _chipValor(
+    BuildContext context, {
+    required String rotulo,
+    required String valor,
+    bool destaque = false,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: destaque
+            ? scheme.primaryContainer.withValues(alpha: 0.65)
+            : scheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: destaque
+              ? scheme.primary.withValues(alpha: 0.45)
+              : scheme.outlineVariant,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            rotulo,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          Text(
+            valor,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: destaque ? scheme.primary : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Layout padronizado da etapa Cobranca do caixa (Fase operacional).
 class CaixaCobrancaPainel extends StatelessWidget {
   const CaixaCobrancaPainel({
@@ -14,7 +175,9 @@ class CaixaCobrancaPainel extends StatelessWidget {
     required this.formatarMoeda,
     this.onAlterarForma,
     required this.recebimento,
-    required this.rodape,
+    required this.valorRecebidoExibicao,
+    required this.troco,
+    required this.acaoConfirmar,
   });
 
   final int numeroOrcamento;
@@ -26,7 +189,9 @@ class CaixaCobrancaPainel extends StatelessWidget {
   final String Function(double) formatarMoeda;
   final VoidCallback? onAlterarForma;
   final Widget recebimento;
-  final Widget rodape;
+  final double valorRecebidoExibicao;
+  final double troco;
+  final Widget acaoConfirmar;
 
   @override
   Widget build(BuildContext context) {
@@ -43,9 +208,9 @@ class CaixaCobrancaPainel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: scheme.primaryContainer.withValues(alpha: 0.45),
+                color: scheme.primaryContainer.withValues(alpha: 0.35),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: scheme.outlineVariant),
               ),
@@ -68,7 +233,7 @@ class CaixaCobrancaPainel extends StatelessWidget {
                           style: theme.textTheme.bodyMedium,
                         ),
                         Text(
-                          '$qtdItens item(ns) · $rotuloPagamento',
+                          '$qtdItens item(ns)',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
@@ -76,34 +241,20 @@ class CaixaCobrancaPainel extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        'Total a pagar',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
+                  if (onAlterarForma != null)
+                    TextButton.icon(
+                      onPressed: onAlterarForma,
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      label: const Text('Alterar forma'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
                         ),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      Text(
-                        formatarMoeda(totalComDesconto),
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: scheme.primary,
-                        ),
-                      ),
-                      if (descontoPdvOrcamento > 0.001) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          'Desc. PDV: -${formatarMoeda(descontoPdvOrcamento)}',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: scheme.tertiary,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+                    ),
                 ],
               ),
             ),
@@ -115,31 +266,11 @@ class CaixaCobrancaPainel extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Forma definida no PDV. Confira ou ajuste os valores abaixo.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                if (onAlterarForma != null)
-                  TextButton.icon(
-                    onPressed: onAlterarForma,
-                    icon: const Icon(Icons.edit_outlined, size: 18),
-                    label: const Text('Alterar forma'),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-              ],
+            Text(
+              'Confira ou ajuste os valores antes de confirmar.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 10),
             Expanded(
@@ -147,8 +278,16 @@ class CaixaCobrancaPainel extends StatelessWidget {
                 child: recebimento,
               ),
             ),
+            CaixaRodapeTotalDestaque(
+              rotuloPagamento: rotuloPagamento,
+              totalFormatado: formatarMoeda(totalComDesconto),
+              formatarMoeda: formatarMoeda,
+              descontoPdvOrcamento: descontoPdvOrcamento,
+              valorRecebido: valorRecebidoExibicao,
+              troco: troco,
+            ),
             const SizedBox(height: 8),
-            rodape,
+            acaoConfirmar,
           ],
         ),
       ),
@@ -221,69 +360,6 @@ class CaixaCobrancaCampoDinheiro extends StatelessWidget {
               ),
             ),
             onChanged: onChanged,
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _infoChip(
-                  context,
-                  rotulo: 'A pagar',
-                  valor: formatarMoeda(totalAPagar),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _infoChip(
-                  context,
-                  rotulo: 'Troco',
-                  valor: formatarMoeda(troco),
-                  destaque: troco > 0.009,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _infoChip(
-    BuildContext context, {
-    required String rotulo,
-    required String valor,
-    bool destaque = false,
-  }) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: destaque
-            ? scheme.primaryContainer
-            : scheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: destaque
-              ? scheme.primary.withValues(alpha: 0.4)
-              : scheme.outlineVariant,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            rotulo,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-          Text(
-            valor,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: destaque ? scheme.primary : null,
-            ),
           ),
         ],
       ),
