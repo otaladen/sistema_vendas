@@ -507,6 +507,8 @@ class SyncEntityCodecExtras {
     'redeSyncToken',
     'backupAutomaticoPasta',
     'ultimoBackupAutomaticoMs',
+    'abrirGavetaAutomatica',
+    'gavetaPino',
   };
 
   static Map<String, dynamic> empresaConfigParaMap(EmpresaConfig c) => {

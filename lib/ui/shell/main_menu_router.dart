@@ -166,6 +166,7 @@ class MainMenuRouter {
           appConfigRepository: deps.appConfigRepository,
           printService: deps.printService,
           usuarioAtual: u.login,
+          podeCancelarVendas: UsuarioPermissaoHelper.podeCancelarVendas(u),
           podeLeituraParcialCaixa: UsuarioPermissaoHelper.tem(
             u,
             PermissaoUsuario.leituraParcialCaixa,

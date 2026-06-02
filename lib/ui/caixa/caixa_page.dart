@@ -40,6 +40,7 @@ import '../../domain/fiscal/fiscal_emissao_lock.dart';
 import '../../services/focus_nfe_service.dart';
 import '../../services/focus_nfe_reconsulta_helper.dart';
 import '../../services/nfce_reconciliacao_service.dart';
+import '../../services/gaveta_esc_pos_service.dart';
 import '../../services/print_service.dart';
 import '../clientes_page.dart';
 import '../cupom_venda_impressao_helper.dart';
@@ -52,8 +53,14 @@ import '../fiscal/nfe_gerenciamento_page.dart';
 import '../../model/usuario_sistema.dart';
 import 'alterar_pagamento_caixa_dialog.dart';
 import 'autorizacao_gerente_caixa.dart';
+import 'caixa_etapa.dart';
 import 'caixa_feedback.dart';
+import 'caixa_pos_venda_sessao.dart';
 import 'caixa_ultimas_vendas_list.dart';
+import 'widgets/caixa_cobranca_painel.dart';
+import 'widgets/caixa_etapas_bar.dart';
+import 'widgets/caixa_pos_venda_fiscal_painel.dart';
+import '../vendas/cancelar_venda_ui.dart';
 
 class CaixaPage extends StatefulWidget {
   const CaixaPage({
@@ -65,6 +72,7 @@ class CaixaPage extends StatefulWidget {
     required this.appConfigRepository,
     required this.printService,
     required this.usuarioAtual,
+    required this.podeCancelarVendas,
     required this.podeLeituraParcialCaixa,
     required this.podeVisualizarAuditoriaCaixa,
     required this.podeManutencaoAuditoriaCaixa,
@@ -78,6 +86,7 @@ class CaixaPage extends StatefulWidget {
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
   final String usuarioAtual;
+  final bool podeCancelarVendas;
   final bool podeLeituraParcialCaixa;
   final bool podeVisualizarAuditoriaCaixa;
   final bool podeManutencaoAuditoriaCaixa;
@@ -103,15 +112,16 @@ class _CaixaPageState extends State<CaixaPage> {
   static const double _valorMinimoParcela = 5.0;
   List<Venda> _orcamentos = [];
   Venda? _selecionado;
+  CaixaEtapa _etapaCaixa = CaixaEtapa.fila;
   final _valorRecebidoController = TextEditingController();
   final _valorRecebidoFocusNode = FocusNode();
   final ScrollController _itensScrollController = ScrollController();
-  final _descontoController = TextEditingController();
   late final MensageriaRepository _mensageriaRepository;
   final _usuarioRepository = UsuarioRepository();
+  GavetaEscPosService? _gavetaService;
   double? _valorRecebido;
-  String _tipoDesconto = 'percentual';
-  int? _itemSelecionadoId;
+  bool _posVendaProcessando = false;
+  CaixaPosVendaSessao? _posVenda;
   bool _caixaAberto = false;
   String _operadorCaixa = '';
   DateTime? _aberturaCaixaEm;
@@ -119,7 +129,6 @@ class _CaixaPageState extends State<CaixaPage> {
   double _totalSuprimentos = 0;
   double _totalSangrias = 0;
   double _limiteDivergenciaSemSupervisor = 20;
-  bool _mostrarCampoDescontoCaixa = true;
   bool _exigirAutorizacaoSegundaViaCupom = true;
   bool _permitirVendaSemEstoque = false;
   int? _mistoPreparadoParaId;
@@ -199,14 +208,9 @@ class _CaixaPageState extends State<CaixaPage> {
     if (!mounted) return;
     setState(() {
       _limiteDivergenciaSemSupervisor = config.limiteDivergenciaCaixa;
-      _mostrarCampoDescontoCaixa = config.mostrarCampoDescontoCaixa;
       _exigirAutorizacaoSegundaViaCupom =
           config.exigirAutorizacaoSegundaViaCupom;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
-      if (!_mostrarCampoDescontoCaixa) {
-        _descontoController.clear();
-        _tipoDesconto = 'percentual';
-      }
     });
   }
 
@@ -216,19 +220,94 @@ class _CaixaPageState extends State<CaixaPage> {
     _disposeMistoEdicao();
     setState(() {
       _selecionado = null;
-      _itemSelecionadoId = null;
+      _posVenda = null;
+      _posVendaProcessando = false;
+      _etapaCaixa = CaixaEtapa.fila;
       _valorRecebidoController.clear();
-      _descontoController.clear();
-      _tipoDesconto = 'percentual';
       _valorRecebido = null;
       _valorRecebidoFocusNode.unfocus();
     });
+  }
+
+  void _selecionarOrcamentoParaConferencia(Venda venda) {
+    setState(() {
+      _selecionado = venda;
+      _etapaCaixa = CaixaEtapa.conferencia;
+      _prepararEdicaoMisto(venda);
+      _sincronizarRecebidoPdVComOrcamento();
+    });
+  }
+
+  void _voltarParaFila() {
+    _disposeMistoEdicao();
+    setState(() {
+      _selecionado = null;
+      _etapaCaixa = CaixaEtapa.fila;
+      _valorRecebidoController.clear();
+      _valorRecebido = null;
+      _valorRecebidoFocusNode.unfocus();
+    });
+  }
+
+  void _irParaCobranca() {
+    if (_selecionado == null) return;
+    setState(() => _etapaCaixa = CaixaEtapa.cobranca);
+    _focarEntradaPrincipalCaixa();
+  }
+
+  void _voltarParaConferencia() {
+    setState(() => _etapaCaixa = CaixaEtapa.conferencia);
+  }
+
+  bool _campoTextoComFoco() {
+    final focus = FocusManager.instance.primaryFocus;
+    if (focus == null) return false;
+    return focus.context?.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
+  KeyEventResult _tratarTeclaCaixaWizard(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (!_atalhoCaixaAtivo()) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_etapaCaixa == CaixaEtapa.fiscal) {
+        unawaited(_encerrarPosVendaFiscal());
+        return KeyEventResult.handled;
+      }
+      if (_etapaCaixa == CaixaEtapa.cobranca) {
+        _voltarParaConferencia();
+        return KeyEventResult.handled;
+      }
+      if (_etapaCaixa != CaixaEtapa.fila) {
+        _voltarParaFila();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      if (_campoTextoComFoco() && _etapaCaixa == CaixaEtapa.conferencia) {
+        return KeyEventResult.ignored;
+      }
+      if (_etapaCaixa == CaixaEtapa.conferencia && _selecionado != null) {
+        _irParaCobranca();
+        return KeyEventResult.handled;
+      }
+      if (_etapaCaixa == CaixaEtapa.cobranca && _selecionado != null) {
+        unawaited(_finalizarOrcamento(_selecionado!));
+        return KeyEventResult.handled;
+      }
+    }
+
+    return KeyEventResult.ignored;
   }
 
   void _carregarOrcamentos() {
     unawaited(_recarregarSessaoRede());
     setState(() {
       _orcamentos = widget.vendaRepository.listarOrcamentosPendentes();
+
       if (_selecionado != null) {
         _selecionado = _orcamentos
             .where((v) => v.id == _selecionado!.id)
@@ -237,10 +316,7 @@ class _CaixaPageState extends State<CaixaPage> {
       if (_selecionado == null) {
         _valorRecebidoController.clear();
         _valorRecebido = null;
-        _descontoController.clear();
-        _tipoDesconto = 'percentual';
         _valorRecebidoFocusNode.unfocus();
-        _itemSelecionadoId = null;
         _disposeMistoEdicao();
       } else if (_mistoPreparadoParaId != _selecionado!.id) {
         _prepararEdicaoMisto(_selecionado!);
@@ -276,15 +352,7 @@ class _CaixaPageState extends State<CaixaPage> {
       });
     }
     if (selecionado == null || !mounted) return;
-    setState(() {
-      _selecionado = selecionado;
-      _descontoController.clear();
-      _tipoDesconto = 'percentual';
-      _itemSelecionadoId = null;
-      _prepararEdicaoMisto(selecionado!);
-      _sincronizarRecebidoPdVComOrcamento();
-    });
-    _focarEntradaPrincipalCaixa();
+    _selecionarOrcamentoParaConferencia(selecionado);
   }
 
   /// No misto, foca o primeiro valor do painel de conferencia; em dinheiro puro, foca o campo de especie.
@@ -1905,25 +1973,9 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
-  double _descontoAplicado(Venda venda) {
-    if (!_mostrarCampoDescontoCaixa) {
-      return 0;
-    }
-    final valorDigitado = _parseValor(_descontoController.text) ?? 0;
-    if (valorDigitado <= 0) {
-      return 0;
-    }
-    if (_tipoDesconto == 'percentual') {
-      final percentual = valorDigitado.clamp(0, 100).toDouble();
-      return (venda.total * (percentual / 100)).clamp(0, venda.total).toDouble();
-    }
-    return valorDigitado.clamp(0, venda.total).toDouble();
-  }
+  double _descontoAplicado(Venda venda) => 0;
 
-  double _totalComDesconto(Venda venda) {
-    final desconto = _descontoAplicado(venda);
-    return (venda.total - desconto).clamp(0, double.infinity).toDouble();
-  }
+  double _totalComDesconto(Venda venda) => venda.total;
 
   /// Linhas do misto com valores proporcionais ao [totalComDesconto] exibido no caixa.
   List<PagamentoOrcamentoLinha> _linhasPagamentoEscaladasCaixa(
@@ -2578,12 +2630,6 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
     try {
-      if (descontoAplicado > 0) {
-        widget.vendaRepository.aplicarDescontoNoOrcamento(
-          venda.id,
-          descontoAplicado,
-        );
-      }
       if (venda.formaPagamento == 'misto') {
         final linhasBruto = _linhasMistoDoFormulario();
         if (linhasBruto.isNotEmpty) {
@@ -2613,7 +2659,7 @@ class _CaixaPageState extends State<CaixaPage> {
           await _mensageriaRepository.processarFilaPendente(limite: 5);
         }
       }
-      _prepararCaixaPosProximaVenda();
+      _carregarOrcamentos();
       if (!mounted) return;
       final numCupom =
           vendaFinalizada.numeroOrcamento > 0
@@ -2626,15 +2672,46 @@ class _CaixaPageState extends State<CaixaPage> {
       );
       if (!mounted) return;
       CaixaFeedback.sucesso(context, 'Venda $numCupom finalizada.');
-      await _mostrarAcoesNotaPosVenda(
-        venda: vendaFinalizada,
-        totalRecebido: totalRecebido,
-        troco: trocoFinal,
-      );
+      unawaited(_tentarAbrirGavetaPosPagamento());
+      setState(() {
+        _posVenda = CaixaPosVendaSessao(
+          venda: vendaFinalizada,
+          totalRecebido: totalRecebido,
+          troco: trocoFinal,
+        );
+        _etapaCaixa = CaixaEtapa.fiscal;
+        _selecionado = null;
+        _valorRecebidoController.clear();
+        _valorRecebido = null;
+        _disposeMistoEdicao();
+      });
     } catch (e) {
       if (!mounted) return;
       CaixaFeedback.erro(context, 'Nao foi possivel finalizar: $e');
     }
+  }
+
+  GavetaEscPosService get _gaveta =>
+      _gavetaService ??= GavetaEscPosService(widget.appConfigRepository);
+
+  Future<void> _tentarAbrirGavetaPosPagamento() async {
+    final r = await _gaveta.abrirAposPagamento();
+    if (!mounted || r.sucesso) return;
+    if (r.codigo == GavetaResultadoCodigo.desativada) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(r.mensagem),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  Future<void> _testarGavetaManual() async {
+    final r = await _gaveta.testarAbrir();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(r.mensagem)),
+    );
   }
 
   Future<String?> _escolherSalvarPdf({
@@ -2660,173 +2737,104 @@ class _CaixaPageState extends State<CaixaPage> {
     return file.path;
   }
 
-  Future<void> _mostrarAcoesNotaPosVenda({
-    required Venda venda,
-    required double totalRecebido,
-    required double troco,
-  }) async {
-    if (!mounted) return;
-    final numCupom = venda.numeroOrcamento > 0
-        ? venda.numeroOrcamento
-        : venda.id;
-    final cliente = _clienteDaVenda(venda);
-    final exigeNfe55 = ClienteFiscalHelper.clienteExigeNfe55(cliente);
-    final jaTemNfe55 =
-        widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id) != null;
-    final acao = await showDialog<String>(
+  void _atualizarPosVendaDoRepositorio() {
+    final sessao = _posVenda;
+    if (sessao == null) return;
+    final v = widget.vendaRepository.obterPorId(sessao.venda.id);
+    if (v != null && mounted) {
+      setState(() => _posVenda = sessao.copyWith(venda: v));
+    }
+  }
+
+  Future<void> _cancelarVendaNoCaixa(Venda venda) async {
+    final resultado = await CancelarVendaUi.executar(
       context: context,
-      useRootNavigator: true,
-      builder: (dialogContext) {
-        final theme = Theme.of(dialogContext);
-        return CallbackShortcuts(
-          bindings: <ShortcutActivator, VoidCallback>{
-            const SingleActivator(LogicalKeyboardKey.escape): () =>
-                Navigator.pop(dialogContext, 'fechar'),
-            const SingleActivator(LogicalKeyboardKey.digit1): () =>
-                Navigator.pop(dialogContext, 'fechar'),
-            const SingleActivator(LogicalKeyboardKey.digit2): () =>
-                Navigator.pop(dialogContext, 'cupom'),
-            const SingleActivator(LogicalKeyboardKey.digit3): () =>
-                Navigator.pop(dialogContext, 'nfce'),
-            const SingleActivator(LogicalKeyboardKey.digit4): () =>
-                Navigator.pop(dialogContext, 'nfe55'),
-            const SingleActivator(LogicalKeyboardKey.numpad1): () =>
-                Navigator.pop(dialogContext, 'fechar'),
-            const SingleActivator(LogicalKeyboardKey.numpad2): () =>
-                Navigator.pop(dialogContext, 'cupom'),
-            const SingleActivator(LogicalKeyboardKey.numpad3): () =>
-                Navigator.pop(dialogContext, 'nfce'),
-            const SingleActivator(LogicalKeyboardKey.numpad4): () =>
-                Navigator.pop(dialogContext, 'nfe55'),
-          },
-          child: AlertDialog(
-            title: Text('Venda $numCupom finalizada'),
-            content: SizedBox(
-              width: 440,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'Pagamento confirmado. O que deseja fazer agora?',
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Total: ${_formatarMoeda(venda.total)}'),
-                  Text(
-                    'Cliente: ${cliente?.nomeRazao ?? 'Consumidor / sem cadastro'}',
-                  ),
-                  if (exigeNfe55 && !jaTemNfe55) ...[
-                    const SizedBox(height: 10),
-                    Material(
-                      color: Colors.amber.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              Icons.warning_amber_rounded,
-                              color: Colors.amber.shade900,
-                              size: 22,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Cliente com CNPJ — emita NF-e modelo 55 (tecla 4) '
-                                'para faturamento correto antes de encerrar.',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: Colors.amber.shade900,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Text(
-                    'Baixa de estoque (itens leva agora) ao autorizar NFC-e/NF-e '
-                    'ou ao cupom interno (2). Carreto e retirada futura: reserva.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    onPressed: () => Navigator.pop(dialogContext, 'cupom'),
-                    icon: const Icon(Icons.receipt_outlined),
-                    label: const Text('Cupom nao fiscal (2)'),
-                  ),
-                  const SizedBox(height: 8),
-                  FilledButton.icon(
-                    autofocus: true,
-                    onPressed: () => Navigator.pop(dialogContext, 'nfce'),
-                    icon: const Icon(Icons.receipt_long_outlined),
-                    label: const Text('Emitir Cupom Fiscal (NFC-e) (3 · Enter)'),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => Navigator.pop(dialogContext, 'nfe55'),
-                    icon: const Icon(Icons.description_outlined),
-                    label: const Text('Emitir NF-e Completa (Modelo 55) (4)'),
-                  ),
-                ],
-              ),
+      vendaRepository: widget.vendaRepository,
+      clienteRepository: widget.clienteRepository,
+      usuarioRepository: _usuarioRepository,
+      usuarioAtual: widget.usuarioAtual,
+      podeCancelarVendas: widget.podeCancelarVendas,
+      venda: venda,
+    );
+    if (!mounted) return;
+    if (resultado != CancelarVendaUiResultado.sucesso) return;
+    _carregarOrcamentos();
+    if (_posVenda?.venda.id == venda.id) {
+      _prepararCaixaPosProximaVenda();
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _encerrarPosVendaFiscal() async {
+    final sessao = _posVenda;
+    if (sessao == null) {
+      _prepararCaixaPosProximaVenda();
+      return;
+    }
+    await _alertarVendaSemNfe55SeNecessario(sessao.venda);
+    if (!mounted) return;
+    await _alertarVendaSemBaixaEstoqueSeNecessario(sessao.venda);
+    if (!mounted) return;
+    _prepararCaixaPosProximaVenda();
+  }
+
+  Future<void> _executarAcaoPosVendaFiscal(String acao) async {
+    final sessao = _posVenda;
+    if (sessao == null || _posVendaProcessando) return;
+    final venda = sessao.venda;
+
+    if (acao == 'nfe55') {
+      setState(() => _posVendaProcessando = true);
+      try {
+        final vendaId = venda.id;
+        final usuarioNfe = await _resolverUsuarioSessaoParaNfe();
+        if (!mounted) return;
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => NfeGerenciamentoPage(
+              vendaRepository: widget.vendaRepository,
+              clienteRepository: widget.clienteRepository,
+              appConfigRepository: widget.appConfigRepository,
+              usuarioLogado: usuarioNfe,
+              vendaIdInicial: vendaId,
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, 'fechar'),
-                child: const Text('Fechar (Esc · 1)'),
-              ),
-            ],
           ),
         );
-      },
-    );
-    if (!mounted || acao == null || acao == 'fechar') {
-      if (mounted && (acao == null || acao == 'fechar')) {
-        await _alertarVendaSemNfe55SeNecessario(venda);
-        await _alertarVendaSemBaixaEstoqueSeNecessario(venda);
+        if (!mounted) return;
+        await _tentarCupomInternoPosNfe55Autorizada(vendaId);
+        _atualizarPosVendaDoRepositorio();
+      } finally {
+        if (mounted) setState(() => _posVendaProcessando = false);
       }
       return;
     }
 
-    if (acao == 'nfe55') {
-      final vendaId = venda.id;
-      final usuarioNfe = await _resolverUsuarioSessaoParaNfe();
-      _prepararCaixaPosProximaVenda();
-      if (!mounted) return;
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => NfeGerenciamentoPage(
-            vendaRepository: widget.vendaRepository,
-            clienteRepository: widget.clienteRepository,
-            appConfigRepository: widget.appConfigRepository,
-            usuarioLogado: usuarioNfe,
-            vendaIdInicial: vendaId,
-          ),
-        ),
-      );
-      if (!mounted) return;
-      await _tentarCupomInternoPosNfe55Autorizada(vendaId);
-      _prepararCaixaPosProximaVenda();
-      return;
-    }
-
     if (acao == 'nfce') {
-      await _aguardarEntreDialogos();
-      if (!mounted) return;
-      await _emitirNfceParaVenda(venda);
+      setState(() => _posVendaProcessando = true);
+      try {
+        await _aguardarEntreDialogos();
+        if (!mounted) return;
+        await _emitirNfceParaVenda(venda);
+        _atualizarPosVendaDoRepositorio();
+      } finally {
+        if (mounted) setState(() => _posVendaProcessando = false);
+      }
       return;
     }
 
     if (acao == 'cupom') {
-      await _imprimirCupomNaoFiscalPosVenda(
-        venda: venda,
-        totalRecebido: totalRecebido,
-        troco: troco,
-      );
+      setState(() => _posVendaProcessando = true);
+      try {
+        await _imprimirCupomNaoFiscalPosVenda(
+          venda: venda,
+          totalRecebido: sessao.totalRecebido,
+          troco: sessao.troco,
+        );
+        _atualizarPosVendaDoRepositorio();
+      } finally {
+        if (mounted) setState(() => _posVendaProcessando = false);
+      }
     }
   }
 
@@ -3576,6 +3584,14 @@ class _CaixaPageState extends State<CaixaPage> {
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Fechar'),
             ),
+            TextButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'cancelar'),
+              icon: Icon(Icons.cancel_outlined, color: Theme.of(ctx).colorScheme.error),
+              label: Text(
+                'Cancelar venda',
+                style: TextStyle(color: Theme.of(ctx).colorScheme.error),
+              ),
+            ),
             OutlinedButton.icon(
               onPressed: () => Navigator.pop(ctx, 'cupom'),
               icon: const Icon(Icons.receipt_outlined),
@@ -3599,6 +3615,10 @@ class _CaixaPageState extends State<CaixaPage> {
     );
     if (!mounted || acao == null) return;
 
+    if (acao == 'cancelar') {
+      await _cancelarVendaNoCaixa(v);
+      return;
+    }
     if (acao == 'cupom') {
       await _emitirSegundaViaCupomParaVenda(v);
     } else if (acao == 'nfce') {
@@ -3912,60 +3932,6 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
-  Future<void> _alterarQuantidadeItemSelecionado(int delta) async {
-    final venda = _selecionado;
-    final itemId = _itemSelecionadoId;
-    if (venda == null || itemId == null) {
-      return;
-    }
-    final item = venda.itens.where((i) => i.id == itemId).firstOrNull;
-    if (item == null) {
-      return;
-    }
-    final novaQuantidade = item.quantidade + delta;
-    if (novaQuantidade <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Quantidade precisa ser maior que zero.')),
-      );
-      return;
-    }
-    try {
-      widget.vendaRepository.atualizarQuantidadeItemOrcamento(
-        venda.id,
-        item.id,
-        novaQuantidade,
-        permitirVendaSemEstoque: _permitirVendaSemEstoque,
-      );
-      _carregarOrcamentos();
-      setState(() {
-        _itemSelecionadoId = item.id;
-      });
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel atualizar quantidade: $e')),
-      );
-    }
-  }
-
-  Future<void> _removerItemSelecionado() async {
-    final venda = _selecionado;
-    final itemId = _itemSelecionadoId;
-    if (venda == null || itemId == null) {
-      return;
-    }
-    try {
-      widget.vendaRepository.removerItemOrcamento(venda.id, itemId);
-      _carregarOrcamentos();
-      setState(() {
-        _itemSelecionadoId = null;
-      });
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel remover item: $e')),
-      );
-    }
-  }
-
   Future<int?> _abrirCadastroNovoCliente() async {
     final cliente = await Navigator.push<Cliente>(
       context,
@@ -4221,11 +4187,574 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
+  Widget _buildEtapaFila(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildBarraAcoesIniciaisCaixa(context),
+        const SizedBox(height: 10),
+        Expanded(child: _buildPainelStatusCaixa(context)),
+      ],
+    );
+  }
+
+  Widget _buildCabecalhoOrcamentoAtivo(
+    BuildContext context,
+    Venda selecionado,
+  ) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            theme.colorScheme.primaryContainer,
+            theme.colorScheme.surfaceContainerHighest,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.point_of_sale_outlined, color: theme.colorScheme.primary),
+          const SizedBox(width: 8),
+          Text(
+            _caixaAberto ? 'CAIXA ABERTO' : 'CAIXA FECHADO',
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          if (_caixaAberto) ...[
+            const SizedBox(width: 10),
+            Text(
+              _operadorCaixa.trim().isEmpty ? '' : 'Operador: $_operadorCaixa',
+              style: theme.textTheme.bodyMedium,
+            ),
+          ],
+          const Spacer(),
+          OutlinedButton.icon(
+            onPressed: _abrirPesquisaOrcamento,
+            icon: const Icon(Icons.search),
+            label: const Text('Pesquisar (F1)'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _voltarParaFila,
+            icon: const Icon(Icons.arrow_back),
+            label: const Text('Fila (Esc)'),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Orcamento ${selecionado.numeroOrcamento}',
+            style: theme.textTheme.titleMedium,
+          ),
+          if (selecionado.entregaPendente) ...[
+            const SizedBox(width: 8),
+            Chip(
+              label: const Text('Retirada futura'),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              labelStyle: theme.textTheme.labelSmall,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabelaItensSomenteLeitura(
+    BuildContext context,
+    Venda selecionado,
+  ) {
+    return Card(
+      elevation: 0,
+      color: Colors.grey.shade50,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.blueGrey.shade100,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(8),
+                topRight: Radius.circular(8),
+              ),
+            ),
+            child: const Row(
+              children: [
+                SizedBox(
+                  width: 32,
+                  child: Text('#', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Expanded(
+                  flex: 4,
+                  child: Text('Produto', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Expanded(
+                  child: Text('Qtd', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Expanded(
+                  child: Text('Vlr Unit', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Expanded(
+                  child: Text(
+                    'Total',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: RawScrollbar(
+              controller: _itensScrollController,
+              thumbVisibility: true,
+              trackVisibility: true,
+              thickness: 10,
+              radius: const Radius.circular(8),
+              child: ListView.builder(
+                controller: _itensScrollController,
+                padding: const EdgeInsets.only(right: 10),
+                itemCount: selecionado.itens.length,
+                itemBuilder: (context, index) {
+                  final item = selecionado.itens[index];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    child: Row(
+                      children: [
+                        SizedBox(width: 32, child: Text('${index + 1}')),
+                        Expanded(
+                          flex: 4,
+                          child: Text(
+                            '${item.nomeProduto} '
+                            '(${EntregaVendaHelper.abreviacaoTipoItem(item.tipoEntregaItem)})',
+                          ),
+                        ),
+                        Expanded(child: Text(item.quantidade.toString())),
+                        Expanded(
+                          child: Text(_formatarMoeda(item.precoUnitario)),
+                        ),
+                        Expanded(
+                          child: Text(
+                            _formatarMoeda(item.subtotal),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResumoPagamentoOrcamento(
+    BuildContext context, {
+    required Venda selecionado,
+    required double totalComDesconto,
+    required double descontoPdvOrcamento,
+    bool mostrarAlterarForma = false,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Pagamento: ${_rotuloPagamentoCabecalho(selecionado)}',
+                ),
+              ),
+              if (mostrarAlterarForma)
+                TextButton.icon(
+                  onPressed: () => _alterarFormaPagamentoCaixa(selecionado),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('Alterar forma'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              const SizedBox(width: 8),
+              Text(
+                'TOTAL: ${_formatarMoeda(totalComDesconto)}',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ],
+          ),
+          if (descontoPdvOrcamento > 0.001)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Desconto (PDV): -${_formatarMoeda(descontoPdvOrcamento)}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.tertiary,
+                    ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEtapaConferencia(
+    BuildContext context, {
+    required Venda selecionado,
+    required Cliente? clienteSelecionado,
+    required double totalComDesconto,
+    required double descontoPdvOrcamento,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildCabecalhoOrcamentoAtivo(context, selecionado),
+        const SizedBox(height: 10),
+        CaixaEtapasBar(etapaAtual: _etapaCaixa),
+        const SizedBox(height: 10),
+        Expanded(
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildResumoPagamentoOrcamento(
+                    context,
+                    selecionado: selecionado,
+                    totalComDesconto: totalComDesconto,
+                    descontoPdvOrcamento: descontoPdvOrcamento,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    [
+                      'Entrega: ${_textoEntregaCaixa(selecionado)}',
+                      if (_vendaExigeDadosCarreto(selecionado))
+                        'Frete: ${_formatarMoeda(selecionado.valorFrete)}',
+                    ].join(' | '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Cliente: ${clienteSelecionado?.nomeRazao ?? 'Sem cliente'}',
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _vincularClienteAgora,
+                        icon: const Icon(Icons.person_add_alt_1_outlined),
+                        label: const Text('Vincular (F4)'),
+                      ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Vendedor: ${_rotuloVendedorUmLinha(selecionado)} (PDV)',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(child: _buildTabelaItensSomenteLeitura(context, selecionado)),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Atalhos: Enter = ir para cobranca | Esc = voltar ao inicio | F4 = vincular cliente',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: FilledButton.icon(
+                      onPressed: _irParaCobranca,
+                      icon: const Icon(Icons.arrow_forward),
+                      label: const Text('Ir para cobranca (Enter)'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCorpoRecebimentoCobranca(
+    BuildContext context, {
+    required Venda selecionado,
+    required double totalComDesconto,
+    required double troco,
+    required List<PagamentoOrcamentoLinha> linhasMistoCaixa,
+  }) {
+    if (selecionado.formaPagamento == 'misto' && linhasMistoCaixa.isNotEmpty) {
+      return _buildPainelPagamentosMistoNoCaixa(
+        context,
+        venda: selecionado,
+        totalComDesconto: totalComDesconto,
+      );
+    }
+
+    if (_caixaPrecisaValorRecebidoDinheiro(selecionado)) {
+      final parteDinheiro =
+          _parteDinheiroNaFinalizacao(selecionado, totalComDesconto);
+      return CaixaCobrancaCampoDinheiro(
+        controller: _valorRecebidoController,
+        focusNode: _valorRecebidoFocusNode,
+        totalAPagar: parteDinheiro > 0.001 ? parteDinheiro : totalComDesconto,
+        troco: troco,
+        formatarMoeda: _formatarMoeda,
+        onChanged: (value) {
+          setState(() => _valorRecebido = _parseValor(value));
+        },
+      );
+    }
+
+    final forma = selecionado.formaPagamento;
+    final planoFiado = PlanoFiadoCodec.decode(selecionado.planoFiadoJson);
+    var detalhe = '';
+    if (forma == 'fiado' && planoFiado.isNotEmpty) {
+      detalhe = PlanoFiadoCodec.formatarResumoLinhas(planoFiado);
+    }
+
+    return CaixaCobrancaConfirmacaoSimples(
+      icone: _iconeFormaPagamentoCaixa(forma),
+      titulo: _rotuloFormaPagamento(forma),
+      subtitulo:
+          'Confirme o recebimento de ${_formatarMoeda(totalComDesconto)} '
+          'e pressione Enter para finalizar.',
+      detalhe: detalhe.isEmpty ? null : detalhe,
+    );
+  }
+
+  IconData _iconeFormaPagamentoCaixa(String forma) => switch (forma) {
+        'dinheiro' => Icons.payments_outlined,
+        'pix' => Icons.qr_code_2_outlined,
+        'cartao_credito' || 'cartao_debito' => Icons.credit_card_outlined,
+        'fiado' => Icons.receipt_long_outlined,
+        'misto' => Icons.account_balance_wallet_outlined,
+        _ => Icons.point_of_sale_outlined,
+      };
+
+  Widget _buildEtapaCobranca(
+    BuildContext context, {
+    required Venda selecionado,
+    required Cliente? clienteSelecionado,
+    required double descontoSelecionado,
+    required double totalComDesconto,
+    required double descontoPdvOrcamento,
+    required double freteSelecionado,
+    required double subtotalProdutos,
+    required List<PagamentoOrcamentoLinha> linhasMistoCaixa,
+    required double valorTotalRecebidoCard,
+    required double troco,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildCabecalhoOrcamentoAtivo(context, selecionado),
+        const SizedBox(height: 10),
+        CaixaEtapasBar(etapaAtual: _etapaCaixa),
+        const SizedBox(height: 10),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxHeight < 700;
+              return CaixaCobrancaPainel(
+                numeroOrcamento: selecionado.numeroOrcamento > 0
+                    ? selecionado.numeroOrcamento
+                    : selecionado.id,
+                clienteNome:
+                    clienteSelecionado?.nomeRazao ?? 'Sem cliente',
+                qtdItens: selecionado.itens.length,
+                rotuloPagamento: _rotuloPagamentoCabecalho(selecionado),
+                totalComDesconto: totalComDesconto,
+                descontoPdvOrcamento: descontoPdvOrcamento,
+                formatarMoeda: _formatarMoeda,
+                onAlterarForma: () => _alterarFormaPagamentoCaixa(selecionado),
+                recebimento: _buildCorpoRecebimentoCobranca(
+                  context,
+                  selecionado: selecionado,
+                  totalComDesconto: totalComDesconto,
+                  troco: troco,
+                  linhasMistoCaixa: linhasMistoCaixa,
+                ),
+                rodape: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (!isCompact)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text(
+                          'Atalhos: Enter = confirmar | Esc = conferencia',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    _buildRodapeCheckoutCaixa(
+                      context,
+                      selecionado: selecionado,
+                      subtotalProdutos: subtotalProdutos,
+                      freteSelecionado: freteSelecionado,
+                      descontoPdvOrcamento: descontoPdvOrcamento,
+                      descontoSelecionado: descontoSelecionado,
+                      totalComDesconto: totalComDesconto,
+                      valorTotalRecebidoCard: valorTotalRecebidoCard,
+                      troco: troco,
+                      isCompact: isCompact,
+                      incluirCampoDinheiro: false,
+                      onFinalizar: () =>
+                          unawaited(_finalizarOrcamento(selecionado)),
+                      labelFinalizar: 'Confirmar pagamento (Enter)',
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEtapaFiscal(BuildContext context) {
+    final sessao = _posVenda;
+    if (sessao == null) {
+      return _buildEtapaFila(context);
+    }
+    final venda = sessao.venda;
+    final cliente = _clienteDaVenda(venda);
+    final exigeNfe55 = ClienteFiscalHelper.clienteExigeNfe55(cliente);
+    final jaTemNfe55 =
+        widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id) != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CaixaEtapasBar(etapaAtual: _etapaCaixa),
+        const SizedBox(height: 10),
+        Expanded(
+          child: CaixaPosVendaFiscalPainel(
+            venda: venda,
+            cliente: cliente,
+            totalRecebido: sessao.totalRecebido,
+            troco: sessao.troco,
+            formatarMoeda: _formatarMoeda,
+            exigeNfe55: exigeNfe55,
+            jaTemNfe55: jaTemNfe55,
+            processando: _posVendaProcessando,
+            onCupomNaoFiscal: () => unawaited(_executarAcaoPosVendaFiscal('cupom')),
+            onEmitirNfce: () => unawaited(_executarAcaoPosVendaFiscal('nfce')),
+            onEmitirNfe55: () => unawaited(_executarAcaoPosVendaFiscal('nfe55')),
+            onConcluir: () => unawaited(_encerrarPosVendaFiscal()),
+            onCancelarVenda: () =>
+                unawaited(_cancelarVendaNoCaixa(venda)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCorpoCaixa(BuildContext context) {
+    if (_etapaCaixa == CaixaEtapa.fiscal && _posVenda != null) {
+      return _buildEtapaFiscal(context);
+    }
+
+    if (_selecionado == null) {
+      if (_etapaCaixa != CaixaEtapa.fila) {
+        _etapaCaixa = CaixaEtapa.fila;
+      }
+      return _buildEtapaFila(context);
+    }
+
+    final selecionado = _selecionado!;
+    final clienteSelecionado = _clienteDaVenda(selecionado);
+    final descontoSelecionado = _descontoAplicado(selecionado);
+    final totalComDesconto = _totalComDesconto(selecionado);
+    final freteSelecionado = selecionado.valorFrete;
+    final subtotalProdutos = selecionado.somaSubtotalItens;
+    final descontoPdvOrcamento = selecionado.descontoImplicitoTotal;
+    final parteDinheiroResumo =
+        _parteDinheiroNaFinalizacao(selecionado, totalComDesconto);
+    final linhasMistoCaixa = selecionado.formaPagamento == 'misto'
+        ? (_mistoValorControllers.isNotEmpty
+            ? _linhasMistoDoFormulario()
+            : _linhasPagamentoEscaladasCaixa(selecionado, totalComDesconto))
+        : <PagamentoOrcamentoLinha>[];
+    final somaMistoCaixa = linhasMistoCaixa.isEmpty
+        ? 0.0
+        : PagamentoOrcamentoCodec.soma(linhasMistoCaixa);
+    final troco = selecionado.formaPagamento == 'misto'
+        ? (somaMistoCaixa - totalComDesconto).clamp(0.0, double.infinity).toDouble()
+        : (parteDinheiroResumo > 0.001
+            ? ((_valorRecebido ?? 0) - parteDinheiroResumo)
+                .clamp(0, double.infinity)
+                .toDouble()
+            : 0.0);
+    final valorTotalRecebidoCard = selecionado.formaPagamento == 'misto' &&
+            linhasMistoCaixa.isNotEmpty
+        ? somaMistoCaixa
+        : (_caixaPrecisaValorRecebidoDinheiro(selecionado)
+            ? (_valorRecebido ?? 0)
+            : totalComDesconto);
+
+    switch (_etapaCaixa) {
+      case CaixaEtapa.fiscal:
+        return _buildEtapaFiscal(context);
+      case CaixaEtapa.cobranca:
+        return _buildEtapaCobranca(
+          context,
+          selecionado: selecionado,
+          clienteSelecionado: clienteSelecionado,
+          descontoSelecionado: descontoSelecionado,
+          totalComDesconto: totalComDesconto,
+          descontoPdvOrcamento: descontoPdvOrcamento,
+          freteSelecionado: freteSelecionado,
+          subtotalProdutos: subtotalProdutos,
+          linhasMistoCaixa: linhasMistoCaixa,
+          valorTotalRecebidoCard: valorTotalRecebidoCard,
+          troco: troco,
+        );
+      case CaixaEtapa.fila:
+      case CaixaEtapa.conferencia:
+        return _buildEtapaConferencia(
+          context,
+          selecionado: selecionado,
+          clienteSelecionado: clienteSelecionado,
+          totalComDesconto: totalComDesconto,
+          descontoPdvOrcamento: descontoPdvOrcamento,
+        );
+    }
+  }
+
   @override
   void dispose() {
     _timerReconciliacaoNfce?.cancel();
     _valorRecebidoController.dispose();
-    _descontoController.dispose();
     _valorRecebidoFocusNode.dispose();
     _itensScrollController.dispose();
     _disposeMistoEdicao();
@@ -4235,60 +4764,8 @@ class _CaixaPageState extends State<CaixaPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final selecionado = _selecionado;
-    final clienteSelecionado = selecionado == null
-        ? null
-        : _clienteDaVenda(selecionado);
-    final descontoSelecionado = selecionado == null
-        ? 0.0
-        : _descontoAplicado(selecionado);
-    final totalComDesconto = selecionado == null
-        ? 0.0
-        : _totalComDesconto(selecionado);
-    final freteSelecionado = selecionado?.valorFrete ?? 0;
-    final subtotalProdutos = selecionado?.somaSubtotalItens ?? 0;
-    final descontoPdvOrcamento = selecionado?.descontoImplicitoTotal ?? 0;
-    final parteDinheiroResumo = selecionado == null
-        ? 0.0
-        : _parteDinheiroNaFinalizacao(selecionado, totalComDesconto);
-    final linhasMistoCaixa = selecionado != null &&
-            selecionado.formaPagamento == 'misto'
-        ? (_mistoValorControllers.isNotEmpty
-            ? _linhasMistoDoFormulario()
-            : _linhasPagamentoEscaladasCaixa(selecionado, totalComDesconto))
-        : <PagamentoOrcamentoLinha>[];
-    final somaMistoCaixa = linhasMistoCaixa.isEmpty
-        ? 0.0
-        : PagamentoOrcamentoCodec.soma(linhasMistoCaixa);
-    final troco = selecionado == null
-        ? 0.0
-        : selecionado.formaPagamento == 'misto'
-            ? (somaMistoCaixa - totalComDesconto)
-                .clamp(0.0, double.infinity)
-                .toDouble()
-            : (parteDinheiroResumo > 0.001
-                ? ((_valorRecebido ?? 0) - parteDinheiroResumo)
-                    .clamp(0, double.infinity)
-                    .toDouble()
-                : 0.0);
-    final valorTotalRecebidoCard = selecionado == null
-        ? 0.0
-        : selecionado.formaPagamento == 'misto' && linhasMistoCaixa.isNotEmpty
-            ? somaMistoCaixa
-            : (_caixaPrecisaValorRecebidoDinheiro(selecionado)
-                ? (_valorRecebido ?? 0)
-                : totalComDesconto);
     return Shortcuts(
       shortcuts: <LogicalKeySet, Intent>{
-        LogicalKeySet(LogicalKeyboardKey.numpadAdd):
-            const _AumentarQuantidadeIntent(),
-        LogicalKeySet(LogicalKeyboardKey.equal, LogicalKeyboardKey.shift):
-            const _AumentarQuantidadeIntent(),
-        LogicalKeySet(LogicalKeyboardKey.numpadSubtract):
-            const _DiminuirQuantidadeIntent(),
-        LogicalKeySet(LogicalKeyboardKey.minus):
-            const _DiminuirQuantidadeIntent(),
-        LogicalKeySet(LogicalKeyboardKey.delete): const _RemoverItemIntent(),
         LogicalKeySet(LogicalKeyboardKey.f1): const _ImportarOrcamentoIntent(),
         LogicalKeySet(LogicalKeyboardKey.f2): const _SegundaViaCupomIntent(),
         LogicalKeySet(LogicalKeyboardKey.f3): const _ReceberFiadoIntent(),
@@ -4296,39 +4773,6 @@ class _CaixaPageState extends State<CaixaPage> {
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
-          _AumentarQuantidadeIntent: CallbackAction<_AumentarQuantidadeIntent>(
-            onInvoke: (intent) {
-              if (ModalRoute.of(context)?.isCurrent != true) {
-                return null;
-              }
-              if (_itemSelecionadoId != null) {
-                _alterarQuantidadeItemSelecionado(1);
-              }
-              return null;
-            },
-          ),
-          _DiminuirQuantidadeIntent: CallbackAction<_DiminuirQuantidadeIntent>(
-            onInvoke: (intent) {
-              if (ModalRoute.of(context)?.isCurrent != true) {
-                return null;
-              }
-              if (_itemSelecionadoId != null) {
-                _alterarQuantidadeItemSelecionado(-1);
-              }
-              return null;
-            },
-          ),
-          _RemoverItemIntent: CallbackAction<_RemoverItemIntent>(
-            onInvoke: (intent) {
-              if (ModalRoute.of(context)?.isCurrent != true) {
-                return null;
-              }
-              if (_itemSelecionadoId != null) {
-                _removerItemSelecionado();
-              }
-              return null;
-            },
-          ),
           _ImportarOrcamentoIntent:
               CallbackAction<_ImportarOrcamentoIntent>(
             onInvoke: (intent) {
@@ -4357,7 +4801,9 @@ class _CaixaPageState extends State<CaixaPage> {
               if (ModalRoute.of(context)?.isCurrent != true) {
                 return null;
               }
-              if (_selecionado != null) {
+              if (_selecionado != null &&
+                  (_etapaCaixa == CaixaEtapa.conferencia ||
+                      _etapaCaixa == CaixaEtapa.cobranca)) {
                 _vincularClienteAgora();
               }
               return null;
@@ -4366,6 +4812,7 @@ class _CaixaPageState extends State<CaixaPage> {
         },
         child: Focus(
           autofocus: true,
+          onKeyEvent: _tratarTeclaCaixaWizard,
           child: Scaffold(
             appBar: AppBar(
               title: _buildTituloAppBarCaixa(context),
@@ -4380,779 +4827,7 @@ class _CaixaPageState extends State<CaixaPage> {
               color: theme.colorScheme.surfaceContainerLowest,
               child: Padding(
                 padding: const EdgeInsets.all(12),
-                child: selecionado == null
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildBarraAcoesIniciaisCaixa(context),
-                          const SizedBox(height: 10),
-                          Expanded(
-                            child: _buildPainelStatusCaixa(context),
-                          ),
-                        ],
-                      )
-                    : Column(
-                        children: [
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  theme.colorScheme.primaryContainer,
-                                  theme.colorScheme.surfaceContainerHighest,
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: theme.colorScheme.outlineVariant,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.point_of_sale_outlined,
-                                  color: theme.colorScheme.primary,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _caixaAberto ? 'CAIXA ABERTO' : 'CAIXA FECHADO',
-                                  style: theme.textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                if (_caixaAberto) ...[
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    _operadorCaixa.trim().isEmpty
-                                        ? ''
-                                        : 'Operador: $_operadorCaixa',
-                                    style: theme.textTheme.bodyMedium,
-                                  ),
-                                ],
-                                const Spacer(),
-                                OutlinedButton.icon(
-                                  onPressed: _abrirPesquisaOrcamento,
-                                  icon: const Icon(Icons.search),
-                                  label: const Text('Pesquisar (F1)'),
-                                ),
-                                const SizedBox(width: 8),
-                                OutlinedButton.icon(
-                                  onPressed: _abrirSegundaViaCupom,
-                                  icon: const Icon(Icons.receipt_long_outlined),
-                                  label: const Text('Segunda via (F2)'),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Orcamento ${selecionado.numeroOrcamento}',
-                                  style: theme.textTheme.titleMedium,
-                                ),
-                                if (selecionado.entregaPendente) ...[
-                                  const SizedBox(width: 8),
-                                  Chip(
-                                    label: const Text('Retirada futura'),
-                                    visualDensity: VisualDensity.compact,
-                                    padding: EdgeInsets.zero,
-                                    labelStyle: theme.textTheme.labelSmall,
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Expanded(
-                            child: Card(
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12),
-                                      child: LayoutBuilder(
-                                        builder: (context, constraints) {
-                                          final isCompact =
-                                              constraints.maxHeight < 700;
-                                          final flexItens = isCompact ? 1 : 2;
-                                          final flexPagamento =
-                                              isCompact ? 4 : 3;
-                                          return Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                          Container(
-                                            width: double.infinity,
-                                            padding: const EdgeInsets.all(10),
-                                            decoration: BoxDecoration(
-                                              color: Colors.grey.shade100,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                              border: Border.all(
-                                                color: Colors.grey.shade300,
-                                              ),
-                                            ),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  children: [
-                                                    Expanded(
-                                                      child: Text(
-                                                        'Pagamento: ${_rotuloPagamentoCabecalho(selecionado)}',
-                                                      ),
-                                                    ),
-                                                    TextButton.icon(
-                                                      onPressed: () =>
-                                                          _alterarFormaPagamentoCaixa(
-                                                            selecionado,
-                                                          ),
-                                                      icon: const Icon(
-                                                        Icons.edit_outlined,
-                                                        size: 18,
-                                                      ),
-                                                      label: const Text(
-                                                        'Alterar forma',
-                                                      ),
-                                                      style: TextButton.styleFrom(
-                                                        visualDensity:
-                                                            VisualDensity.compact,
-                                                        padding:
-                                                            const EdgeInsets.symmetric(
-                                                          horizontal: 8,
-                                                          vertical: 4,
-                                                        ),
-                                                        tapTargetSize:
-                                                            MaterialTapTargetSize
-                                                                .shrinkWrap,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    Text(
-                                                      'TOTAL: ${_formatarMoeda(totalComDesconto)}',
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .titleMedium
-                                                          ?.copyWith(
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                          ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                if (descontoPdvOrcamento >
-                                                    0.001)
-                                                  Padding(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                      top: 6,
-                                                    ),
-                                                    child: Text(
-                                                      'Desconto (PDV): -${_formatarMoeda(descontoPdvOrcamento)}',
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.copyWith(
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                            color: Theme.of(
-                                                                    context)
-                                                                .colorScheme
-                                                                .tertiary,
-                                                          ),
-                                                    ),
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            [
-                                              'Entrega: ${_textoEntregaCaixa(selecionado)}',
-                                              if (_vendaExigeDadosCarreto(selecionado))
-                                                'Frete: ${_formatarMoeda(selecionado.valorFrete)}',
-                                              if (_vendaExigeDadosCarreto(selecionado) &&
-                                                  selecionado.enderecoEntrega.trim().isNotEmpty)
-                                                'Endereco: ${selecionado.enderecoEntrega}',
-                                              if (_vendaExigeDadosCarreto(selecionado))
-                                                'Status: ${_rotuloStatusEntrega(selecionado.statusEntrega)}',
-                                              if (_vendaExigeDadosCarreto(selecionado) &&
-                                                  selecionado.observacaoEntrega.trim().isNotEmpty)
-                                                'Obs: ${selecionado.observacaoEntrega}',
-                                            ].join(' | '),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: 6),
-                                          Row(
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  'Cliente: ${clienteSelecionado?.nomeRazao ?? 'Sem cliente'}',
-                                                ),
-                                              ),
-                                              OutlinedButton.icon(
-                                                onPressed:
-                                                    _vincularClienteAgora,
-                                                icon: const Icon(
-                                                  Icons
-                                                      .person_add_alt_1_outlined,
-                                                ),
-                                                label: const Text(
-                                                  'Vincular cliente agora (F4)',
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 6,
-                                            ),
-                                            child: Align(
-                                              alignment: Alignment.centerLeft,
-                                              child: Text(
-                                                'Vendedor: ${_rotuloVendedorUmLinha(selecionado)} '
-                                                '(definido no Ponto de Venda)',
-                                                style: Theme.of(
-                                                  context,
-                                                ).textTheme.bodyMedium,
-                                              ),
-                                            ),
-                                          ),
-                                          if (selecionado.formaPagamento ==
-                                              'cartao_credito') ...[
-                                            const SizedBox(height: 6),
-                                            Text(
-                                              'Parcela: ${_formatarMoeda(selecionado.total / selecionado.quantidadeParcelas)}'
-                                              ' (minimo ${_formatarMoeda(_valorMinimoParcela)})',
-                                            ),
-                                          ],
-                                          const SizedBox(height: 8),
-                                          Expanded(
-                                            flex: flexItens,
-                                            child: Row(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.stretch,
-                                              children: [
-                                                Expanded(
-                                                  child: Card(
-                                                    elevation: 0,
-                                                    color: Colors.grey.shade50,
-                                                    child: Column(
-                                                      children: [
-                                                        Container(
-                                                          padding:
-                                                              const EdgeInsets.symmetric(
-                                                                horizontal: 8,
-                                                                vertical: 6,
-                                                              ),
-                                                          decoration: BoxDecoration(
-                                                            color: Colors
-                                                                .blueGrey
-                                                                .shade100,
-                                                            borderRadius:
-                                                                const BorderRadius.only(
-                                                                  topLeft:
-                                                                      Radius.circular(
-                                                                        8,
-                                                                      ),
-                                                                  topRight:
-                                                                      Radius.circular(
-                                                                        8,
-                                                                      ),
-                                                                ),
-                                                          ),
-                                                          child: const Row(
-                                                            children: [
-                                                              SizedBox(
-                                                                width: 32,
-                                                                child: Text(
-                                                                  '#',
-                                                                  style: TextStyle(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              Expanded(
-                                                                flex: 4,
-                                                                child: Text(
-                                                                  'Produto',
-                                                                  style: TextStyle(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              Expanded(
-                                                                child: Text(
-                                                                  'Qtd',
-                                                                  style: TextStyle(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              Expanded(
-                                                                child: Text(
-                                                                  'Vlr Unit',
-                                                                  style: TextStyle(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              Expanded(
-                                                                child: Text(
-                                                                  'Total',
-                                                                  textAlign:
-                                                                      TextAlign
-                                                                          .right,
-                                                                  style: TextStyle(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                        Expanded(
-                                                          child: RawScrollbar(
-                                                            controller:
-                                                                _itensScrollController,
-                                                            thumbVisibility:
-                                                                true,
-                                                            trackVisibility:
-                                                                true,
-                                                            thickness: 10,
-                                                            radius:
-                                                                const Radius.circular(
-                                                                  8,
-                                                                ),
-                                                            child: ListView.builder(
-                                                              controller:
-                                                                  _itensScrollController,
-                                                              padding:
-                                                                  const EdgeInsets.only(
-                                                                    right: 10,
-                                                                  ),
-                                                              itemCount:
-                                                                  selecionado
-                                                                      .itens
-                                                                      .length,
-                                                              itemBuilder: (context, index) {
-                                                                final item =
-                                                                    selecionado
-                                                                        .itens[index];
-                                                                final selecionadoItem =
-                                                                    _itemSelecionadoId ==
-                                                                    item.id;
-                                                                return InkWell(
-                                                                  onTap: () {
-                                                                    setState(() {
-                                                                      _itemSelecionadoId =
-                                                                          item.id;
-                                                                    });
-                                                                  },
-                                                                  child: Container(
-                                                                    color:
-                                                                        selecionadoItem
-                                                                        ? Colors
-                                                                              .blue
-                                                                              .shade50
-                                                                        : null,
-                                                                    padding: const EdgeInsets.symmetric(
-                                                                      horizontal:
-                                                                          8,
-                                                                      vertical:
-                                                                          6,
-                                                                    ),
-                                                                    child: Row(
-                                                                      children: [
-                                                                        SizedBox(
-                                                                          width:
-                                                                              32,
-                                                                          child: Text(
-                                                                            '${index + 1}',
-                                                                          ),
-                                                                        ),
-                                                                        Expanded(
-                                                                          flex:
-                                                                              4,
-                                                                          child: Text(
-                                                                            '${item.nomeProduto} '
-                                                                            '(${EntregaVendaHelper.abreviacaoTipoItem(item.tipoEntregaItem)})',
-                                                                          ),
-                                                                        ),
-                                                                        Expanded(
-                                                                          child: Text(
-                                                                            item.quantidade.toString(),
-                                                                          ),
-                                                                        ),
-                                                                        Expanded(
-                                                                          child: Text(
-                                                                            _formatarMoeda(
-                                                                              item.precoUnitario,
-                                                                            ),
-                                                                          ),
-                                                                        ),
-                                                                        Expanded(
-                                                                          child: Text(
-                                                                            _formatarMoeda(
-                                                                              item.subtotal,
-                                                                            ),
-                                                                            textAlign:
-                                                                                TextAlign.right,
-                                                                          ),
-                                                                        ),
-                                                                      ],
-                                                                    ),
-                                                                  ),
-                                                                );
-                                                              },
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                SizedBox(
-                                                  width: isCompact ? 180 : 160,
-                                                  child: isCompact
-                                                      ? Column(
-                                                          children: [
-                                                            Row(
-                                                              children: [
-                                                                Expanded(
-                                                                  child: OutlinedButton(
-                                                                    onPressed: _itemSelecionadoId ==
-                                                                            null
-                                                                        ? null
-                                                                        : () => _alterarQuantidadeItemSelecionado(1),
-                                                                    style: OutlinedButton.styleFrom(
-                                                                      visualDensity: VisualDensity.compact,
-                                                                      minimumSize: const Size(0, 32),
-                                                                    ),
-                                                                    child: const Text('+ Qtd'),
-                                                                  ),
-                                                                ),
-                                                                const SizedBox(width: 6),
-                                                                Expanded(
-                                                                  child: OutlinedButton(
-                                                                    onPressed: _itemSelecionadoId ==
-                                                                            null
-                                                                        ? null
-                                                                        : () => _alterarQuantidadeItemSelecionado(-1),
-                                                                    style: OutlinedButton.styleFrom(
-                                                                      visualDensity: VisualDensity.compact,
-                                                                      minimumSize: const Size(0, 32),
-                                                                    ),
-                                                                    child: const Text('- Qtd'),
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                            const SizedBox(height: 6),
-                                                            Row(
-                                                              children: [
-                                                                Expanded(
-                                                                  child: OutlinedButton(
-                                                                    onPressed: _itemSelecionadoId ==
-                                                                            null
-                                                                        ? null
-                                                                        : _removerItemSelecionado,
-                                                                    style: OutlinedButton.styleFrom(
-                                                                      visualDensity: VisualDensity.compact,
-                                                                      minimumSize: const Size(0, 32),
-                                                                    ),
-                                                                    child: const Text('Remover'),
-                                                                  ),
-                                                                ),
-                                                                const SizedBox(width: 6),
-                                                                Expanded(
-                                                                  child: OutlinedButton(
-                                                                    onPressed: _carregarOrcamentos,
-                                                                    style: OutlinedButton.styleFrom(
-                                                                      visualDensity: VisualDensity.compact,
-                                                                      minimumSize: const Size(0, 32),
-                                                                    ),
-                                                                    child: const Text('Atualizar'),
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          ],
-                                                        )
-                                                      : Column(
-                                                          children: [
-                                                            _buildAcaoCaixaButton(
-                                                              context,
-                                                              label: '+ Quantidade',
-                                                              onPressed:
-                                                                  _itemSelecionadoId ==
-                                                                          null
-                                                                      ? null
-                                                                      : () => _alterarQuantidadeItemSelecionado(
-                                                                            1,
-                                                                          ),
-                                                            ),
-                                                            const SizedBox(height: 8),
-                                                            _buildAcaoCaixaButton(
-                                                              context,
-                                                              label: '- Quantidade',
-                                                              onPressed:
-                                                                  _itemSelecionadoId ==
-                                                                          null
-                                                                      ? null
-                                                                      : () => _alterarQuantidadeItemSelecionado(
-                                                                            -1,
-                                                                          ),
-                                                            ),
-                                                            const SizedBox(height: 8),
-                                                            _buildAcaoCaixaButton(
-                                                              context,
-                                                              label: 'Remover item',
-                                                              onPressed:
-                                                                  _itemSelecionadoId ==
-                                                                          null
-                                                                      ? null
-                                                                      : _removerItemSelecionado,
-                                                            ),
-                                                            const SizedBox(height: 8),
-                                                            _buildAcaoCaixaButton(
-                                                              context,
-                                                              label: 'Atualizar',
-                                                              onPressed:
-                                                                  _carregarOrcamentos,
-                                                            ),
-                                                          ],
-                                                        ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          Expanded(
-                                            flex: flexPagamento,
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.stretch,
-                                              children: [
-                                                Expanded(
-                                                  child: SingleChildScrollView(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                      bottom: 8,
-                                                    ),
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                          const SizedBox(height: 4),
-                                          _buildBotaoGestaoCaixa(context),
-                                          const SizedBox(height: 12),
-                                          if (selecionado.formaPagamento ==
-                                                  'misto' &&
-                                              linhasMistoCaixa.isNotEmpty) ...[
-                                            _buildPainelPagamentosMistoNoCaixa(
-                                              context,
-                                              venda: selecionado,
-                                              totalComDesconto: totalComDesconto,
-                                              descontoCaixaAplicado:
-                                                  descontoSelecionado > 0.001,
-                                            ),
-                                            const SizedBox(height: 12),
-                                          ],
-                                          if (!isCompact && _mostrarCampoDescontoCaixa) ...[
-                                            Container(
-                                              width: double.infinity,
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                color: Colors.grey.shade50,
-                                                borderRadius: BorderRadius.circular(
-                                                  8,
-                                                ),
-                                                border: Border.all(
-                                                  color: Colors.grey.shade300,
-                                                ),
-                                              ),
-                                              child: Row(
-                                                children: [
-                                                  const Text('Desconto rapido:'),
-                                                  const SizedBox(width: 8),
-                                                  SegmentedButton<String>(
-                                                    segments: const [
-                                                      ButtonSegment<String>(
-                                                        value: 'percentual',
-                                                        label: Text('%'),
-                                                      ),
-                                                      ButtonSegment<String>(
-                                                        value: 'valor',
-                                                        label: Text('R\$'),
-                                                      ),
-                                                    ],
-                                                    selected: {_tipoDesconto},
-                                                    onSelectionChanged: (values) {
-                                                      setState(() {
-                                                        _tipoDesconto = values.first;
-                                                        if (_selecionado !=
-                                                                null &&
-                                                            _selecionado!
-                                                                    .formaPagamento ==
-                                                                'misto') {
-                                                          _prepararEdicaoMisto(
-                                                            _selecionado!,
-                                                          );
-                                                        }
-                                                        _sincronizarRecebidoPdVComOrcamento();
-                                                      });
-                                                    },
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  SizedBox(
-                                                    width: 140,
-                                                    child: TextField(
-                                                      controller:
-                                                          _descontoController,
-                                                      keyboardType:
-                                                          const TextInputType.numberWithOptions(
-                                                            decimal: true,
-                                                          ),
-                                                      decoration: InputDecoration(
-                                                        isDense: true,
-                                                        labelText: _tipoDesconto ==
-                                                                'percentual'
-                                                            ? 'Valor %'
-                                                            : 'Valor R\$',
-                                                        hintText: _tipoDesconto ==
-                                                                'percentual'
-                                                            ? 'Ex.: 10'
-                                                            : 'Ex.: 25,00',
-                                                      ),
-                                                      onChanged: (_) {
-                                                        setState(() {
-                                                          if (_selecionado !=
-                                                                  null &&
-                                                              _selecionado!
-                                                                      .formaPagamento ==
-                                                                  'misto') {
-                                                            _prepararEdicaoMisto(
-                                                              _selecionado!,
-                                                            );
-                                                          }
-                                                          _sincronizarRecebidoPdVComOrcamento();
-                                                        });
-                                                      },
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Expanded(
-                                                    child: Text(
-                                                      'Aplicado: -${_formatarMoeda(descontoSelecionado)}',
-                                                      textAlign: TextAlign.right,
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .titleSmall
-                                                          ?.copyWith(
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                          ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            const SizedBox(height: 10),
-                                          ],
-                                          if (!isCompact) ...[
-                                            const SizedBox(height: 4),
-                                            Align(
-                                              alignment: Alignment.centerLeft,
-                                              child: Text(
-                                                'Atalhos: Enter = finalizar | Esc = limpar recebido | + = aumentar qtd | - = diminuir qtd | Del = remover item | F4 = vincular cliente',
-                                                style: Theme.of(
-                                                  context,
-                                                ).textTheme.bodySmall,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Container(
-                                              width: double.infinity,
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                border: Border.all(
-                                                  color: Theme.of(
-                                                    context,
-                                                  ).colorScheme.outlineVariant,
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    'Checkout',
-                                                    style: Theme.of(
-                                                      context,
-                                                    ).textTheme.titleMedium,
-                                                  ),
-                                                  const SizedBox(height: 2),
-                                                  Text(
-                                                    'Finalize a venda pelo caixa. A escolha de retirada futura e feita no orcamento.',
-                                                    style: Theme.of(
-                                                      context,
-                                                    ).textTheme.bodySmall,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                                _buildRodapeCheckoutCaixa(
-                                                  context,
-                                                  selecionado: selecionado,
-                                                  subtotalProdutos: subtotalProdutos,
-                                                  freteSelecionado: freteSelecionado,
-                                                  descontoPdvOrcamento:
-                                                      descontoPdvOrcamento,
-                                                  descontoSelecionado:
-                                                      descontoSelecionado,
-                                                  totalComDesconto:
-                                                      totalComDesconto,
-                                                  valorTotalRecebidoCard:
-                                                      valorTotalRecebidoCard,
-                                                  troco: troco,
-                                                  isCompact: isCompact,
-                                                  onFinalizar: () =>
-                                                      _finalizarOrcamento(
-                                                    selecionado,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                        );
-                                        },
-                                    ),
-                                  ),
-                          ),
-                          ),
-                        ],
-                      ),
+                child: _buildCorpoCaixa(context),
               ),
             ),
           ),
@@ -5231,7 +4906,7 @@ class _CaixaPageState extends State<CaixaPage> {
 
     return Row(
       children: [
-        const Text('Caixa'),
+        Text(_etapaCaixa == CaixaEtapa.fiscal ? 'Caixa — Fiscal' : 'Caixa'),
         Expanded(
           child: Center(
             child: trocoCentro ?? const SizedBox.shrink(),
@@ -5311,6 +4986,17 @@ class _CaixaPageState extends State<CaixaPage> {
               : null,
           icon: const Icon(Icons.fact_check_outlined),
           label: const Text('Auditoria'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 34),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: _testarGavetaManual,
+          icon: const Icon(Icons.point_of_sale_outlined),
+          label: const Text('Testar gaveta'),
           style: OutlinedButton.styleFrom(
             minimumSize: const Size(0, 34),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -5432,7 +5118,7 @@ class _CaixaPageState extends State<CaixaPage> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Toque na venda para segunda via, NFC-e ou DANFE.',
+                    'Toque na venda para segunda via, NFC-e, cancelar ou DANFE.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.outline,
                     ),
@@ -5487,14 +5173,6 @@ class _CaixaPageState extends State<CaixaPage> {
           context,
           label: compacto ? 'DESC. PDV' : 'DESCONTO PDV',
           valor: '- ${_formatarMoeda(descontoPdvOrcamento)}',
-        ),
-      if (_mostrarCampoDescontoCaixa)
-        _buildResumoCard(
-          context,
-          label: descontoPdvOrcamento > 0.001
-              ? (compacto ? 'DESC. CX' : 'DESCONTO CAIXA')
-              : (compacto ? 'DESCONTO' : 'DESCONTO'),
-          valor: '- ${_formatarMoeda(descontoSelecionado)}',
         ),
       _buildResumoCard(
         context,
@@ -5556,6 +5234,8 @@ class _CaixaPageState extends State<CaixaPage> {
     required double troco,
     required bool isCompact,
     required VoidCallback onFinalizar,
+    bool incluirCampoDinheiro = true,
+    String labelFinalizar = 'Finalizar venda (Enter)',
   }) {
     return Material(
       elevation: 6,
@@ -5579,21 +5259,18 @@ class _CaixaPageState extends State<CaixaPage> {
               troco: troco,
               compacto: isCompact,
             ),
-            SizedBox(
-              height: _caixaPrecisaValorRecebidoDinheiro(selecionado) ? 10 : 6,
-            ),
-            if (_caixaPrecisaValorRecebidoDinheiro(selecionado))
+            if (incluirCampoDinheiro &&
+                _caixaPrecisaValorRecebidoDinheiro(selecionado)) ...[
+              const SizedBox(height: 10),
               TextField(
                 controller: _valorRecebidoController,
                 focusNode: _valorRecebidoFocusNode,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   isDense: true,
-                  labelText: selecionado.formaPagamento == 'misto'
-                      ? 'Valor recebido em dinheiro (troco sobre especie)'
-                      : 'Valor recebido (dinheiro)',
+                  labelText: 'Valor recebido (dinheiro)',
                   hintText: 'Ex.: 100,00',
                 ),
                 onChanged: (value) {
@@ -5602,6 +5279,7 @@ class _CaixaPageState extends State<CaixaPage> {
                   });
                 },
               ),
+            ],
             SafeArea(
               top: false,
               minimum: EdgeInsets.zero,
@@ -5613,7 +5291,7 @@ class _CaixaPageState extends State<CaixaPage> {
                   child: ElevatedButton.icon(
                     onPressed: onFinalizar,
                     icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Finalizar venda (Enter)'),
+                    label: Text(labelFinalizar),
                   ),
                 ),
               ),
@@ -5667,129 +5345,10 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
-  Widget _buildCampoValorMistoCaixa(BuildContext context, {required int index}) {
-    final theme = Theme.of(context);
-    final meio = _mistoLinhasModelo[index].meio;
-    final parcelas = _mistoLinhasModelo[index].parcelas;
-    final rotulo = '${_rotuloFormaPagamento(meio)}'
-        '${meio == 'cartao_credito' ? ' · ${parcelas}x' : ''}';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          rotulo,
-          textAlign: TextAlign.center,
-          style: theme.textTheme.labelMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 4),
-        TextField(
-          controller: _mistoValorControllers[index],
-          focusNode: index < _mistoValorFocusNodes.length
-              ? _mistoValorFocusNodes[index]
-              : null,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          textAlign: TextAlign.center,
-          decoration: const InputDecoration(
-            isDense: true,
-            labelText: 'Valor',
-            alignLabelWithHint: true,
-          ),
-          onChanged: (_) {
-            setState(() {
-              _sincronizarRecebidoPdVComOrcamento();
-            });
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCardTrocoMistoCaixa(BuildContext context, double troco) {
-    final theme = Theme.of(context);
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.35),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.payments_outlined,
-            size: 18,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            'Troco',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            _formatarMoeda(troco),
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: theme.colorScheme.primary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIndicadorResumoMisto(
-    BuildContext context, {
-    required String rotulo,
-    required String valor,
-    Color? corValor,
-    bool alinharFim = false,
-  }) {
-    final theme = Theme.of(context);
-    final alinhamento =
-        alinharFim ? CrossAxisAlignment.end : CrossAxisAlignment.start;
-    return Column(
-      crossAxisAlignment: alinhamento,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          rotulo,
-          textAlign: alinharFim ? TextAlign.right : TextAlign.left,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 2),
-        Text(
-          valor,
-          textAlign: alinharFim ? TextAlign.right : TextAlign.left,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: corValor,
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildPainelPagamentosMistoNoCaixa(
     BuildContext context, {
     required Venda venda,
     required double totalComDesconto,
-    required bool descontoCaixaAplicado,
   }) {
     if (_mistoValorControllers.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
@@ -5809,29 +5368,28 @@ class _CaixaPageState extends State<CaixaPage> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(
                 Icons.account_balance_wallet_outlined,
-                size: 18,
+                size: 20,
                 color: theme.colorScheme.primary,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Pagamento misto (conferir / ajustar)',
+                  'Pagamento misto',
                   style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
@@ -5852,120 +5410,147 @@ class _CaixaPageState extends State<CaixaPage> {
               ),
             ],
           ),
-          if (descontoCaixaAplicado) ...[
-            const SizedBox(height: 4),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildChipResumoMisto(
+                context,
+                'A receber agora',
+                _formatarMoeda(aPagarAgora),
+              ),
+              _buildChipResumoMisto(
+                context,
+                'Recebido no caixa',
+                _formatarMoeda(recebidoAgora),
+                corValor: pagamentoInsuficiente
+                    ? theme.colorScheme.error
+                    : null,
+              ),
+              if (fiadoOrc > 0.001)
+                _buildChipResumoMisto(
+                  context,
+                  'Fiado (depois)',
+                  _formatarMoeda(fiadoOrc),
+                ),
+              if (!pagamentoInsuficiente && trocoSobreTotal > 0.02)
+                _buildChipResumoMisto(
+                  context,
+                  'Troco',
+                  _formatarMoeda(trocoSobreTotal),
+                  corValor: theme.colorScheme.primary,
+                ),
+            ],
+          ),
+          if (fiadoOrc > 0.001) ...[
+            const SizedBox(height: 10),
             Text(
-              'Valores abaixo ja consideram o desconto aplicado no caixa.',
+              PlanoFiadoCodec.formatarResumoLinhas(planoFiado).isEmpty
+                  ? 'Fiado definido no PDV — nao entra no caixa agora.'
+                  : PlanoFiadoCodec.formatarResumoLinhas(planoFiado),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ],
-          const SizedBox(height: 8),
-          if (fiadoOrc > 0.001) ...[
-            Text(
-              'Fiado ${_formatarMoeda(fiadoOrc)}: a receber depois (definido no PDV). '
-              'Confira abaixo apenas o que entra no caixa agora.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: theme.colorScheme.primary,
-              ),
-            ),
-            if (planoFiado.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                PlanoFiadoCodec.formatarResumoLinhas(planoFiado),
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
-            const SizedBox(height: 8),
-          ],
           if (indicesCaixa.isNotEmpty) ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    for (var j = 0; j < indicesCaixa.length; j++) ...[
-                      if (j > 0) const SizedBox(width: 8),
-                      SizedBox(
-                        width: 128,
-                        child: _buildCampoValorMistoCaixa(
-                          context,
-                          index: indicesCaixa[j],
-                        ),
-                      ),
-                    ],
-                    if (!pagamentoInsuficiente && trocoSobreTotal > 0.02) ...[
-                      const SizedBox(width: 8),
-                      _buildCardTrocoMistoCaixa(context, trocoSobreTotal),
-                    ],
-                  ],
-                ),
-                const Spacer(),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildIndicadorResumoMisto(
-                      context,
-                      rotulo: 'Recebido agora (caixa)',
-                      valor: _formatarMoeda(recebidoAgora),
-                      corValor: pagamentoInsuficiente
-                          ? theme.colorScheme.error
-                          : null,
-                      alinharFim: true,
-                    ),
-                    if (fiadoOrc > 0.001) ...[
-                      const SizedBox(width: 16),
-                      _buildIndicadorResumoMisto(
-                        context,
-                        rotulo: '+ Fiado (a receber)',
-                        valor: _formatarMoeda(fiadoOrc),
-                        alinharFim: true,
-                      ),
-                    ],
-                    const SizedBox(width: 16),
-                    _buildIndicadorResumoMisto(
-                      context,
-                      rotulo: 'Total da venda',
-                      valor: _formatarMoeda(totalComDesconto),
-                      alinharFim: true,
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            const SizedBox(height: 12),
+            for (var j = 0; j < indicesCaixa.length; j++) ...[
+              if (j > 0) const SizedBox(height: 8),
+              _buildLinhaValorMistoCaixa(context, index: indicesCaixa[j]),
+            ],
           ],
           if (pagamentoInsuficiente)
             Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  'O valor recebido agora ainda nao cobre '
-                  '${_formatarMoeda(aPagarAgora)} (total menos fiado).',
-                  textAlign: TextAlign.right,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.error,
-                  ),
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                'Recebido agora menor que ${_formatarMoeda(aPagarAgora)} '
+                '(total menos fiado).',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-          if (fiadoOrc > 0.001) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Fiado nao e recebido no caixa. Confira PIX, cartao e dinheiro; '
-              'o troco considera so o que entra agora.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildChipResumoMisto(
+    BuildContext context,
+    String rotulo,
+    String valor, {
+    Color? corValor,
+  }) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            rotulo,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          Text(
+            valor,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: corValor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLinhaValorMistoCaixa(BuildContext context, {required int index}) {
+    final theme = Theme.of(context);
+    final meio = _mistoLinhasModelo[index].meio;
+    final parcelas = _mistoLinhasModelo[index].parcelas;
+    final rotulo = '${_rotuloFormaPagamento(meio)}'
+        '${meio == 'cartao_credito' ? ' · ${parcelas}x' : ''}';
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 140,
+          child: Text(
+            rotulo,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: TextField(
+            controller: _mistoValorControllers[index],
+            focusNode: index < _mistoValorFocusNodes.length
+                ? _mistoValorFocusNodes[index]
+                : null,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              isDense: true,
+              labelText: 'Valor no caixa',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (_) {
+              setState(() => _sincronizarRecebidoPdVComOrcamento());
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -6001,26 +5586,6 @@ class _CaixaPageState extends State<CaixaPage> {
             ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildAcaoCaixaButton(
-    BuildContext context, {
-    required String label,
-    required VoidCallback? onPressed,
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size(0, 34),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          visualDensity: VisualDensity.compact,
-        ),
-        child: Text(label),
       ),
     );
   }
@@ -6309,18 +5874,6 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
       ),
     );
   }
-}
-
-class _AumentarQuantidadeIntent extends Intent {
-  const _AumentarQuantidadeIntent();
-}
-
-class _DiminuirQuantidadeIntent extends Intent {
-  const _DiminuirQuantidadeIntent();
-}
-
-class _RemoverItemIntent extends Intent {
-  const _RemoverItemIntent();
 }
 
 class _ImportarOrcamentoIntent extends Intent {

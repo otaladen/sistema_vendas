@@ -119,6 +119,7 @@ class VendasPage extends StatelessWidget {
                       appConfigRepository: appConfigRepository,
                       printService: printService,
                       usuarioAtual: u.login,
+                      podeCancelarVendas: podeCancelar,
                       podeLeituraParcialCaixa: UsuarioPermissaoHelper.tem(
                         u,
                         PermissaoUsuario.leituraParcialCaixa,
@@ -241,6 +242,7 @@ class VendasPage extends StatelessWidget {
                               appConfigRepository: appConfigRepository,
                               printService: printService,
                               usuarioAtual: u.login,
+                              podeCancelarVendas: podeCancelar,
                               podeLeituraParcialCaixa: UsuarioPermissaoHelper.tem(
                                 u,
                                 PermissaoUsuario.leituraParcialCaixa,

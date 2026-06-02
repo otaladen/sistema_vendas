@@ -17,6 +17,8 @@ class SyncLocalConfig {
   static const _kLogo = 'sync_local_logo_path';
   static const _kBackupPasta = 'sync_local_backup_automatico_pasta';
   static const _kBackupUltimoMs = 'sync_local_backup_automatico_ultimo_ms';
+  static const _kAbrirGavetaAutomatica = 'sync_local_abrir_gaveta_automatica';
+  static const _kGavetaPino = 'sync_local_gaveta_pino';
 
   static Future<void> migrarLegadoSeNecessario(EmpresaConfig legado) async {
     final prefs = await SharedPreferences.getInstance();
@@ -56,6 +58,13 @@ class SyncLocalConfig {
           prefs.getString(_kBackupPasta) ?? base.backupAutomaticoPasta,
       ultimoBackupAutomaticoMs:
           prefs.getInt(_kBackupUltimoMs) ?? base.ultimoBackupAutomaticoMs,
+      abrirGavetaAutomatica:
+          prefs.getBool(_kAbrirGavetaAutomatica) ?? base.abrirGavetaAutomatica,
+      gavetaPino: () {
+        final p = prefs.getInt(_kGavetaPino);
+        if (p == null) return base.gavetaPino;
+        return p.clamp(0, 1);
+      }(),
     );
   }
 
@@ -79,6 +88,8 @@ class SyncLocalConfig {
           ? 0
           : config.ultimoBackupAutomaticoMs,
     );
+    await prefs.setBool(_kAbrirGavetaAutomatica, config.abrirGavetaAutomatica);
+    await prefs.setInt(_kGavetaPino, config.gavetaPino.clamp(0, 1));
     await prefs.setBool(_kMigrado, true);
   }
 }

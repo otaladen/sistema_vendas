@@ -43,6 +43,12 @@ class EmpresaConfig {
     this.alertasProativosWhatsappAtivos = false,
     this.whatsappDonoNumero = '',
     this.alertasProativosIntervaloMinutos = 120,
+
+    /// Abre gaveta (ESC/POS) apos finalizar pagamento no caixa (config local do PC).
+    this.abrirGavetaAutomatica = true,
+
+    /// Pino da gaveta no comando ESC p: 0 ou 1 (Epson/Bematech/Elgin).
+    this.gavetaPino = 0,
   });
 
   final String nomeLoja;
@@ -114,6 +120,12 @@ class EmpresaConfig {
   final String whatsappDonoNumero;
   final int alertasProativosIntervaloMinutos;
 
+  /// Pulso automatico na gaveta ao confirmar pagamento no caixa (somente Windows).
+  final bool abrirGavetaAutomatica;
+
+  /// Conector da gaveta na impressora termica (0 = pin 2, 1 = pin 5 — padrao Epson).
+  final int gavetaPino;
+
   LayoutImpressaoEmpresa get layoutImpressao =>
       LayoutImpressaoEmpresa.fromJsonString(layoutImpressaoJson);
 
@@ -153,6 +165,8 @@ class EmpresaConfig {
     bool? alertasProativosWhatsappAtivos,
     String? whatsappDonoNumero,
     int? alertasProativosIntervaloMinutos,
+    bool? abrirGavetaAutomatica,
+    int? gavetaPino,
   }) {
     return EmpresaConfig(
       nomeLoja: nomeLoja ?? this.nomeLoja,
@@ -208,6 +222,9 @@ class EmpresaConfig {
       whatsappDonoNumero: whatsappDonoNumero ?? this.whatsappDonoNumero,
       alertasProativosIntervaloMinutos: alertasProativosIntervaloMinutos ??
           this.alertasProativosIntervaloMinutos,
+      abrirGavetaAutomatica:
+          abrirGavetaAutomatica ?? this.abrirGavetaAutomatica,
+      gavetaPino: gavetaPino ?? this.gavetaPino,
     );
   }
 }

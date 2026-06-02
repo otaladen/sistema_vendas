@@ -27,9 +27,9 @@ import 'clientes_page.dart';
 import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
 import '../services/venda_fiscal_service.dart';
+import 'vendas/cancelar_venda_ui.dart';
 import 'fiscal/abrir_documento_fiscal.dart';
 import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
-import 'fiscal/widgets/nfe_historico_acoes_dialog.dart';
 import 'registrar_devolucao_troca_page.dart';
 
 /// Lista vendas já finalizadas no Caixa (`status == finalizada`), com filtros e busca.
@@ -959,229 +959,19 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     );
   }
 
-  Future<(bool autorizado, String usuarioAutorizador)>
-  _autorizarCancelamento() async {
-    if (widget.podeCancelarVendas) {
-      return (true, widget.usuarioAtual);
-    }
-    final loginController = TextEditingController();
-    final senhaController = TextEditingController();
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Autorizacao para cancelamento'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Informe usuario com permissao (admin/financeiro/manutencao de caixa).',
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: loginController,
-                  decoration: const InputDecoration(labelText: 'Login'),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: senhaController,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Senha'),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Autorizar'),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmar != true) {
-      loginController.dispose();
-      senhaController.dispose();
-      return (false, '');
-    }
-    final login = loginController.text.trim();
-    final senha = senhaController.text.trim();
-    loginController.dispose();
-    senhaController.dispose();
-    final usuario = await _usuarioRepository.autenticar(login, senha);
-    final autorizado = usuario != null &&
-        usuario.ativo &&
-        (usuario.admin ||
-            usuario.podeFinanceiro ||
-            usuario.podeManutencaoAuditoriaCaixa);
-    if (!autorizado) {
-      return (false, '');
-    }
-    return (true, usuario.login);
-  }
-
   Future<void> _cancelarVenda(Venda venda) async {
-    if (venda.cancelada) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Venda ja esta cancelada.')),
-      );
-      return;
-    }
-    final autorizado = await _autorizarCancelamento();
-    if (!mounted || !autorizado.$1) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cancelamento nao autorizado.')),
-        );
-      }
-      return;
-    }
-
-    final vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? venda;
-    final fiscalSvc = VendaFiscalService(
+    final resultado = await CancelarVendaUi.executar(
+      context: context,
       vendaRepository: widget.vendaRepository,
       clienteRepository: widget.clienteRepository,
+      usuarioRepository: _usuarioRepository,
+      usuarioAtual: widget.usuarioAtual,
+      podeCancelarVendas: widget.podeCancelarVendas,
+      venda: venda,
     );
-    final exigeFiscal = fiscalSvc.vendaExigeCancelamentoFiscal(vendaAtual);
-
-    String justificativaFiscal = '';
-    if (exigeFiscal) {
-      justificativaFiscal = await showNfeCancelamentoDialog(context) ?? '';
-      if (!mounted || justificativaFiscal.isEmpty) return;
-    }
-
-    final motivoController = TextEditingController();
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Confirmar cancelamento'),
-          content: SizedBox(
-            width: 460,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Cancelar ${_rotuloVendaUsuario(vendaAtual)}?',
-                ),
-                if (exigeFiscal) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    vendaAtual.nfceAutorizadaAtiva && vendaAtual.nfe55Autorizada
-                        ? 'A NFC-e e a NF-e serao canceladas na SEFAZ antes '
-                            'de estornar estoque e fiado.'
-                        : vendaAtual.nfceAutorizadaAtiva
-                            ? 'A NFC-e sera cancelada na SEFAZ antes de estornar '
-                                'estoque e fiado.'
-                            : 'A NF-e sera cancelada na SEFAZ antes de estornar '
-                                'estoque e fiado.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                TextField(
-                  controller: motivoController,
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                    labelText: exigeFiscal
-                        ? 'Observacao interna (opcional)'
-                        : 'Motivo (opcional)',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Voltar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Confirmar cancelamento'),
-            ),
-          ],
-        );
-      },
-    );
-    final motivoExtra = motivoController.text.trim();
-    motivoController.dispose();
-    if (confirmar != true) return;
-
-    if (exigeFiscal) {
-      if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const AlertDialog(
-          content: Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Expanded(child: Text('Cancelando documento fiscal na SEFAZ...')),
-            ],
-          ),
-        ),
-      );
-
-      final fiscalRes = await fiscalSvc.cancelarDocumentosFiscaisVenda(
-        venda: vendaAtual,
-        justificativa: justificativaFiscal,
-      );
-
-      if (mounted) Navigator.of(context).pop();
-
-      if (!fiscalRes.sucesso) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              fiscalRes.mensagem.isNotEmpty
-                  ? fiscalRes.mensagem
-                  : 'Nao foi possivel cancelar o documento fiscal.',
-            ),
-          ),
-        );
-        return;
-      }
-    }
-
-    final motivo = [
-      if (justificativaFiscal.isNotEmpty) justificativaFiscal,
-      if (motivoExtra.isNotEmpty) motivoExtra,
-    ].join(' | ');
-
-    try {
-      widget.vendaRepository.cancelarVenda(
-        vendaAtual.id,
-        motivo: motivo,
-        canceladaPor: autorizado.$2,
-      );
+    if (!mounted) return;
+    if (resultado == CancelarVendaUiResultado.sucesso) {
       _pesquisar();
-      if (!mounted) return;
-      final sufixoMotivo = motivo.isEmpty ? '' : ' Motivo: $motivo';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${_rotuloVendaUsuario(vendaAtual)} cancelada por ${autorizado.$2}.$sufixoMotivo',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel cancelar venda: $e')),
-      );
     }
   }
 

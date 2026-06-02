@@ -1724,6 +1724,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                             MaterialPageRoute<void>(
                               builder: (_) => ConfigImpressoraPage(
                                 printService: widget.printService,
+                                appConfigRepository: widget.appConfigRepository,
                               ),
                             ),
                           );
