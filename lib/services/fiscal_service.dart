@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/fiscal_config.dart';
+import '../domain/produto_nome_exibicao.dart';
 import '../domain/fiscal/fiscal_item_nfce.dart';
 import '../domain/fiscal/fiscal_pedido_nfce.dart';
 import '../domain/estoque/tipo_movimento_estoque.dart';
@@ -27,10 +28,12 @@ class FiscalItemOrigem {
   final String? descricaoOverride;
 
   double get subtotal => quantidade * precoUnitario;
-  String get descricao =>
-      (descricaoOverride ?? produto.nome).trim().isEmpty
-          ? 'Produto'
-          : (descricaoOverride ?? produto.nome).trim();
+  String get descricao {
+    final base = descricaoOverride?.trim();
+    if (base != null && base.isNotEmpty) return base;
+    final imp = ProdutoNomeExibicao.paraImpressao(produto);
+    return imp.isEmpty ? 'Produto' : imp;
+  }
 }
 
 /// Servico de integracao fiscal (NFC-e) — estrutura pronta para credenciais do contador.
@@ -121,7 +124,7 @@ class FiscalService {
           produto: produto,
           quantidade: item.quantidade,
           precoUnitario: item.precoUnitario,
-          descricaoOverride: item.nomeProduto,
+          descricaoOverride: ProdutoNomeExibicao.paraImpressaoItem(item),
         ),
       );
     }
@@ -275,7 +278,7 @@ class FiscalService {
           produto: p,
           quantidade: item.quantidade,
           precoUnitario: item.precoUnitario,
-          descricaoOverride: item.nomeProduto,
+          descricaoOverride: ProdutoNomeExibicao.paraImpressaoItem(item),
         ),
       );
     }

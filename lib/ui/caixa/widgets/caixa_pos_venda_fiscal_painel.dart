@@ -17,6 +17,7 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
     required this.formatarMoeda,
     required this.exigeNfe55,
     required this.jaTemNfe55,
+    required this.podeConcluir,
     required this.processando,
     required this.onCupomNaoFiscal,
     required this.onEmitirNfce,
@@ -32,6 +33,7 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
   final String Function(double) formatarMoeda;
   final bool exigeNfe55;
   final bool jaTemNfe55;
+  final bool podeConcluir;
   final bool processando;
   final VoidCallback onCupomNaoFiscal;
   final VoidCallback onEmitirNfce;
@@ -48,20 +50,24 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
     final scheme = theme.colorScheme;
     final fiscalInfo = CaixaFiscalStatusHelper.deVenda(venda, orcamentoPendente: false);
 
+    final atalhos = <ShortcutActivator, VoidCallback>{
+      const SingleActivator(LogicalKeyboardKey.digit2): onCupomNaoFiscal,
+      const SingleActivator(LogicalKeyboardKey.numpad2): onCupomNaoFiscal,
+      const SingleActivator(LogicalKeyboardKey.digit3): onEmitirNfce,
+      const SingleActivator(LogicalKeyboardKey.numpad3): onEmitirNfce,
+      const SingleActivator(LogicalKeyboardKey.digit4): onEmitirNfe55,
+      const SingleActivator(LogicalKeyboardKey.numpad4): onEmitirNfe55,
+      const SingleActivator(LogicalKeyboardKey.enter): onEmitirNfce,
+      const SingleActivator(LogicalKeyboardKey.numpadEnter): onEmitirNfce,
+    };
+    if (podeConcluir) {
+      atalhos[const SingleActivator(LogicalKeyboardKey.digit1)] = onConcluir;
+      atalhos[const SingleActivator(LogicalKeyboardKey.numpad1)] = onConcluir;
+      atalhos[const SingleActivator(LogicalKeyboardKey.escape)] = onConcluir;
+    }
+
     return CallbackShortcuts(
-      bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.digit1): onConcluir,
-        const SingleActivator(LogicalKeyboardKey.numpad1): onConcluir,
-        const SingleActivator(LogicalKeyboardKey.digit2): onCupomNaoFiscal,
-        const SingleActivator(LogicalKeyboardKey.numpad2): onCupomNaoFiscal,
-        const SingleActivator(LogicalKeyboardKey.digit3): onEmitirNfce,
-        const SingleActivator(LogicalKeyboardKey.numpad3): onEmitirNfce,
-        const SingleActivator(LogicalKeyboardKey.digit4): onEmitirNfe55,
-        const SingleActivator(LogicalKeyboardKey.numpad4): onEmitirNfe55,
-        const SingleActivator(LogicalKeyboardKey.enter): onEmitirNfce,
-        const SingleActivator(LogicalKeyboardKey.numpadEnter): onEmitirNfce,
-        const SingleActivator(LogicalKeyboardKey.escape): onConcluir,
-      },
+      bindings: atalhos,
       child: Focus(
         autofocus: true,
         child: Column(
@@ -149,8 +155,37 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+            if (!podeConcluir) ...[
+              Material(
+                color: scheme.errorContainer.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, color: scheme.error),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Obrigatorio registrar documento: use tecla 2, 3 ou 4. '
+                          'So depois disso e possivel concluir (1 / Esc).',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onErrorContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             Text(
-              'Atalhos: Enter/3 = NFC-e · 2 = cupom · 4 = NF-e 55 · 1/Esc = concluir',
+              podeConcluir
+                  ? 'Atalhos: Enter/3 = NFC-e · 2 = cupom · 4 = NF-e 55 · 1/Esc = concluir'
+                  : 'Atalhos: Enter/3 = NFC-e · 2 = cupom · 4 = NF-e 55',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -172,9 +207,13 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
             SizedBox(
               height: 48,
               child: OutlinedButton.icon(
-                onPressed: processando ? null : onConcluir,
+                onPressed: (processando || !podeConcluir) ? null : onConcluir,
                 icon: const Icon(Icons.playlist_add_check),
-                label: const Text('Concluir e voltar ao inicio (Esc · 1)'),
+                label: Text(
+                  podeConcluir
+                      ? 'Concluir e voltar ao inicio (Esc · 1)'
+                      : 'Concluir (registre 2, 3 ou 4 antes)',
+                ),
               ),
             ),
           ],

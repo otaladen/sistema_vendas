@@ -9,6 +9,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../domain/entrega_venda_helper.dart';
+import '../domain/quantidade_venda_util.dart';
+import '../domain/troca_com_nota_pdv_intent.dart';
 import '../domain/limite_credito_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
@@ -16,6 +18,7 @@ import '../domain/usuario_permissao_helper.dart';
 import '../domain/permissao_usuario.dart';
 import '../model/usuario_sistema.dart';
 import '../domain/produto_embalagem.dart';
+import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../data/app_config_repository.dart';
 import '../data/cliente_repository.dart';
@@ -52,6 +55,7 @@ import 'promocao_margem_autorizacao.dart';
 import 'widgets/pdv_carrinho_linha_compacta.dart';
 import 'widgets/pdv_tipo_entrega_item.dart';
 import 'widgets/plano_fiado_pdv_panel.dart';
+import 'widgets/troca_com_nota_pdv_banner.dart';
 
 class _LinhaPagamentoMistoPdV {
   _LinhaPagamentoMistoPdV({
@@ -77,6 +81,7 @@ class PontoDeVendaPage extends StatefulWidget {
     required this.appConfigRepository,
     required this.printService,
     required this.usuarioLogado,
+    this.intentTrocaComNota,
   });
 
   final ProdutoRepository produtoRepository;
@@ -86,6 +91,8 @@ class PontoDeVendaPage extends StatefulWidget {
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
   final UsuarioSistema usuarioLogado;
+  /// Apos devolucao na listagem: cliente + credito sugerido no desconto (F3).
+  final TrocaComNotaPdvIntent? intentTrocaComNota;
 
   @override
   State<PontoDeVendaPage> createState() => _PontoDeVendaPageState();
@@ -342,6 +349,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   /// Ultimo orcamento enviado ao caixa (exibido no painel apos salvar).
   int? _ultimoOrcamentoSalvoNumero;
   bool _mostrarAjudaAtalhos = false;
+  bool _trocaComNotaBannerVisivel = true;
+  bool _trocaComNotaIntentAplicado = false;
+  bool _trocaComNotaDescontoAplicado = false;
+  double? _trocaComNotaCreditoAplicadoReais;
 
   /// Agrupa varios KeyDown do F7 no mesmo ciclo (Windows); senao executa dois passos de uma vez.
   int _checkoutF7BurstId = 0;
@@ -444,6 +455,78 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       _maxDescontoPercentualPdv = widget.usuarioLogado.tetoDescontoPercentualPdv(
         config.maxDescontoPercentualPdv,
       );
+    });
+    await _aplicarIntentTrocaComNotaSeNecessario();
+  }
+
+  Future<void> _aplicarIntentTrocaComNotaSeNecessario() async {
+    final intent = widget.intentTrocaComNota;
+    if (intent == null || _trocaComNotaIntentAplicado || !mounted) return;
+
+    final cliente = widget.clienteRepository.obterPorId(intent.clienteId);
+    if (cliente == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cliente id ${intent.clienteId} nao encontrado. Selecione o cliente manualmente.',
+          ),
+        ),
+      );
+      setState(() => _trocaComNotaIntentAplicado = true);
+      return;
+    }
+
+    await _selecionarClienteNoOrcamento(cliente.id);
+    if (!mounted) return;
+
+    final vendedorId = intent.vendedorId;
+    if (vendedorId != null &&
+        vendedorId > 0 &&
+        _vendedoresAtivos.any((v) => v.id == vendedorId)) {
+      setState(() => _vendedorSelecionadoId = vendedorId);
+    }
+
+    setState(() => _trocaComNotaIntentAplicado = true);
+
+    if (!mounted) return;
+    final moeda = NumberFormat('#,##0.00', 'pt_BR');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Troca com nota: cliente ${cliente.nomeRazao}. '
+          'Credito sugerido R\$ ${moeda.format(intent.creditoDevolucaoReais)}. '
+          'Inclua os produtos novos no carrinho.',
+        ),
+        duration: const Duration(seconds: 5),
+      ),
+    );
+    _aplicarDescontoCreditoTrocaComNotaSePossivel();
+  }
+
+  void _aplicarDescontoCreditoTrocaComNotaSePossivel() {
+    final intent = widget.intentTrocaComNota;
+    if (intent == null ||
+        _trocaComNotaDescontoAplicado ||
+        intent.creditoDevolucaoReais <= 0.004) {
+      return;
+    }
+    if (_maxDescontoPercentualPdv <= 0) return;
+    final sub = _subtotalElegivelDescontoPdV;
+    if (sub <= 0.004) return;
+
+    final maxReais = _valorMaximoDescontoReaisPdV();
+    final aplicar = intent.creditoDevolucaoReais
+        .clamp(0.0, maxReais)
+        .clamp(0.0, sub);
+    if (aplicar <= 0.004) return;
+
+    setState(() {
+      _tipoDescontoPdV = 'valor';
+      _descontoPdVController.text =
+          aplicar.toStringAsFixed(2).replaceAll('.', ',');
+      _trocaComNotaDescontoAplicado = true;
+      _trocaComNotaCreditoAplicadoReais = aplicar;
     });
   }
 
@@ -586,7 +669,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       final qtd = comando.quantidadeDireta ?? 1;
       await _adicionarComQuantidade(
         produto,
-        qtd,
+        qtd.toDouble(),
         precoTipo: _precoListaAtivo,
       );
       _voltarFocoParaPesquisa();
@@ -610,7 +693,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         if (comando.adicaoDireta || comando.quantidadeDireta != null) {
           await _adicionarComQuantidade(
             porBarras,
-            qtd,
+            qtd.toDouble(),
             precoTipo: _precoListaAtivo,
           );
         } else {
@@ -671,7 +754,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     if (result.quantidadeDireta != null) {
       await _adicionarComQuantidade(
         result.produto,
-        result.quantidadeDireta!,
+        result.quantidadeDireta!.toDouble(),
         precoTipo: result.precoListaAtivo,
       );
       return;
@@ -879,19 +962,42 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   Future<void> _adicionarComQuantidade(
-    Produto produto,
-    int quantidade, {
+    Produto produtoIn,
+    double quantidadeVenda, {
     String? precoTipo,
     String? tipoEntregaItem,
     bool quantidadeEmUnidadeCompra = false,
   }) async {
-    if (quantidade <= 0) return;
+    if (quantidadeVenda <= 0) return;
+    final produto = _produtoAtualizadoParaPdv(produtoIn);
+    final fracionada = produto.permiteQuantidadeFracionada &&
+        !quantidadeEmUnidadeCompra;
+    if (!fracionada && quantidadeVenda != quantidadeVenda.roundToDouble()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${produto.nome}: quantidade inteira. Para vender com decimais '
+            '(ex.: 4,50), ative "Permite venda fracionada" no cadastro do produto.',
+          ),
+        ),
+      );
+      return;
+    }
+    final qArmazenada = QuantidadeVendaUtil.paraArmazenamento(
+      quantidadeVenda,
+      fracionada: fracionada,
+    );
+    if (qArmazenada <= 0) return;
     final precoLista = precoTipo ?? _precoListaAtivo;
     final emEmbalagem = quantidadeEmUnidadeCompra &&
         produto.pdvPodeVenderEmUnidadeCompra;
     final qEstoque = ProdutoEmbalagem.quantidadeVendaParaEstoque(
       produto: produto,
-      quantidadeDigitada: quantidade,
+      quantidadeDigitada: QuantidadeVendaUtil.paraEstoqueInteiro(
+        produto,
+        qArmazenada,
+      ),
       emUnidadeCompra: emEmbalagem,
     );
     if (qEstoque <= 0) return;
@@ -980,13 +1086,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
     setState(() {
       if (idxExistente != null) {
-        _carrinho[idxExistente].quantidade += quantidade;
+        _carrinho[idxExistente].quantidade += qArmazenada;
         _indiceLinhaCarrinho = idxExistente;
       } else {
         _carrinho.add(
           _OrcamentoItemDraft(
             produto: produto,
-            quantidade: quantidade,
+            quantidade: qArmazenada,
             precoTipo: preco,
             precoUnitario: unit,
             tipoEntregaItem: tipoNovo,
@@ -999,6 +1105,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       }
       _recalcularPromocoesCarrinho();
     });
+    _aplicarDescontoCreditoTrocaComNotaSePossivel();
     _registrarProdutoRecente(produto);
     _voltarFocoParaPesquisa();
   }
@@ -1116,7 +1223,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         continue;
       }
       final q = it.quantidade * mult;
-      await _adicionarComQuantidade(p, q);
+      await _adicionarComQuantidade(p, q.toDouble());
     }
 
     if (!mounted) return;
@@ -1145,15 +1252,25 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
   }
 
-  void _alterarQuantidadeCarrinho(int index, int delta) {
-    if (!_permitirVendaSemEstoque && delta > 0) {
+  int _passoQuantidadeCarrinho(Produto produto) {
+    if (produto.permiteQuantidadeFracionada) {
+      return QuantidadeVendaUtil.escalaFracionada ~/ 10;
+    }
+    return 1;
+  }
+
+  void _alterarQuantidadeCarrinho(int index, int deltaArmazenado) {
+    if (!_permitirVendaSemEstoque && deltaArmazenado > 0) {
       final item = _carrinho[index];
       final fresh =
           widget.produtoRepository.obterPorId(item.produto.id) ?? item.produto;
       final disp = fresh.estoqueLivreParaVenda;
       final qNova = ProdutoEmbalagem.quantidadeVendaParaEstoque(
         produto: item.produto,
-        quantidadeDigitada: item.quantidade + delta,
+        quantidadeDigitada: QuantidadeVendaUtil.paraEstoqueInteiro(
+          item.produto,
+          item.quantidade + deltaArmazenado,
+        ),
         emUnidadeCompra: item.quantidadeEmUnidadeCompra,
       );
       if (qNova > disp) {
@@ -1170,7 +1287,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
     setState(() {
       final item = _carrinho[index];
-      final nova = item.quantidade + delta;
+      final nova = item.quantidade + deltaArmazenado;
       if (nova <= 0) {
         _carrinho.removeAt(index);
         _ajustarIndiceAposRemoverCarrinho(index);
@@ -1231,11 +1348,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       return KeyEventResult.handled;
     }
     if (!ctrl && event.logicalKey == LogicalKeyboardKey.numpadAdd) {
-      _alterarQuantidadeCarrinho(idx, 1);
+      _alterarQuantidadeCarrinho(
+        idx,
+        _passoQuantidadeCarrinho(_carrinho[idx].produto),
+      );
       return KeyEventResult.handled;
     }
     if (!ctrl && event.logicalKey == LogicalKeyboardKey.numpadSubtract) {
-      _alterarQuantidadeCarrinho(idx, -1);
+      _alterarQuantidadeCarrinho(
+        idx,
+        -_passoQuantidadeCarrinho(_carrinho[idx].produto),
+      );
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.space ||
@@ -2480,15 +2603,20 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
   }
 
+  Produto _produtoAtualizadoParaPdv(Produto produto) =>
+      widget.produtoRepository.obterPorId(produto.id) ?? produto;
+
   Future<void> _adicionarAoOrcamento(Produto produto) async {
+    final produtoAtual = _produtoAtualizadoParaPdv(produto);
     final result = await showDialog<_AdicionarOrcamentoResult>(
       context: context,
       builder: (context) => _AdicionarAoOrcamentoDialog(
-        produto: produto,
+        produtoRepository: widget.produtoRepository,
+        produto: produtoAtual,
         precoTipoInicial: _precoListaAtivo,
         tipoEntregaInicial: _tipoEntregaSelecionada,
-        precoUnitarioDe: (t) =>
-            _resolverPrecoProduto(produto, precoTipoLista: t).precoFinal,
+        precoUnitarioDe: (p, t) =>
+            _resolverPrecoProduto(p, precoTipoLista: t).precoFinal,
         formatarMoeda: _formatarMoeda,
       ),
     );
@@ -2499,7 +2627,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     if (!mounted) {
       return;
     }
-    if (result.quantidade <= 0) {
+    if (result.quantidadeVenda <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Quantidade deve ser maior que zero.')),
       );
@@ -2507,8 +2635,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
 
     await _adicionarComQuantidade(
-      produto,
-      result.quantidade,
+      _produtoAtualizadoParaPdv(produto),
+      result.quantidadeVenda,
       precoTipo: result.precoTipo,
       tipoEntregaItem: result.tipoEntregaItem,
       quantidadeEmUnidadeCompra: result.quantidadeEmUnidadeCompra,
@@ -4183,7 +4311,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           .map(
             (item) => ItemVendaInput(
               produtoId: item.produto.id,
-              quantidade: item.quantidadeEstoque,
+              quantidade: item.quantidade,
               precoUnitario: item.precoUnitario,
               precoTipo: item.precoTipo,
               tipoEntregaItem: item.tipoEntregaItem,
@@ -4868,7 +4996,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               ...venda.itens.map(
                 (item) => CupomPdfLayout.itemVenda(
                   layout: layout,
-                  nomeProduto: item.nomeProduto,
+                  nomeProduto: ProdutoNomeExibicao.paraImpressaoItem(item),
                   quantidade: item.quantidade,
                   precoUnitario: item.precoUnitario,
                   subtotal: item.subtotal,
@@ -5370,6 +5498,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (widget.intentTrocaComNota != null && _trocaComNotaBannerVisivel)
+                  TrocaComNotaPdvBanner(
+                    intent: widget.intentTrocaComNota!,
+                    creditoAplicadoNoDesconto: _trocaComNotaCreditoAplicadoReais,
+                    maxDescontoPermitidoReais: _valorMaximoDescontoReaisPdV(),
+                    onFechar: () {
+                      setState(() => _trocaComNotaBannerVisivel = false);
+                    },
+                  ),
                 FocusTraversalOrder(
                   order: const NumericFocusOrder(5),
                   child: _PdvHeaderPesquisa(
@@ -6110,12 +6247,12 @@ class _PdvCheckoutTotaisBase extends StatelessWidget {
 
 class _AdicionarOrcamentoResult {
   const _AdicionarOrcamentoResult({
-    required this.quantidade,
+    required this.quantidadeVenda,
     required this.precoTipo,
     required this.tipoEntregaItem,
     this.quantidadeEmUnidadeCompra = false,
   });
-  final int quantidade;
+  final double quantidadeVenda;
   final String precoTipo;
   final String tipoEntregaItem;
   final bool quantidadeEmUnidadeCompra;
@@ -6466,6 +6603,7 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
 
 class _AdicionarAoOrcamentoDialog extends StatefulWidget {
   const _AdicionarAoOrcamentoDialog({
+    required this.produtoRepository,
     required this.produto,
     required this.precoTipoInicial,
     required this.tipoEntregaInicial,
@@ -6473,10 +6611,11 @@ class _AdicionarAoOrcamentoDialog extends StatefulWidget {
     required this.formatarMoeda,
   });
 
+  final ProdutoRepository produtoRepository;
   final Produto produto;
   final String precoTipoInicial;
   final String tipoEntregaInicial;
-  final double Function(String precoTipo) precoUnitarioDe;
+  final double Function(Produto produto, String precoTipo) precoUnitarioDe;
   final String Function(double) formatarMoeda;
 
   @override
@@ -6486,15 +6625,25 @@ class _AdicionarAoOrcamentoDialog extends StatefulWidget {
 
 class _AdicionarAoOrcamentoDialogState
     extends State<_AdicionarAoOrcamentoDialog> {
+  late Produto _produto;
   late String _precoTipo;
   late String _tipoEntrega;
   late bool _quantidadeEmUnidadeCompra;
   late final TextEditingController _qtdController;
   final _qtdFocus = FocusNode(debugLabel: 'pdvDialogQtd');
 
+  void _recarregarProdutoDoBanco() {
+    final fresh = widget.produtoRepository.obterPorId(widget.produto.id);
+    if (fresh != null) {
+      _produto = fresh;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _produto = widget.produto;
+    _recarregarProdutoDoBanco();
     _precoTipo = widget.precoTipoInicial;
     _tipoEntrega = EntregaVendaHelper.normalizarTipoItem(
       widget.tipoEntregaInicial,
@@ -6520,16 +6669,42 @@ class _AdicionarAoOrcamentoDialogState
   }
 
   void _confirmar() {
-    final q = int.tryParse(_qtdController.text.trim());
-    if (q == null || q <= 0) {
+    _recarregarProdutoDoBanco();
+    final fracionada = _produto.permiteQuantidadeFracionada &&
+        !_quantidadeEmUnidadeCompra;
+    final textoQtd = _qtdController.text;
+    final q = QuantidadeVendaUtil.parseEntradaPdv(
+      textoQtd,
+      fracionada: fracionada,
+    );
+    if (q == null) {
+      final pareceDecimal =
+          QuantidadeVendaUtil.textoPareceQuantidadeDecimal(textoQtd);
+      final comoFracionada = QuantidadeVendaUtil.parseEntradaPdv(
+        textoQtd,
+        fracionada: true,
+      );
+      String msg;
+      if (pareceDecimal &&
+          comoFracionada != null &&
+          !_produto.permiteQuantidadeFracionada) {
+        msg =
+            'Este produto ainda nao esta com "Permite venda fracionada" no PDV. '
+            'Salve no cadastro, feche este dialogo, pesquise o produto de novo '
+            'e tente outra vez.';
+      } else if (fracionada) {
+        msg = 'Informe uma quantidade maior que zero (ex.: 4,50 ou 1.5).';
+      } else {
+        msg = 'Informe uma quantidade inteira maior que zero.';
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Informe uma quantidade maior que zero.')),
+        SnackBar(content: Text(msg)),
       );
       return;
     }
     Navigator.of(context).pop(
       _AdicionarOrcamentoResult(
-        quantidade: q,
+        quantidadeVenda: q,
         precoTipo: _precoTipo,
         tipoEntregaItem: _tipoEntrega,
         quantidadeEmUnidadeCompra: _quantidadeEmUnidadeCompra,
@@ -6537,37 +6712,63 @@ class _AdicionarAoOrcamentoDialogState
     );
   }
 
+  String _previewSubtotalLinha(double precoUnit, bool fracionada) {
+    final q = QuantidadeVendaUtil.parseEntradaPdv(
+      _qtdController.text,
+      fracionada: fracionada,
+    );
+    if (q == null) return '';
+    return ' · Subtotal: ${widget.formatarMoeda(q * precoUnit)}';
+  }
+
   String? _previewConversaoEstoque() {
     if (!_quantidadeEmUnidadeCompra ||
-        !widget.produto.pdvPodeVenderEmUnidadeCompra) {
+        !_produto.pdvPodeVenderEmUnidadeCompra) {
       return null;
     }
     final q = int.tryParse(_qtdController.text.trim()) ?? 0;
     if (q <= 0) return null;
     final qEst = ProdutoEmbalagem.quantidadeVendaParaEstoque(
-      produto: widget.produto,
+      produto: _produto,
       quantidadeDigitada: q,
       emUnidadeCompra: true,
     );
-    final uVenda = ProdutoEmbalagem.normalizarUnidade(widget.produto.unidade);
+    final uVenda = ProdutoEmbalagem.normalizarUnidade(_produto.unidade);
     return 'Baixa de estoque: $qEst $uVenda';
   }
 
   @override
   Widget build(BuildContext context) {
-    final precoUnit = widget.precoUnitarioDe(_precoTipo);
-    final podeEmbalagem = widget.produto.pdvPodeVenderEmUnidadeCompra;
+    final precoUnit = widget.precoUnitarioDe(_produto, _precoTipo);
+    final fracionada =
+        _produto.permiteQuantidadeFracionada && !_quantidadeEmUnidadeCompra;
+    final podeEmbalagem = _produto.pdvPodeVenderEmUnidadeCompra;
     final uCompra =
-        ProdutoEmbalagem.normalizarUnidade(widget.produto.unidadeCompraEfetiva);
-    final uVenda = ProdutoEmbalagem.normalizarUnidade(widget.produto.unidade);
+        ProdutoEmbalagem.normalizarUnidade(_produto.unidadeCompraEfetiva);
+    final uVenda = ProdutoEmbalagem.normalizarUnidade(_produto.unidade);
     final previewEstoque = _previewConversaoEstoque();
     return AlertDialog(
-      title: Text('Adicionar: ${widget.produto.nome}'),
+      title: Text('Adicionar: ${_produto.nome}'),
       content: AdaptiveDialogPane(
         desktopWidth: 380,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (fracionada)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Chip(
+                    avatar: const Icon(Icons.straighten, size: 18),
+                    label: Text(
+                      'Venda fracionada ($uVenda) — use 4,50 ou 4.5',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
             DropdownButtonFormField<String>(
               key: ValueKey(_precoTipo),
               initialValue: _precoTipo,
@@ -6613,11 +6814,11 @@ class _AdicionarAoOrcamentoDialogState
                   setState(() => _quantidadeEmUnidadeCompra = s.first);
                 },
               ),
-              if (widget.produto.rotuloConversaoEmbalagem.isNotEmpty)
+              if (_produto.rotuloConversaoEmbalagem.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
-                    widget.produto.rotuloConversaoEmbalagem,
+                    _produto.rotuloConversaoEmbalagem,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -6633,9 +6834,15 @@ class _AdicionarAoOrcamentoDialogState
                 labelText: _quantidadeEmUnidadeCompra && podeEmbalagem
                     ? 'Quantidade ($uCompra)'
                     : 'Quantidade ($uVenda)',
-                helperText: previewEstoque,
+                helperText: previewEstoque ??
+                    (fracionada
+                        ? 'Permite decimais (ex.: 4,50 ou 4.50).'
+                        : 'Somente quantidade inteira. Para vender fracionado, '
+                            'ative "Permite venda fracionada" no cadastro do produto.'),
               ),
-              keyboardType: TextInputType.number,
+              keyboardType: fracionada
+                  ? const TextInputType.numberWithOptions(decimal: true)
+                  : TextInputType.number,
               textInputAction: TextInputAction.done,
               onChanged: (_) => setState(() {}),
               onFieldSubmitted: (_) => _confirmar(),
@@ -6644,7 +6851,8 @@ class _AdicionarAoOrcamentoDialogState
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                'Preco por $uVenda: ${widget.formatarMoeda(precoUnit)}',
+                'Preco por $uVenda: ${widget.formatarMoeda(precoUnit)}'
+                '${_previewSubtotalLinha(precoUnit, fracionada)}',
               ),
             ),
           ],
@@ -6730,7 +6938,10 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
   @override
   int get quantidadeEstoque => ProdutoEmbalagem.quantidadeVendaParaEstoque(
         produto: produto,
-        quantidadeDigitada: quantidade,
+        quantidadeDigitada: QuantidadeVendaUtil.paraEstoqueInteiro(
+          produto,
+          quantidade,
+        ),
         emUnidadeCompra: quantidadeEmUnidadeCompra,
       );
 
@@ -6741,5 +6952,10 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
         emUnidadeCompra: quantidadeEmUnidadeCompra,
       );
 
-  double get subtotal => quantidadeEstoque * precoUnitario;
+  double get subtotal =>
+      QuantidadeVendaUtil.valorExibicao(
+        quantidade,
+        fracionada: produto.permiteQuantidadeFracionada,
+      ) *
+      precoUnitario;
 }

@@ -1,4 +1,4 @@
-import '../../config/fiscal_config.dart';
+import 'fiscal_regime_padrao.dart';
 import '../../model/cliente.dart';
 import '../../model/produto.dart';
 import '../../services/focus_nfe_service.dart';
@@ -44,14 +44,15 @@ abstract final class NfeFiscalHelpers {
   static String icmsCstProduto(Produto produto) {
     return ProdutoFiscalCatalog.resolverIcmsSituacaoTributaria(
       produto,
-      icmsPadraoLoja: FiscalConfig.icmsSituacaoTributariaPadrao,
+      icmsPadraoLoja: FiscalRegimePadrao.icmsSituacaoTributariaPadrao(),
+      ehSimplesNacional: FiscalRegimePadrao.ehSimplesNacional(),
     );
   }
 
   static String pisCofinsCstProduto(Produto produto) {
     return ProdutoFiscalCatalog.resolverPisCofinsSituacaoTributaria(
       produto,
-      pisCofinsPadraoLoja: FiscalConfig.pisCofinsSituacaoTributariaPadrao,
+      pisCofinsPadraoLoja: FiscalRegimePadrao.pisCofinsSituacaoTributariaPadrao(),
     );
   }
 }

@@ -29,6 +29,7 @@ import '../../domain/promocao_preco_result.dart';
 import '../../domain/promocao_preco_service.dart';
 import '../../config/fiscal_config.dart';
 import '../../domain/fiscal/cliente_fiscal_helper.dart';
+import '../../domain/venda_documento_pos_caixa.dart';
 import '../../config/focus_nfe_runtime.dart';
 import '../../domain/pagamento_orcamento.dart';
 import '../../domain/plano_fiado.dart';
@@ -3243,15 +3244,60 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
+  Venda? _vendaPosCaixaAtualizada() {
+    final sessao = _posVenda;
+    if (sessao == null) return null;
+    return widget.vendaRepository.obterPorId(sessao.venda.id) ?? sessao.venda;
+  }
+
+  bool _vendaComDocumentoPosCaixaObrigatorio(Venda venda) {
+    return VendaDocumentoPosCaixa.registrado(
+      venda,
+      temNfe55Autorizada:
+          widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id) != null,
+    );
+  }
+
+  Future<bool> _mostrarBloqueioDocumentoPosCaixa() async {
+    final r = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(Icons.receipt_long_outlined, color: Colors.orange.shade800),
+        title: const Text('Documento obrigatorio'),
+        content: const Text(
+          'Esta venda foi paga, mas ainda nao tem registro fiscal.\n\n'
+          'Escolha uma opcao antes de concluir:\n'
+          '· Tecla 2 — Cupom nao fiscal (cupom interno)\n'
+          '· Tecla 3 — Emitir NFC-e\n'
+          '· Tecla 4 — Emitir NF-e modelo 55',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
+    return r == true;
+  }
+
   Future<void> _encerrarPosVendaFiscal() async {
     final sessao = _posVenda;
     if (sessao == null) {
       _prepararCaixaPosProximaVenda();
       return;
     }
-    await _alertarVendaSemNfe55SeNecessario(sessao.venda);
+    final venda = _vendaPosCaixaAtualizada() ?? sessao.venda;
+    if (!_vendaComDocumentoPosCaixaObrigatorio(venda)) {
+      if (!mounted) return;
+      await _mostrarBloqueioDocumentoPosCaixa();
+      return;
+    }
+    await _alertarVendaSemNfe55SeNecessario(venda);
     if (!mounted) return;
-    await _alertarVendaSemBaixaEstoqueSeNecessario(sessao.venda);
+    await _alertarVendaSemBaixaEstoqueSeNecessario(venda);
     if (!mounted) return;
     _prepararCaixaPosProximaVenda();
   }
@@ -5159,6 +5205,8 @@ class _CaixaPageState extends State<CaixaPage> {
     final exigeNfe55 = ClienteFiscalHelper.clienteExigeNfe55(cliente);
     final jaTemNfe55 =
         widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id) != null;
+    final vendaAtual = _vendaPosCaixaAtualizada() ?? venda;
+    final podeConcluir = _vendaComDocumentoPosCaixaObrigatorio(vendaAtual);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5167,13 +5215,14 @@ class _CaixaPageState extends State<CaixaPage> {
         const SizedBox(height: 10),
         Expanded(
           child: CaixaPosVendaFiscalPainel(
-            venda: venda,
+            venda: vendaAtual,
             cliente: cliente,
             totalRecebido: sessao.totalRecebido,
             troco: sessao.troco,
             formatarMoeda: _formatarMoeda,
             exigeNfe55: exigeNfe55,
             jaTemNfe55: jaTemNfe55,
+            podeConcluir: podeConcluir,
             processando: _posVendaProcessando,
             onCupomNaoFiscal: () => unawaited(_executarAcaoPosVendaFiscal('cupom')),
             onEmitirNfce: () => unawaited(_executarAcaoPosVendaFiscal('nfce')),

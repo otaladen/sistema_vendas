@@ -58,6 +58,7 @@ abstract final class FiscalConfigStore {
   static const _kAmbiente = 'fiscal_focus_ambiente_v1';
   static const _kCnpj = 'fiscal_focus_cnpj_v1';
   static const _kIe = 'fiscal_focus_ie_v1';
+  static const _kRegime = 'fiscal_focus_regime_v1';
 
   static FiscalConfigDados? _cache;
 
@@ -70,6 +71,7 @@ abstract final class FiscalConfigStore {
     final ambiente = prefs.getString(_kAmbiente)?.trim();
     final cnpj = prefs.getString(_kCnpj)?.replaceAll(RegExp(r'\D'), '');
     final ie = prefs.getString(_kIe)?.replaceAll(RegExp(r'\D'), '');
+    final regimeSalvo = prefs.getInt(_kRegime);
 
     _cache = FiscalConfigDados(
       apiBaseUrl: padrao.apiBaseUrl,
@@ -77,7 +79,10 @@ abstract final class FiscalConfigStore {
       cnpjEmitente: (cnpj != null && cnpj.length == 14) ? cnpj : padrao.cnpjEmitente,
       inscricaoEstadualEmitente:
           (ie != null && ie.isNotEmpty) ? ie : padrao.inscricaoEstadualEmitente,
-      regimeTributarioEmitente: padrao.regimeTributarioEmitente,
+      regimeTributarioEmitente:
+          (regimeSalvo != null && regimeSalvo >= 1 && regimeSalvo <= 3)
+              ? regimeSalvo
+              : padrao.regimeTributarioEmitente,
       ufEmitente: padrao.ufEmitente,
       ambiente: (ambiente == 'producao' || ambiente == 'homologacao')
           ? ambiente!
@@ -91,6 +96,7 @@ abstract final class FiscalConfigStore {
     required String ambiente,
     String? cnpjEmitente,
     String? inscricaoEstadualEmitente,
+    int? regimeTributarioEmitente,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final token = apiToken.trim();
@@ -116,6 +122,21 @@ abstract final class FiscalConfigStore {
       await prefs.setString(_kIe, ie);
     }
 
+    if (regimeTributarioEmitente != null) {
+      await prefs.setInt(
+        _kRegime,
+        regimeTributarioEmitente.clamp(1, 3),
+      );
+    }
+
+    await carregar();
+  }
+
+  /// Aplica regime vindo da [EmpresaConfig] sincronizada na LAN.
+  static Future<void> aplicarRegimeEmpresa(int regime) async {
+    final r = regime.clamp(1, 3);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kRegime, r);
     await carregar();
   }
 

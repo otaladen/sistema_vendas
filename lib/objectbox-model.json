@@ -90,7 +90,7 @@
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "44:656435191199984921",
+      "lastPropertyId": "45:3223106704485660019",
       "name": "Produto",
       "properties": [
         {
@@ -315,6 +315,11 @@
         {
           "id": "44:656435191199984921",
           "name": "pisCofinsSituacaoTributaria",
+          "type": 9
+        },
+        {
+          "id": "45:3223106704485660019",
+          "name": "nomeImpressao",
           "type": 9
         }
       ],

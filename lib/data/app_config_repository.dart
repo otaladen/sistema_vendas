@@ -1,6 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/fiscal_config.dart';
 import '../domain/auditoria_retencao.dart';
+import '../services/fiscal_config_store.dart';
 import '../model/config_layout_impressao.dart';
 import 'sync/sync_local_config.dart';
 import 'sync/sync_write_trigger.dart';
@@ -49,6 +51,9 @@ class EmpresaConfig {
 
     /// Pino da gaveta no comando ESC p: 0 ou 1 (Epson/Bematech/Elgin).
     this.gavetaPino = 0,
+
+    /// Regime Focus: 1 = Simples Nacional, 3 = Regime Normal (sincroniza na LAN).
+    this.regimeTributarioEmitente = FiscalConfig.regimeTributarioEmitente,
   });
 
   final String nomeLoja;
@@ -126,6 +131,8 @@ class EmpresaConfig {
   /// Conector da gaveta na impressora termica (0 = pin 2, 1 = pin 5 — padrao Epson).
   final int gavetaPino;
 
+  final int regimeTributarioEmitente;
+
   LayoutImpressaoEmpresa get layoutImpressao =>
       LayoutImpressaoEmpresa.fromJsonString(layoutImpressaoJson);
 
@@ -167,6 +174,7 @@ class EmpresaConfig {
     int? alertasProativosIntervaloMinutos,
     bool? abrirGavetaAutomatica,
     int? gavetaPino,
+    int? regimeTributarioEmitente,
   }) {
     return EmpresaConfig(
       nomeLoja: nomeLoja ?? this.nomeLoja,
@@ -225,6 +233,9 @@ class EmpresaConfig {
       abrirGavetaAutomatica:
           abrirGavetaAutomatica ?? this.abrirGavetaAutomatica,
       gavetaPino: gavetaPino ?? this.gavetaPino,
+      regimeTributarioEmitente: regimeTributarioEmitente != null
+          ? regimeTributarioEmitente.clamp(1, 3)
+          : this.regimeTributarioEmitente,
     );
   }
 }
@@ -276,6 +287,7 @@ class AppConfigRepository {
   static const _kAlertasProativosIntervaloMin =
       'config_alertas_proativos_intervalo_min';
   static const _kModoImplantacaoLocal = 'sync_modo_implantacao_local_v1';
+  static const _kRegimeTributarioEmitente = 'config_regime_tributario_emitente_v1';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -347,6 +359,13 @@ class AppConfigRepository {
         final m = prefs.getInt(_kAlertasProativosIntervaloMin);
         if (m == null || m < 15) return 120;
         return m.clamp(15, 1440);
+      }(),
+      regimeTributarioEmitente: () {
+        final r = prefs.getInt(_kRegimeTributarioEmitente);
+        if (r == null || r < 1 || r > 3) {
+          return FiscalConfig.regimeTributarioEmitente;
+        }
+        return r;
       }(),
     );
     return SyncLocalConfig.aplicarSobre(base);
@@ -468,6 +487,11 @@ class AppConfigRepository {
       _kAlertasProativosIntervaloMin,
       config.alertasProativosIntervaloMinutos.clamp(15, 1440),
     );
+    await prefs.setInt(
+      _kRegimeTributarioEmitente,
+      config.regimeTributarioEmitente.clamp(1, 3),
+    );
+    await FiscalConfigStore.aplicarRegimeEmpresa(config.regimeTributarioEmitente);
     await SyncLocalConfig.salvarCamposLocais(config);
     if (propagarRede) {
       notificarAlteracaoParaRede(

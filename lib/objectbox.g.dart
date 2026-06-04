@@ -150,7 +150,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(2, 12069401530715107),
     name: 'Produto',
-    lastPropertyId: const obx_int.IdUid(44, 656435191199984921),
+    lastPropertyId: const obx_int.IdUid(45, 3223106704485660019),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -412,6 +412,12 @@ final _entities = <obx_int.ModelEntity>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(44, 656435191199984921),
         name: 'pisCofinsSituacaoTributaria',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(45, 3223106704485660019),
+        name: 'nomeImpressao',
         type: 9,
         flags: 0,
       ),
@@ -3335,7 +3341,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final pisCofinsSituacaoTributariaOffset = fbb.writeString(
           object.pisCofinsSituacaoTributaria,
         );
-        fbb.startTable(45);
+        final nomeImpressaoOffset = fbb.writeString(object.nomeImpressao);
+        fbb.startTable(46);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, nomeOffset);
         fbb.addInt64(2, object.estoque);
@@ -3379,6 +3386,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(41, icmsOrigemOffset);
         fbb.addOffset(42, icmsSituacaoTributariaOffset);
         fbb.addOffset(43, pisCofinsSituacaoTributariaOffset);
+        fbb.addOffset(44, nomeImpressaoOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -3402,6 +3410,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final nomeParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 6, '');
+        final nomeImpressaoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 92, '');
         final descricaoParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 20, '');
@@ -3583,6 +3594,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           id: idParam,
           codigoInterno: codigoInternoParam,
           nome: nomeParam,
+          nomeImpressao: nomeImpressaoParam,
           descricao: descricaoParam,
           unidade: unidadeParam,
           categoria: categoriaParam,
@@ -7394,6 +7406,11 @@ class Produto_ {
   /// See [Produto.pisCofinsSituacaoTributaria].
   static final pisCofinsSituacaoTributaria = obx.QueryStringProperty<Produto>(
     _entities[1].properties[42],
+  );
+
+  /// See [Produto.nomeImpressao].
+  static final nomeImpressao = obx.QueryStringProperty<Produto>(
+    _entities[1].properties[43],
   );
 
   /// see [Produto.historicoEntradas]

@@ -1,4 +1,5 @@
 import '../../config/fiscal_config.dart';
+import '../produto_nome_exibicao.dart';
 import '../../model/item_venda.dart';
 import '../../model/produto.dart';
 import '../../model/venda.dart';
@@ -122,9 +123,7 @@ abstract final class NfeItemFiscalPreviewBuilder {
           codigo: produto.codigoInterno.trim().isEmpty
               ? 'ID-${produto.id}'
               : produto.codigoInterno.trim(),
-          descricao: item.nomeProduto.trim().isEmpty
-              ? produto.nome
-              : item.nomeProduto.trim(),
+          descricao: ProdutoNomeExibicao.paraImpressao(produto),
           quantidade: item.quantidade,
           valorUnitario: item.precoUnitario,
           ncm: ncm,

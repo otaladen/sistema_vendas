@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../model/historico_entrada.dart';
 import '../model/movimento_estoque.dart';
 import '../model/produto.dart';
+import '../domain/produto_nome_exibicao.dart';
 import '../services/gerenciador_estoque_service.dart';
 import 'movimento_estoque_repository.dart';
 import 'produto_busca_sinonimos.dart';
@@ -891,6 +892,10 @@ class ProdutoRepository extends ChangeNotifier {
     String motivoAjusteEstoque = 'Ajuste manual cadastro produto',
     String usuarioAjusteEstoque = '',
   }) {
+    produto.nomeImpressao = ProdutoNomeExibicao.normalizarNomeImpressaoPersistido(
+      nome: produto.nome,
+      nomeImpressao: produto.nomeImpressao,
+    );
     final id = _db.store.runInTransaction(TxMode.write, () {
       if (produto.id > 0) {
         final existente = _db.produtoBox.get(produto.id);
@@ -936,6 +941,7 @@ class ProdutoRepository extends ChangeNotifier {
   static void _copiarCamposCadastro(Produto destino, Produto origem) {
     destino.codigoInterno = origem.codigoInterno;
     destino.nome = origem.nome;
+    destino.nomeImpressao = origem.nomeImpressao;
     destino.descricao = origem.descricao;
     destino.unidade = origem.unidade;
     destino.categoria = origem.categoria;

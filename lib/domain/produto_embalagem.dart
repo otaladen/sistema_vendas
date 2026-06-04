@@ -1,4 +1,5 @@
 import '../model/produto.dart';
+import 'quantidade_venda_util.dart';
 
 /// Regras de conversao entre unidade de compra/embalagem e unidade de estoque/venda.
 class ProdutoEmbalagem {
@@ -113,6 +114,16 @@ class ProdutoEmbalagem {
       emUnidadeCompra: emUnidadeCompra,
     );
     if (!emUnidadeCompra || !vendaPodeUsarUnidadeCompra(produto)) {
+      if (produto.permiteQuantidadeFracionada) {
+        final qTxt = QuantidadeVendaUtil.formatarExibicao(
+          QuantidadeVendaUtil.valorExibicao(
+            quantidadeDigitada,
+            fracionada: true,
+          ),
+          fracionada: true,
+        );
+        return '$qTxt $uVenda';
+      }
       return '$quantidadeDigitada $uVenda';
     }
     final uCompra = normalizarUnidade(produto.unidadeCompraEfetiva);

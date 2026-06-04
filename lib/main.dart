@@ -56,6 +56,10 @@ Future<void> main() async {
       AuditoriaRegistrar.inicializar(auditoriaRepository);
       final appConfigRepository = AppConfigRepository();
       await FiscalConfigStore.carregar();
+      final empresaCfg = await appConfigRepository.carregarEmpresaConfig();
+      await FiscalConfigStore.aplicarRegimeEmpresa(
+        empresaCfg.regimeTributarioEmitente,
+      );
       await FiscalReconciliacaoStartup.executarSeConfigurado(
         objectBox: objectBox,
       );

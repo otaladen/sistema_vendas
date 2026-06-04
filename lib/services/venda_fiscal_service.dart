@@ -6,6 +6,7 @@ import '../data/nfe_saida_fiscal_store.dart';
 import '../data/venda_repository.dart';
 import '../domain/fiscal/endereco_fiscal_ibge_resolver.dart';
 import '../domain/fiscal/nfe_registro_focus_merge.dart';
+import '../domain/produto_nome_exibicao.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
@@ -301,7 +302,7 @@ class VendaFiscalService {
       itensFiscais.add(
         FocusNfeItemDevolucao(
           produto: produto,
-          descricao: linha.item.nomeProduto,
+          descricao: ProdutoNomeExibicao.paraImpressaoItem(linha.item),
           quantidade: linha.quantidade,
           valorUnitario: linha.item.precoUnitario,
         ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../domain/fiscal/fiscal_regime_padrao.dart';
 import '../../../services/fiscal_config_store.dart';
 
 /// Alerta de ambiente Focus (homologacao vs producao).
@@ -10,6 +11,9 @@ class NfeAmbienteBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final homolog = FiscalConfigStore.efetivo.homologacao;
+    final regimeTxt =
+        '${FiscalRegimePadrao.rotuloRegime(FiscalRegimePadrao.regimeEfetivo())} · '
+        '${FiscalRegimePadrao.resumoPadroesEmissao(FiscalRegimePadrao.regimeEfetivo())}';
     if (!homolog) {
       return Material(
         color: Colors.green.shade50,
@@ -21,7 +25,7 @@ class NfeAmbienteBanner extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Ambiente PRODUCAO — notas com validade juridica.',
+                  'PRODUCAO — validade juridica. $regimeTxt',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: Colors.green.shade900,
                     fontWeight: FontWeight.w600,
@@ -44,8 +48,7 @@ class NfeAmbienteBanner extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'HOMOLOGACAO — notas de teste, sem validade fiscal. '
-                'Cancelamento e CC-e so para conferencia.',
+                'HOMOLOGACAO — testes, sem validade fiscal. $regimeTxt',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onErrorContainer,
                   fontWeight: FontWeight.w600,

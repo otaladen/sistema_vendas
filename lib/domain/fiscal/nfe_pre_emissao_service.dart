@@ -1,4 +1,5 @@
 import '../../config/fiscal_config.dart';
+import 'fiscal_regime_padrao.dart';
 import '../../services/fiscal_config_store.dart';
 import '../../data/nfe_saida_fiscal_store.dart';
 import '../../model/cliente.dart';
@@ -80,7 +81,7 @@ abstract final class NfePreEmissaoService {
       checklist.add(
         const NfeChecklistItem(
           titulo: 'Focus NFe / emitente',
-          detalhe: 'Configure token, CNPJ e IE em fiscal_config.dart.',
+          detalhe: 'Configure token, CNPJ e IE em Configuracoes > Fiscal.',
           severidade: NfeChecklistSeveridade.bloqueio,
         ),
       );
@@ -90,7 +91,10 @@ abstract final class NfePreEmissaoService {
           titulo:
               'Focus NFe (${FiscalConfigStore.efetivo.homologacao ? "homologacao" : "producao"})',
           detalhe:
-              'Emitente ${FiscalConfigStore.efetivo.cnpjEmitente} · UF ${FiscalConfigStore.efetivo.ufEmitente}',
+              'Emitente ${FiscalConfigStore.efetivo.cnpjEmitente} · '
+              'UF ${FiscalConfigStore.efetivo.ufEmitente} · '
+              '${FiscalRegimePadrao.rotuloRegime(FiscalRegimePadrao.regimeEfetivo())} · '
+              '${FiscalRegimePadrao.resumoPadroesEmissao(FiscalRegimePadrao.regimeEfetivo())}',
           severidade: NfeChecklistSeveridade.ok,
         ),
       );

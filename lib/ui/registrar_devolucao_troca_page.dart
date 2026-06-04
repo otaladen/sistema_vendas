@@ -6,12 +6,18 @@ import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
+import '../data/vendedor_repository.dart';
+import '../domain/permissao_usuario.dart';
+import '../domain/troca_com_nota_pdv_intent.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
+import '../model/usuario_sistema.dart';
 import '../model/venda.dart';
+import '../services/print_service.dart';
 import '../services/venda_fiscal_service.dart';
 import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
+import 'troca_com_nota_pdv_navigation.dart';
 import 'widgets/produto_busca_input.dart';
 
 /// Fluxo de devolucao (estoque de volta) ou troca (devolucao + saida de produtos).
@@ -24,6 +30,10 @@ class RegistrarDevolucaoTrocaPage extends StatefulWidget {
     required this.vendaId,
     required this.usuarioAtual,
     required this.podeRegistrarSemSenha,
+    this.usuarioLogado,
+    this.vendedorRepository,
+    this.appConfigRepository,
+    this.printService,
   });
 
   final VendaRepository vendaRepository;
@@ -32,6 +42,10 @@ class RegistrarDevolucaoTrocaPage extends StatefulWidget {
   final int vendaId;
   final String usuarioAtual;
   final bool podeRegistrarSemSenha;
+  final UsuarioSistema? usuarioLogado;
+  final VendedorRepository? vendedorRepository;
+  final AppConfigRepository? appConfigRepository;
+  final PrintService? printService;
 
   @override
   State<RegistrarDevolucaoTrocaPage> createState() =>
@@ -143,6 +157,259 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     return n == null || n < 0 ? 0 : n;
   }
 
+  bool get _podeFluxoTrocaComNotaNoPdv {
+    final u = widget.usuarioLogado;
+    return u != null &&
+        widget.vendedorRepository != null &&
+        widget.appConfigRepository != null &&
+        widget.printService != null &&
+        UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarPdv);
+  }
+
+  List<LinhaDevolucaoEntradaInput> _entradasPreenchidasFromUi() {
+    final v = _venda;
+    if (v == null) return [];
+    final entradas = <LinhaDevolucaoEntradaInput>[];
+    for (final item in v.itens) {
+      final ctl = _qtdDevolucaoPorItem[item.id];
+      if (ctl == null) continue;
+      final q = _parseQtd(ctl.text);
+      if (q <= 0) continue;
+      entradas.add(
+        LinhaDevolucaoEntradaInput(itemVendaId: item.id, quantidade: q),
+      );
+    }
+    return entradas;
+  }
+
+  double _creditoSugeridoAtual() => _valorTotalDevolvido();
+
+  /// Valor de referencia do que o cliente devolve (preco da venda original).
+  double _valorTotalDevolvido() {
+    final v = _venda;
+    if (v == null) return 0;
+    final entradas = _entradasPreenchidasFromUi();
+    return creditoDevolucaoReaisDeEntradas(
+      entradas: entradas
+          .map((e) => (itemVendaId: e.itemVendaId, quantidade: e.quantidade))
+          .toList(),
+      precoUnitarioDoItem: (id) {
+        final item = v.itens.firstWhere((i) => i.id == id);
+        return item.precoUnitario;
+      },
+    );
+  }
+
+  /// Valor dos produtos que o cliente leva na troca (tabela escolhida no PDV).
+  double _valorTotalSaidaTroca() {
+    var total = 0.0;
+    for (final linha in _linhasTroca) {
+      final q = linha.quantidade;
+      if (q <= 0) continue;
+      total += q * _precoProdutoTipo(linha.produto, linha.precoTipo);
+    }
+    return total;
+  }
+
+  /// Positivo = cliente deve pagar; negativo = loja devolve ao cliente.
+  double _diferencaTroca() => _valorTotalSaidaTroca() - _valorTotalDevolvido();
+
+  static const double _epsValorTroca = 0.009;
+
+  Widget _buildResumoValoresTroca(BuildContext context) {
+    final tema = Theme.of(context);
+    final devolvido = _valorTotalDevolvido();
+    final saida = _valorTotalSaidaTroca();
+    final diff = _diferencaTroca();
+    final valoresBatem = diff.abs() <= _epsValorTroca && saida > _epsValorTroca;
+
+    Color corDiff;
+    IconData iconeDiff;
+    String tituloDiff;
+    String orientacao;
+
+    if (saida <= _epsValorTroca && devolvido <= _epsValorTroca) {
+      corDiff = tema.colorScheme.outline;
+      iconeDiff = Icons.info_outline;
+      tituloDiff = 'Informe as quantidades';
+      orientacao =
+          'Preencha o que volta e adicione os produtos da troca para conferir os valores.';
+    } else if (valoresBatem) {
+      corDiff = tema.colorScheme.primary;
+      iconeDiff = Icons.check_circle_outline;
+      tituloDiff = 'Valores conferem';
+      orientacao =
+          'Credito da devolucao e valor da troca estao iguais. '
+          'Nao ha diferenca a receber no caixa.';
+    } else if (diff > _epsValorTroca) {
+      corDiff = tema.colorScheme.tertiary;
+      iconeDiff = Icons.payments_outlined;
+      tituloDiff = 'Cliente paga a diferenca';
+      orientacao =
+          'O que o cliente leva custa mais do que o devolvido. '
+          'Registre a troca aqui e cobre ${_formatarMoeda(diff)} no caixa '
+          '(ou PDV + caixa se precisar de nota dos produtos novos). '
+          'Anote na observacao financeira.';
+    } else {
+      corDiff = tema.colorScheme.secondary;
+      iconeDiff = Icons.savings_outlined;
+      tituloDiff = 'Loja devolve ao cliente';
+      orientacao =
+          'O devolvido vale mais do que a troca. '
+          'Devolva ${_formatarMoeda(-diff)} ao cliente (dinheiro/PIX) '
+          'e registre na observacao financeira.';
+    }
+
+    Widget linhaValor(String rotulo, double valor, {bool destaque = false}) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                rotulo,
+                style: destaque
+                    ? tema.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      )
+                    : tema.textTheme.bodyMedium,
+              ),
+            ),
+            Text(
+              _formatarMoeda(valor),
+              style: destaque
+                  ? tema.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    )
+                  : tema.textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 1,
+      color: tema.colorScheme.surfaceContainerHighest.withValues(alpha: 0.65),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Conferencia de valores',
+              style: tema.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            linhaValor('Devolvido (credito na troca)', devolvido),
+            linhaValor('Produtos da troca (saida)', saida),
+            const Divider(height: 20),
+            linhaValor(
+              'Diferenca (saida − devolvido)',
+              diff.abs() <= _epsValorTroca ? 0 : diff,
+              destaque: true,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(iconeDiff, size: 22, color: corDiff),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        tituloDiff,
+                        style: tema.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: corDiff,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        orientacao,
+                        style: tema.textTheme.bodySmall?.copyWith(
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  TrocaComNotaPdvIntent? _montarIntentTrocaComNota({
+    required Venda v,
+    required double credito,
+  }) {
+    final clienteId = v.cliente.targetId;
+    if (clienteId <= 0) return null;
+    final vend = v.vendedor.target;
+    final ref = v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : 'id ${v.id}';
+    final obsFin = _obsFinanceiraController.text.trim();
+    return TrocaComNotaPdvIntent(
+      vendaOrigemId: v.id,
+      clienteId: clienteId,
+      creditoDevolucaoReais: credito,
+      numeroVendaOrigem: v.numeroOrcamento,
+      vendedorId: vend?.id,
+      observacao: obsFin.isEmpty
+          ? 'Troca com nota apos devolucao da venda $ref'
+          : obsFin,
+    );
+  }
+
+  Future<void> _abrirPdvTrocaComNota({
+    required Venda v,
+    required double credito,
+  }) async {
+    if (!_podeFluxoTrocaComNotaNoPdv) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Abra pela Listagem de vendas com usuario que acessa o PDV.',
+          ),
+        ),
+      );
+      return;
+    }
+    final intent = _montarIntentTrocaComNota(v: v, credito: credito);
+    if (intent == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Venda sem cliente cadastrado. Vincule o cliente antes de abrir o PDV.',
+          ),
+        ),
+      );
+      return;
+    }
+    await abrirPdvTrocaComNota(
+      context,
+      intent: intent,
+      produtoRepository: widget.produtoRepository,
+      clienteRepository: widget.clienteRepository,
+      vendaRepository: widget.vendaRepository,
+      vendedorRepository: widget.vendedorRepository!,
+      appConfigRepository: widget.appConfigRepository!,
+      printService: widget.printService!,
+      usuarioLogado: widget.usuarioLogado!,
+    );
+  }
+
   Future<(bool ok, String usuario)> _autorizar() async {
     if (widget.podeRegistrarSemSenha) {
       return (true, widget.usuarioAtual);
@@ -203,9 +470,19 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     return (true, u.login);
   }
 
-  Future<void> _confirmar() async {
+  Future<void> _confirmar({bool abrirPdvApos = false}) async {
     final v = _venda;
     if (v == null) return;
+    if (abrirPdvApos && _modoTroca) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Para troca com nota, use o modo Devolucao (nao Troca) e depois o PDV.',
+          ),
+        ),
+      );
+      return;
+    }
     final motivo = _motivoController.text.trim();
     if (motivo.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -412,6 +689,26 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
         ),
       ),
     );
+
+    final credito = creditoDevolucaoReaisDeEntradas(
+      entradas: entradas
+          .map((e) => (itemVendaId: e.itemVendaId, quantidade: e.quantidade))
+          .toList(),
+      precoUnitarioDoItem: (id) {
+        final item = v.itens.firstWhere((i) => i.id == id);
+        return item.precoUnitario;
+      },
+    );
+
+    if (abrirPdvApos && credito > 0.004) {
+      await _abrirPdvTrocaComNota(v: v, credito: credito);
+    } else if (abrirPdvApos && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nenhum credito de devolucao para o PDV.')),
+      );
+    }
+
+    if (!mounted) return;
     Navigator.pop(context, true);
   }
 
@@ -552,6 +849,59 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                 : 'Apenas entrada de mercadoria devolvida no estoque.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
+          if (_modoTroca) ...[
+            const SizedBox(height: 10),
+            Card(
+              margin: EdgeInsets.zero,
+              color: Theme.of(context).colorScheme.errorContainer.withValues(
+                    alpha: 0.45,
+                  ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  'Troca com nota fiscal nos produtos novos: use o modo Devolucao '
+                  '(nao adicione saida aqui) e depois Registro + PDV + Caixa.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        height: 1.35,
+                      ),
+                ),
+              ),
+            ),
+          ],
+          if (!_modoTroca) ...[
+            const SizedBox(height: 10),
+            Card(
+              margin: EdgeInsets.zero,
+              color: Theme.of(context).colorScheme.tertiaryContainer.withValues(
+                    alpha: 0.4,
+                  ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Troca com nota (produtos novos)',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '1) Informe as quantidades devolvidas abaixo.\n'
+                      '2) Registre a devolucao (e NF-e de devolucao, se houver).\n'
+                      '3) Abra o PDV com o mesmo cliente e credito sugerido '
+                      '${_formatarMoeda(_creditoSugeridoAtual())}.\n'
+                      '4) Inclua os produtos novos, F10 ao caixa e emita a nota.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            height: 1.35,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Text(
             'Itens da venda (quantidade a devolver)',
@@ -561,6 +911,8 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
           ...v.itens.map((ItemVenda item) {
             final maxD = item.quantidade - item.quantidadeDevolvida;
             final ctl = _qtdDevolucaoPorItem[item.id]!;
+            final qDev = _parseQtd(ctl.text);
+            final subDev = qDev * item.precoUnitario;
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Row(
@@ -579,6 +931,13 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                           'Vendido: ${item.quantidade} · Ja devolvido: ${item.quantidadeDevolvida} · Max: $maxD',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
+                        Text(
+                          'Unit. ${_formatarMoeda(item.precoUnitario)}'
+                          '${qDev > 0 ? ' · Subtotal devolvido: ${_formatarMoeda(subDev)}' : ''}',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                fontWeight: qDev > 0 ? FontWeight.w600 : null,
+                              ),
+                        ),
                       ],
                     ),
                   ),
@@ -587,6 +946,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                     child: TextField(
                       controller: ctl,
                       keyboardType: TextInputType.number,
+                      onChanged: (_) => setState(() {}),
                       decoration: const InputDecoration(
                         labelText: 'Qtd',
                         isDense: true,
@@ -623,6 +983,9 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
               ..._linhasTroca.asMap().entries.map((e) {
                 final i = e.key;
                 final linha = e.value;
+                final unit = _precoProdutoTipo(linha.produto, linha.precoTipo);
+                final qSaida = linha.quantidade;
+                final subSaida = qSaida * unit;
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
@@ -641,6 +1004,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                             ),
                             keyboardType: TextInputType.number,
                             controller: linha.qtdController,
+                            onChanged: (_) => setState(() {}),
                           ),
                         ),
                         DropdownButton<String>(
@@ -664,14 +1028,15 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                             setState(() => linha.precoTipo = nv);
                           },
                         ),
-                        Text(
-                          _formatarMoeda(
-                            _precoProdutoTipo(
-                              linha.produto,
-                              linha.precoTipo,
-                            ),
+                        Text('Unit. ${_formatarMoeda(unit)}'),
+                        if (qSaida > 0)
+                          Text(
+                            'Subtotal: ${_formatarMoeda(subSaida)}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
                           ),
-                        ),
                       ],
                     ),
                     trailing: IconButton(
@@ -685,6 +1050,33 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                   ),
                 );
               }),
+            const SizedBox(height: 12),
+            _buildResumoValoresTroca(context),
+          ],
+          if (!_modoTroca && _valorTotalDevolvido() > _epsValorTroca) ...[
+            const SizedBox(height: 12),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Valor devolvido (referencia)',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                    Text(
+                      _formatarMoeda(_valorTotalDevolvido()),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
           const SizedBox(height: 20),
           TextField(
@@ -697,19 +1089,32 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
           const SizedBox(height: 12),
           TextField(
             controller: _obsFinanceiraController,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Observacao financeira (opcional)',
-              hintText:
-                  'Ex.: R\$ devolvido em dinheiro, cliente pagou diferenca...',
+              hintText: _modoTroca && _diferencaTroca().abs() > _epsValorTroca
+                  ? (_diferencaTroca() > 0
+                      ? 'Ex.: Cliente pagou diferenca ${_formatarMoeda(_diferencaTroca())} no caixa'
+                      : 'Ex.: Devolvido ${_formatarMoeda(-_diferencaTroca())} em dinheiro ao cliente')
+                  : 'Ex.: R\$ devolvido em dinheiro, cliente pagou diferenca...',
             ),
             maxLines: 2,
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: _confirmar,
+            onPressed: () => _confirmar(),
             icon: const Icon(Icons.check),
             label: const Text('Registrar'),
           ),
+          if (!_modoTroca && _podeFluxoTrocaComNotaNoPdv) ...[
+            const SizedBox(height: 10),
+            FilledButton.tonalIcon(
+              onPressed: _creditoSugeridoAtual() > 0.004
+                  ? () => _confirmar(abrirPdvApos: true)
+                  : null,
+              icon: const Icon(Icons.point_of_sale_outlined),
+              label: const Text('Registrar devolucao e abrir PDV'),
+            ),
+          ],
         ],
       ),
     );

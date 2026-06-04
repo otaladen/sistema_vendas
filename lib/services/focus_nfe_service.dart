@@ -22,6 +22,7 @@ import '../domain/fiscal/nfe_cfop_devolucao_resolver.dart';
 import '../domain/fiscal/nfe_cfop_resolver.dart';
 import '../domain/fiscal/nfe_cobranca_helper.dart';
 import '../domain/fiscal/produto_fiscal_catalog.dart';
+import '../domain/produto_nome_exibicao.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../model/cliente.dart';
 import '../model/produto.dart';
@@ -1545,7 +1546,9 @@ class FocusNfeService {
     return {
       'numero_item': numeroItem.toString(),
       'codigo_produto': codigo,
-      'descricao': descricao.trim().isEmpty ? produto.nome : descricao.trim(),
+      'descricao': descricao.trim().isEmpty
+          ? ProdutoNomeExibicao.paraImpressao(produto)
+          : descricao.trim(),
       'codigo_barras_comercial': gtin,
       'codigo_barras_tributavel': gtin,
       'cfop': cfop,
@@ -1764,8 +1767,8 @@ class FocusNfeService {
         _itemFocus(
           numeroItem: numero++,
           produto: produto,
-          descricao: item.nomeProduto,
-          quantidade: item.quantidade,
+          descricao: ProdutoNomeExibicao.paraImpressaoItem(item),
+          quantidade: item.quantidadeVendaEfetiva,
           valorUnitario: item.precoUnitario,
           ufDestino: ufDestino,
           emissaoNfe: emissaoNfe,
@@ -1780,7 +1783,7 @@ class FocusNfeService {
     required int numeroItem,
     required Produto produto,
     required String descricao,
-    required int quantidade,
+    required num quantidade,
     required double valorUnitario,
     required String ufDestino,
     bool emissaoNfe = false,
@@ -1796,7 +1799,7 @@ class FocusNfeService {
           )
         : _resolverCfopNfce(produto, ufDestino: ufDestino);
     final unidade = FiscalService.normalizarUnidadeFiscal(produto.unidade);
-    final valorBruto = quantidade * valorUnitario;
+    final valorBruto = quantidade.toDouble() * valorUnitario;
     final codigo = produto.codigoInterno.trim().isEmpty
         ? 'ID-${produto.id}'
         : produto.codigoInterno.trim();
@@ -1808,7 +1811,9 @@ class FocusNfeService {
     return {
       'numero_item': numeroItem.toString(),
       'codigo_produto': codigo,
-      'descricao': descricao.trim().isEmpty ? produto.nome : descricao.trim(),
+      'descricao': descricao.trim().isEmpty
+          ? ProdutoNomeExibicao.paraImpressao(produto)
+          : descricao.trim(),
       'codigo_barras_comercial': gtin,
       'codigo_barras_tributavel': gtin,
       'cfop': cfop,
@@ -1848,9 +1853,12 @@ class FocusNfeService {
   }
 
   String _resolverIcmsSituacaoTributariaItem(Produto produto) {
+    final regime = _config.regimeTributarioEmitente;
+    final ehSimples = regime == 1 || regime == 2;
     return ProdutoFiscalCatalog.resolverIcmsSituacaoTributaria(
       produto,
       icmsPadraoLoja: _config.icmsSituacaoTributariaPadrao,
+      ehSimplesNacional: ehSimples,
     );
   }
 

@@ -536,6 +536,7 @@ class SyncEntityCodecExtras {
         'alertasProativosWhatsappAtivos': c.alertasProativosWhatsappAtivos,
         'whatsappDonoNumero': c.whatsappDonoNumero,
         'alertasProativosIntervaloMinutos': c.alertasProativosIntervaloMinutos,
+        'regimeTributarioEmitente': c.regimeTributarioEmitente,
       };
 
   static EmpresaConfig empresaConfigDeMap(
@@ -597,6 +598,13 @@ class SyncEntityCodecExtras {
         final v = (m['alertasProativosIntervaloMinutos'] as num?)?.toInt();
         if (v == null) return base.alertasProativosIntervaloMinutos;
         return v.clamp(15, 1440);
+      }(),
+      regimeTributarioEmitente: () {
+        final v = (m['regimeTributarioEmitente'] as num?)?.toInt();
+        if (v == null || v < 1 || v > 3) {
+          return base.regimeTributarioEmitente;
+        }
+        return v;
       }(),
     );
   }

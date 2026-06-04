@@ -62,8 +62,15 @@ class FiscalConfig {
   /// CST ICMS padrao no balcao (Regime Normal): 00 = tributada integralmente.
   static const String icmsSituacaoTributariaPadrao = '00';
 
+  /// CSOSN padrao (Simples Nacional): 102 — tributada SN sem credito.
+  /// Validar com o contador da loja (102, 103, 500, etc.).
+  static const String icmsSituacaoTributariaSimples = '102';
+
   /// PIS/COFINS padrao (Regime Normal): 01 = operacao tributavel, aliquota basica.
   static const String pisCofinsSituacaoTributariaPadrao = '01';
+
+  /// PIS/COFINS padrao (Simples): 49 = outras saidas.
+  static const String pisCofinsSituacaoTributariaSimples = '49';
 
   /// Natureza da operacao padrao (NFC-e e NF-e).
   static const String naturezaOperacaoPadrao = 'Venda de mercadoria';

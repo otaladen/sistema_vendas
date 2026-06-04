@@ -23,6 +23,7 @@ import '../data/objectbox.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../config/fiscal_config.dart';
+import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../services/fiscal_config_store.dart';
 import '../services/gemini_config.dart';
 import '../services/print_service.dart';
@@ -78,6 +79,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _geminiChaveOculta = true;
   bool _fiscalTokenOculto = true;
   String _fiscalAmbiente = 'homologacao';
+  int _fiscalRegime = FiscalRegimePadrao.regimeNormal;
   String _modeloPdf = 'cupom';
   String _impressoraPadrao = '';
   String _logoPath = '';
@@ -173,6 +175,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _fiscalCnpjController.text = cfg.cnpjEmitente;
       _fiscalIeController.text = cfg.inscricaoEstadualEmitente;
       _fiscalAmbiente = cfg.homologacao ? 'homologacao' : 'producao';
+      _fiscalRegime = FiscalRegimePadrao.regimeEfetivo(cfg);
     });
   }
 
@@ -189,14 +192,18 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       ambiente: _fiscalAmbiente,
       cnpjEmitente: _fiscalCnpjController.text,
       inscricaoEstadualEmitente: _fiscalIeController.text,
+      regimeTributarioEmitente: _fiscalRegime,
+    );
+    final empresa = await widget.appConfigRepository.carregarEmpresaConfig();
+    await widget.appConfigRepository.salvarEmpresaConfig(
+      empresa.copyWith(regimeTributarioEmitente: _fiscalRegime),
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          _fiscalAmbiente == 'producao'
-              ? 'Fiscal salvo em PRODUCAO. Notas terao validade juridica.'
-              : 'Fiscal salvo em homologacao (testes).',
+          'Fiscal salvo (${FiscalRegimePadrao.rotuloRegime(_fiscalRegime)}). '
+          '${_fiscalAmbiente == 'producao' ? 'Ambiente PRODUCAO.' : 'Homologacao (testes).'}',
         ),
       ),
     );
@@ -1562,6 +1569,37 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 10),
+                      DropdownButtonFormField<int>(
+                        value: _fiscalRegime == FiscalRegimePadrao.simplesNacional
+                            ? FiscalRegimePadrao.simplesNacional
+                            : FiscalRegimePadrao.regimeNormal,
+                        decoration: const InputDecoration(
+                          labelText: 'Regime tributario da loja',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: FiscalRegimePadrao.simplesNacional,
+                            child: Text('Simples Nacional'),
+                          ),
+                          DropdownMenuItem(
+                            value: FiscalRegimePadrao.regimeNormal,
+                            child: Text('Regime Normal'),
+                          ),
+                        ],
+                        onChanged: (v) {
+                          if (v == null) return;
+                          setState(() => _fiscalRegime = v);
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Padrao na emissao e XML: '
+                        '${FiscalRegimePadrao.resumoPadroesEmissao(_fiscalRegime)} '
+                        '(produtos em Automatico). Valide com o contador.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
                         value: _fiscalAmbiente,
                         decoration: const InputDecoration(

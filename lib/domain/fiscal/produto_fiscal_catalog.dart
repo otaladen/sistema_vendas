@@ -35,6 +35,17 @@ class ProdutoFiscalCatalog {
     OpcaoFiscalCadastro('8', '8 — Nacional conteudo import. > 70%'),
   ];
 
+  /// CSOSN mais usados no Simples Nacional (Focus: icms_situacao_tributaria).
+  static const List<OpcaoFiscalCadastro> icmsCsosnSimples = [
+    opcaoAutomatica,
+    OpcaoFiscalCadastro('102', '102 — Tributada SN sem credito'),
+    OpcaoFiscalCadastro('103', '103 — Tributada SN com credito'),
+    OpcaoFiscalCadastro('300', '300 — Imune'),
+    OpcaoFiscalCadastro('400', '400 — Nao tributada'),
+    OpcaoFiscalCadastro('500', '500 — ICMS cobrado anteriormente por ST'),
+    OpcaoFiscalCadastro('900', '900 — Outras'),
+  ];
+
   /// CST ICMS mais usados no varejo (Regime Normal).
   static const List<OpcaoFiscalCadastro> icmsCstVenda = [
     opcaoAutomatica,
@@ -69,15 +80,32 @@ class ProdutoFiscalCatalog {
     return FiscalConfig.icmsOrigemPadrao;
   }
 
+  static List<OpcaoFiscalCadastro> icmsOpcoesCadastro({
+    required bool ehSimplesNacional,
+  }) =>
+      ehSimplesNacional ? icmsCsosnSimples : icmsCstVenda;
+
   static String resolverIcmsSituacaoTributaria(
     Produto produto, {
     required String icmsPadraoLoja,
+    bool ehSimplesNacional = false,
   }) {
     final cadastro = produto.icmsSituacaoTributaria.trim();
-    if (cadastro.length == 2 && RegExp(r'^\d{2}$').hasMatch(cadastro)) {
+    if (RegExp(r'^\d{2,3}$').hasMatch(cadastro) &&
+        (cadastro.length == 2 || cadastro.length == 3)) {
       return cadastro;
     }
     final grupo = grupoTributarioProdutoDeString(produto.grupoTributario);
+    if (ehSimplesNacional) {
+      switch (grupo) {
+        case GrupoTributarioProduto.isento:
+          return '400';
+        case GrupoTributarioProduto.substituicaoTributaria:
+          return '500';
+        case GrupoTributarioProduto.tributado:
+          return icmsPadraoLoja;
+      }
+    }
     switch (grupo) {
       case GrupoTributarioProduto.isento:
         return '40';

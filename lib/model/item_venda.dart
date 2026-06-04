@@ -1,6 +1,7 @@
 import 'package:objectbox/objectbox.dart';
 
 import '../domain/entrega_venda_helper.dart';
+import '../domain/quantidade_venda_util.dart';
 import 'produto.dart';
 import 'venda.dart';
 
@@ -53,8 +54,16 @@ class ItemVenda {
   final produto = ToOne<Produto>();
   final venda = ToOne<Venda>();
 
-  double get subtotal => quantidade * precoUnitario;
-  double get subtotalCusto => quantidade * precoCustoUnitario;
+  double get quantidadeVendaEfetiva {
+    final p = produto.target;
+    return QuantidadeVendaUtil.valorExibicao(
+      quantidade,
+      fracionada: p?.permiteQuantidadeFracionada ?? false,
+    );
+  }
+
+  double get subtotal => quantidadeVendaEfetiva * precoUnitario;
+  double get subtotalCusto => quantidadeVendaEfetiva * precoCustoUnitario;
   double get lucro => subtotal - subtotalCusto;
 
   /// Unidades ainda nao retiradas (somente itens [retirada_futura]).

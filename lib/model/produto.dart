@@ -9,6 +9,7 @@ class Produto {
     this.id = 0,
     required this.codigoInterno,
     required this.nome,
+    this.nomeImpressao = '',
     this.descricao = '',
     this.unidade = 'UN',
     this.categoria = '',
@@ -63,6 +64,9 @@ class Produto {
   /// Ordenacao em listas e busca textual no cadastro.
   @Index()
   String nome;
+
+  /// Texto no cupom / DANFE / NF-e; vazio = usa [nome].
+  String nomeImpressao;
 
   String descricao;
   String unidade;

@@ -17,7 +17,9 @@ import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
+import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/fiscal/produto_fiscal_catalog.dart';
+import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_precificacao.dart';
 import '../model/produto.dart';
 import '../config/busca_imagem_config.dart';
@@ -230,6 +232,7 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   final _codigoInternoController = TextEditingController();
   final _nomeController = TextEditingController();
+  final _nomeImpressaoController = TextEditingController();
   final _descricaoController = TextEditingController();
   final _marcaController = TextEditingController();
   final _fornecedorController = TextEditingController();
@@ -276,6 +279,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   int? _produtoEmEdicaoId;
   bool _produtoAtivo = true;
   bool _gerarSkuAutomatico = true;
+  bool _nomeImpressaoVinculadoAoNome = true;
   final _formKey = GlobalKey<FormState>();
   bool _tentouSalvar = false;
   late final ProdutoImagemService _produtoImagemService;
@@ -310,6 +314,8 @@ class _ProdutosPageState extends State<ProdutosPage>
       aoConcluir: _snackbarDadosAtualizados,
     );
     _subAbaCadastroController.addListener(_onSubAbaCadastroChanged);
+    _nomeController.addListener(_sincronizarNomeImpressaoSeVinculado);
+    _nomeImpressaoController.addListener(_atualizarVinculoNomeImpressao);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focarBarrasSeNovoCadastro();
@@ -323,6 +329,35 @@ class _ProdutosPageState extends State<ProdutosPage>
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
     }
+  }
+
+  void _sincronizarNomeImpressaoSeVinculado() {
+    if (!_nomeImpressaoVinculadoAoNome) return;
+    final nome = _nomeController.text;
+    if (_nomeImpressaoController.text == nome) return;
+    _nomeImpressaoController.text = nome;
+  }
+
+  void _atualizarVinculoNomeImpressao() {
+    final nome = _nomeController.text.trim();
+    final imp = _nomeImpressaoController.text.trim();
+    final vinculado = imp.isEmpty || imp == nome;
+    if (vinculado != _nomeImpressaoVinculadoAoNome) {
+      setState(() => _nomeImpressaoVinculadoAoNome = vinculado);
+    }
+  }
+
+  String _nomeImpressaoParaSalvar(String nomeCadastro) {
+    if (_nomeImpressaoVinculadoAoNome) {
+      return ProdutoNomeExibicao.normalizarNomeImpressaoPersistido(
+        nome: nomeCadastro,
+        nomeImpressao: '',
+      );
+    }
+    return ProdutoNomeExibicao.normalizarNomeImpressaoPersistido(
+      nome: nomeCadastro,
+      nomeImpressao: _nomeImpressaoController.text,
+    );
   }
 
   void _focarBarrasSeNovoCadastro() {
@@ -352,7 +387,10 @@ class _ProdutosPageState extends State<ProdutosPage>
   void dispose() {
     disposeSafeSyncRefresh();
     _codigoInternoController.dispose();
+    _nomeController.removeListener(_sincronizarNomeImpressaoSeVinculado);
+    _nomeImpressaoController.removeListener(_atualizarVinculoNomeImpressao);
     _nomeController.dispose();
+    _nomeImpressaoController.dispose();
     _descricaoController.dispose();
     _marcaController.dispose();
     _fornecedorController.dispose();
@@ -909,6 +947,22 @@ class _ProdutosPageState extends State<ProdutosPage>
                     ),
                   ],
                 );
+                final campoNomeImpressao = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _erpFieldLabel('Nome impressao', context),
+                    TextFormField(
+                      controller: _nomeImpressaoController,
+                      textInputAction: TextInputAction.next,
+                      decoration: _erpInputDecoration(
+                        context,
+                        helper:
+                            'Cupom, orcamento e NF-e. Inicia igual ao nome; '
+                            'edite aqui para texto diferente na impressao.',
+                      ),
+                    ),
+                  ],
+                );
                 if (empilhar) {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -916,15 +970,24 @@ class _ProdutosPageState extends State<ProdutosPage>
                       campoBarras,
                       const SizedBox(height: _erpGap8),
                       campoNome,
+                      const SizedBox(height: _erpGap8),
+                      campoNomeImpressao,
                     ],
                   );
                 }
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(flex: 2, child: campoBarras),
-                    const SizedBox(width: _erpGap16),
-                    Expanded(flex: 3, child: campoNome),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 2, child: campoBarras),
+                        const SizedBox(width: _erpGap16),
+                        Expanded(flex: 3, child: campoNome),
+                      ],
+                    ),
+                    const SizedBox(height: _erpGap8),
+                    campoNomeImpressao,
                   ],
                 );
               },
@@ -1281,6 +1344,8 @@ class _ProdutosPageState extends State<ProdutosPage>
     setState(() {
       _codigoInternoController.clear();
       _nomeController.clear();
+      _nomeImpressaoController.clear();
+      _nomeImpressaoVinculadoAoNome = true;
       _descricaoController.clear();
       _marcaController.clear();
       _fornecedorController.clear();
@@ -2920,6 +2985,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       id: produtoExistente?.id ?? 0,
       codigoInterno: codigoInternoFinal,
       nome: nomePadrao,
+      nomeImpressao: _nomeImpressaoParaSalvar(nomePadrao),
       descricao: descricao,
       unidade: _normalizarUnidade(_unidadeSelecionada),
       categoria: categoria,
@@ -2990,6 +3056,11 @@ class _ProdutosPageState extends State<ProdutosPage>
       _produtoEmEdicaoId = produto.id;
       _codigoInternoController.text = produto.codigoInterno;
       _nomeController.text = produto.nome;
+      _nomeImpressaoVinculadoAoNome =
+          ProdutoNomeExibicao.nomeImpressaoVinculadoAoNome(produto);
+      _nomeImpressaoController.text = _nomeImpressaoVinculadoAoNome
+          ? produto.nome
+          : produto.nomeImpressao;
       _descricaoController.text = produto.descricao;
       if (_categoriasMateriaisConstrucao.containsKey(produto.categoria)) {
         _categoriaSelecionada = produto.categoria;
@@ -5392,7 +5463,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               .start,
                                                       children: [
                                                         _erpFieldLabel(
-                                                          'CST ICMS',
+                                                          FiscalRegimePadrao
+                                                              .rotuloIcmsCampo(),
                                                           context,
                                                         ),
                                                         DropdownButtonFormField<
@@ -5405,11 +5477,17 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                           decoration:
                                                               _erpInputDecoration(
                                                                 context,
-                                                                helper:
-                                                                    'Automatico: 00 / 40 / 60 pelo grupo',
+                                                                helper: FiscalRegimePadrao
+                                                                        .ehSimplesNacional()
+                                                                    ? 'Automatico: CSOSN pelo grupo (102/400/500)'
+                                                                    : 'Automatico: CST 00 / 40 / 60 pelo grupo',
                                                               ),
                                                           items: ProdutoFiscalCatalog
-                                                              .icmsCstVenda
+                                                              .icmsOpcoesCadastro(
+                                                                ehSimplesNacional:
+                                                                    FiscalRegimePadrao
+                                                                        .ehSimplesNacional(),
+                                                              )
                                                               .map(
                                                                 (o) =>
                                                                     DropdownMenuItem(
@@ -5454,7 +5532,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               _erpInputDecoration(
                                                                 context,
                                                                 helper:
-                                                                    'Vazio = 01 (padrao loja)',
+                                                                    'Vazio = ${FiscalRegimePadrao.pisCofinsSituacaoTributariaPadrao()} (padrao loja)',
                                                               ),
                                                           items: ProdutoFiscalCatalog
                                                               .pisCofinsCst

@@ -19,6 +19,7 @@ import '../domain/pagamento_orcamento.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
+import '../model/usuario_sistema.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../services/cupom_nao_fiscal_venda_pdf.dart';
@@ -44,6 +45,7 @@ class ListagemVendasPage extends StatefulWidget {
     required this.printService,
     required this.usuarioAtual,
     required this.podeCancelarVendas,
+    required this.usuarioLogado,
   });
 
   final VendaRepository vendaRepository;
@@ -54,6 +56,7 @@ class ListagemVendasPage extends StatefulWidget {
   final PrintService printService;
   final String usuarioAtual;
   final bool podeCancelarVendas;
+  final UsuarioSistema usuarioLogado;
 
   @override
   State<ListagemVendasPage> createState() => _ListagemVendasPageState();
@@ -215,6 +218,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
           vendaId: v.id,
           usuarioAtual: widget.usuarioAtual,
           podeRegistrarSemSenha: widget.podeCancelarVendas,
+          usuarioLogado: widget.usuarioLogado,
+          vendedorRepository: widget.vendedorRepository,
+          appConfigRepository: widget.appConfigRepository,
+          printService: widget.printService,
         ),
       ),
     );

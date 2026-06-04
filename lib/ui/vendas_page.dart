@@ -182,6 +182,7 @@ class VendasPage extends StatelessWidget {
                       printService: printService,
                       usuarioAtual: u.login,
                       podeCancelarVendas: podeCancelar,
+                      usuarioLogado: u,
                     ),
                   ),
                 );

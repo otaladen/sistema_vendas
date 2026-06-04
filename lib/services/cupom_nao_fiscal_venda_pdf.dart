@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/produto_nome_exibicao.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
 import '../model/cliente.dart';
@@ -286,12 +287,12 @@ class CupomNaoFiscalVendaPdf {
       ...venda.itens.map((item) {
         final dados = _dadosProdutoItem(item);
         final sufixo = EntregaVendaHelper.sufixoEntregaItemPdf(item);
+        final nomeImp = ProdutoNomeExibicao.paraImpressaoItem(item);
         return CupomPdfLayout.tabelaLinhaItemNfce(
           layout: layout,
           codigo: dados.codigo,
-          descricao: sufixo.isEmpty
-              ? item.nomeProduto
-              : '${item.nomeProduto}$sufixo',
+          descricao:
+              sufixo.isEmpty ? nomeImp : '$nomeImp$sufixo',
           quantidade: item.quantidade,
           unidade: dados.unidade,
           valorUnitario: formatarMoeda(item.precoUnitario),
@@ -495,7 +496,7 @@ class CupomNaoFiscalVendaPdf {
       ...venda.itens.map(
         (item) => CupomPdfLayout.itemVenda(
           layout: layout,
-          nomeProduto: item.nomeProduto,
+          nomeProduto: ProdutoNomeExibicao.paraImpressaoItem(item),
           quantidade: item.quantidade,
           precoUnitario: item.precoUnitario,
           subtotal: item.subtotal,
