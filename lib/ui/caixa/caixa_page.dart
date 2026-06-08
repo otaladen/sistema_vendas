@@ -43,7 +43,10 @@ import '../../model/vendedor.dart';
 import '../../services/auditoria_registrar.dart';
 import '../../services/cupom_nao_fiscal_venda_pdf.dart';
 import '../../data/sync/sync_cursor_storage.dart';
+import '../../domain/fiscal/abrir_danfe_focus.dart';
 import '../../domain/fiscal/fiscal_emissao_lock.dart';
+import '../../domain/fiscal/venda_documento_fiscal_mutex.dart';
+import '../fiscal/abrir_documento_fiscal.dart';
 import '../../services/focus_nfe_service.dart';
 import '../../services/focus_nfe_reconsulta_helper.dart';
 import '../../services/nfce_reconciliacao_service.dart';
@@ -3334,6 +3337,19 @@ class _CaixaPageState extends State<CaixaPage> {
     }
 
     if (acao == 'nfce') {
+      final vendaAtual = _vendaPosCaixaAtualizada() ?? venda;
+      final bloqueioNfce =
+          VendaDocumentoFiscalMutex.mensagemBloqueioNovaNfce(vendaAtual);
+      if (bloqueioNfce != null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(bloqueioNfce),
+            duration: const Duration(seconds: 8),
+          ),
+        );
+        return;
+      }
       setState(() => _posVendaProcessando = true);
       try {
         await _aguardarEntreDialogos();
@@ -3497,6 +3513,48 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
+  Future<void> _imprimirCupomNfceAutorizada(
+    Venda venda, {
+    double? totalRecebido,
+    double? troco,
+  }) async {
+    final vendaAtualizada =
+        widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!mounted) return;
+
+    final infer =
+        CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(vendaAtualizada);
+    final recebido = (totalRecebido ?? _posVenda?.totalRecebido ?? 0) > 0
+        ? (totalRecebido ?? _posVenda!.totalRecebido)
+        : infer.recebido;
+    final trocoVal = totalRecebido != null || _posVenda != null
+        ? (troco ?? _posVenda?.troco ?? 0)
+        : infer.troco;
+
+    final nomeArquivo =
+        'nfce_venda_${vendaAtualizada.numeroOrcamento > 0 ? vendaAtualizada.numeroOrcamento : vendaAtualizada.id}.pdf';
+    await mostrarFluxoImpressaoCupomVenda(
+      context,
+      printService: widget.printService,
+      config: config,
+      title: 'Cupom NFC-e',
+      content:
+          'Deseja imprimir o cupom fiscal desta venda? (Uma via — sem duplicar.)',
+      gerarPdf: () => CupomNaoFiscalVendaPdf.gerar(
+        venda: vendaAtualizada,
+        config: config,
+        cliente: _clienteDaVenda(vendaAtualizada),
+        vendedor: _vendedorDaVenda(vendaAtualizada),
+        totalRecebido: recebido,
+        troco: trocoVal,
+        segundaVia: false,
+        dataCabecalhoVenda: vendaAtualizada.nfceEmitidaEm ?? vendaAtualizada.data,
+      ),
+      suggestedFileName: nomeArquivo,
+    );
+  }
+
   Future<void> _imprimirCupomNaoFiscalPosVenda({
     required Venda venda,
     required double totalRecebido,
@@ -3550,7 +3608,7 @@ class _CaixaPageState extends State<CaixaPage> {
           '2. Na empresa, marque/habilite NFC-e (modelo 65) para a Bahia.\n'
           '3. Envie o certificado digital A1 (.pfx) e a senha.\n'
           '4. Confira CSC e ID CSC da SEFAZ-BA (se a Focus nao preencher sozinha).\n'
-          '5. Use o token de homologacao dessa mesma empresa em fiscal_config.dart.\n'
+          '5. Cole o token de homologacao em Configuracoes → Fiscal — Focus NFe.\n'
           '6. Aguarde alguns minutos apos salvar e tente de novo.\n\n'
           'Guia: focusnfe.com.br/guides/configurando-empresa/';
     }
@@ -3706,13 +3764,18 @@ class _CaixaPageState extends State<CaixaPage> {
 
     while (mounted) {
       vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? vendaAtual;
-      if (vendaAtual.nfceEmitida) {
+      final bloqueioNfce =
+          VendaDocumentoFiscalMutex.mensagemBloqueioNovaNfce(vendaAtual);
+      if (bloqueioNfce != null) {
+        final jaEmitida = vendaAtual.nfceEmitida;
         messenger.showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'NFC-e ja consta emitida para esta venda. '
-              'Use Visualizar/Reimprimir DANFE.',
+              jaEmitida
+                  ? '$bloqueioNfce Use Visualizar/Reimprimir DANFE.'
+                  : bloqueioNfce,
             ),
+            duration: const Duration(seconds: 8),
           ),
         );
         return;
@@ -3918,6 +3981,7 @@ class _CaixaPageState extends State<CaixaPage> {
 
           final vendaComNfce =
               widget.vendaRepository.obterPorId(vSalvar.id) ?? vSalvar;
+          _atualizarListaUltimasVendasFinalizadasCaixa();
           final detalhe = <String>[
             if (r.numero.isNotEmpty) 'Numero: ${r.numero}',
             if (r.serie.isNotEmpty) 'Serie: ${r.serie}',
@@ -3947,18 +4011,26 @@ class _CaixaPageState extends State<CaixaPage> {
                 ),
                 actionsAlignment: MainAxisAlignment.center,
                 actions: [
+                  FilledButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      await _imprimirCupomNfceAutorizada(vendaComNfce);
+                    },
+                    icon: const Icon(Icons.print_outlined),
+                    label: const Text('Imprimir cupom NFC-e'),
+                  ),
                   if (temDanfe)
-                    FilledButton.icon(
+                    TextButton.icon(
                       onPressed: () async {
                         Navigator.pop(ctx);
                         await _abrirDanfeNfceVenda(vendaComNfce);
                       },
                       icon: const Icon(Icons.picture_as_pdf_outlined),
-                      label: const Text('Imprimir DANFE (NFC-e)'),
+                      label: const Text('DANFE Focus (pode ter 2 vias)'),
                     ),
                   TextButton(
                     onPressed: () => Navigator.pop(ctx),
-                    child: Text(temDanfe ? 'Fechar' : 'OK'),
+                    child: const Text('Fechar'),
                   ),
                 ],
               );
@@ -3975,7 +4047,7 @@ class _CaixaPageState extends State<CaixaPage> {
               content: Text(
                 temDanfe
                     ? 'NFC-e ${r.numero.isNotEmpty ? r.numero : ''} autorizada.$msgCupom '
-                        'Use Imprimir DANFE para o PDF.'
+                        'Use Imprimir cupom NFC-e (uma via).'
                     : 'NFC-e autorizada.$msgCupom',
               ),
               backgroundColor: Colors.green.shade700,
@@ -3997,6 +4069,11 @@ class _CaixaPageState extends State<CaixaPage> {
     return widget.vendaRepository.listarUltimasVendasFinalizadas(
       limit: _ultimasVendasFinalizadasLimite,
     );
+  }
+
+  void _atualizarListaUltimasVendasFinalizadasCaixa() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _abrirAcoesVendaFinalizada(Venda vIn) async {
@@ -4032,7 +4109,10 @@ class _CaixaPageState extends State<CaixaPage> {
     final numCupom = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
     final cliente = _clienteDaVenda(v);
     final nfceEmitida = v.nfceEmitida;
+    final nfe55Autorizada = v.nfe55Autorizada;
+    final bloqueiaNovaNfce = VendaDocumentoFiscalMutex.bloqueiaNovaNfce(v);
     final temDanfe = v.nfceUrlDanfe.trim().isNotEmpty;
+    final temDanfeNfe55 = v.nfeUrlDanfe.trim().isNotEmpty;
 
     final acao = await showDialog<String>(
       context: context,
@@ -4099,6 +4179,42 @@ class _CaixaPageState extends State<CaixaPage> {
                       ),
                     ),
                 ],
+                if (nfe55Autorizada) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline,
+                        size: 20,
+                        color: Colors.green.shade700,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'NF-e modelo 55 ja emitida para esta venda.',
+                          style: Theme.of(ctx).textTheme.titleSmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (v.nfeNumero.isNotEmpty)
+                    Text('Numero NF-e: ${v.nfeNumero}'),
+                  if (v.nfeChaveAcesso.isNotEmpty)
+                    Text(
+                      'Chave: ${v.nfeChaveAcesso}',
+                      style: Theme.of(ctx).textTheme.bodySmall,
+                    ),
+                ],
+                if (!nfceEmitida && nfe55Autorizada) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'NFC-e nao pode ser emitida: esta venda ja possui NF-e.',
+                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                          color: Colors.orange.shade800,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -4120,7 +4236,7 @@ class _CaixaPageState extends State<CaixaPage> {
               icon: const Icon(Icons.receipt_outlined),
               label: const Text('Segunda via cupom'),
             ),
-            if (!nfceEmitida)
+            if (!bloqueiaNovaNfce)
               FilledButton.icon(
                 onPressed: () => Navigator.pop(ctx, 'nfce'),
                 icon: const Icon(Icons.receipt_long_outlined),
@@ -4128,9 +4244,15 @@ class _CaixaPageState extends State<CaixaPage> {
               ),
             if (nfceEmitida && temDanfe)
               FilledButton.icon(
-                onPressed: () => Navigator.pop(ctx, 'danfe'),
+                onPressed: () => Navigator.pop(ctx, 'danfe_nfce'),
                 icon: const Icon(Icons.picture_as_pdf_outlined),
-                label: const Text('Visualizar/Reimprimir DANFE'),
+                label: const Text('Visualizar/Reimprimir DANFE NFC-e'),
+              ),
+            if (nfe55Autorizada && temDanfeNfe55)
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(ctx, 'danfe_nfe'),
+                icon: const Icon(Icons.description_outlined),
+                label: const Text('Visualizar/Reimprimir DANFE NF-e'),
               ),
           ],
         );
@@ -4148,8 +4270,11 @@ class _CaixaPageState extends State<CaixaPage> {
       await _aguardarEntreDialogos();
       if (!mounted) return;
       await _emitirNfceParaVenda(v);
-    } else if (acao == 'danfe') {
+      _atualizarListaUltimasVendasFinalizadasCaixa();
+    } else if (acao == 'danfe_nfce') {
       await _abrirDanfeNfceVenda(v);
+    } else if (acao == 'danfe_nfe') {
+      await _abrirDanfeNfe55Venda(v);
     }
   }
 
@@ -4194,64 +4319,26 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _abrirDanfeNfceVenda(Venda venda) async {
-    final url = venda.nfceUrlDanfe.trim();
-    if (url.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Esta venda nao possui link do DANFE salvo. '
-            'Reemita pela API fiscal ou consulte o portal da SEFAZ.',
-          ),
-          duration: Duration(seconds: 8),
-        ),
-      );
-      return;
-    }
-    await _abrirUrlExterna(url);
+    await abrirDanfeFocus(
+      context,
+      focusNfe: _focusNfeService,
+      urlSalva: venda.nfceUrlDanfe,
+      venda: venda,
+    );
   }
 
-  Future<void> _abrirUrlExterna(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null || !uri.hasScheme) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Link do DANFE invalido.')),
-      );
-      return;
-    }
-
-    if (Platform.isWindows) {
-      try {
-        final r = await Process.run(
-          'rundll32',
-          ['url.dll,FileProtocolHandler', uri.toString()],
-        );
-        if (r.exitCode == 0) return;
-      } catch (_) {
-        // segue para launchUrl
-      }
-    }
-
-    try {
-      var ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
-      if (!ok) {
-        ok = await launchUrl(uri);
-      }
-      if (!mounted) return;
-      if (!ok) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Nao foi possivel abrir o DANFE no navegador.'),
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao abrir DANFE: $e')),
-      );
-    }
+  Future<void> _abrirDanfeNfe55Venda(Venda venda) async {
+    final reg = widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id);
+    final url = reg?.urlDanfe.trim().isNotEmpty == true
+        ? reg!.urlDanfe
+        : venda.nfeUrlDanfe.trim().isNotEmpty
+            ? venda.nfeUrlDanfe
+            : (reg?.urlXml ?? '');
+    await abrirUrlDocumentoFiscal(
+      context,
+      url,
+      mensagemSeVazio: 'NF-e autorizada, mas sem link de DANFE/XML salvo.',
+    );
   }
 
   Future<void> _abrirSegundaViaCupom() async {

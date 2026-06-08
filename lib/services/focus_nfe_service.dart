@@ -17,7 +17,10 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import '../config/fiscal_config.dart';
+import '../domain/fiscal/focus_documento_fiscal_url.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
+import '../domain/fiscal/icms_focus_item_helper.dart';
+import '../domain/fiscal/venda_documento_fiscal_mutex.dart';
 import '../domain/fiscal/nfe_cfop_devolucao_resolver.dart';
 import '../domain/fiscal/nfe_cfop_resolver.dart';
 import '../domain/fiscal/nfe_cobranca_helper.dart';
@@ -408,31 +411,38 @@ class FocusNfeEmissaoResultado {
     Map<String, dynamic> json, {
     required String referencia,
     int httpStatusCode = 200,
+    String apiBaseUrl = '',
   }) {
     final status = (json['status'] ?? '').toString().trim().toLowerCase();
     final statusSefaz = (json['status_sefaz'] ?? '').toString();
     final mensagemSefaz = (json['mensagem_sefaz'] ?? '').toString();
     final mensagemApi = (json['mensagem'] ?? json['message'] ?? '').toString();
     final chave = (json['chave_nfe'] ?? json['chave_acesso'] ?? '').toString();
-    final urlDanfe = (json['caminho_danfe'] ??
-            json['url_danfe'] ??
-            json['danfe'] ??
-            json['url_pdf'] ??
-            '')
-        .toString()
-        .trim();
-    final urlXml = (json['caminho_xml_nota_fiscal'] ??
-            json['caminho_xml'] ??
-            json['url_xml'] ??
-            '')
-        .toString()
-        .trim();
-    final urlXmlCancelamento = (json['caminho_xml_cancelamento'] ??
-            json['url_xml_cancelamento'] ??
-            json['caminho_xml_evento_cancelamento'] ??
-            '')
-        .toString()
-        .trim();
+    final urlDanfe = FocusDocumentoFiscalUrl.normalizar(
+      (json['caminho_danfe'] ??
+              json['url_danfe'] ??
+              json['danfe'] ??
+              json['url_pdf'] ??
+              '')
+          .toString(),
+      apiBaseUrl: apiBaseUrl,
+    );
+    final urlXml = FocusDocumentoFiscalUrl.normalizar(
+      (json['caminho_xml_nota_fiscal'] ??
+              json['caminho_xml'] ??
+              json['url_xml'] ??
+              '')
+          .toString(),
+      apiBaseUrl: apiBaseUrl,
+    );
+    final urlXmlCancelamento = FocusDocumentoFiscalUrl.normalizar(
+      (json['caminho_xml_cancelamento'] ??
+              json['url_xml_cancelamento'] ??
+              json['caminho_xml_evento_cancelamento'] ??
+              '')
+          .toString(),
+      apiBaseUrl: apiBaseUrl,
+    );
 
     final cancelada =
         status == 'cancelado' || statusSefaz == '135' || statusSefaz == '101';
@@ -515,12 +525,16 @@ class FocusNfeOperacaoSimplesResultado {
     this.mensagem = '',
     this.httpStatusCode = 0,
     this.protocolo = '',
+    this.urlXml = '',
+    this.xmlCorpo = '',
   });
 
   final bool sucesso;
   final String mensagem;
   final int httpStatusCode;
   final String protocolo;
+  final String urlXml;
+  final String xmlCorpo;
 
   factory FocusNfeOperacaoSimplesResultado.erro(String mensagem) {
     return FocusNfeOperacaoSimplesResultado(sucesso: false, mensagem: mensagem);
@@ -560,14 +574,53 @@ class FocusNfeService {
   final http.Client _http;
   final FiscalService _fiscal;
 
+  FocusNfeConfig get config => _config;
+
   static final DateFormat _isoEmissao = DateFormat("yyyy-MM-dd'T'HH:mm:ssXXX");
+  static final DateFormat _isoEmissaoSemFuso =
+      DateFormat("yyyy-MM-dd'T'HH:mm:ss");
+
+  /// Fuso fixo Brasil (sem horario de verao desde 2019).
+  static const String _offsetFiscalBrasil = '-03:00';
+
+  /// Margem para evitar rejeicao SEFAZ "data-hora posterior ao recebimento".
+  static const Duration _margemDataEmissaoNfce = Duration(seconds: 45);
+
+  static const String _justificativaContingenciaNfcePadrao =
+      'Indisponibilidade de comunicacao com a SEFAZ para autorizacao da NFC-e.';
+
+  /// Horario de emissao para Focus/SEFAZ: relogio local do PC + offset Brasil fixo.
+  ///
+  /// Evita rejeicao quando o Windows exibe a hora certa mas o fuso automatico
+  /// esta errado (ex.: UTC em vez de Brasilia).
+  @visibleForTesting
+  static String dataEmissaoFocus({
+    DateTime? base,
+    bool margemSeguranca = false,
+    String offset = _offsetFiscalBrasil,
+  }) {
+    final local = base ?? DateTime.now();
+    var dt = DateTime(
+      local.year,
+      local.month,
+      local.day,
+      local.hour,
+      local.minute,
+      local.second,
+    );
+    if (margemSeguranca) {
+      dt = dt.subtract(_margemDataEmissaoNfce);
+    }
+    return '${_isoEmissaoSemFuso.format(dt)}$offset';
+  }
 
   void validarConfiguracao() {
     if (!_config.configurado) {
       throw FocusNfeConfigIncompletaException(
-        'Configure Focus NFe em lib/config/fiscal_config.dart: '
-        'apiToken, cnpjEmitente (14 digitos) e inscricaoEstadualEmitente '
-        'antes de emitir NFC-e ou NF-e.',
+        'Focus NFe nao configurado neste computador. '
+        'Abra Configuracoes → Fiscal — Focus NFe, informe o token da API, '
+        'CNPJ, inscricao estadual e o ambiente (homologacao ou producao), '
+        'depois salve e tente emitir novamente.',
       );
     }
   }
@@ -585,6 +638,10 @@ class FocusNfeService {
     FocusNfeOpcoesEmissao opcoes = const FocusNfeOpcoesEmissao(),
   }) async {
     validarConfiguracao();
+    final bloqueioNfce = VendaDocumentoFiscalMutex.mensagemBloqueioNovaNfce(venda);
+    if (bloqueioNfce != null) {
+      return FocusNfeEmissaoResultado.erro(bloqueioNfce);
+    }
     final ref = referencia ?? referenciaVendaNfce(venda);
     final contingencia = opcoes.forcarContingenciaOfflineNfce;
     final formaUrl = contingencia
@@ -594,6 +651,7 @@ class FocusNfeService {
         ? FocusNfeEmissaoSefaz.tipoEmissaoContingenciaOfflineNfce
         : FocusNfeEmissaoSefaz.tipoEmissaoNormal;
 
+    final emissaoBase = DateTime.now();
     var payload = montarPayloadNfce(
       venda,
       cliente: cliente,
@@ -601,6 +659,7 @@ class FocusNfeService {
       entregaDomicilio: entregaDomicilio,
       tipoEmissao: tipoEmissao,
       formaEmissao: formaUrl,
+      dataEmissao: emissaoBase,
     );
     var resultado = await _postDocumento(
       uri: Uri.parse(_config.endpointNfce(ref, formaEmissao: formaUrl)),
@@ -618,6 +677,7 @@ class FocusNfeService {
         entregaDomicilio: entregaDomicilio,
         tipoEmissao: FocusNfeEmissaoSefaz.tipoEmissaoContingenciaOfflineNfce,
         formaEmissao: FocusNfeFormaEmissaoUrl.contingenciaOfflineNfce,
+        dataEmissao: DateTime.now(),
       );
       resultado = await _postDocumento(
         uri: Uri.parse(
@@ -695,6 +755,7 @@ class FocusNfeService {
         jsonBody,
         referencia: ref,
         httpStatusCode: response.statusCode,
+        apiBaseUrl: _config.baseUrl,
       );
     } catch (e) {
       return FocusNfeEmissaoResultado.erro('Falha ao consultar NF-e na Focus: $e');
@@ -951,6 +1012,8 @@ class FocusNfeService {
     } catch (_) {}
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
+      final corpo = response.body.trim();
+      final corpoXml = corpo.startsWith('<') ? corpo : '';
       final msg = jsonBody == null
           ? ''
           : (jsonBody['mensagem'] ?? jsonBody['status'] ?? '').toString().trim();
@@ -962,11 +1025,22 @@ class FocusNfeService {
                   '')
               .toString()
               .trim();
+      final urlXml = jsonBody == null
+          ? ''
+          : (jsonBody['caminho_xml_nota_fiscal'] ??
+                  jsonBody['caminho_xml'] ??
+                  jsonBody['url_xml'] ??
+                  jsonBody['caminho_xml_evento'] ??
+                  '')
+              .toString()
+              .trim();
       return FocusNfeOperacaoSimplesResultado(
         sucesso: true,
         mensagem: msg.isNotEmpty ? msg : 'Operacao concluida.',
         httpStatusCode: response.statusCode,
         protocolo: protocolo,
+        urlXml: urlXml,
+        xmlCorpo: corpoXml,
       );
     }
     final msg = jsonBody != null
@@ -1010,6 +1084,7 @@ class FocusNfeService {
       jsonBody,
       referencia: referencia,
       httpStatusCode: response.statusCode,
+      apiBaseUrl: _config.baseUrl,
     );
   }
 
@@ -1160,6 +1235,55 @@ class FocusNfeService {
         bytes[3] == 0x46;
   }
 
+  /// Baixa PDF do DANFE (requer token Focus na maioria dos endpoints).
+  Future<Uint8List?> baixarDocumentoPdf(Uri uri) async {
+    validarConfiguracao();
+    try {
+      final response = await _http
+          .get(
+            uri,
+            headers: {
+              ..._headers(),
+              'Accept': 'application/pdf',
+            },
+          )
+          .timeout(const Duration(seconds: 90));
+      if (response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          _parecePdf(response.bodyBytes)) {
+        return Uint8List.fromList(response.bodyBytes);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Baixa XML fiscal (inutilizacao, eventos) com autenticacao Focus.
+  Future<String?> baixarDocumentoXml(String url) async {
+    validarConfiguracao();
+    final normalizada = FocusDocumentoFiscalUrl.normalizar(
+      url,
+      apiBaseUrl: _config.baseUrl,
+    );
+    if (normalizada.isEmpty) return null;
+    try {
+      final response = await _http
+          .get(
+            Uri.parse(normalizada),
+            headers: {
+              ..._headers(),
+              'Accept': 'application/xml, text/xml, */*',
+            },
+          )
+          .timeout(const Duration(seconds: 90));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
+      final body = utf8.decode(response.bodyBytes);
+      return body.trim().startsWith('<') ? body : null;
+    } catch (_) {}
+    return null;
+  }
+
   /// Consulta NFC-e ja enviada (URL do XML / reconsulta SEFAZ).
   Future<FocusNfeEmissaoResultado> consultarNfce(String referencia) async {
     validarConfiguracao();
@@ -1199,6 +1323,7 @@ class FocusNfeService {
         jsonBody,
         referencia: ref,
         httpStatusCode: response.statusCode,
+        apiBaseUrl: _config.baseUrl,
       );
     } catch (e) {
       return FocusNfeEmissaoResultado.erro('Falha ao consultar NFC-e na Focus: $e');
@@ -1221,6 +1346,7 @@ class FocusNfeService {
     bool entregaDomicilio = false,
     String tipoEmissao = FocusNfeEmissaoSefaz.tipoEmissaoNormal,
     FocusNfeFormaEmissaoUrl formaEmissao = FocusNfeFormaEmissaoUrl.normal,
+    DateTime? dataEmissao,
   }) {
     final itens = _itensFocusDeVenda(venda, ufDestino: ufDestino);
     if (itens.isEmpty) {
@@ -1235,6 +1361,12 @@ class FocusNfeService {
         .toDouble();
 
     final docDest = _documentoDestinatario(cliente);
+    final contingenciaOffline =
+        tipoEmissao == FocusNfeEmissaoSefaz.tipoEmissaoContingenciaOfflineNfce;
+    final dataEmissaoIso = dataEmissaoFocus(
+      base: dataEmissao,
+      margemSeguranca: true,
+    );
     final payload = <String, dynamic>{
       ..._camposEmitenteFocus(),
       ..._camposTipoEmissao(
@@ -1243,7 +1375,7 @@ class FocusNfeService {
         incluirFormaEmissaoNoCorpo: true,
       ),
       'natureza_operacao': _config.naturezaOperacaoNfce,
-      'data_emissao': _isoEmissao.format(DateTime.now()),
+      'data_emissao': dataEmissaoIso,
       'tipo_documento': '1',
       'local_destino': _localDestino(ufDestino),
       'finalidade_emissao': '1',
@@ -1258,6 +1390,12 @@ class FocusNfeService {
       'formas_pagamento': _formasPagamentoDeVenda(venda, valorTotal),
       'informacoes_adicionais_contribuinte': _observacaoVenda(venda),
     };
+
+    if (contingenciaOffline) {
+      payload['data_entrada_contingencia'] = dataEmissaoIso;
+      payload['motivo_entrada_contingencia'] =
+          _justificativaContingenciaNfcePadrao;
+    }
 
     if (docDest != null) {
       if (docDest.length == 11) {
@@ -1600,6 +1738,14 @@ class FocusNfeService {
   static bool pareceFalhaComunicacao(FocusNfeEmissaoResultado resultado) {
     if (resultado.autorizada || resultado.processando) return false;
 
+    // Rejeicao fiscal da SEFAZ (HTTP 2xx) nao e falha de rede.
+    if (resultado.rejeitada &&
+        resultado.statusSefaz.isNotEmpty &&
+        resultado.httpStatusCode >= 200 &&
+        resultado.httpStatusCode < 300) {
+      return false;
+    }
+
     final http = resultado.httpStatusCode;
     if (http == 408 ||
         http == 502 ||
@@ -1610,23 +1756,49 @@ class FocusNfeService {
     }
 
     final msg = resultado.mensagem.toLowerCase();
+
+    const exclusoesRejeicaoFiscal = [
+      'data-hora',
+      'posterior ao horario',
+      'posterior ao horário',
+      'rejeicao:',
+      'rejeição:',
+      'cfop',
+      'cst',
+      'ncm',
+      'cest',
+      'cnpj',
+      'cpf',
+      'inscricao',
+      'inscrição',
+      'csc',
+      'duplicidade',
+      'denegad',
+    ];
+    for (final e in exclusoesRejeicaoFiscal) {
+      if (msg.contains(e)) return false;
+    }
+
     const gatilhos = [
       'timeout',
       'timed out',
       'indispon',
       'temporariamente',
-      'comunicar',
-      'comunicacao',
-      'conexao',
-      'conexão',
-      'servidor',
-      'sefaz',
+      'falha de comunicacao',
+      'falha de comunicação',
       'falha ao comunicar',
+      'erro de conexao',
+      'erro de conexão',
+      'connection refused',
+      'connection reset',
+      'host lookup',
+      'socketexception',
+      'handshake',
     ];
     for (final g in gatilhos) {
       if (msg.contains(g)) return true;
     }
-    return http == 0 && resultado.rejeitada;
+    return false;
   }
 
   Future<FocusNfeEmissaoResultado> _postDocumento({
@@ -1691,6 +1863,7 @@ class FocusNfeService {
         jsonBody,
         referencia: referencia,
         httpStatusCode: response.statusCode,
+        apiBaseUrl: _config.baseUrl,
       );
 
       if (resultado.rejeitada && resultado.mensagem.isEmpty) {
@@ -1841,8 +2014,10 @@ class FocusNfeService {
   /// passar a ter CST por produto, mapeie em [_resolverIcmsSituacaoTributariaItem].
   Map<String, String> _tributacaoItemPadrao(Produto produto) {
     return {
-      'icms_origem': _resolverIcmsOrigemItem(produto),
-      'icms_situacao_tributaria': _resolverIcmsSituacaoTributariaItem(produto),
+      ...IcmsFocusItemHelper.camposIcmsItem(
+        icmsOrigem: _resolverIcmsOrigemItem(produto),
+        icmsSituacaoTributaria: _resolverIcmsSituacaoTributariaItem(produto),
+      ),
       'pis_situacao_tributaria': _resolverPisCofinsItem(produto),
       'cofins_situacao_tributaria': _resolverPisCofinsItem(produto),
     };

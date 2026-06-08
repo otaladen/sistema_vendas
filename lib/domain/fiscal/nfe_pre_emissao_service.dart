@@ -11,6 +11,7 @@ import 'fiscal_emissao_lock.dart';
 import 'nfe_cobranca_helper.dart';
 import 'nfe_fiscal_helpers.dart';
 import 'nfe_item_fiscal_preview.dart';
+import 'venda_documento_fiscal_mutex.dart';
 
 enum NfeChecklistSeveridade { ok, aviso, bloqueio }
 
@@ -210,12 +211,14 @@ abstract final class NfePreEmissaoService {
       );
     }
 
-    if (venda.nfceEmitida) {
+    final bloqueioNfePorNfce = VendaDocumentoFiscalMutex.mensagemBloqueioNovaNfe55(
+      venda,
+    );
+    if (bloqueioNfePorNfce != null) {
       checklist.add(
-        const NfeChecklistItem(
+        NfeChecklistItem(
           titulo: 'NFC-e ja emitida nesta venda',
-          detalhe:
-              'Nao e permitido emitir NF-e modelo 55 quando ja existe NFC-e autorizada.',
+          detalhe: bloqueioNfePorNfce,
           severidade: NfeChecklistSeveridade.bloqueio,
         ),
       );

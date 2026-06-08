@@ -41,7 +41,10 @@ void main() {
     final itemPayload =
         (payload['items'] as List).first as Map<String, dynamic>;
     expect(itemPayload['icms_origem'], '0');
+    expect(itemPayload['icms_modalidade_base_calculo'], '3');
     expect(itemPayload['icms_situacao_tributaria'], '00');
+    expect(itemPayload.containsKey('icms_base_calculo'), isFalse);
+    expect(itemPayload.containsKey('icms_aliquota'), isFalse);
     expect(itemPayload['pis_situacao_tributaria'], '01');
     expect(itemPayload['cofins_situacao_tributaria'], '01');
     expect(itemPayload.containsKey('cest'), isFalse);
@@ -93,6 +96,21 @@ void main() {
 
     expect(payload['tipo_emissao'], '9');
     expect(payload['forma_emissao'], 'offline');
+    expect(payload['data_entrada_contingencia'], payload['data_emissao']);
+    expect(payload['motivo_entrada_contingencia'], isNotEmpty);
+    expect((payload['data_emissao'] as String).endsWith('-03:00'), isTrue);
+  });
+
+  test('dataEmissaoFocus usa offset Brasil fixo e margem opcional', () {
+    final base = DateTime(2026, 6, 2, 15, 30, 45);
+    expect(
+      FocusNfeService.dataEmissaoFocus(base: base),
+      '2026-06-02T15:30:45-03:00',
+    );
+    expect(
+      FocusNfeService.dataEmissaoFocus(base: base, margemSeguranca: true),
+      '2026-06-02T15:30:00-03:00',
+    );
   });
 
   test('item ST envia CEST e CST 60; origem e PIS customizados no produto', () {
@@ -133,6 +151,8 @@ void main() {
     expect(itemPayload['cest'], '1000300');
     expect(itemPayload['icms_origem'], '1');
     expect(itemPayload['icms_situacao_tributaria'], '60');
+    expect(itemPayload.containsKey('icms_modalidade_base_calculo'), isFalse);
+    expect(itemPayload.containsKey('icms_base_calculo'), isFalse);
     expect(itemPayload['pis_situacao_tributaria'], '06');
     expect(itemPayload['cfop'], '5405');
   });

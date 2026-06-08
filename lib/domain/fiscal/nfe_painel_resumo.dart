@@ -1,6 +1,7 @@
 import '../../data/nfe_inutilizacao_store.dart';
 import '../../data/nfe_saida_fiscal_store.dart';
 import 'nfe_numeracao_fiscal_helper.dart';
+import 'nfe_pendencias_service.dart';
 
 /// Indicadores do painel NF-e (visao operacional + fiscal robusto v2).
 class NfePainelResumo {
@@ -37,6 +38,7 @@ abstract final class NfePainelResumoBuilder {
     required int vendasSemNfe,
     NfeInutilizacaoStore? inutilizacaoStore,
     NfeSaidaFiscalStore? nfeStore,
+    Set<int> vendasComNfeAutorizada = const {},
   }) {
     var auth = 0;
     var proc = 0;
@@ -45,13 +47,17 @@ abstract final class NfePainelResumoBuilder {
     var totalCce = 0;
     var cceProc = 0;
     for (final r in historico) {
+      final superado = NfePendenciasService.registroSuperadoPorNfeAutorizada(
+        r,
+        vendasComNfeAutorizada: vendasComNfeAutorizada,
+      );
       if (r.cancelada) {
         canc++;
       } else if (r.autorizada) {
         auth++;
-      } else if (r.processando) {
+      } else if (r.processando && !superado) {
         proc++;
-      } else if (r.rejeitada) {
+      } else if (r.rejeitada && !superado) {
         rej++;
       }
       totalCce += r.totalCartasCorrecao;

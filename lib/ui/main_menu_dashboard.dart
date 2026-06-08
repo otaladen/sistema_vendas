@@ -11,6 +11,7 @@ import '../../data/sync/sync_log.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/filtro_listagem_entregas.dart';
 import '../../domain/dashboard_alertas.dart';
+import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
 import '../../domain/main_menu_destino.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
@@ -37,6 +38,7 @@ class _MainMenuResumo {
     required this.alertas,
     this.totalAReceber,
     this.totalFiadoVencido,
+    this.fiscalPendencias = 0,
   });
 
   final int vendasHoje;
@@ -47,6 +49,7 @@ class _MainMenuResumo {
   final List<DashboardAlerta> alertas;
   final double? totalAReceber;
   final double? totalFiadoVencido;
+  final int fiscalPendencias;
 }
 
 /// Painel inicial (KPIs + modulos). Usado no mobile e no shell desktop.
@@ -76,6 +79,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
   Timer? _alertasProativosTimer;
   AlertasProativosService? _alertasProativosService;
   List<MainMenuDestino> _favoritos = const [];
+  Timer? _fiscalPendenciasTimer;
 
   @override
   void initState() {
@@ -85,6 +89,10 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       _atualizarRelogio();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _inicializar());
+    _fiscalPendenciasTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => unawaited(_atualizarPendenciasFiscais()),
+    );
   }
 
   Future<void> _inicializar() async {
@@ -126,7 +134,34 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
   void dispose() {
     _relogioTimer?.cancel();
     _alertasProativosTimer?.cancel();
+    _fiscalPendenciasTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _atualizarPendenciasFiscais() async {
+    if (!mounted) return;
+    final deps = MainMenuDeps.maybeOf(context);
+    if (deps == null) return;
+    final total = FiscalPendenciasResumoService.contar(
+      vendaRepository: deps.vendaRepository,
+    ).total;
+    final atual = _resumo?.fiscalPendencias ?? -1;
+    if (atual == total) return;
+    setState(() {
+      final r = _resumo;
+      if (r == null) return;
+      _resumo = _MainMenuResumo(
+        vendasHoje: r.vendasHoje,
+        faturamentoHoje: r.faturamentoHoje,
+        caixaAberto: r.caixaAberto,
+        entregasEmAberto: r.entregasEmAberto,
+        entregasAtrasadas: r.entregasAtrasadas,
+        alertas: r.alertas,
+        totalAReceber: r.totalAReceber,
+        totalFiadoVencido: r.totalFiadoVencido,
+        fiscalPendencias: total,
+      );
+    });
   }
 
   void _atualizarRelogio() {
@@ -195,6 +230,10 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       podeEntregas: UsuarioPermissaoHelper.podeVisualizarEntregas(u),
     );
 
+    final fiscalPendencias = FiscalPendenciasResumoService.contar(
+      vendaRepository: deps.vendaRepository,
+    ).total;
+
     if (!mounted) return;
     setState(() {
       _config = config;
@@ -207,6 +246,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         alertas: alertas,
         totalAReceber: totalAReceber,
         totalFiadoVencido: totalFiadoVencido,
+        fiscalPendencias: fiscalPendencias,
       );
       _carregandoResumo = false;
     });
@@ -438,6 +478,9 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
   Widget _tileModulo(MainMenuDestino d) {
     final u = MainMenuDeps.of(context).usuarioLogado;
     final habilitado = d.podeAcessar(u);
+    final badge = d == MainMenuDestino.notasFiscais
+        ? (_resumo?.fiscalPendencias ?? 0)
+        : null;
     return MainMenuModuleTile(
       icon: d.icone,
       corDestaque: d.cor,
@@ -445,6 +488,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       subtitulo: d.subtitulo,
       habilitado: habilitado,
       favorito: _ehFavorito(d),
+      badgeContagem: badge != null && badge > 0 ? badge : null,
       onAlternarFavorito: habilitado ? () => _alternarFavorito(d) : null,
       onTap: () => _ir(d),
     );

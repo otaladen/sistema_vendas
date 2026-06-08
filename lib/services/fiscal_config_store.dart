@@ -75,7 +75,7 @@ abstract final class FiscalConfigStore {
 
     _cache = FiscalConfigDados(
       apiBaseUrl: padrao.apiBaseUrl,
-      apiToken: (token != null && token.isNotEmpty) ? token : padrao.apiToken,
+      apiToken: (token != null && token.isNotEmpty) ? token : '',
       cnpjEmitente: (cnpj != null && cnpj.length == 14) ? cnpj : padrao.cnpjEmitente,
       inscricaoEstadualEmitente:
           (ie != null && ie.isNotEmpty) ? ie : padrao.inscricaoEstadualEmitente,

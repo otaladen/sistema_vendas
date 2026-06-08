@@ -6,7 +6,9 @@ import '../domain/entrega_filtro_util.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/limite_credito_helper.dart';
+import '../config/fiscal_config.dart';
 import '../domain/fiscal/fiscal_emissao_lock.dart';
+import '../domain/fiscal/focus_documento_fiscal_url.dart';
 import '../domain/fiscal/nfce_xml_local_service.dart';
 import '../domain/fiscal/nfe_xml_local_service.dart';
 import '../domain/estoque/tipo_movimento_estoque.dart';
@@ -2337,8 +2339,14 @@ class VendaRepository {
       venda.nfceNumero = numero.trim();
       venda.nfceSerie = serie.trim();
       venda.nfceProtocolo = protocolo.trim();
-      venda.nfceUrlDanfe = urlDanfe.trim();
-      venda.nfceUrlXml = urlXml.trim();
+      venda.nfceUrlDanfe = FocusDocumentoFiscalUrl.normalizar(
+        urlDanfe,
+        apiBaseUrl: FiscalConfig.apiBaseUrl,
+      );
+      venda.nfceUrlXml = FocusDocumentoFiscalUrl.normalizar(
+        urlXml,
+        apiBaseUrl: FiscalConfig.apiBaseUrl,
+      );
       venda.nfceStatusFocus = statusFocus.trim().isEmpty
           ? 'autorizado'
           : statusFocus.trim();
@@ -2501,7 +2509,7 @@ class VendaRepository {
     try {
       return query
           .find()
-          .where(_vendaMarcadaComNfcePendenteFocus)
+          .where((v) => v.nfceProcessandoPendenteFocus)
           .take(limite)
           .toList();
     } finally {
@@ -2509,13 +2517,36 @@ class VendaRepository {
     }
   }
 
-  static bool _vendaMarcadaComNfcePendenteFocus(Venda venda) {
-    if (venda.nfceEmitida) return false;
-    final status = venda.nfceStatusFocus.trim().toLowerCase();
-    if (status == 'processando_autorizacao') return true;
-    final protocolo = venda.nfceProtocolo.trim();
-    if (protocolo.contains('focus_pendente')) return true;
-    return false;
+  /// NFC-e aguardando SEFAZ no periodo da venda (nao entra no ZIP do fechamento).
+  List<Venda> listarNfcePendenteFocusNoPeriodo({
+    required DateTime inicio,
+    required DateTime fim,
+  }) {
+    final inicioUtc = DateTime(inicio.year, inicio.month, inicio.day).toUtc();
+    final fimUtc = DateTime(
+      fim.year,
+      fim.month,
+      fim.day,
+      23,
+      59,
+      59,
+      999,
+    ).toUtc();
+    final cond = Venda_.status
+        .equals('finalizada')
+        .and(Venda_.nfceChaveAcesso.equals(''))
+        .and(Venda_.nfceUrlDanfe.equals(''))
+        .and(Venda_.data.greaterOrEqualDate(inicioUtc))
+        .and(Venda_.data.lessOrEqualDate(fimUtc));
+    final query = _db.vendaBox
+        .query(cond)
+        .order(Venda_.id, flags: Order.descending)
+        .build();
+    try {
+      return query.find().where((v) => v.nfceProcessandoPendenteFocus).toList();
+    } finally {
+      query.close();
+    }
   }
 
   void vincularClienteVendaFinalizada(int vendaId, int clienteId) {

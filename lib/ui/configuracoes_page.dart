@@ -1563,9 +1563,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Token e ambiente ficam neste PC (nao vao para o Git). '
-                        'Padrao do codigo: ${FiscalConfig.ambiente}. '
-                        'CNPJ/IE: ${FiscalConfig.cnpjEmitente}.',
+                        'Token obrigatorio nesta tela (salvo só neste PC, '
+                        'fora do Git). Ambiente padrao do codigo: '
+                        '${FiscalConfig.ambiente}. CNPJ/IE padrao: '
+                        '${FiscalConfig.cnpjEmitente}.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 10),

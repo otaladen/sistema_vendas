@@ -7,7 +7,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../data/fechamento_fiscal_local_source.dart';
 import '../../data/venda_repository.dart';
+import '../../domain/fiscal/fiscal_bloqueios_fechamento.dart';
 import '../../services/fechamento_contabil_service.dart';
+import 'widgets/fiscal_bloqueios_banner.dart';
 
 /// Fechamento do mes: ZIP com XMLs autorizados + planilha Excel para contabilidade.
 class ExportarFechamentoPage extends StatefulWidget {
@@ -61,16 +63,90 @@ class _ExportarFechamentoPageState extends State<ExportarFechamentoPage> {
 
   int? _previewSaidas;
   int? _previewEntradas;
+  FiscalBloqueiosFechamento? _bloqueios;
 
   void _atualizarPreview() {
     final pacote = _service.listarPacoteFiscal(_mes, _ano);
+    final bloqueios = FiscalBloqueiosFechamentoService.avaliar(
+      vendaRepository: widget.vendaRepository,
+      mes: _mes,
+      ano: _ano,
+    );
     if (mounted) {
       setState(() {
         _previewSaidas = pacote.saidas.length;
         _previewEntradas = pacote.entradas.length;
         _previewQuantidade = pacote.totalDocumentos;
+        _bloqueios = bloqueios;
       });
     }
+  }
+
+  Future<bool> _confirmarExportacaoComBloqueios(
+    FiscalBloqueiosFechamento bloqueios,
+  ) async {
+    if (bloqueios.bloqueiaExportacao) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(
+            Icons.block_rounded,
+            color: Colors.red.shade700,
+          ),
+          title: const Text('Exportacao bloqueada'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Ha NFC-e aguardando autorizacao da SEFAZ neste periodo. '
+                  'Essas vendas nao entram no ZIP ate regularizar.',
+                ),
+                const SizedBox(height: 12),
+                FiscalBloqueiosBanner(bloqueios: bloqueios),
+                const SizedBox(height: 8),
+                const Text(
+                  'Abra Notas Fiscais → Pendencias fiscais, reconsulte e '
+                  'tente novamente.',
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Entendi'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+    if (!bloqueios.temAviso) return true;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          Icons.info_outline,
+          color: Colors.orange.shade800,
+        ),
+        title: const Text('Avisos no fechamento'),
+        content: SingleChildScrollView(
+          child: FiscalBloqueiosBanner(bloqueios: bloqueios),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Voltar e resolver'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Continuar exportacao'),
+          ),
+        ],
+      ),
+    );
+    return result == true;
   }
 
   List<int> get _anosDisponiveis {
@@ -80,6 +156,14 @@ class _ExportarFechamentoPageState extends State<ExportarFechamentoPage> {
 
   Future<void> _exportar() async {
     if (_exportando) return;
+    final bloqueios = _bloqueios ??
+        FiscalBloqueiosFechamentoService.avaliar(
+          vendaRepository: widget.vendaRepository,
+          mes: _mes,
+          ano: _ano,
+        );
+    if (!await _confirmarExportacaoComBloqueios(bloqueios)) return;
+
     setState(() => _exportando = true);
 
     var progressoAtual = 0;
@@ -229,8 +313,9 @@ class _ExportarFechamentoPageState extends State<ExportarFechamentoPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Gera um ZIP com os XMLs das notas autorizadas (NFC-e e NF-e) '
-              'e uma planilha Excel de resumo para a contabilidade.',
+              'Gera um ZIP com os XMLs das notas autorizadas (NFC-e e NF-e), '
+              'inutilizacoes, CC-e e eventos, mais planilha Excel para a '
+              'contabilidade.',
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 24),
@@ -287,6 +372,10 @@ class _ExportarFechamentoPageState extends State<ExportarFechamentoPage> {
               ],
             ),
             const SizedBox(height: 16),
+            if (_bloqueios != null && _bloqueios!.temAviso) ...[
+              FiscalBloqueiosBanner(bloqueios: _bloqueios!),
+              const SizedBox(height: 12),
+            ],
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -317,8 +406,21 @@ class _ExportarFechamentoPageState extends State<ExportarFechamentoPage> {
               ),
             ),
             const Spacer(),
+            if (_bloqueios?.bloqueiaExportacao ?? false) ...[
+              Text(
+                'Exportacao bloqueada: regularize as NFC-e pendentes do '
+                'periodo em Pendencias fiscais.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.red.shade800,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+            ],
             FilledButton.icon(
-              onPressed: _exportando || (_previewQuantidade ?? 0) == 0
+              onPressed: _exportando ||
+                      (_previewQuantidade ?? 0) == 0 ||
+                      (_bloqueios?.bloqueiaExportacao ?? false)
                   ? null
                   : _exportar,
               icon: _exportando

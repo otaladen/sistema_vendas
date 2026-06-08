@@ -27,7 +27,10 @@ class NfeReconciliacaoService {
   String get _storePath => _historicoStore.storeDirectoryPath;
 
   Future<NfeReconciliacaoLote> reconsultarProcessando() async {
-    final fila = NfePendenciasService.listarProcessando(_historicoStore);
+    final fila = NfePendenciasService.listarProcessando(
+      _historicoStore,
+      vendaRepository: _vendaRepository,
+    );
     var autorizadas = 0;
     var atualizadas = 0;
     for (final reg in fila) {

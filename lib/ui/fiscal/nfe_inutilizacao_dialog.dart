@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/nfe_inutilizacao_store.dart';
+import '../../domain/fiscal/nfe_inutilizacao_xml_local_service.dart';
 import '../../data/nfe_saida_fiscal_store.dart';
 import '../../domain/fiscal/nfe_numeracao_fiscal_helper.dart';
 import '../../services/auditoria_registrar.dart';
@@ -151,10 +152,18 @@ class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
         sucesso: r.sucesso,
         protocolo: r.protocolo,
         mensagemSefaz: r.mensagem,
+        urlXml: r.urlXml,
       ),
     );
 
     if (r.sucesso) {
+      await NfeInutilizacaoXmlLocalService.arquivarSePossivel(
+        storeDirectoryPath: widget.nfeStore.storeDirectoryPath,
+        registroId: id,
+        resultado: r,
+        focusNfe: widget.focusNfe,
+      );
+      if (!mounted) return;
       AuditoriaRegistrar.registrar(
         modulo: AuditoriaModulo.fiscal,
         acao: AuditoriaAcao.nfeInutilizar,

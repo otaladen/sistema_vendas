@@ -3,6 +3,8 @@ import 'dart:convert';
 /// Presets de layout (cupom/orcamento).
 enum LayoutImpressaoPreset {
   padrao,
+  /// Bobina 80 mm — area imprimivel 72 mm (valores alinhados, sem corte na margem).
+  bematechMp4200,
   economico,
   compacto,
   destaque,
@@ -248,13 +250,14 @@ class ConfigLayoutImpressao {
     this.destacarTroco = true,
     this.divisoriaAntesRodape = true,
     this.espacoCompacto = false,
-    this.flexColunaEsquerda = 4,
-    this.larguraColunaValorMm = 28,
+    this.flexColunaEsquerda = 3,
+    this.larguraColunaValorMm = 32,
     this.reservarColunaValorFixa = true,
-    this.margemPaginaMm = 3,
+    this.larguraPaginaPdfMm = 72,
+    this.margemPaginaMm = 2,
     this.margemCorteMm = 2,
     this.fatorEspacoVertical = 1,
-    this.fatorAlturaPaginaPdf = 0.92,
+    this.fatorAlturaPaginaPdf = 1.05,
     this.alturaLogoMm = 36,
     this.espacoEntreItensMm = 1.5,
     this.exibirEspacoFinal = true,
@@ -303,6 +306,9 @@ class ConfigLayoutImpressao {
 
   /// Reserva espaco fixo para valores — evita texto da esquerda “comer” o preco.
   final bool reservarColunaValorFixa;
+
+  /// Largura do PDF enviado a impressora (mm). Papel 80 mm: use 72 (Bematech MP-4200 TH).
+  final double larguraPaginaPdfMm;
   final double margemPaginaMm;
   final double margemCorteMm;
   final double fatorEspacoVertical;
@@ -327,15 +333,49 @@ class ConfigLayoutImpressao {
   String get caractereDestaque =>
       caractereDivisoriaDestaque.isEmpty ? '=' : caractereDivisoriaDestaque[0];
 
-  static ConfigLayoutImpressao padraoCupom() => const ConfigLayoutImpressao();
-
-  static ConfigLayoutImpressao padraoOrcamento() => const ConfigLayoutImpressao(
-        exibirValidadeOrcamento: true,
-        exibirEntrega: false,
-        exibirEnderecoEntrega: false,
-        exibirObservacaoEntrega: false,
-        estiloCupomNfce: false,
+  static ConfigLayoutImpressao padraoCupom() => const ConfigLayoutImpressao(
+        familiaFonte: LayoutFamiliaFonte.courier,
       );
+
+  static ConfigLayoutImpressao padraoOrcamento() =>
+      economico(orcamento: true).copyWith(
+        familiaFonte: LayoutFamiliaFonte.courier,
+      );
+
+  /// Bematech MP-4200 TH e termicas 80 mm com area util ~72 mm.
+  static ConfigLayoutImpressao bematechMp4200({required bool orcamento}) {
+    if (orcamento) {
+      return economico(orcamento: true).copyWith(
+        preset: LayoutImpressaoPreset.bematechMp4200,
+        larguraPaginaPdfMm: 72,
+        larguraColunaValorMm: 32,
+        reservarColunaValorFixa: true,
+        flexColunaEsquerda: 3,
+        margemPaginaMm: 2,
+        colunasEsquerdaDireita: true,
+        linhaQuantidadePreco: true,
+        alinharTotaisColunas: true,
+        alinharPagamentoColunas: true,
+      );
+    }
+    return const ConfigLayoutImpressao(
+      preset: LayoutImpressaoPreset.bematechMp4200,
+      larguraPaginaPdfMm: 72,
+      larguraColunaValorMm: 32,
+      reservarColunaValorFixa: true,
+      flexColunaEsquerda: 3,
+      margemPaginaMm: 2,
+      margemCorteMm: 2,
+      fatorAlturaPaginaPdf: 1.05,
+      modoImpressaoDireta: LayoutModoImpressaoDireta.alturaPdf,
+      estiloCupomNfce: true,
+      colunasEsquerdaDireita: true,
+      cabecalhoColunasItens: true,
+      linhaQuantidadePreco: true,
+      alinharTotaisColunas: true,
+      alinharPagamentoColunas: true,
+    );
+  }
 
   /// Maxima economia de papel (teste na loja).
   static ConfigLayoutImpressao economico({required bool orcamento}) =>
@@ -357,7 +397,7 @@ class ConfigLayoutImpressao {
         margemPaginaMm: 2,
         margemCorteMm: 0,
         fatorEspacoVertical: 0.5,
-        fatorAlturaPaginaPdf: 0.85,
+        fatorAlturaPaginaPdf: 1.0,
         alturaLogoMm: 28,
         espacoEntreItensMm: 1,
         exibirEspacoFinal: false,
@@ -404,6 +444,8 @@ class ConfigLayoutImpressao {
     required bool orcamento,
   }) {
     switch (preset) {
+      case LayoutImpressaoPreset.bematechMp4200:
+        return bematechMp4200(orcamento: orcamento);
       case LayoutImpressaoPreset.economico:
         return economico(orcamento: orcamento);
       case LayoutImpressaoPreset.compacto:
@@ -453,6 +495,7 @@ class ConfigLayoutImpressao {
     int? flexColunaEsquerda,
     double? larguraColunaValorMm,
     bool? reservarColunaValorFixa,
+    double? larguraPaginaPdfMm,
     double? margemPaginaMm,
     double? margemCorteMm,
     double? fatorEspacoVertical,
@@ -511,6 +554,7 @@ class ConfigLayoutImpressao {
       larguraColunaValorMm: larguraColunaValorMm ?? this.larguraColunaValorMm,
       reservarColunaValorFixa:
           reservarColunaValorFixa ?? this.reservarColunaValorFixa,
+      larguraPaginaPdfMm: larguraPaginaPdfMm ?? this.larguraPaginaPdfMm,
       margemPaginaMm: margemPaginaMm ?? this.margemPaginaMm,
       margemCorteMm: margemCorteMm ?? this.margemCorteMm,
       fatorEspacoVertical: fatorEspacoVertical ?? this.fatorEspacoVertical,
@@ -559,6 +603,7 @@ class ConfigLayoutImpressao {
         'flexColunaEsquerda': flexColunaEsquerda,
         'larguraColunaValorMm': larguraColunaValorMm,
         'reservarColunaValorFixa': reservarColunaValorFixa,
+        'larguraPaginaPdfMm': larguraPaginaPdfMm,
         'margemPaginaMm': margemPaginaMm,
         'margemCorteMm': margemCorteMm,
         'fatorEspacoVertical': fatorEspacoVertical,
@@ -658,6 +703,10 @@ class ConfigLayoutImpressao {
           .clamp(20, 40),
       reservarColunaValorFixa: json['reservarColunaValorFixa'] as bool? ??
           padrao.reservarColunaValorFixa,
+      larguraPaginaPdfMm:
+          ((json['larguraPaginaPdfMm'] as num?) ?? padrao.larguraPaginaPdfMm)
+              .toDouble()
+              .clamp(68, 80),
       margemPaginaMm: ((json['margemPaginaMm'] as num?) ?? padrao.margemPaginaMm)
           .toDouble()
           .clamp(1, 8),

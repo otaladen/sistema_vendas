@@ -3,8 +3,6 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import '../domain/fiscal/nfe_carta_correcao_registro.dart';
-
 /// Registro de inutilizacao de numeracao NF-e (historico local).
 class NfeInutilizacaoRegistro {
   NfeInutilizacaoRegistro({
@@ -17,6 +15,7 @@ class NfeInutilizacaoRegistro {
     required this.sucesso,
     this.protocolo = '',
     this.mensagemSefaz = '',
+    this.urlXml = '',
     DateTime? registradaEm,
   }) : registradaEm = registradaEm ?? DateTime.now();
 
@@ -29,7 +28,11 @@ class NfeInutilizacaoRegistro {
   final bool sucesso;
   final String protocolo;
   final String mensagemSefaz;
+  final String urlXml;
   final DateTime registradaEm;
+
+  String get nomeArquivoXml =>
+      'inutilizacao_serie${serie}_$numeroInicial-$numeroFinal.xml';
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -41,6 +44,7 @@ class NfeInutilizacaoRegistro {
         'sucesso': sucesso,
         if (protocolo.trim().isNotEmpty) 'protocolo': protocolo,
         if (mensagemSefaz.trim().isNotEmpty) 'mensagemSefaz': mensagemSefaz,
+        if (urlXml.trim().isNotEmpty) 'urlXml': urlXml,
         'registradaEm': registradaEm.toUtc().toIso8601String(),
       };
 
@@ -55,6 +59,7 @@ class NfeInutilizacaoRegistro {
       sucesso: json['sucesso'] == true,
       protocolo: (json['protocolo'] ?? '').toString(),
       mensagemSefaz: (json['mensagemSefaz'] ?? '').toString(),
+      urlXml: (json['urlXml'] ?? '').toString(),
       registradaEm:
           DateTime.tryParse((json['registradaEm'] ?? '').toString()) ??
               DateTime.now(),
@@ -67,6 +72,7 @@ class NfeInutilizacaoStore {
   NfeInutilizacaoStore(this._storeDirectoryPath);
 
   final String _storeDirectoryPath;
+  String get storeDirectoryPath => _storeDirectoryPath;
   static const String _arquivo = 'nfe_inutilizacoes_v1.json';
 
   File get _file => File(p.join(_storeDirectoryPath, _arquivo));

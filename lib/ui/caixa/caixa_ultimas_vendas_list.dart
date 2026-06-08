@@ -71,16 +71,8 @@ class CaixaUltimasVendasList extends StatelessWidget {
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (v.nfceEmitida)
-                    Tooltip(
-                      message: 'NFC-e emitida',
-                      child: Icon(
-                        Icons.receipt_long,
-                        size: 18,
-                        color: Colors.green.shade700,
-                      ),
-                    ),
-                  if (v.nfceEmitida) const SizedBox(width: 8),
+                  ..._iconesNotaFiscalEmitida(v),
+                  if (v.nfceEmitida || v.nfe55Autorizada) const SizedBox(width: 8),
                   Text(
                     formatarMoeda(v.total),
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -95,5 +87,32 @@ class CaixaUltimasVendasList extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static List<Widget> _iconesNotaFiscalEmitida(Venda v) {
+    final verde = Colors.green.shade700;
+    final icones = <Widget>[];
+    if (v.nfceEmitida) {
+      icones.add(
+        Tooltip(
+          message: v.nfceNumero.trim().isNotEmpty
+              ? 'NFC-e ${v.nfceNumero.trim()} emitida'
+              : 'NFC-e emitida',
+          child: Icon(Icons.receipt_long, size: 18, color: verde),
+        ),
+      );
+    }
+    if (v.nfe55Autorizada) {
+      if (icones.isNotEmpty) icones.add(const SizedBox(width: 4));
+      icones.add(
+        Tooltip(
+          message: v.nfeNumero.trim().isNotEmpty
+              ? 'NF-e ${v.nfeNumero.trim()} emitida'
+              : 'NF-e emitida',
+          child: Icon(Icons.description_outlined, size: 18, color: verde),
+        ),
+      );
+    }
+    return icones;
   }
 }

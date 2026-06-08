@@ -50,6 +50,26 @@ class NfePreviaResumo {
         return 'Interna (BA)';
     }
   }
+
+  /// Rotulo SEFAZ da modalidade de frete (modFrete).
+  String get rotuloModalidadeFrete {
+    switch (modalidadeFrete) {
+      case '0':
+        return 'CIF — emitente (0)';
+      case '1':
+        return 'FOB — destinatario (1)';
+      case '2':
+        return 'Terceiros (2)';
+      case '3':
+        return 'Proprio remetente (3)';
+      case '4':
+        return 'Proprio destinatario (4)';
+      case '9':
+        return 'Sem ocorrencia de transporte (9)';
+      default:
+        return 'Modalidade $modalidadeFrete';
+    }
+  }
 }
 
 abstract final class NfePreviaResumoBuilder {

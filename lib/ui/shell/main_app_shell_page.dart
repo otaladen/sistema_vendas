@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../../data/produto_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
+import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
 import '../../domain/main_menu_destino.dart';
 import '../../model/usuario_sistema.dart';
 import '../../services/lan_sync_server_manager.dart';
@@ -63,14 +65,35 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   List<MainMenuDestino> _favoritos = const [];
   bool _railEstendido = true;
   bool _syncIniciado = false;
+  int _fiscalPendencias = 0;
+  Timer? _fiscalPendenciasTimer;
 
   @override
   void initState() {
     super.initState();
     _carregarFavoritos();
+    _atualizarPendenciasFiscais();
+    _fiscalPendenciasTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => _atualizarPendenciasFiscais(),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _iniciarSyncSeNecessario();
     });
+  }
+
+  @override
+  void dispose() {
+    _fiscalPendenciasTimer?.cancel();
+    super.dispose();
+  }
+
+  void _atualizarPendenciasFiscais() {
+    final total = FiscalPendenciasResumoService.contar(
+      vendaRepository: widget.vendaRepository,
+    ).total;
+    if (!mounted || total == _fiscalPendencias) return;
+    setState(() => _fiscalPendencias = total);
   }
 
   Future<void> _iniciarSyncSeNecessario() async {
@@ -113,6 +136,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   void _irPara(MainMenuDestino destino) {
     if (!destino.podeAcessar(widget.usuarioLogado)) return;
     setState(() => _destino = destino);
+    _atualizarPendenciasFiscais();
     _navKey.currentState?.pushAndRemoveUntil<void>(
       MaterialPageRoute<void>(
         settings: RouteSettings(name: destino.name),
@@ -236,8 +260,20 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       destinations: [
         for (final d in itens)
           NavigationRailDestination(
-            icon: Icon(d.icone),
-            selectedIcon: Icon(d.icone, color: d.cor),
+            icon: _iconeRail(
+              d,
+              selecionado: false,
+              badge: d == MainMenuDestino.notasFiscais
+                  ? _fiscalPendencias
+                  : 0,
+            ),
+            selectedIcon: _iconeRail(
+              d,
+              selecionado: true,
+              badge: d == MainMenuDestino.notasFiscais
+                  ? _fiscalPendencias
+                  : 0,
+            ),
             label: Text(
               d.titulo,
               style: TextStyle(
@@ -271,6 +307,22 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _iconeRail(
+    MainMenuDestino d, {
+    required bool selecionado,
+    required int badge,
+  }) {
+    final icone = Icon(
+      d.icone,
+      color: selecionado ? d.cor : null,
+    );
+    if (badge <= 0) return icone;
+    return Badge(
+      label: Text(badge > 99 ? '99+' : '$badge'),
+      child: icone,
     );
   }
 

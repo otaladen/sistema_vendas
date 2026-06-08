@@ -12,7 +12,30 @@ import '../model/config_layout_impressao.dart';
 class CupomPdfLayout {
   CupomPdfLayout._();
 
-  static const double larguraBobinaMm = 80;
+  /// Largura do papel na bobina (referencia).
+  static const double larguraPapelBobinaMm = 80;
+
+  @Deprecated('Use larguraPdfMm(layout) — area imprimivel da MP-4200 e similares.')
+  static const double larguraBobinaMm = larguraPapelBobinaMm;
+
+  /// Folga extra na altura do PDF termico (evita corte na impressora).
+  static const double margemSegurancaAlturaBobinaMm = 14;
+
+  /// Largura do PDF = area imprimivel (72 mm na Bematech MP-4200 TH em papel 80 mm).
+  static double larguraPdfMm(ConfigLayoutImpressao layout) =>
+      layout.larguraPaginaPdfMm.clamp(68, 80);
+
+  static double larguraUtilConteudoMm(ConfigLayoutImpressao layout) {
+    final pdf = larguraPdfMm(layout);
+    final margens = _margemPagina(layout) * 2;
+    return (pdf - margens).clamp(48, pdf);
+  }
+
+  static double _larguraColunaValorEfetivaMm(ConfigLayoutImpressao layout) {
+    final util = larguraUtilConteudoMm(layout);
+    final maxValor = util * 0.48;
+    return layout.larguraColunaValorMm.clamp(22, maxValor);
+  }
   static const double espacoBlocoMm = 2.5;
 
   static double _margemPagina(ConfigLayoutImpressao layout) =>
@@ -76,18 +99,30 @@ class CupomPdfLayout {
   static pw.Widget espacoBloco(ConfigLayoutImpressao layout) =>
       pw.SizedBox(height: _espacoBloco(layout) * PdfPageFormat.mm);
 
+  /// Tracejado de ponta a ponta na area util da bobina (estilo cupom termico).
+  static String linhaDivisoriaCompleta(ConfigLayoutImpressao layout) {
+    final raw = layout.caractereSimples.trim();
+    final c = raw.isEmpty ? '-' : raw[0];
+    final fs = layout.tamanhoFonteCorpo.fontSizeContato;
+    final larguraMm = larguraUtilConteudoMm(layout);
+    final mmPorCaractere = (fs * 0.14 + 0.38).clamp(0.85, 1.45);
+    final n = (larguraMm / mmPorCaractere).floor().clamp(32, 80);
+    return c * n;
+  }
+
   static pw.Widget divisoriaSecao({
     required ConfigLayoutImpressao layout,
     bool destaque = false,
+    bool compacta = false,
   }) {
-    final caractere =
-        destaque ? layout.caractereDestaque : layout.caractereSimples;
-    final linha = caractere * layout.comprimentoDivisoria.caracteres;
+    final linha = linhaDivisoriaCompleta(layout);
+    final fatorVertical = compacta ? 0.12 : 0.3;
     return pw.Padding(
       padding: pw.EdgeInsets.symmetric(
-        vertical: _espacoBloco(layout) * 0.65 * PdfPageFormat.mm,
+        vertical: _espacoBloco(layout) * fatorVertical * PdfPageFormat.mm,
       ),
-      child: pw.Center(
+      child: pw.SizedBox(
+        width: larguraUtilConteudoMm(layout) * PdfPageFormat.mm,
         child: pw.Text(
           linha,
           style: estilo(
@@ -95,6 +130,7 @@ class CupomPdfLayout {
             fontSize: layout.tamanhoFonteCorpo.fontSizeContato,
           ),
           textAlign: pw.TextAlign.center,
+          maxLines: 1,
         ),
       ),
     );
@@ -150,7 +186,7 @@ class CupomPdfLayout {
     }
 
     if (layout.reservarColunaValorFixa) {
-      final wValor = layout.larguraColunaValorMm.clamp(20, 40) * PdfPageFormat.mm;
+      final wValor = _larguraColunaValorEfetivaMm(layout) * PdfPageFormat.mm;
       return pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
@@ -164,12 +200,7 @@ class CupomPdfLayout {
           ),
           pw.SizedBox(
             width: wValor,
-            child: pw.Text(
-              direita,
-              style: estiloDir,
-              textAlign: pw.TextAlign.right,
-              softWrap: false,
-            ),
+            child: _textoValorBobina(direita, estiloDir),
           ),
         ],
       );
@@ -191,14 +222,68 @@ class CupomPdfLayout {
         ),
         pw.Expanded(
           flex: flexDir,
-          child: pw.Text(
-            direita,
-            style: estiloDir,
-            textAlign: pw.TextAlign.right,
-            softWrap: false,
-          ),
+          child: _textoValorBobina(direita, estiloDir),
         ),
       ],
+    );
+  }
+
+  /// Valores (R\$) encolhem se necessario — evita corte na margem direita da termica.
+  static pw.Widget _textoValorBobina(String texto, pw.TextStyle style) {
+    final fs = style.fontSize ?? 9;
+    return pw.SizedBox(
+      height: fs * 1.2,
+      child: pw.FittedBox(
+        fit: pw.BoxFit.scaleDown,
+        alignment: pw.Alignment.topRight,
+        child: pw.Text(
+          texto,
+          style: style,
+          textAlign: pw.TextAlign.right,
+          maxLines: 1,
+        ),
+      ),
+    );
+  }
+
+  /// Linha rotulo/valor compacta para totais no estilo legado (sem folga vertical).
+  static pw.Widget linhaResumoLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required String rotulo,
+    required String valor,
+    double? fontSize,
+    pw.FontWeight fontWeight = pw.FontWeight.normal,
+    pw.FontWeight? fontWeightValor,
+  }) {
+    final fs = fontSize ?? layout.tamanhoFonteTotais.fontSizeTotais;
+    final pesoVal = fontWeightValor ?? fontWeight;
+    final estiloEsq = estilo(layout, fontSize: fs, fontWeight: fontWeight);
+    final estiloVal = estilo(layout, fontSize: fs, fontWeight: pesoVal);
+    final wValor = _larguraColunaValorEfetivaMm(layout) * PdfPageFormat.mm;
+    return pw.Padding(
+      padding: pw.EdgeInsets.symmetric(vertical: 0.12 * PdfPageFormat.mm),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Expanded(
+            child: pw.Text(
+              rotulo,
+              style: estiloEsq,
+              maxLines: 2,
+              softWrap: true,
+            ),
+          ),
+          pw.SizedBox(
+            width: wValor,
+            child: pw.Text(
+              valor,
+              style: estiloVal,
+              textAlign: pw.TextAlign.right,
+              maxLines: 1,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -225,8 +310,10 @@ class CupomPdfLayout {
     required double precoUnitario,
     required double subtotal,
     required String Function(double) formatarMoeda,
+    String? quantidadeExibicao,
     String sufixoEntrega = '',
   }) {
+    final qtdTxt = quantidadeExibicao ?? '$quantidade';
     final nomeLinha = sufixoEntrega.isEmpty
         ? nomeProduto
         : '$nomeProduto$sufixoEntrega';
@@ -246,7 +333,7 @@ class CupomPdfLayout {
             ),
             if (layout.linhaQuantidadePreco)
               pw.Text(
-                '$quantidade x ${formatarMoeda(precoUnitario)} = ${formatarMoeda(subtotal)}',
+                '$qtdTxt x ${formatarMoeda(precoUnitario)} = ${formatarMoeda(subtotal)}',
                 style: estilo(layout, fontSize: fsDet),
               ),
           ],
@@ -270,7 +357,7 @@ class CupomPdfLayout {
             pw.SizedBox(height: 0.4 * PdfPageFormat.mm),
             linhaColunas(
               layout: layout,
-              esquerda: '$quantidade x ${formatarMoeda(precoUnitario)}',
+              esquerda: '$qtdTxt x ${formatarMoeda(precoUnitario)}',
               direita: '',
               fontSize: fsDet,
             ),
@@ -456,7 +543,7 @@ class CupomPdfLayout {
     final fs = layout.tamanhoFonteCorpo.fontSizeRodape;
     return [
       if (layout.divisoriaAntesRodape)
-        divisoriaSecao(layout: layout, destaque: true),
+        divisoriaSecao(layout: layout, compacta: true),
       ...linhas.map(
         (l) => _textoCentralizado(
           layout,
@@ -497,7 +584,7 @@ class CupomPdfLayout {
     required bool temFrete,
     String textoRodape = '',
   }) {
-    var n = 13;
+    var n = layout.espacoCompacto ? 7 : 13;
     if (layout.divisoriaDestaqueAntesTotais) n++;
     if (cabecalhoColunasItens(layout) != null) n++;
     if (temDesconto) n++;
@@ -530,7 +617,10 @@ class CupomPdfLayout {
   }) {
     final margem = _margemPagina(layout);
     final corte = _margemCorte(layout);
-    final fatorAltura = layout.fatorAlturaPaginaPdf.clamp(0.75, 1.15);
+    // Valores < 1 encurtavam a pagina e cortavam o cupom na bobina.
+    final fatorAltura = layout.fatorAlturaPaginaPdf < 1.0
+        ? 1.0
+        : layout.fatorAlturaPaginaPdf.clamp(1.0, 1.2);
     final fatorEsp = _fatorEspaco(layout);
     final alturaLinhaMm = 3.4 * fatorEsp;
     final alturaItemMm = (5.5 + layout.espacoEntreItensMm) * fatorEsp;
@@ -543,9 +633,10 @@ class CupomPdfLayout {
     if (layout.exibirEspacoFinal) mm += corte;
     if (comLogo) mm += layout.alturaLogoMm.clamp(20, 52) + 4;
     if (segundaVia) mm += 4;
-    mm = (mm * fatorAltura).clamp(45.0, 1200.0);
+    mm = mm * fatorAltura + margemSegurancaAlturaBobinaMm;
+    mm = mm.clamp(45.0, 1200.0);
     return PdfPageFormat(
-      larguraBobinaMm * PdfPageFormat.mm,
+      larguraPdfMm(layout) * PdfPageFormat.mm,
       mm * PdfPageFormat.mm,
       marginTop: margem * PdfPageFormat.mm,
       marginBottom: margem * PdfPageFormat.mm,
@@ -584,7 +675,7 @@ class CupomPdfLayout {
     switch (layout.modoImpressaoDireta) {
       case LayoutModoImpressaoDireta.driverIlimitado:
         return PdfPageFormat(
-          larguraBobinaMm * PdfPageFormat.mm,
+          larguraPdfMm(layout) * PdfPageFormat.mm,
           double.infinity,
           marginTop: _margemPagina(layout) * PdfPageFormat.mm,
           marginBottom: _margemPagina(layout) * PdfPageFormat.mm,
@@ -595,7 +686,7 @@ class CupomPdfLayout {
       case LayoutModoImpressaoDireta.altura200:
         final h = layout.modoImpressaoDireta.alturaFixaMm ?? 150;
         return PdfPageFormat(
-          larguraBobinaMm * PdfPageFormat.mm,
+          larguraPdfMm(layout) * PdfPageFormat.mm,
           h * PdfPageFormat.mm,
           marginTop: formatoPdf.marginTop,
           marginBottom: formatoPdf.marginBottom,
@@ -609,7 +700,7 @@ class CupomPdfLayout {
 
   @Deprecated('Use formatoImpressaoDireta com layout e formatoPdf')
   static PdfPageFormat formatoImpressaoDiretaBobina() => PdfPageFormat(
-        larguraBobinaMm * PdfPageFormat.mm,
+        72 * PdfPageFormat.mm,
         double.infinity,
       );
 
@@ -629,8 +720,17 @@ class CupomPdfLayout {
   static const String tituloDanfeNfce =
       'Documento Auxiliar da Nota Fiscal de Consumidor Eletronica';
 
+  /// Titulo do cupom legado (duas linhas, como no programa antigo / DANFE).
+  static const String tituloDanfeNfceLegadoLinha1 =
+      'DANFE NFC-e - DOCUMENTO AUXILIAR';
+  static const String tituloDanfeNfceLegadoLinha2 =
+      'NOTA FISCAL ELETRONICA PARA CONSUMIDOR FINAL';
+
   static String urlConsultaNfcePorUf([String? uf]) {
     final u = (uf ?? FiscalConfig.ufEmitente).trim().toUpperCase();
+    if (u == 'BA') {
+      return 'http://hinternet.sefaz.ba.gov.br/nfce/consulta';
+    }
     return 'http://www.sefaz.$u.gov.br/nfce/consulta';
   }
 
@@ -654,6 +754,13 @@ class CupomPdfLayout {
   static String chaveAcessoSomenteDigitos(String chave) =>
       chave.replaceAll(RegExp(r'\D'), '');
 
+  /// Posicao 35 da chave NFC-e: tpEmis 9 = contingencia offline.
+  static bool chaveNfceIndicaContingencia(String chave) {
+    final d = chaveAcessoSomenteDigitos(chave);
+    if (d.length != 44) return false;
+    return d[34] == '9';
+  }
+
   static String formatarChaveAcessoGrupos(String chave) {
     final d = chaveAcessoSomenteDigitos(chave);
     if (d.length != 44) return chave.trim();
@@ -662,6 +769,80 @@ class CupomPdfLayout {
       grupos.add(d.substring(i, i + 4));
     }
     return grupos.join(' ');
+  }
+
+  /// Chave NFC-e decorativa (44 digitos) derivada do numero da nota/cupom.
+  /// Somente aparencia visual no cupom nao fiscal — nao substitui NFC-e real.
+  static String gerarChaveAcessoDecorativaNfce({
+    required String cnpj,
+    required String uf,
+    required String numeroNota,
+    required String serie,
+    DateTime? emissao,
+  }) {
+    final cuf = codigoUfIbgeNfce(uf).toString().padLeft(2, '0');
+    final dt = emissao ?? DateTime.now();
+    final aamm =
+        '${(dt.year % 100).toString().padLeft(2, '0')}${dt.month.toString().padLeft(2, '0')}';
+    final cnpjD = chaveAcessoSomenteDigitos(cnpj).padLeft(14, '0');
+    final cnpjFmt = cnpjD.length > 14 ? cnpjD.substring(0, 14) : cnpjD;
+    const mod = '65';
+    final ser = chaveAcessoSomenteDigitos(serie).padLeft(3, '0');
+    final serFmt = ser.length > 3 ? ser.substring(ser.length - 3) : ser;
+    final nnf = chaveAcessoSomenteDigitos(numeroNota).padLeft(9, '0');
+    final nnfFmt = nnf.length > 9 ? nnf.substring(nnf.length - 9) : nnf;
+    const tpEmis = '9';
+    final cnf = codigoNumericoDecorativoChaveNfce(numeroNota, cnpjFmt, serFmt);
+    final base43 = '$cuf$aamm$cnpjFmt$mod$serFmt$nnfFmt$tpEmis$cnf';
+    final dv = digitoVerificadorChaveNfce(base43);
+    return '$base43$dv';
+  }
+
+  static int codigoUfIbgeNfce(String uf) {
+    switch (uf.trim().toUpperCase()) {
+      case 'BA':
+        return 29;
+      case 'SP':
+        return 35;
+      case 'RJ':
+        return 33;
+      case 'MG':
+        return 31;
+      case 'PE':
+        return 26;
+      case 'CE':
+        return 23;
+      default:
+        return 29;
+    }
+  }
+
+  static String codigoNumericoDecorativoChaveNfce(
+    String numeroNota,
+    String cnpj,
+    String serie,
+  ) {
+    final seed = '$numeroNota|$cnpj|$serie';
+    var hash = 0;
+    for (var i = 0; i < seed.length; i++) {
+      hash = (hash * 31 + seed.codeUnitAt(i)) & 0x7fffffff;
+    }
+    return (hash % 100000000).toString().padLeft(8, '0');
+  }
+
+  static int digitoVerificadorChaveNfce(String chave43) {
+    if (chave43.length != 43) {
+      throw ArgumentError('Chave sem DV deve ter 43 digitos');
+    }
+    var mult = 2;
+    var soma = 0;
+    for (var i = chave43.length - 1; i >= 0; i--) {
+      soma += int.parse(chave43[i]) * mult;
+      mult = mult == 9 ? 2 : mult + 1;
+    }
+    final resto = soma % 11;
+    if (resto == 0 || resto == 1) return 0;
+    return 11 - resto;
   }
 
   static String textoTributosLei12741(double valorTotal) {
@@ -808,32 +989,561 @@ class CupomPdfLayout {
     return out;
   }
 
+  /// Faixa do cupom interno (visual tipo DANFE, sem ser contingencia SEFAZ).
+  static pw.Widget faixaCupomNaoFiscalDanfe({
+    required ConfigLayoutImpressao layout,
+    String titulo = 'CUPOM NAO FISCAL',
+    String subtitulo = 'Controle interno — nao substitui a NFC-e',
+  }) =>
+      faixaContingenciaNfce(
+        layout: layout,
+        titulo: titulo,
+        subtitulo: subtitulo,
+      );
+
   static pw.Widget faixaContingenciaNfce({
     required ConfigLayoutImpressao layout,
     String titulo = 'EMITIDA EM CONTINGENCIA',
     String subtitulo = 'Pendente de autorizacao',
   }) {
     final fs = layout.tamanhoFonteCorpo.fontSizeCorpo;
+    final sub = subtitulo.trim();
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        divisoriaSecao(layout: layout, destaque: true),
-        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+        divisoriaSecao(layout: layout, compacta: true),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
         _textoCentralizado(
           layout,
           texto: titulo,
           fontSize: fs,
           fontWeight: pw.FontWeight.bold,
         ),
-        pw.SizedBox(height: 0.8 * PdfPageFormat.mm),
+        if (sub.isNotEmpty) ...[
+          pw.SizedBox(height: 0.25 * PdfPageFormat.mm),
+          _textoCentralizado(
+            layout,
+            texto: sub,
+            fontSize: fs - 0.5,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ],
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        divisoriaSecao(layout: layout, compacta: true),
+      ],
+    );
+  }
+
+  /// Aviso de contingencia apos pagamento/troco (programa antigo LDV).
+  static pw.Widget faixaContingenciaAposPagamentoLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    String titulo = 'NOTA EMITIDA EM CONTIGENCIA-AUTORIZACAO PENDENTE',
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeCorpo;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
         _textoCentralizado(
           layout,
-          texto: subtitulo,
+          texto: titulo,
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+      ],
+    );
+  }
+
+  /// Linhas de endereco no formato do programa antigo (RUA / BAIRRO / CEP|TEL).
+  static List<String> linhasEnderecoCupomLegado({
+    required String? endereco,
+    String? telefone,
+    bool exibirTelefone = true,
+  }) {
+    final end = endereco?.trim() ?? '';
+    if (end.isEmpty && (telefone?.trim().isEmpty ?? true)) return [];
+
+    final cepRe = RegExp(r'(\d{5})-?(\d{3})');
+    var cep = '';
+    var resto = end;
+    final cepMatch = cepRe.firstMatch(end);
+    if (cepMatch != null) {
+      cep = '${cepMatch.group(1)}${cepMatch.group(2)}';
+      resto = end.replaceFirst(cepMatch.group(0)!, '').trim();
+      resto = resto.replaceAll(RegExp(r'^[\s,\-–|]+'), '').trim();
+    }
+
+    final linhas = <String>[];
+    if (resto.isNotEmpty) {
+      final partes = resto
+          .split(' - ')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      if (partes.length >= 3) {
+        linhas.add('RUA: ${partes.first}');
+        final cidade = partes.last
+            .replaceAll(RegExp(r'\s*-\s*[A-Z]{2}$'), '')
+            .trim();
+        linhas.add('BAIRRO: ${partes[partes.length - 2]} CIDADE: $cidade');
+      } else if (partes.length == 2) {
+        linhas.add('RUA: ${partes[0]}');
+        linhas.add('CIDADE: ${partes[1]}');
+      } else {
+        linhas.add('RUA: $resto');
+      }
+    }
+
+    final tel = telefone?.replaceAll(RegExp(r'\D'), '') ?? '';
+    final rodape = <String>[];
+    if (cep.isNotEmpty) rodape.add('CEP:$cep');
+    if (exibirTelefone && tel.isNotEmpty) rodape.add('TEL:$tel');
+    if (rodape.isNotEmpty) linhas.add(rodape.join(' '));
+
+    return linhas;
+  }
+
+  static String formatarNumeroDocumentoLegado(String numero) {
+    final digits = numero.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return numero.trim();
+    return digits.padLeft(9, '0');
+  }
+
+  /// Cabecalho centralizado no estilo do cupom termico antigo (LDV).
+  static List<pw.Widget> cabecalhoLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required String razaoSocial,
+    required String nomeLoja,
+    String cnpj = '',
+    String inscricaoEstadual = '',
+    Uint8List? logoBytes,
+    String? telefone,
+    String? endereco,
+  }) {
+    final logo = logoBytes;
+    final temLogoLoja = layout.exibirLogo && logo != null && logo.isNotEmpty;
+    final fsNome = layout.tamanhoNomeLoja.fontSizeNome - 0.5;
+    final fsCorpo = layout.tamanhoFonteCorpo.fontSizeContato - 0.5;
+    final hLogo = layout.alturaLogoMm.clamp(10.0, 28.0);
+    final razao = razaoSocial.trim().isNotEmpty
+        ? razaoSocial.trim()
+        : (nomeLoja.trim().isEmpty ? 'Loja' : nomeLoja.trim());
+
+    final out = <pw.Widget>[];
+    if (temLogoLoja) {
+      out.add(
+        pw.Center(
+          child: pw.Padding(
+            padding: pw.EdgeInsets.only(bottom: 1 * PdfPageFormat.mm),
+            child: pw.Image(pw.MemoryImage(logo), height: hLogo),
+          ),
+        ),
+      );
+    }
+
+    out.add(
+      _textoCentralizado(
+        layout,
+        texto: razao.toUpperCase(),
+        fontSize: fsNome,
+        fontWeight: pw.FontWeight.bold,
+      ),
+    );
+
+    final cnpjD = cnpj.replaceAll(RegExp(r'\D'), '');
+    final ie = inscricaoEstadual.trim();
+    if (cnpjD.isNotEmpty || ie.isNotEmpty) {
+      final partes = <String>[];
+      if (cnpjD.isNotEmpty) partes.add('CNPJ: $cnpjD');
+      if (ie.isNotEmpty) partes.add('INSC.ESTADUAL: $ie');
+      out.add(
+        _textoCentralizado(
+          layout,
+          texto: partes.join(' | '),
+          fontSize: fsCorpo,
+        ),
+      );
+    }
+
+    if (layout.exibirEndereco) {
+      for (final linha in linhasEnderecoCupomLegado(
+        endereco: endereco,
+        telefone: telefone,
+        exibirTelefone: layout.exibirTelefone,
+      )) {
+        out.add(
+          _textoCentralizado(
+            layout,
+            texto: linha,
+            fontSize: fsCorpo - 0.5,
+          ),
+        );
+      }
+    } else if (layout.exibirTelefone &&
+        telefone != null &&
+        telefone.trim().isNotEmpty) {
+      final tel = telefone.replaceAll(RegExp(r'\D'), '');
+      if (tel.isNotEmpty) {
+        out.add(
+          _textoCentralizado(
+            layout,
+            texto: 'TEL:$tel',
+            fontSize: fsCorpo - 0.5,
+          ),
+        );
+      }
+    }
+
+    return out;
+  }
+
+  /// Titulo em duas linhas (DANFE NFC-e ou cupom interno).
+  static pw.Widget faixaTituloDocumentoLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required String linha1,
+    required String linha2,
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeTipoDocumento;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        divisoriaSecao(layout: layout, compacta: true),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: linha1,
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        pw.SizedBox(height: 0.25 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: linha2,
           fontSize: fs - 0.5,
           fontWeight: pw.FontWeight.bold,
         ),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        divisoriaSecao(layout: layout, compacta: true),
+      ],
+    );
+  }
+
+  static pw.Widget cabecalhoTabelaItensLegadoLdv(ConfigLayoutImpressao layout) {
+    final fs = layout.tamanhoFonteItens.fontSizeItemDetalhe - 0.5;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Text(
+          'ITEM COD UNI DESCRICAO',
+          style: estilo(layout, fontSize: fs, fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 0.3 * PdfPageFormat.mm),
+        pw.Text(
+          'QTD VLBRUTO DESC VLUNIT VLTOTAL',
+          style: estilo(layout, fontSize: fs, fontWeight: pw.FontWeight.bold),
+          textAlign: pw.TextAlign.right,
+        ),
+        divisoriaSecao(layout: layout, compacta: true),
+      ],
+    );
+  }
+
+  static pw.Widget linhaItemLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required String item,
+    required String codigo,
+    required String unidade,
+    required String descricao,
+    required String quantidade,
+    required String vlBruto,
+    required String desconto,
+    required String vlUnit,
+    required String vlTotal,
+  }) {
+    final fs = layout.tamanhoFonteItens.fontSizeItemDetalhe - 0.5;
+    final estiloItem = estilo(layout, fontSize: fs);
+    final estiloVal = estilo(layout, fontSize: fs - 0.5);
+    final linhaProduto =
+        '$item $codigo $unidade ${descricao.trim()}'.trim();
+
+    return pw.Padding(
+      padding: pw.EdgeInsets.only(bottom: 0.35 * PdfPageFormat.mm),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          pw.Text(
+            linhaProduto,
+            style: estiloItem,
+            maxLines: 3,
+            softWrap: true,
+          ),
+          pw.SizedBox(height: 0.2 * PdfPageFormat.mm),
+          pw.Row(
+            children: [
+              pw.Expanded(
+                flex: 2,
+                child: pw.Text(quantidade, style: estiloVal, textAlign: pw.TextAlign.right),
+              ),
+              pw.Expanded(
+                flex: 2,
+                child: pw.Text(vlBruto, style: estiloVal, textAlign: pw.TextAlign.right),
+              ),
+              pw.Expanded(
+                flex: 2,
+                child: pw.Text(desconto, style: estiloVal, textAlign: pw.TextAlign.right),
+              ),
+              pw.Expanded(
+                flex: 2,
+                child: pw.Text(vlUnit, style: estiloVal, textAlign: pw.TextAlign.right),
+              ),
+              pw.Expanded(
+                flex: 2,
+                child: pw.Text(
+                  vlTotal,
+                  style: estilo(layout, fontSize: fs - 0.5, fontWeight: pw.FontWeight.bold),
+                  textAlign: pw.TextAlign.right,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget blocoTotaisLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required int qtdItens,
+    required String subtotal,
+    required String desconto,
+    required String frete,
+    required String valorTotal,
+    bool exibirFrete = false,
+  }) {
+    final fs = layout.tamanhoFonteTotais.fontSizeTotais;
+    final fsDestaque = layout.tamanhoFonteTotais.fontSizeTotalDestaque;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        divisoriaSecao(layout: layout, compacta: true),
+        linhaResumoLegadoLdv(
+          layout: layout,
+          rotulo: 'QTD. TOTAL DE ITENS',
+          valor: '$qtdItens',
+          fontSize: fs,
+        ),
+        linhaResumoLegadoLdv(
+          layout: layout,
+          rotulo: 'SUB TOTAL R\$',
+          valor: subtotal,
+          fontSize: fs,
+        ),
+        linhaResumoLegadoLdv(
+          layout: layout,
+          rotulo: 'DESCONTO R\$',
+          valor: desconto,
+          fontSize: fs,
+        ),
+        if (exibirFrete)
+          linhaResumoLegadoLdv(
+            layout: layout,
+            rotulo: 'FRETE R\$',
+            valor: frete,
+            fontSize: fs,
+          ),
+        linhaResumoLegadoLdv(
+          layout: layout,
+          rotulo: 'VALOR TOTAL R\$',
+          valor: valorTotal,
+          fontSize: fsDestaque,
+          fontWeight: pw.FontWeight.bold,
+          fontWeightValor: pw.FontWeight.bold,
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget blocoPagamentoLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required String formaPagamento,
+    required String valorPago,
+    required String troco,
+    List<({String forma, String valor})> linhasMisto = const [],
+  }) {
+    final fs = layout.tamanhoFonteTotais.fontSizeTotais;
+    final forma = formaPagamento.trim().toUpperCase();
+    final children = <pw.Widget>[
+      pw.Padding(
+        padding: pw.EdgeInsets.symmetric(vertical: 0.12 * PdfPageFormat.mm),
+        child: _textoCentralizado(
+          layout,
+          texto: 'FORMA DE PAGAMENTO | VALOR PAGO',
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+      ),
+    ];
+
+    if (linhasMisto.isNotEmpty) {
+      for (final l in linhasMisto) {
+        children.add(
+          linhaResumoLegadoLdv(
+            layout: layout,
+            rotulo: '${l.forma.toUpperCase()}:',
+            valor: l.valor,
+            fontSize: fs,
+          ),
+        );
+      }
+    } else {
+      children.add(
+        linhaResumoLegadoLdv(
+          layout: layout,
+          rotulo: '$forma:',
+          valor: valorPago,
+          fontSize: fs,
+        ),
+      );
+    }
+
+    children.addAll([
+      linhaResumoLegadoLdv(
+        layout: layout,
+        rotulo: 'TROCO R\$',
+        valor: troco,
+        fontSize: fs,
+        fontWeight:
+            layout.destacarTroco ? pw.FontWeight.bold : pw.FontWeight.normal,
+        fontWeightValor:
+            layout.destacarTroco ? pw.FontWeight.bold : pw.FontWeight.normal,
+      ),
+      divisoriaSecao(layout: layout, compacta: true),
+    ]);
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: children,
+    );
+  }
+
+  /// Consulta SEFAZ + chave de acesso (modelo cupom termico LDV).
+  static pw.Widget blocoConsultaChaveAcessoLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required String chaveAcesso,
+    String? urlConsulta,
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeContato;
+    final url = (urlConsulta ?? urlConsultaNfcePorUf()).trim();
+    final chaveFmt = formatarChaveAcessoGrupos(chaveAcesso);
+    final temChave = chaveAcessoSomenteDigitos(chaveAcesso).length == 44;
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: 'Consulte pela Chave de Acesso em',
+          fontSize: fs - 0.5,
+        ),
+        pw.SizedBox(height: 0.25 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: url,
+          fontSize: fs - 0.5,
+        ),
+        pw.SizedBox(height: 0.5 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: 'CHAVE DE ACESSO',
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        if (temChave)
+          pw.Text(
+            chaveFmt,
+            style: estilo(layout, fontSize: fs - 0.5),
+            textAlign: pw.TextAlign.center,
+            softWrap: true,
+          )
+        else
+          _textoCentralizado(
+            layout,
+            texto: 'Chave pendente de autorizacao na SEFAZ',
+            fontSize: fs - 0.5,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        divisoriaSecao(layout: layout, compacta: true),
+      ],
+    );
+  }
+
+  static pw.Widget textoConsumidorLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required String textoPrincipal,
+    List<String> linhasExtras = const [],
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeCorpo;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: textoPrincipal,
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        ...linhasExtras.map(
+          (l) => pw.Padding(
+            padding: pw.EdgeInsets.only(top: 0.35 * PdfPageFormat.mm),
+            child: _textoCentralizado(
+              layout,
+              texto: l,
+              fontSize: fs - 0.5,
+            ),
+          ),
+        ),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        divisoriaSecao(layout: layout, compacta: true),
+      ],
+    );
+  }
+
+  static pw.Widget rodapeIdentificacaoLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required String numero,
+    required String serie,
+    required String emissao,
+    String via = 'VIA CONSUMIDOR',
+    String? linhaExtra,
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeContato;
+    final numFmt = formatarNumeroDocumentoLegado(numero);
+    final serFmt = serie.trim().padLeft(3, '0');
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
         pw.SizedBox(height: 1 * PdfPageFormat.mm),
-        divisoriaSecao(layout: layout, destaque: true),
+        _textoCentralizado(
+          layout,
+          texto: 'NUMERO: $numFmt SERIE: $serFmt EMISSAO: $emissao',
+          fontSize: fs,
+        ),
+        _textoCentralizado(
+          layout,
+          texto: via.toUpperCase(),
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        if (linhaExtra != null && linhaExtra.trim().isNotEmpty)
+          _textoCentralizado(
+            layout,
+            texto: linhaExtra.trim(),
+            fontSize: fs - 0.5,
+          ),
       ],
     );
   }
@@ -857,15 +1567,15 @@ class CupomPdfLayout {
         pw.SizedBox(height: 1 * PdfPageFormat.mm),
         _textoCentralizado(
           layout,
-          texto: 'Consulta pela Chave de Acesso',
-          fontSize: fs,
-          fontWeight: pw.FontWeight.bold,
+          texto: url,
+          fontSize: fs - 0.5,
         ),
         pw.SizedBox(height: 0.8 * PdfPageFormat.mm),
         _textoCentralizado(
           layout,
-          texto: url,
-          fontSize: fs - 0.5,
+          texto: 'Chave de Acesso',
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
         ),
         pw.SizedBox(height: 1 * PdfPageFormat.mm),
         if (temChave)
@@ -884,6 +1594,33 @@ class CupomPdfLayout {
             fontSize: fs - 0.5,
             fontWeight: pw.FontWeight.bold,
           ),
+        divisoriaSecao(layout: layout),
+      ],
+    );
+  }
+
+  static pw.Widget blocoCupomInternoSemChaveNfce({
+    required ConfigLayoutImpressao layout,
+  }) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeContato;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
+        divisoriaSecao(layout: layout),
+        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: 'Documento interno de venda',
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        pw.SizedBox(height: 0.8 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: 'Consulte a NFC-e no caixa apos autorizacao',
+          fontSize: fs - 0.5,
+        ),
         divisoriaSecao(layout: layout),
       ],
     );
@@ -923,11 +1660,17 @@ class CupomPdfLayout {
   }) {
     final data = payload.trim();
     if (data.isEmpty) return pw.SizedBox.shrink();
-    final lado = (larguraBobinaMm - layout.margemPaginaMm * 2)
-        .clamp(28.0, 42.0);
+    final lado = (larguraUtilConteudoMm(layout) * 0.55).clamp(18.0, 24.0);
+    final fs = layout.tamanhoFonteCorpo.fontSizeContato;
     return pw.Column(
       children: [
-        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
+        pw.SizedBox(height: 0.6 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: 'Consulta via leitor de QR Code',
+          fontSize: fs - 0.5,
+        ),
+        pw.SizedBox(height: 0.6 * PdfPageFormat.mm),
         pw.Center(
           child: pw.BarcodeWidget(
             barcode: Barcode.qrCode(),
@@ -937,7 +1680,7 @@ class CupomPdfLayout {
             drawText: false,
           ),
         ),
-        pw.SizedBox(height: 1 * PdfPageFormat.mm),
+        pw.SizedBox(height: 0.6 * PdfPageFormat.mm),
       ],
     );
   }
@@ -1070,8 +1813,8 @@ class CupomPdfLayout {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        if (destaque) divisoriaSecao(layout: layout, destaque: true),
-        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
+        if (destaque) divisoriaSecao(layout: layout, compacta: true),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
         _textoCentralizado(
           layout,
           texto: titulo,
@@ -1079,15 +1822,15 @@ class CupomPdfLayout {
           fontWeight: pw.FontWeight.bold,
         ),
         if (subtitulo != null && subtitulo.trim().isNotEmpty) ...[
-          pw.SizedBox(height: 1 * PdfPageFormat.mm),
+          pw.SizedBox(height: 0.25 * PdfPageFormat.mm),
           _textoCentralizado(
             layout,
             texto: subtitulo.trim(),
             fontSize: fsSub,
           ),
         ],
-        pw.SizedBox(height: 1.5 * PdfPageFormat.mm),
-        if (destaque) divisoriaSecao(layout: layout, destaque: true),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        if (destaque) divisoriaSecao(layout: layout, compacta: true),
       ],
     );
   }
@@ -1095,10 +1838,13 @@ class CupomPdfLayout {
   static pw.TextStyle _estiloCelulaNfce(
     ConfigLayoutImpressao layout, {
     bool bold = false,
+    bool valor = false,
   }) {
+    var fs = layout.tamanhoFonteItens.fontSizeItemDetalhe;
+    if (valor) fs = (fs - 0.5).clamp(6.5, fs);
     return estilo(
       layout,
-      fontSize: layout.tamanhoFonteItens.fontSizeItemDetalhe,
+      fontSize: fs,
       fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
     );
   }
@@ -1109,29 +1855,41 @@ class CupomPdfLayout {
     pw.TextAlign align = pw.TextAlign.left,
     bool bold = false,
     int maxLines = 4,
+    bool valorMonetario = false,
   }) {
+    final estilo = _estiloCelulaNfce(layout, bold: bold, valor: valorMonetario);
+    final child = valorMonetario && align == pw.TextAlign.right
+        ? _textoValorBobina(texto, estilo)
+        : pw.Text(
+            texto,
+            style: estilo,
+            textAlign: align,
+            maxLines: maxLines,
+            softWrap: true,
+          );
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 0.5, horizontal: 0.5),
-      child: pw.Text(
-        texto,
-        style: _estiloCelulaNfce(layout, bold: bold),
-        textAlign: align,
-        maxLines: maxLines,
-        softWrap: true,
-      ),
+      child: child,
     );
+  }
+
+  /// Colunas da tabela NFC-e: mais espaco para Vl Unit / Vl Total (bobina 72 mm).
+  static Map<int, pw.TableColumnWidth> _largurasColunasTabelaNfce(
+    ConfigLayoutImpressao layout,
+  ) {
+    return const {
+      0: pw.FlexColumnWidth(0.95),
+      1: pw.FlexColumnWidth(3.0),
+      2: pw.FlexColumnWidth(1.0),
+      3: pw.FlexColumnWidth(0.65),
+      4: pw.FlexColumnWidth(1.75),
+      5: pw.FlexColumnWidth(1.85),
+    };
   }
 
   static pw.Widget tabelaCabecalhoItensNfce(ConfigLayoutImpressao layout) {
     return pw.Table(
-      columnWidths: const {
-        0: pw.FlexColumnWidth(1.1),
-        1: pw.FlexColumnWidth(2.6),
-        2: pw.FlexColumnWidth(0.9),
-        3: pw.FlexColumnWidth(0.7),
-        4: pw.FlexColumnWidth(1.2),
-        5: pw.FlexColumnWidth(1.2),
-      },
+      columnWidths: _largurasColunasTabelaNfce(layout),
       defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
       children: [
         pw.TableRow(
@@ -1140,8 +1898,20 @@ class CupomPdfLayout {
             _celulaNfce('Descricao', layout, bold: true),
             _celulaNfce('Qtde', layout, bold: true, align: pw.TextAlign.right),
             _celulaNfce('UN', layout, bold: true, align: pw.TextAlign.center),
-            _celulaNfce('Vl Unit', layout, bold: true, align: pw.TextAlign.right),
-            _celulaNfce('Vl Total', layout, bold: true, align: pw.TextAlign.right),
+            _celulaNfce(
+              'Vl Unit',
+              layout,
+              bold: true,
+              align: pw.TextAlign.right,
+              valorMonetario: true,
+            ),
+            _celulaNfce(
+              'Vl Total',
+              layout,
+              bold: true,
+              align: pw.TextAlign.right,
+              valorMonetario: true,
+            ),
           ],
         ),
       ],
@@ -1152,20 +1922,13 @@ class CupomPdfLayout {
     required ConfigLayoutImpressao layout,
     required String codigo,
     required String descricao,
-    required int quantidade,
+    required String quantidadeExibicao,
     required String unidade,
     required String valorUnitario,
     required String valorTotal,
   }) {
     return pw.Table(
-      columnWidths: const {
-        0: pw.FlexColumnWidth(1.1),
-        1: pw.FlexColumnWidth(2.6),
-        2: pw.FlexColumnWidth(0.9),
-        3: pw.FlexColumnWidth(0.7),
-        4: pw.FlexColumnWidth(1.2),
-        5: pw.FlexColumnWidth(1.2),
-      },
+      columnWidths: _largurasColunasTabelaNfce(layout),
       defaultVerticalAlignment: pw.TableCellVerticalAlignment.top,
       children: [
         pw.TableRow(
@@ -1173,17 +1936,23 @@ class CupomPdfLayout {
             _celulaNfce(codigo, layout, maxLines: 2),
             _celulaNfce(descricao, layout, maxLines: 3),
             _celulaNfce(
-              '$quantidade',
+              quantidadeExibicao,
               layout,
               align: pw.TextAlign.right,
             ),
             _celulaNfce(unidade, layout, align: pw.TextAlign.center),
-            _celulaNfce(valorUnitario, layout, align: pw.TextAlign.right),
+            _celulaNfce(
+              valorUnitario,
+              layout,
+              align: pw.TextAlign.right,
+              valorMonetario: true,
+            ),
             _celulaNfce(
               valorTotal,
               layout,
               align: pw.TextAlign.right,
               bold: true,
+              valorMonetario: true,
             ),
           ],
         ),
@@ -1212,7 +1981,7 @@ class CupomPdfLayout {
         fontSize: fs,
         fontWeight: destaque ? pw.FontWeight.bold : pw.FontWeight.normal,
         fontWeightDireita: destaque ? pw.FontWeight.bold : pw.FontWeight.normal,
-        flexEsquerda: 6,
+        flexEsquerda: 5,
       ),
     );
   }
@@ -1338,13 +2107,15 @@ class CupomPdfLayout {
     int linhasFiado = 0,
     int linhasRodape = 1,
     bool temChave = false,
+    bool contingenciaSefaz = false,
   }) {
-    var n = 38 + qtdItens * 2;
+    var n = 30 + (qtdItens * 2.5).ceil();
     if (segundaVia) n += 3;
     if (temDesconto) n++;
     if (temEntrega) n += 2;
     if (temFiado) n += 2 + linhasFiado;
-    if (temChave) n += 2;
+    n += 12;
+    if (contingenciaSefaz) n += 3;
     n += linhasRodape;
     return n;
   }

@@ -4,8 +4,10 @@ import 'package:intl/intl.dart';
 import '../../data/fechamento_fiscal_local_source.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/fiscal/fechamento_fiscal_resumo.dart';
+import '../../domain/fiscal/fiscal_bloqueios_fechamento.dart';
 import '../../services/fechamento_contabil_service.dart';
 import 'exportar_fechamento_page.dart';
+import 'widgets/fiscal_bloqueios_banner.dart';
 
 /// Visao mensal do fiscal (saidas, entradas, totais) sem gerar ZIP.
 class RelatorioFiscalMensalPage extends StatefulWidget {
@@ -26,6 +28,7 @@ class _RelatorioFiscalMensalPageState extends State<RelatorioFiscalMensalPage> {
   late int _mes;
   late int _ano;
   FechamentoFiscalResumo? _resumo;
+  FiscalBloqueiosFechamento? _bloqueios;
 
   static const _nomesMes = [
     'Janeiro',
@@ -60,8 +63,14 @@ class _RelatorioFiscalMensalPageState extends State<RelatorioFiscalMensalPage> {
 
   void _atualizar() {
     final pacote = _service.listarPacoteFiscal(_mes, _ano);
+    final bloqueios = FiscalBloqueiosFechamentoService.avaliar(
+      vendaRepository: widget.vendaRepository,
+      mes: _mes,
+      ano: _ano,
+    );
     setState(() {
       _resumo = FechamentoFiscalResumo.calcular(_mes, _ano, pacote);
+      _bloqueios = bloqueios;
     });
   }
 
@@ -150,6 +159,10 @@ class _RelatorioFiscalMensalPageState extends State<RelatorioFiscalMensalPage> {
             ),
             const SizedBox(height: 12),
             _kpiGrid(theme, r),
+            if (_bloqueios != null && _bloqueios!.temAviso) ...[
+              const SizedBox(height: 12),
+              FiscalBloqueiosBanner(bloqueios: _bloqueios!),
+            ],
             if (r.alertasVendaCancelada > 0) ...[
               const SizedBox(height: 12),
               Material(

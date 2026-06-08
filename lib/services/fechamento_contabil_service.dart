@@ -131,10 +131,13 @@ class FechamentoContabilService {
     var xmlsFalha = 0;
 
     final saidasEnriquecidas = <NotaFiscalFechamentoItem>[];
+    final inutSucesso =
+        inutilizacoes.where((i) => i.sucesso).length;
     final totalPassos = pacote.saidas.length +
         pacote.entradas.length +
         pacote.saidas.where((s) => s.urlXmlEventoCancelamento.isNotEmpty).length +
-        cceLocais.length;
+        cceLocais.length +
+        inutSucesso;
     var passo = 0;
 
     for (final nota in pacote.saidas) {
@@ -287,6 +290,47 @@ class FechamentoContabilService {
       } catch (e) {
         xmlsFalha++;
         erros.add('CC-e ${cce.chave} seq ${cce.sequencia}: $e');
+      }
+    }
+
+    for (final inut in inutilizacoes.where((i) => i.sucesso)) {
+      passo++;
+      onProgresso?.call(
+        passo,
+        totalPassos > 0 ? totalPassos : 1,
+        'Inutilizacao: serie ${inut.serie} ${inut.numeroInicial}-${inut.numeroFinal}...',
+      );
+      try {
+        List<int>? bytes;
+        final local = _local.arquivoXmlInutilizacaoLocal(inut.id);
+        if (local != null) {
+          bytes = await local.readAsBytes();
+        } else if (inut.urlXml.trim().isNotEmpty) {
+          bytes = await _baixarBytes(inut.urlXml);
+        }
+        if (bytes == null || bytes.isEmpty) {
+          xmlsFalha++;
+          erros.add(
+            'Inutilizacao serie ${inut.serie} ${inut.numeroInicial}-'
+            '${inut.numeroFinal}: XML indisponivel (regrave na Focus ou '
+            'refaca a inutilizacao em homologacao).',
+          );
+          continue;
+        }
+        arquivosZip.add(
+          ArchiveFile(
+            'xml/inutilizacao/${inut.nomeArquivoXml}',
+            bytes.length,
+            bytes,
+          ),
+        );
+        xmlsOk++;
+      } catch (e) {
+        xmlsFalha++;
+        erros.add(
+          'Inutilizacao serie ${inut.serie} ${inut.numeroInicial}-'
+          '${inut.numeroFinal}: $e',
+        );
       }
     }
 

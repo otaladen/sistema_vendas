@@ -40,5 +40,18 @@ void main() {
       );
       expect(FocusNfeService.pareceFalhaComunicacao(r), isFalse);
     });
+
+    test('ignora rejeicao SEFAZ de data-hora (nao dispara contingencia)', () {
+      final r = FocusNfeEmissaoResultado(
+        autorizada: false,
+        rejeitada: true,
+        processando: false,
+        statusSefaz: '703',
+        mensagem:
+            'Data-Hora de Emissao posterior ao horario de recebimento (Offline)',
+        httpStatusCode: 201,
+      );
+      expect(FocusNfeService.pareceFalhaComunicacao(r), isFalse);
+    });
   });
 }

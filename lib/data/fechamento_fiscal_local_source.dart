@@ -10,6 +10,7 @@ import 'nfe_cce_xml_store.dart';
 import 'nfe_entrada_repository.dart';
 import 'nfe_entrada_xml_store.dart';
 import 'nfe_inutilizacao_store.dart';
+import 'nfe_inutilizacao_xml_store.dart';
 import 'nfce_saida_xml_store.dart';
 import 'nfe_saida_fiscal_store.dart';
 import 'nfe_saida_xml_store.dart';
@@ -28,6 +29,7 @@ class FechamentoFiscalLocalSource {
         _xmlNfceSaidaStore = NfceSaidaXmlStore(storeDirectoryPath),
         _xmlCceStore = NfeCceXmlStore(storeDirectoryPath),
         _inutilizacaoStore = NfeInutilizacaoStore(storeDirectoryPath),
+        _xmlInutilizacaoStore = NfeInutilizacaoXmlStore(storeDirectoryPath),
         _vendaRepository = vendaRepository,
         _entradaRepository = entradaRepository;
 
@@ -47,6 +49,7 @@ class FechamentoFiscalLocalSource {
   final NfceSaidaXmlStore _xmlNfceSaidaStore;
   final NfeCceXmlStore _xmlCceStore;
   final NfeInutilizacaoStore _inutilizacaoStore;
+  final NfeInutilizacaoXmlStore _xmlInutilizacaoStore;
   final VendaRepository? _vendaRepository;
   final NfeEntradaRepository? _entradaRepository;
 
@@ -321,6 +324,13 @@ class FechamentoFiscalLocalSource {
     required DateTime fim,
   }) {
     return _inutilizacaoStore.listarNoPeriodo(inicio: inicio, fim: fim);
+  }
+
+  File? arquivoXmlInutilizacaoLocal(String registroId) {
+    final id = registroId.trim();
+    if (id.isEmpty) return null;
+    final f = _xmlInutilizacaoStore.arquivoPorId(id);
+    return f.existsSync() ? f : null;
   }
 
   static String _rotuloStatusNfce(String statusFocus) {

@@ -15,6 +15,7 @@ import '../model/cliente.dart';
 import '../model/mensagem_log.dart';
 import '../model/vendedor.dart';
 import '../services/brasil_api_cep_service.dart';
+import 'widgets/cliente_endereco_ibge_selector.dart';
 import '../services/brasil_api_cnpj_service.dart';
 import '../model/mensagem_template.dart';
 import '../model/venda.dart';
@@ -60,6 +61,7 @@ class _AlvoPreenchimentoCep {
     required this.bairro,
     required this.cidade,
     required this.uf,
+    this.codigoIbge,
   });
 
   final TextEditingController cep;
@@ -68,6 +70,7 @@ class _AlvoPreenchimentoCep {
   final TextEditingController bairro;
   final TextEditingController cidade;
   final TextEditingController uf;
+  final TextEditingController? codigoIbge;
 }
 
 class _ClientesPageState extends State<ClientesPage>
@@ -105,6 +108,7 @@ class _ClientesPageState extends State<ClientesPage>
   final _bairroController = TextEditingController();
   final _cidadeController = TextEditingController();
   final _ufController = TextEditingController();
+  final _codigoIbgeController = TextEditingController();
   final _referenciaController = TextEditingController();
   final _limiteController = TextEditingController();
   final _observacoesController = TextEditingController();
@@ -193,6 +197,7 @@ class _ClientesPageState extends State<ClientesPage>
     _bairroController.dispose();
     _cidadeController.dispose();
     _ufController.dispose();
+    _codigoIbgeController.dispose();
     _referenciaController.dispose();
     _limiteController.dispose();
     _observacoesController.dispose();
@@ -508,6 +513,7 @@ class _ClientesPageState extends State<ClientesPage>
       _bairroController.clear();
       _cidadeController.clear();
       _ufController.clear();
+      _codigoIbgeController.clear();
       _referenciaController.clear();
       _enderecosExtras.clear();
       _limiteController.clear();
@@ -839,7 +845,8 @@ class _ClientesPageState extends State<ClientesPage>
       _cepControllerEmConsulta = alvo.cep;
     });
     try {
-      final dados = await BrasilApiCepService.consultar(digitos);
+      final dados = await BrasilApiCepService.consultarComIbge(digitos) ??
+          await BrasilApiCepService.consultar(digitos);
       if (!mounted) return;
       if (_carregandoClienteNoFormulario) return;
       if (_somenteDigitos(alvo.cep.text) != digitos) return;
@@ -851,13 +858,28 @@ class _ClientesPageState extends State<ClientesPage>
         );
         return;
       }
+      final ibge = dados.codigoIbge.replaceAll(RegExp(r'\D'), '');
       setState(() {
         alvo.endereco.text = dados.logradouro;
         alvo.bairro.text = dados.bairro;
         alvo.cidade.text = dados.cidade;
         alvo.uf.text = dados.uf;
         alvo.cep.text = dados.cep;
+        if (alvo.codigoIbge != null && ibge.length == 7) {
+          alvo.codigoIbge!.text = ibge;
+        }
       });
+      if (ibge.length != 7 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'CEP encontrado, mas sem codigo IBGE na BrasilAPI. '
+              'Preencha o IBGE do municipio manualmente (7 digitos) para NF-e.',
+            ),
+            duration: Duration(seconds: 6),
+          ),
+        );
+      }
       alvo.cep.value = _cepFormatter.formatEditUpdate(
         const TextEditingValue(),
         TextEditingValue(text: alvo.cep.text),
@@ -938,6 +960,7 @@ class _ClientesPageState extends State<ClientesPage>
       _bairroController.text = principal.bairro;
       _cidadeController.text = principal.cidade;
       _ufController.text = principal.uf;
+      _codigoIbgeController.text = principal.codigoIbge;
       _referenciaController.text = principal.referencia;
       _enderecosExtras
         ..clear()
@@ -1094,6 +1117,7 @@ class _ClientesPageState extends State<ClientesPage>
         cidade: _cidadeController.text.trim(),
         uf: _ufController.text.trim().toUpperCase(),
         referencia: _referenciaController.text.trim(),
+        codigoIbge: _somenteDigitos(_codigoIbgeController.text),
       ),
       ..._enderecosExtras.map((e) => e.toEndereco()),
     ];
@@ -1985,6 +2009,7 @@ class _ClientesPageState extends State<ClientesPage>
                     bairroController: _bairroController,
                     cidadeController: _cidadeController,
                     ufController: _ufController,
+                    codigoIbgeController: _codigoIbgeController,
                     referenciaController: _referenciaController,
                   ),
                   for (var i = 0; i < _enderecosExtras.length; i++) ...[
@@ -2008,6 +2033,8 @@ class _ClientesPageState extends State<ClientesPage>
                       bairroController: _enderecosExtras[i].bairroController,
                       cidadeController: _enderecosExtras[i].cidadeController,
                       ufController: _enderecosExtras[i].ufController,
+                      codigoIbgeController:
+                          _enderecosExtras[i].codigoIbgeController,
                       referenciaController:
                           _enderecosExtras[i].referenciaController,
                       onRemover: () {
@@ -2787,6 +2814,7 @@ class _ClientesPageState extends State<ClientesPage>
     required TextEditingController bairroController,
     required TextEditingController cidadeController,
     required TextEditingController ufController,
+    required TextEditingController codigoIbgeController,
     required TextEditingController referenciaController,
     VoidCallback? onRemover,
   }) {
@@ -2797,6 +2825,7 @@ class _ClientesPageState extends State<ClientesPage>
       bairro: bairroController,
       cidade: cidadeController,
       uf: ufController,
+      codigoIbge: codigoIbgeController,
     );
     final cepConsultando = _consultaCepEmAndamento &&
         identical(_cepControllerEmConsulta, cepController);
@@ -3010,6 +3039,11 @@ class _ClientesPageState extends State<ClientesPage>
                 child: campoUf,
               ),
             ],
+            const SizedBox(height: 6),
+            ClienteEnderecoIbgeSelector(
+              codigoIbgeController: codigoIbgeController,
+              cidadeController: cidadeController,
+            ),
             const SizedBox(height: 6),
             TextField(
               controller: referenciaController,
@@ -3229,6 +3263,7 @@ class _EnderecoFormControllers {
     required this.bairroController,
     required this.cidadeController,
     required this.ufController,
+    required this.codigoIbgeController,
     required this.referenciaController,
   });
 
@@ -3242,6 +3277,7 @@ class _EnderecoFormControllers {
       bairroController: TextEditingController(),
       cidadeController: TextEditingController(),
       ufController: TextEditingController(),
+      codigoIbgeController: TextEditingController(),
       referenciaController: TextEditingController(),
     );
   }
@@ -3257,6 +3293,7 @@ class _EnderecoFormControllers {
       bairroController: TextEditingController(text: endereco.bairro),
       cidadeController: TextEditingController(text: endereco.cidade),
       ufController: TextEditingController(text: endereco.uf),
+      codigoIbgeController: TextEditingController(text: endereco.codigoIbge),
       referenciaController: TextEditingController(text: endereco.referencia),
     );
   }
@@ -3270,6 +3307,7 @@ class _EnderecoFormControllers {
   final TextEditingController bairroController;
   final TextEditingController cidadeController;
   final TextEditingController ufController;
+  final TextEditingController codigoIbgeController;
   final TextEditingController referenciaController;
 
   String tituloExibicao() {
@@ -3291,6 +3329,7 @@ class _EnderecoFormControllers {
       cidade: cidadeController.text.trim(),
       uf: ufController.text.trim().toUpperCase(),
       referencia: referenciaController.text.trim(),
+      codigoIbge: codigoIbgeController.text.replaceAll(RegExp(r'\D'), ''),
     );
   }
 
@@ -3302,6 +3341,7 @@ class _EnderecoFormControllers {
     bairroController.dispose();
     cidadeController.dispose();
     ufController.dispose();
+    codigoIbgeController.dispose();
     referenciaController.dispose();
   }
 }

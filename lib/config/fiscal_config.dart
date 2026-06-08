@@ -1,19 +1,19 @@
-/// Credenciais e endpoints da API fiscal (Focus NFe — NFC-e / NF-e).
+/// Parametros fiscais padrao (Focus NFe — NFC-e / NF-e).
 ///
-/// **Antes de emitir no caixa:** preencha [apiToken], [cnpjEmitente] e
-/// [inscricaoEstadualEmitente] conforme o cadastro da empresa na Focus.
-/// Nao commitar token real em repositorio publico.
+/// **Token Focus:** nao fica neste arquivo. Configure em
+/// Configuracoes → Fiscal — Focus NFe (gravado localmente no PC).
+/// Nunca commitar token real no Git.
 class FiscalConfig {
   const FiscalConfig._();
 
   /// URL base da API Focus NFe.
   ///
   /// Homologacao: notas de teste, sem validade juridica.
-  /// Producao: altere para `https://api.focusnfe.com.br` e [ambiente] = `producao`.
+  /// Producao: `https://api.focusnfe.com.br` (defina o ambiente na tela Fiscal).
   static const String apiBaseUrl = 'https://homologacao.focusnfe.com.br';
 
-  /// Token do painel Focus (autenticacao HTTP Basic: `token:`).
-  static const String apiToken = 'rLVoesq3fNQEubxSRwTDH4laV1wPfNOb';
+  /// Token vazio no codigo — use [FiscalConfigStore] / tela de Configuracoes.
+  static const String apiToken = '';
 
   /// Razao social do emitente (cabecalho contabil / Excel).
   static const String razaoSocialEmitente =

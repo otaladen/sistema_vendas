@@ -195,7 +195,7 @@ class _NfePreviaEmissaoDialogState extends State<NfePreviaEmissaoDialog>
             '${_resumo.consumidorFinal ? "Consumidor final" : "Contribuinte"}',
           ),
           _linhaResumo('Natureza', _resumo.naturezaOperacao),
-          _linhaResumo('Frete', _resumo.modalidadeFrete == '0' ? 'CIF' : 'FOB'),
+          _linhaResumo('Frete', _resumo.rotuloModalidadeFrete),
           const Divider(),
           _linhaResumo('Produtos', 'R\$ ${_moeda.format(_resumo.valorProdutos)}'),
           if (_resumo.valorFrete > 0)

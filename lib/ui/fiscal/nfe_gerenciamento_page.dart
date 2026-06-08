@@ -70,6 +70,7 @@ class NfeGerenciamentoPage extends StatefulWidget {
     required this.appConfigRepository,
     required this.usuarioLogado,
     this.vendaIdInicial,
+    this.abaInicial = 0,
   });
 
   final VendaRepository vendaRepository;
@@ -77,6 +78,7 @@ class NfeGerenciamentoPage extends StatefulWidget {
   final AppConfigRepository appConfigRepository;
   final UsuarioSistema usuarioLogado;
   final int? vendaIdInicial;
+  final int abaInicial;
 
   @override
   State<NfeGerenciamentoPage> createState() => _NfeGerenciamentoPageState();
@@ -113,6 +115,11 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     lacunasNumeracaoSerie1: 0,
     inutilizacoesRegistradas: 0,
   );
+  int get _contagemPendenciasOperacionais =>
+      _resumo.vendasSemNfeAutorizada +
+      _resumo.processando +
+      _resumo.rejeitadas;
+
   Venda? _vendaSelecionada;
   Cliente? _cliente;
   EnderecoIbgeResolvido? _ibgeResolvido;
@@ -139,7 +146,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     _tabs = TabController(
       length: 3,
       vsync: this,
-      initialIndex: 0,
+      initialIndex: widget.abaInicial.clamp(0, 2),
     );
     _historicoStore = NfeSaidaFiscalStore(
       widget.vendaRepository.objectBox.storeDirectoryPath,
@@ -289,11 +296,16 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         nfeStore: _historicoStore,
       ),
     );
+    final comAuth = NfePendenciasService.idsVendasComNfeAutorizada(
+      _historicoStore,
+      vendaRepository: widget.vendaRepository,
+    );
     final resumo = NfePainelResumoBuilder.calcular(
       historico: lista,
       vendasSemNfe: semNfe.length,
       inutilizacaoStore: _inutilizacaoStore,
       nfeStore: _historicoStore,
+      vendasComNfeAutorizada: comAuth,
     );
     setState(() {
       _historico = lista;
@@ -301,9 +313,14 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         ..clear()
         ..addAll(mapa);
       _pendenciasVendas = semNfe;
-      _pendenciasProcessando = NfePendenciasService.listarProcessando(_historicoStore);
-      _pendenciasRejeitadas =
-          NfePendenciasService.listarRejeitadasRecentes(_historicoStore);
+      _pendenciasProcessando = NfePendenciasService.listarProcessando(
+        _historicoStore,
+        vendaRepository: widget.vendaRepository,
+      );
+      _pendenciasRejeitadas = NfePendenciasService.listarRejeitadasRecentes(
+        _historicoStore,
+        vendaRepository: widget.vendaRepository,
+      );
       _resumo = resumo;
     });
     _atualizarPreEmissao();
@@ -773,7 +790,11 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   }
 
   void _abrirHistoricoInutilizacao() {
-    showNfeInutilizacaoHistoricoDialog(context, _inutilizacaoStore);
+    showNfeInutilizacaoHistoricoDialog(
+      context,
+      _inutilizacaoStore,
+      focusNfe: _focusNfe,
+    );
   }
 
   Future<void> _enviarEmailNfe(NfeSaidaFiscalRegistro reg) async {
@@ -959,7 +980,29 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   }
 
   Future<void> _reemitirVenda(NfeSaidaFiscalRegistro reg) async {
-    final id = reg.vendaId > 0 ? reg.vendaId : reg.numeroOrcamento;
+    final vendaId = reg.vendaId;
+    if (vendaId > 0) {
+      final venda = widget.vendaRepository.obterPorId(vendaId);
+      if (venda != null && venda.nfe55Autorizada) {
+        _recarregarHistorico();
+        _snack(
+          'Esta venda ja possui NF-e autorizada'
+          '${venda.nfeNumero.trim().isNotEmpty ? " (nota ${venda.nfeNumero.trim()})" : ""}. '
+          'Nao e necessario reemitir — consulte o historico.',
+        );
+        return;
+      }
+      if (_vendaComNfeAutorizada[vendaId] == true) {
+        _recarregarHistorico();
+        _snack(
+          'Esta venda ja possui NF-e autorizada no historico. '
+          'Nao e necessario reemitir.',
+        );
+        return;
+      }
+    }
+
+    final id = vendaId > 0 ? vendaId : reg.numeroOrcamento;
     if (id <= 0) {
       _snack('Registro sem venda vinculada.', erro: true);
       return;
@@ -1080,11 +1123,8 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
             Tab(
               text: 'Pendencias',
               icon: Badge(
-                isLabelVisible: _resumo.vendasSemNfeAutorizada > 0 ||
-                    _resumo.processando > 0,
-                label: Text(
-                  '${_resumo.vendasSemNfeAutorizada + _resumo.processando}',
-                ),
+                isLabelVisible: _contagemPendenciasOperacionais > 0,
+                label: Text('$_contagemPendenciasOperacionais'),
                 child: const Icon(Icons.pending_actions_outlined),
               ),
             ),

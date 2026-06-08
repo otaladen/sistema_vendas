@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/quantidade_venda_util.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
@@ -26,6 +27,10 @@ class CupomNaoFiscalVendaPdf {
 
   static String formatarMoeda(double valor) =>
       'R\$ ${_currency.format(valor)}';
+
+  /// Valores numericos sem prefixo R\$ (estilo cupom termico antigo).
+  static String formatarValorNumerico(double valor) =>
+      _currency.format(valor);
 
   static String rotuloFormaPagamento(String forma) {
     switch (forma) {
@@ -135,8 +140,10 @@ class CupomNaoFiscalVendaPdf {
         temEntrega: layout.exibirEntrega,
         temFiado: PlanoFiadoCodec.vendaTemPlanoQuitacao(venda),
         linhasFiado: PlanoFiadoCodec.contarLinhasPdf(venda),
-        linhasRodape: CupomPdfLayout.linhasTexto(rodape).length,
+        linhasRodape: 0,
         temChave: _chaveNfceValida(venda),
+        contingenciaSefaz: !_chaveNfceValida(venda) ||
+            _vendaNfceEmContingencia(venda),
       );
     }
     return _contarLinhasCupom(venda, cliente, segundaVia);
@@ -171,9 +178,13 @@ class CupomNaoFiscalVendaPdf {
     return '';
   }
 
-  static String _textoConsumidorDanfe(Cliente? cliente, Venda venda) {
-    final partes = <String>['CONSUMIDOR'];
+  static String _textoConsumidorLegado(Cliente? cliente, Venda venda) {
     final doc = cliente?.documento.trim() ?? '';
+    final nome = cliente?.nomeRazao.trim() ?? '';
+    if (doc.isEmpty && nome.isEmpty) {
+      return 'CONSUMIDOR NAO IDENTIFICADO';
+    }
+    final partes = <String>['CONSUMIDOR'];
     if (doc.isNotEmpty) {
       partes.add(
         doc.replaceAll(RegExp(r'\D'), '').length == 11
@@ -181,11 +192,8 @@ class CupomNaoFiscalVendaPdf {
             : 'CNPJ ${CupomPdfLayout.formatarDocumentoConsumidor(doc)}',
       );
     }
-    final nome = cliente?.nomeRazao.trim();
-    if (nome != null && nome.isNotEmpty) {
+    if (nome.isNotEmpty) {
       partes.add(nome);
-    } else {
-      partes.add('Nao informado');
     }
     final endereco = _enderecoConsumidorDanfe(cliente, venda);
     if (endereco.isNotEmpty) partes.add(endereco);
@@ -202,18 +210,76 @@ class CupomNaoFiscalVendaPdf {
     return '1';
   }
 
-  static String _payloadQrNfce(Venda venda) {
+  static String _payloadQrNfce(Venda venda, String chaveRodape) {
     final urlDanfe = venda.nfceUrlDanfe.trim();
     if (urlDanfe.isNotEmpty) return urlDanfe;
-    final chave = CupomPdfLayout.chaveAcessoSomenteDigitos(venda.nfceChaveAcesso);
+    final chave = CupomPdfLayout.chaveAcessoSomenteDigitos(chaveRodape);
     final url = CupomPdfLayout.urlConsultaNfcePorUf();
     if (chave.length == 44) return '$url?p=$chave';
     return url;
   }
 
+  static DateTime _dataEmissaoCupom(Venda venda, String dataLinhaPrincipal) {
+    if (venda.nfceEmitidaEm != null) return venda.nfceEmitidaEm!.toLocal();
+    for (final fmt in [
+      'dd/MM/yyyy HH:mm:ss',
+      'dd/MM/yyyy HH:mm',
+    ]) {
+      try {
+        return DateFormat(fmt).parse(dataLinhaPrincipal);
+      } catch (_) {}
+    }
+    return DateTime.now();
+  }
+
+  static String _chaveRodapeCupom({
+    required Venda venda,
+    required String numeroDocumento,
+    required String serieDocumento,
+    required String dataLinhaPrincipal,
+  }) {
+    if (_chaveNfceValida(venda)) return venda.nfceChaveAcesso;
+    return CupomPdfLayout.gerarChaveAcessoDecorativaNfce(
+      cnpj: FiscalConfig.cnpjEmitente,
+      uf: FiscalConfig.ufEmitente,
+      numeroNota: numeroDocumento,
+      serie: serieDocumento,
+      emissao: _dataEmissaoCupom(venda, dataLinhaPrincipal),
+    );
+  }
+
+  static String _quantidadeItemLegado(ItemVenda item) {
+    final q = item.quantidadeVendaEfetiva;
+    return NumberFormat('#,##0.000', 'pt_BR').format(q);
+  }
+
   static bool _chaveNfceValida(Venda venda) =>
       CupomPdfLayout.chaveAcessoSomenteDigitos(venda.nfceChaveAcesso).length ==
       44;
+
+  static bool _vendaNfceEmContingencia(Venda venda) =>
+      _chaveNfceValida(venda) &&
+      CupomPdfLayout.chaveNfceIndicaContingencia(venda.nfceChaveAcesso);
+
+  static String _quantidadeItemNfce(ItemVenda item) {
+    final fracionada =
+        item.produto.target?.permiteQuantidadeFracionada ?? false;
+    return QuantidadeVendaUtil.formatarExibicao(
+      item.quantidadeVendaEfetiva,
+      fracionada: fracionada,
+    );
+  }
+
+  static String _numeroCupomInterno(Venda venda) =>
+      '${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}';
+
+  static String _emissaoLegadoComSegundos(String dataHora) {
+    final t = dataHora.trim();
+    if (RegExp(r'^\d{2}/\d{2}/\d{4} \d{2}:\d{2}$').hasMatch(t)) {
+      return '$t:00';
+    }
+    return t;
+  }
 
   static List<pw.Widget> _buildCorpoNfce({
     required Venda venda,
@@ -230,38 +296,36 @@ class CupomNaoFiscalVendaPdf {
   }) {
     final descontoNota = venda.descontoImplicitoTotal;
     final chaveValida = _chaveNfceValida(venda);
-
-    final linhasExtrasConsumidor = <String>[];
-    if (layout.exibirEntrega) {
-      linhasExtrasConsumidor.add(
-        'Entrega: ${EntregaVendaHelper.textoEntregaCabecalhoVenda(venda)}',
-      );
-      if (EntregaVendaHelper.vendaTemItensCarreto(venda)) {
-        linhasExtrasConsumidor.add('Frete: ${formatarMoeda(venda.valorFrete)}');
-      }
-    }
-    if (layout.exibirEnderecoEntrega &&
-        venda.enderecoEntrega.trim().isNotEmpty &&
-        _enderecoConsumidorDanfe(cliente, venda) != venda.enderecoEntrega.trim()) {
-      linhasExtrasConsumidor.add('Endereco entrega: ${venda.enderecoEntrega}');
-    }
-    if (layout.exibirVendedor) {
-      linhasExtrasConsumidor.add('Vendedor: ${rotuloVendedorUmLinha(vendedor)}');
-    }
-    if (layout.exibirTelefoneCliente &&
-        (cliente?.telefone.trim().isNotEmpty ?? false)) {
-      linhasExtrasConsumidor.add('Tel: ${cliente!.telefone.trim()}');
-    }
-
+    final contingenciaSefaz = _vendaNfceEmContingencia(venda);
+    final exibirAvisoContingencia = !chaveValida || contingenciaSefaz;
+    final temNfceIdentificada =
+        chaveValida || venda.nfceNumero.trim().isNotEmpty;
     final linhasMisto = venda.formaPagamento == 'misto' &&
             venda.pagamentosJson.trim().isNotEmpty
         ? PagamentoOrcamentoCodec.decode(venda.pagamentosJson)
-            .map(_detalheLinhaPagamentoPdf)
+            .map(
+              (l) => (
+                forma: rotuloFormaPagamento(l.meio),
+                valor: formatarValorNumerico(l.valor),
+              ),
+            )
             .toList()
-        : const <String>[];
+        : const <({String forma, String valor})>[];
+
+    final numeroDocumento = temNfceIdentificada
+        ? _numeroNfceExibicao(venda)
+        : _numeroCupomInterno(venda);
+    final serieDocumento =
+        temNfceIdentificada ? _serieNfceExibicao(venda) : '001';
+    final chaveRodape = _chaveRodapeCupom(
+      venda: venda,
+      numeroDocumento: numeroDocumento,
+      serieDocumento: serieDocumento,
+      dataLinhaPrincipal: dataLinhaPrincipal,
+    );
 
     final widgets = <pw.Widget>[
-      ...CupomPdfLayout.cabecalhoDanfeNfceContingencia(
+      ...CupomPdfLayout.cabecalhoLegadoLdv(
         layout: layout,
         razaoSocial: FiscalConfig.razaoSocialEmitente,
         nomeLoja: config.nomeLoja,
@@ -269,126 +333,79 @@ class CupomNaoFiscalVendaPdf {
         inscricaoEstadual: FiscalConfig.inscricaoEstadualEmitente,
         telefone: config.telefone,
         endereco: config.endereco,
-        logoBytes: logoBytes,
+        logoBytes: null,
       ),
-      CupomPdfLayout.faixaTituloDocumentoAuxiliar(
+      CupomPdfLayout.faixaTituloDocumentoLegadoLdv(
         layout: layout,
-        titulo: CupomPdfLayout.tituloDanfeNfce,
+        linha1: CupomPdfLayout.tituloDanfeNfceLegadoLinha1,
+        linha2: CupomPdfLayout.tituloDanfeNfceLegadoLinha2,
       ),
-      CupomPdfLayout.faixaContingenciaNfce(layout: layout),
-      if (FiscalConfig.ambiente == 'homologacao')
-        CupomPdfLayout.faixaAvisoCentralNfce(
-          layout: layout,
-          titulo: 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO',
-          subtitulo: 'SEM VALOR FISCAL',
-          destaque: true,
-        ),
-      CupomPdfLayout.tabelaCabecalhoItensNfce(layout),
-      ...venda.itens.map((item) {
+      CupomPdfLayout.cabecalhoTabelaItensLegadoLdv(layout),
+      ...venda.itens.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final item = entry.value;
         final dados = _dadosProdutoItem(item);
-        final sufixo = EntregaVendaHelper.sufixoEntregaItemPdf(item);
         final nomeImp = ProdutoNomeExibicao.paraImpressaoItem(item);
-        return CupomPdfLayout.tabelaLinhaItemNfce(
+        final qtd = item.quantidadeVendaEfetiva;
+        final vlBruto = qtd * item.precoUnitario;
+        final descLinha =
+            (vlBruto - item.subtotal).clamp(0.0, double.infinity).toDouble();
+        return CupomPdfLayout.linhaItemLegadoLdv(
           layout: layout,
+          item: (idx + 1).toString().padLeft(3, '0'),
           codigo: dados.codigo,
-          descricao:
-              sufixo.isEmpty ? nomeImp : '$nomeImp$sufixo',
-          quantidade: item.quantidade,
           unidade: dados.unidade,
-          valorUnitario: formatarMoeda(item.precoUnitario),
-          valorTotal: formatarMoeda(item.subtotal),
+          descricao: nomeImp,
+          quantidade: _quantidadeItemLegado(item),
+          vlBruto: formatarValorNumerico(vlBruto),
+          desconto: formatarValorNumerico(descLinha),
+          vlUnit: formatarValorNumerico(item.precoUnitario),
+          vlTotal: formatarValorNumerico(item.subtotal),
         );
       }),
-      CupomPdfLayout.divisoriaSecao(layout: layout, destaque: true),
-      CupomPdfLayout.linhaResumoNfce(
+      CupomPdfLayout.blocoTotaisLegadoLdv(
         layout: layout,
-        rotulo: 'Qtde. total de itens',
-        valor: '${venda.itens.length}',
+        qtdItens: venda.itens.length,
+        subtotal: formatarValorNumerico(venda.somaSubtotalItens),
+        desconto: formatarValorNumerico(descontoNota),
+        frete: formatarValorNumerico(venda.valorFrete),
+        valorTotal: formatarValorNumerico(venda.total),
+        exibirFrete: venda.valorFrete > 0,
       ),
-      CupomPdfLayout.linhaResumoNfce(
-        layout: layout,
-        rotulo: 'Valor total R\$',
-        valor: formatarMoeda(venda.somaSubtotalItens),
-      ),
-      if (descontoNota > 0)
-        CupomPdfLayout.linhaResumoNfce(
-          layout: layout,
-          rotulo: 'Desconto R\$',
-          valor: formatarMoeda(descontoNota),
-        ),
-      CupomPdfLayout.linhaResumoNfce(
-        layout: layout,
-        rotulo: 'Frete R\$',
-        valor: formatarMoeda(venda.valorFrete),
-      ),
-      CupomPdfLayout.linhaResumoNfce(
-        layout: layout,
-        rotulo: 'Valor a Pagar R\$',
-        valor: formatarMoeda(venda.total),
-        destaque: true,
-      ),
-      CupomPdfLayout.blocoPagamentoNfce(
+      CupomPdfLayout.blocoPagamentoLegadoLdv(
         layout: layout,
         formaPagamento: _rotuloFormaPagamentoResumo(venda),
-        valorPago: formatarMoeda(totalRecebido),
-        troco: formatarMoeda(troco),
-        linhasPagamentoMisto: linhasMisto,
+        valorPago: formatarValorNumerico(totalRecebido),
+        troco: formatarValorNumerico(troco),
+        linhasMisto: linhasMisto,
       ),
-      if (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda)) ...[
-        CupomPdfLayout.textoCorpo(
-          'Condicao de quitacao (fiado):',
-          layout,
-          fontWeight: pw.FontWeight.bold,
-        ),
-        ...PlanoFiadoCodec.linhasTextoPdf(venda).map(
-          (linha) => CupomPdfLayout.textoCorpo(
-            linha,
-            layout,
-            fontWeight: pw.FontWeight.bold,
-          ),
-        ),
-      ],
-      CupomPdfLayout.blocoConsumidorNfce(
+      if (exibirAvisoContingencia)
+        CupomPdfLayout.faixaContingenciaAposPagamentoLegadoLdv(layout: layout),
+      CupomPdfLayout.rodapeIdentificacaoLegadoLdv(
         layout: layout,
-        textoConsumidor: _textoConsumidorDanfe(cliente, venda),
-        linhasExtras: linhasExtrasConsumidor,
-      ),
-      CupomPdfLayout.blocoConsultaChaveAcessoNfce(
-        layout: layout,
-        chaveAcesso: venda.nfceChaveAcesso,
-        chavePendente: !chaveValida,
-      ),
-      CupomPdfLayout.linhaIdentificacaoNfce(
-        layout: layout,
-        numero: _numeroNfceExibicao(venda),
-        serie: _serieNfceExibicao(venda),
-        dataHora: venda.nfceEmitidaEm != null
-            ? DateFormat('dd/MM/yyyy HH:mm')
+        numero: numeroDocumento,
+        serie: serieDocumento,
+        emissao: temNfceIdentificada && venda.nfceEmitidaEm != null
+            ? DateFormat('dd/MM/yyyy HH:mm:ss')
                 .format(venda.nfceEmitidaEm!.toLocal())
-            : dataLinhaPrincipal,
+            : _emissaoLegadoComSegundos(dataLinhaPrincipal),
+        via: segundaVia ? 'SEGUNDA VIA' : 'VIA CONSUMIDOR',
         linhaExtra: segundaVia && dataReimpressao != null
             ? 'Reimpressao: $dataReimpressao'
-            : (segundaVia ? 'SEGUNDA VIA' : null),
+            : null,
+      ),
+      CupomPdfLayout.blocoConsultaChaveAcessoLegadoLdv(
+        layout: layout,
+        chaveAcesso: chaveRodape,
+      ),
+      CupomPdfLayout.textoConsumidorLegadoLdv(
+        layout: layout,
+        textoPrincipal: _textoConsumidorLegado(cliente, venda),
       ),
       CupomPdfLayout.qrCodeNfceDanfe(
         layout: layout,
-        payload: _payloadQrNfce(venda),
+        payload: _payloadQrNfce(venda, chaveRodape),
       ),
-      CupomPdfLayout.linhaTributosLei12741(
-        layout: layout,
-        valorTotal: venda.total,
-      ),
-      CupomPdfLayout.faixaContingenciaNfce(layout: layout),
-      ...CupomPdfLayout.rodapeDocumento(
-        layout: layout,
-        textoRodape: config.rodapeNota,
-      ),
-      if (segundaVia)
-        CupomPdfLayout.textoCorpo(
-          'Valores recebido/troco podem ser aproximados na segunda via.',
-          layout,
-          fontSize: layout.tamanhoFonteCorpo.fontSizeContato - 1,
-        ),
       CupomPdfLayout.espacoFinalDocumento(layout),
     ];
     return widgets;
@@ -498,6 +515,7 @@ class CupomNaoFiscalVendaPdf {
           layout: layout,
           nomeProduto: ProdutoNomeExibicao.paraImpressaoItem(item),
           quantidade: item.quantidade,
+          quantidadeExibicao: _quantidadeItemNfce(item),
           precoUnitario: item.precoUnitario,
           subtotal: item.subtotal,
           formatarMoeda: formatarMoeda,
@@ -561,16 +579,6 @@ class CupomNaoFiscalVendaPdf {
         destaque: layout.destacarTroco,
         colunas: layout.alinharPagamentoColunas,
       ),
-      if (segundaVia)
-        CupomPdfLayout.textoCorpo(
-          'Valores recebido/troco podem ser aproximados na segunda via.',
-          layout,
-          fontSize: layout.tamanhoFonteCorpo.fontSizeContato - 1,
-        ),
-      ...CupomPdfLayout.rodapeDocumento(
-        layout: layout,
-        textoRodape: config.rodapeNota,
-      ),
       CupomPdfLayout.espacoFinalDocumento(layout),
     ];
   }
@@ -625,18 +633,34 @@ class CupomNaoFiscalVendaPdf {
     final comLogo = logoBytes.isNotEmpty;
     final layout = config.layoutImpressao.cupom;
 
-    final pageFormat = CupomPdfLayout.formatoPagina(
-      modelo,
-      layout: layout,
-      linhasTexto: _contarLinhasCupomComLayout(
+    late final int linhasTexto;
+    late final int qtdItens;
+    late final int linhasExtras;
+    if (layout.estiloCupomNfce) {
+      linhasTexto = 0;
+      qtdItens = 0;
+      linhasExtras = _contarLinhasCupomComLayout(
         venda,
         cliente,
         segundaVia,
         layout,
         config.rodapeNota,
-      ),
-      qtdItens: venda.itens.length,
-      linhasExtras: layout.estiloCupomNfce ? 14 : 2,
+      );
+    } else {
+      linhasTexto = _contarLinhasCupom(venda, cliente, segundaVia);
+      linhasExtras = CupomPdfLayout.linhasTexto(config.rodapeNota).length + 2;
+      final unidades = CupomPdfLayout.unidadesAlturaItensTermico(
+        venda.itens.map(ProdutoNomeExibicao.paraImpressaoItem),
+      );
+      qtdItens = unidades > 0 ? unidades : venda.itens.length;
+    }
+
+    final pageFormat = CupomPdfLayout.formatoPagina(
+      modelo,
+      layout: layout,
+      linhasTexto: linhasTexto,
+      qtdItens: qtdItens,
+      linhasExtras: linhasExtras,
       comLogo: comLogo,
       segundaVia: segundaVia,
     );

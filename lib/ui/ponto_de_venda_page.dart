@@ -37,6 +37,7 @@ import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../domain/cliente_cadastro.dart';
 import '../model/cliente.dart';
+import '../model/config_layout_impressao.dart';
 import '../model/item_venda.dart';
 import '../model/kit_orcamento.dart';
 import '../model/produto.dart';
@@ -138,6 +139,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   /// Dialogo "Dados para enviar ao caixa" aberto (atalhos F10/Esc/1-6).
   bool _checkoutDialogAberto = false;
+
+  /// Dialogo "Orcamento salvo" (imprimir/PDF) — bloqueia F10 do PDV.
+  bool _dialogoOrcamentoSalvoAberto = false;
+
+  /// Evita envio duplo (F10 + clique) e corrida com fechamento do dialogo.
+  bool _salvandoOrcamento = false;
   bool _checkoutDialogFocoInicialAplicado = false;
   StateSetter? _checkoutDialogSetState;
   BuildContext? _checkoutDialogFechamentoContext;
@@ -821,20 +828,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   bool _handlerTeclasHardwarePdv(KeyEvent event) {
     if (!mounted) return false;
 
-    final route = ModalRoute.of(context);
-    if (route == null || !route.isCurrent) return false;
-
-    if (event is KeyDownEvent &&
-        _pesquisaFocus.hasFocus &&
-        event.logicalKey == LogicalKeyboardKey.arrowDown &&
-        _carrinho.isNotEmpty) {
-      _entrarFocoCarrinhoPdv();
+    if (_dialogoOrcamentoSalvoAberto && event is KeyDownEvent) {
       return true;
     }
 
+    // Checkout modal: rota do PDV deixa de ser "current", mas os atalhos
+    // precisam funcionar (F10 enviar, F6/F3, Esc).
     if (_checkoutDialogAberto && event is KeyDownEvent) {
       if (event.logicalKey == LogicalKeyboardKey.f10) {
-        _checkoutDialogAcaoF10();
+        unawaited(_checkoutDialogAcaoF10Async());
         return true;
       }
       if (event.logicalKey == LogicalKeyboardKey.f6) {
@@ -845,6 +847,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         _focarDescontoCheckoutDialogoAberto();
         return true;
       }
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        _checkoutDialogFecharOuRetroceder();
+        return true;
+      }
+    }
+
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return false;
+
+    if (event is KeyDownEvent &&
+        _pesquisaFocus.hasFocus &&
+        event.logicalKey == LogicalKeyboardKey.arrowDown &&
+        _carrinho.isNotEmpty) {
+      _entrarFocoCarrinhoPdv();
+      return true;
     }
 
     if (!_checkoutDialogAberto && event is KeyDownEvent) {
@@ -3193,18 +3210,19 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     return null;
   }
 
-  void _checkoutDialogAcaoF10() {
-    if (!_checkoutDialogAberto) return;
+  Future<void> _checkoutDialogAcaoF10Async() async {
+    if (!_checkoutDialogAberto || _salvandoOrcamento) return;
     final ctx = _checkoutDialogFechamentoContext;
     if (ctx == null) return;
     final erro = _mensagemErroConfirmarCheckout();
     if (erro != null) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(erro)),
       );
       return;
     }
-    unawaited(_salvarOrcamento(fechamentoDialogContext: ctx));
+    await _salvarOrcamento(fechamentoDialogContext: ctx);
   }
 
   Widget _buildCheckoutDicaAtalhosTeclado() {
@@ -3256,18 +3274,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 _aplicarFocoInicialCheckoutDialog();
               });
             }
-            return CallbackShortcuts(
-              bindings: <ShortcutActivator, VoidCallback>{
-                const SingleActivator(LogicalKeyboardKey.escape):
-                    _checkoutDialogFecharOuRetroceder,
-                const SingleActivator(LogicalKeyboardKey.f10):
-                    _checkoutDialogAcaoF10,
-                const SingleActivator(LogicalKeyboardKey.f6):
-                    _toggleCheckoutMaisOpcoesDialogoAberto,
-                const SingleActivator(LogicalKeyboardKey.f3):
-                    _focarDescontoCheckoutDialogoAberto,
-              },
-              child: AlertDialog(
+            return AlertDialog(
               title: Text(
                 _orcamentoEmEdicaoId != null
                     ? 'Concluir atualizacao da venda'
@@ -3332,7 +3339,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 setDialogState: setDialogState,
                 scrollCheckout: scrollCheckout,
               ),
-            ),
             );
           },
         );
@@ -3345,7 +3351,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       _checkoutDialogFechamentoContext = null;
       _checkoutDialogScroll = null;
       scrollCheckout.dispose();
-      if (mounted) {
+      if (mounted &&
+          !_salvandoOrcamento &&
+          !_dialogoOrcamentoSalvoAberto) {
         _aplicarFocoInicialPdv();
       }
     }
@@ -4228,6 +4236,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   Future<void> _salvarOrcamento({BuildContext? fechamentoDialogContext}) async {
+    if (_salvandoOrcamento) return;
     if (_carrinho.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Adicione ao menos um item na venda.')),
@@ -4241,6 +4250,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       );
       return;
     }
+    _salvandoOrcamento = true;
     try {
       final valorFrete = _carrinhoTemItemCarreto
           ? _parseValorMonetario(_valorFreteController.text)
@@ -4424,9 +4434,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       final vendaSalva = widget.vendaRepository.obterPorId(orcamentoId);
       final numeroOrcamentoSalvo =
           vendaSalva?.numeroOrcamento ?? _orcamentoEmEdicaoNumero;
-      _prepararNovaVendaAposEnvioCaixa(
-        numeroOrcamentoSalvo: numeroOrcamentoSalvo,
-      );
       if (fechamentoDialogContext != null && fechamentoDialogContext.mounted) {
         Navigator.of(fechamentoDialogContext).pop();
       }
@@ -4443,11 +4450,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       if (vendaSalva != null && mounted) {
         await _mostrarAcoesPdfOrcamento(vendaSalva);
       }
+      if (mounted) {
+        _prepararNovaVendaAposEnvioCaixa(
+          numeroOrcamentoSalvo: numeroOrcamentoSalvo,
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Erro ao salvar venda: $e')));
+    } finally {
+      _salvandoOrcamento = false;
     }
   }
 
@@ -4909,7 +4923,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final temVendedor = _vendedorDaVenda(venda) != null;
     final modelo = empresaModeloPdfDeString(empresa.modeloPdf);
     final comLogo = logoBytes.isNotEmpty;
-    final layout = empresa.layoutImpressao.orcamento;
+    final layout = empresa.layoutImpressao.orcamento.copyWith(
+      familiaFonte: LayoutFamiliaFonte.courier,
+    );
     final linhasTexto = CupomPdfLayout.contarLinhasCabecalhoOrcamento(
       layout: layout,
       temCliente: temCliente,
@@ -4985,7 +5001,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 ),
               if (layout.exibirValidadeOrcamento)
                 CupomPdfLayout.textoCorpo(
-                  'Validade do orcamento: $validadeFmt ($_validadeOrcamentoDias dias)',
+                  layout.espacoCompacto
+                      ? 'Valido ate $validadeFmt'
+                      : 'Validade do orcamento: $validadeFmt ($_validadeOrcamentoDias dias)',
                   layout,
                   fontWeight: pw.FontWeight.bold,
                 ),
@@ -4994,14 +5012,23 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               if (CupomPdfLayout.cabecalhoColunasItens(layout) != null)
                 CupomPdfLayout.cabecalhoColunasItens(layout)!,
               ...venda.itens.map(
-                (item) => CupomPdfLayout.itemVenda(
-                  layout: layout,
-                  nomeProduto: ProdutoNomeExibicao.paraImpressaoItem(item),
-                  quantidade: item.quantidade,
-                  precoUnitario: item.precoUnitario,
-                  subtotal: item.subtotal,
-                  formatarMoeda: _formatarMoeda,
-                ),
+                (item) {
+                  final fracionada =
+                      item.produto.target?.permiteQuantidadeFracionada ??
+                          false;
+                  return CupomPdfLayout.itemVenda(
+                    layout: layout,
+                    nomeProduto: ProdutoNomeExibicao.paraImpressaoItem(item),
+                    quantidade: item.quantidade,
+                    quantidadeExibicao: QuantidadeVendaUtil.formatarExibicao(
+                      item.quantidadeVendaEfetiva,
+                      fracionada: fracionada,
+                    ),
+                    precoUnitario: item.precoUnitario,
+                    subtotal: item.subtotal,
+                    formatarMoeda: _formatarMoeda,
+                  );
+                },
               ),
               if (layout.divisoriaDestaqueAntesTotais)
                 CupomPdfLayout.divisoriaSecao(layout: layout, destaque: true),
@@ -5044,11 +5071,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                   (linha) => CupomPdfLayout.textoCorpo(linha, layout),
                 ),
               ],
-              CupomPdfLayout.textoCorpo(
-                'Este orcamento e valido por $_validadeOrcamentoDias dias a partir da data de emissao.',
-                layout,
-                fontSize: layout.tamanhoFonteCorpo.fontSizeContato,
-              ),
+              if (!layout.espacoCompacto)
+                CupomPdfLayout.textoCorpo(
+                  'Este orcamento e valido por $_validadeOrcamentoDias dias a partir da data de emissao.',
+                  layout,
+                  fontSize: layout.tamanhoFonteCorpo.fontSizeContato,
+                ),
               ...CupomPdfLayout.rodapeDocumento(
                 layout: layout,
                 textoRodape: empresa.rodapeOrcamento,
@@ -5087,36 +5115,67 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     return file.path;
   }
 
+  KeyEventResult _atalhoDialogoOrcamentoSalvo(
+    FocusNode node,
+    KeyEvent event,
+    void Function(String acao) fechar,
+  ) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.digit1 ||
+        key == LogicalKeyboardKey.numpad1) {
+      fechar('fechar');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.digit2 ||
+        key == LogicalKeyboardKey.numpad2) {
+      fechar('pdf');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.digit3 ||
+        key == LogicalKeyboardKey.numpad3) {
+      fechar('direto');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.digit4 ||
+        key == LogicalKeyboardKey.numpad4) {
+      fechar('imprimir');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      fechar('imprimir');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.f10) {
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   Future<void> _mostrarAcoesPdfOrcamento(Venda venda) async {
     final numOrcamento =
         venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id;
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
-    final acao = await showDialog<String>(
+    _dialogoOrcamentoSalvoAberto = true;
+    String? acao;
+    try {
+      acao = await showDialog<String>(
       context: context,
+      barrierDismissible: false,
       builder: (dialogContext) {
         final theme = Theme.of(dialogContext);
-        return CallbackShortcuts(
-          bindings: <ShortcutActivator, VoidCallback>{
-            const SingleActivator(LogicalKeyboardKey.escape): () =>
-                Navigator.pop(dialogContext, 'fechar'),
-            const SingleActivator(LogicalKeyboardKey.digit1): () =>
-                Navigator.pop(dialogContext, 'fechar'),
-            const SingleActivator(LogicalKeyboardKey.digit2): () =>
-                Navigator.pop(dialogContext, 'pdf'),
-            const SingleActivator(LogicalKeyboardKey.digit3): () =>
-                Navigator.pop(dialogContext, 'direto'),
-            const SingleActivator(LogicalKeyboardKey.digit4): () =>
-                Navigator.pop(dialogContext, 'imprimir'),
-            const SingleActivator(LogicalKeyboardKey.numpad1): () =>
-                Navigator.pop(dialogContext, 'fechar'),
-            const SingleActivator(LogicalKeyboardKey.numpad2): () =>
-                Navigator.pop(dialogContext, 'pdf'),
-            const SingleActivator(LogicalKeyboardKey.numpad3): () =>
-                Navigator.pop(dialogContext, 'direto'),
-            const SingleActivator(LogicalKeyboardKey.numpad4): () =>
-                Navigator.pop(dialogContext, 'imprimir'),
-          },
+        void fechar(String valor) {
+          if (!dialogContext.mounted) return;
+          Navigator.pop(dialogContext, valor);
+        }
+
+        return Focus(
+          autofocus: true,
+          onKeyEvent: (node, event) =>
+              _atalhoDialogoOrcamentoSalvo(node, event, fechar),
           child: AlertDialog(
             title: const Text('Orcamento salvo'),
             content: Column(
@@ -5162,7 +5221,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 const SizedBox(height: 10),
                 const Text(
                   'Teclado: Esc ou 1 — fechar · 2 — PDF · 3 — impressao direta · '
-                  '4 — acao Imprimir (Enter confirma o botao em foco) · Tab entre botoes',
+                  '4 ou Enter — imprimir · F10 ignorado nesta tela',
                   style: TextStyle(fontSize: 12.5),
                 ),
               ],
@@ -5183,7 +5242,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 label: const Text('Impressao direta (3)'),
               ),
               ElevatedButton.icon(
-                autofocus: true,
                 onPressed: () => Navigator.pop(dialogContext, 'imprimir'),
                 icon: const Icon(Icons.print_outlined),
                 label: const Text('Imprimir (4 · Enter)'),
@@ -5193,9 +5251,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         );
       },
     );
+    } finally {
+      _dialogoOrcamentoSalvoAberto = false;
+    }
     if (!mounted || acao == null || acao == 'fechar') return;
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
     try {
       final pdf = await _gerarOrcamentoPdfBytes(venda);
+      if (!mounted) return;
       if (acao == 'imprimir') {
         await Printing.layoutPdf(onLayout: (_) async => pdf.bytes);
         return;
@@ -5236,7 +5300,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('PDF do orcamento salvo em: $path')),
       );
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('Erro ao gerar/imprimir orcamento: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -5434,6 +5499,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               ),
           PdvSalvarOrcamentoIntent: CallbackAction<PdvSalvarOrcamentoIntent>(
             onInvoke: (_) {
+              if (_dialogoOrcamentoSalvoAberto ||
+                  _checkoutDialogAberto ||
+                  _salvandoOrcamento) {
+                return null;
+              }
               unawaited(_abrirPassoFechamentoVenda());
               return null;
             },

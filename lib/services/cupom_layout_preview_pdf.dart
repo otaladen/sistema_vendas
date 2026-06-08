@@ -17,6 +17,9 @@ class CupomLayoutPreviewPdf {
 
   static String _moeda(double v) => CupomNaoFiscalVendaPdf.formatarMoeda(v);
 
+  static String _valor(double v) =>
+      CupomNaoFiscalVendaPdf.formatarValorNumerico(v);
+
   static Future<Uint8List> gerarBytes({
     required EmpresaConfig empresa,
     required ConfigLayoutImpressao layout,
@@ -42,7 +45,8 @@ class CupomLayoutPreviewPdf {
         : Uint8List(0);
     final comLogo = logoBytes.isNotEmpty;
     final agora = DateTime.now();
-    final dataHora = DateFormat('dd/MM/yyyy HH:mm').format(agora);
+    final dataHora = DateFormat('dd/MM/yyyy HH:mm:ss').format(agora);
+    final qtdLegado = NumberFormat('#,##0.000', 'pt_BR');
     final modelo = empresaModeloPdfDeString(empresa.modeloPdf);
     final doc = pw.Document();
 
@@ -80,13 +84,20 @@ class CupomLayoutPreviewPdf {
           final total = subtotal + frete;
 
           if (!orcamento && layout.estiloCupomNfce) {
-            const chaveExemplo =
-                '29260532662298000191650010000010421000104210';
+            const numeroExemplo = '1042';
+            const serieExemplo = '001';
+            final chaveExemplo = CupomPdfLayout.gerarChaveAcessoDecorativaNfce(
+              cnpj: FiscalConfig.cnpjEmitente,
+              uf: FiscalConfig.ufEmitente,
+              numeroNota: numeroExemplo,
+              serie: serieExemplo,
+              emissao: agora,
+            );
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               mainAxisSize: pw.MainAxisSize.min,
               children: [
-                ...CupomPdfLayout.cabecalhoDanfeNfceContingencia(
+                ...CupomPdfLayout.cabecalhoLegadoLdv(
                   layout: layout,
                   razaoSocial: FiscalConfig.razaoSocialEmitente,
                   nomeLoja: empresa.nomeLoja,
@@ -94,100 +105,75 @@ class CupomLayoutPreviewPdf {
                   inscricaoEstadual: FiscalConfig.inscricaoEstadualEmitente,
                   telefone: empresa.telefone,
                   endereco: empresa.endereco,
-                  logoBytes: comLogo ? logoBytes : null,
+                  logoBytes: null,
                 ),
-                CupomPdfLayout.faixaTituloDocumentoAuxiliar(
+                CupomPdfLayout.faixaTituloDocumentoLegadoLdv(
                   layout: layout,
-                  titulo: CupomPdfLayout.tituloDanfeNfce,
+                  linha1: CupomPdfLayout.tituloDanfeNfceLegadoLinha1,
+                  linha2: CupomPdfLayout.tituloDanfeNfceLegadoLinha2,
                 ),
-                CupomPdfLayout.faixaContingenciaNfce(layout: layout),
-                if (FiscalConfig.ambiente == 'homologacao')
-                  CupomPdfLayout.faixaAvisoCentralNfce(
-                    layout: layout,
-                    titulo: 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO',
-                    subtitulo: 'SEM VALOR FISCAL',
-                    destaque: true,
-                  ),
-                CupomPdfLayout.tabelaCabecalhoItensNfce(layout),
-                CupomPdfLayout.tabelaLinhaItemNfce(
+                CupomPdfLayout.cabecalhoTabelaItensLegadoLdv(layout),
+                CupomPdfLayout.linhaItemLegadoLdv(
                   layout: layout,
+                  item: '001',
                   codigo: '001',
-                  descricao: itens[0].nome,
-                  quantidade: itens[0].qtd,
                   unidade: 'SC',
-                  valorUnitario: _moeda(itens[0].unit),
-                  valorTotal: _moeda(itens[0].qtd * itens[0].unit),
+                  descricao: itens[0].nome,
+                  quantidade: qtdLegado.format(itens[0].qtd),
+                  vlBruto: _valor(itens[0].qtd * itens[0].unit),
+                  desconto: _valor(0),
+                  vlUnit: _valor(itens[0].unit),
+                  vlTotal: _valor(itens[0].qtd * itens[0].unit),
                 ),
-                CupomPdfLayout.tabelaLinhaItemNfce(
+                CupomPdfLayout.linhaItemLegadoLdv(
                   layout: layout,
+                  item: '002',
                   codigo: '002',
-                  descricao: itens[1].nome,
-                  quantidade: itens[1].qtd,
                   unidade: 'GL',
-                  valorUnitario: _moeda(itens[1].unit),
-                  valorTotal: _moeda(itens[1].qtd * itens[1].unit),
+                  descricao: itens[1].nome,
+                  quantidade: qtdLegado.format(itens[1].qtd),
+                  vlBruto: _valor(itens[1].qtd * itens[1].unit),
+                  desconto: _valor(0),
+                  vlUnit: _valor(itens[1].unit),
+                  vlTotal: _valor(itens[1].qtd * itens[1].unit),
                 ),
-                CupomPdfLayout.divisoriaSecao(layout: layout, destaque: true),
-                CupomPdfLayout.linhaResumoNfce(
+                CupomPdfLayout.blocoTotaisLegadoLdv(
                   layout: layout,
-                  rotulo: 'Qtde. total de itens',
-                  valor: '${itens.length}',
+                  qtdItens: itens.length,
+                  subtotal: _valor(subtotal),
+                  desconto: _valor(0),
+                  frete: _valor(frete),
+                  valorTotal: _valor(total),
+                  exibirFrete: frete > 0,
                 ),
-                CupomPdfLayout.linhaResumoNfce(
-                  layout: layout,
-                  rotulo: 'Valor total R\$',
-                  valor: _moeda(subtotal),
-                ),
-                CupomPdfLayout.linhaResumoNfce(
-                  layout: layout,
-                  rotulo: 'Frete R\$',
-                  valor: _moeda(frete),
-                ),
-                CupomPdfLayout.linhaResumoNfce(
-                  layout: layout,
-                  rotulo: 'Valor a Pagar R\$',
-                  valor: _moeda(total),
-                  destaque: true,
-                ),
-                CupomPdfLayout.blocoPagamentoNfce(
+                CupomPdfLayout.blocoPagamentoLegadoLdv(
                   layout: layout,
                   formaPagamento: 'Dinheiro',
-                  valorPago: _moeda(300),
-                  troco: _moeda(300 - total),
+                  valorPago: _valor(300),
+                  troco: _valor(300 - total),
                 ),
-                CupomPdfLayout.blocoConsumidorNfce(
+                CupomPdfLayout.faixaContingenciaAposPagamentoLegadoLdv(
                   layout: layout,
-                  textoConsumidor:
-                      'CONSUMIDOR - CPF 123.456.789-09 - Cliente Exemplo - '
-                      'Rua das Flores, 100 | Centro | Salvador - BA',
-                  linhasExtras: const [
-                    'Entrega: Retirada na loja',
-                    'Vendedor: 01 · Maria',
-                  ],
                 ),
-                CupomPdfLayout.blocoConsultaChaveAcessoNfce(
+                CupomPdfLayout.rodapeIdentificacaoLegadoLdv(
+                  layout: layout,
+                  numero: numeroExemplo,
+                  serie: serieExemplo,
+                  emissao: dataHora,
+                  via: 'VIA CONSUMIDOR',
+                ),
+                CupomPdfLayout.blocoConsultaChaveAcessoLegadoLdv(
                   layout: layout,
                   chaveAcesso: chaveExemplo,
                 ),
-                CupomPdfLayout.linhaIdentificacaoNfce(
+                CupomPdfLayout.textoConsumidorLegadoLdv(
                   layout: layout,
-                  numero: '1042',
-                  serie: '1',
-                  dataHora: dataHora,
+                  textoPrincipal: 'CONSUMIDOR NAO IDENTIFICADO',
                 ),
                 CupomPdfLayout.qrCodeNfceDanfe(
                   layout: layout,
                   payload:
                       '${CupomPdfLayout.urlConsultaNfcePorUf()}?p=$chaveExemplo',
-                ),
-                CupomPdfLayout.linhaTributosLei12741(
-                  layout: layout,
-                  valorTotal: total,
-                ),
-                CupomPdfLayout.faixaContingenciaNfce(layout: layout),
-                ...CupomPdfLayout.rodapeDocumento(
-                  layout: layout,
-                  textoRodape: empresa.rodapeNota,
                 ),
                 CupomPdfLayout.espacoFinalDocumento(layout),
               ],

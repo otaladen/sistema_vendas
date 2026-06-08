@@ -13,6 +13,7 @@ import '../services/xml_nfe_parser_service.dart';
 import 'conferencia_xml_screen.dart';
 import 'fiscal/exportar_fechamento_page.dart';
 import 'fiscal/nfe_gerenciamento_page.dart';
+import 'fiscal/pendencias_fiscais_page.dart';
 import 'fiscal/relatorio_fiscal_mensal_page.dart';
 import 'nfe_importadas_page.dart';
 import 'layout/app_layout.dart';
@@ -110,6 +111,25 @@ class NotasFiscaisPage extends StatelessWidget {
                   MaterialPageRoute<void>(
                     builder: (_) => NfeImportadasPage(
                       produtoRepository: produtoRepository,
+                    ),
+                  ),
+                );
+              },
+            ),
+            HubNavButton(
+              icon: Icons.pending_actions_outlined,
+              corDestaque: HubNavColors.menuNotasFiscais,
+              titulo: 'Pendencias fiscais',
+              subtitulo:
+                  'NFC-e aguardando SEFAZ (reconsulta manual) e atalho para NF-e 55.',
+              onTap: () {
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PendenciasFiscaisPage(
+                      vendaRepository: vendaRepository,
+                      clienteRepository: clienteRepository,
+                      appConfigRepository: appConfigRepository,
+                      usuarioLogado: usuarioLogado,
                     ),
                   ),
                 );

@@ -29,6 +29,9 @@ import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
 import '../services/venda_fiscal_service.dart';
 import 'vendas/cancelar_venda_ui.dart';
+import '../config/focus_nfe_runtime.dart';
+import '../domain/fiscal/abrir_danfe_focus.dart';
+import '../services/focus_nfe_service.dart';
 import 'fiscal/abrir_documento_fiscal.dart';
 import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
 import 'registrar_devolucao_troca_page.dart';
@@ -120,6 +123,12 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   String _statusOperacionalLista(Venda v) {
+    if (v.nfceProcessandoPendenteFocus) {
+      return 'NFC-e aguardando SEFAZ';
+    }
+    if (v.nfceEmissaoEmAndamento) {
+      return 'Emitindo NFC-e...';
+    }
     if (v.estoqueBaixadoCupom) {
       if (v.nfceEmitida ||
           widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null) {
@@ -132,10 +141,11 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   Future<void> _verDanfeNfce(Venda v) async {
-    await abrirUrlDocumentoFiscal(
+    await abrirDanfeFocus(
       context,
-      v.nfceUrlDanfe,
-      mensagemSeVazio: 'Esta venda nao possui DANFE da NFC-e salvo.',
+      focusNfe: FocusNfeService(config: criarFocusNfeConfigPadrao()),
+      urlSalva: v.nfceUrlDanfe,
+      venda: v,
     );
   }
 

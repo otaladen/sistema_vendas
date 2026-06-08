@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../domain/caixa_fiscal_status.dart';
+import '../../../domain/fiscal/venda_documento_fiscal_mutex.dart';
 import '../../../model/cliente.dart';
 import '../../../model/venda.dart';
 import '../caixa_fiscal_chip.dart';
@@ -50,16 +51,20 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
     final scheme = theme.colorScheme;
     final fiscalInfo = CaixaFiscalStatusHelper.deVenda(venda, orcamentoPendente: false);
 
+    final bloqueiaNovaNfce = VendaDocumentoFiscalMutex.bloqueiaNovaNfce(venda);
     final atalhos = <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.digit2): onCupomNaoFiscal,
       const SingleActivator(LogicalKeyboardKey.numpad2): onCupomNaoFiscal,
-      const SingleActivator(LogicalKeyboardKey.digit3): onEmitirNfce,
-      const SingleActivator(LogicalKeyboardKey.numpad3): onEmitirNfce,
       const SingleActivator(LogicalKeyboardKey.digit4): onEmitirNfe55,
       const SingleActivator(LogicalKeyboardKey.numpad4): onEmitirNfe55,
-      const SingleActivator(LogicalKeyboardKey.enter): onEmitirNfce,
-      const SingleActivator(LogicalKeyboardKey.numpadEnter): onEmitirNfce,
     };
+    if (!bloqueiaNovaNfce) {
+      atalhos[const SingleActivator(LogicalKeyboardKey.digit3)] = onEmitirNfce;
+      atalhos[const SingleActivator(LogicalKeyboardKey.numpad3)] = onEmitirNfce;
+      atalhos[const SingleActivator(LogicalKeyboardKey.enter)] = onEmitirNfce;
+      atalhos[const SingleActivator(LogicalKeyboardKey.numpadEnter)] =
+          onEmitirNfce;
+    }
     if (podeConcluir) {
       atalhos[const SingleActivator(LogicalKeyboardKey.digit1)] = onConcluir;
       atalhos[const SingleActivator(LogicalKeyboardKey.numpad1)] = onConcluir;
@@ -127,6 +132,7 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
                     exigeNfe55: exigeNfe55,
                     jaTemNfe55: jaTemNfe55,
                     nfceEmitida: venda.nfceEmitida,
+                    bloqueiaNovaNfce: bloqueiaNovaNfce,
                     onCupom: onCupomNaoFiscal,
                     onNfce: onEmitirNfce,
                     onNfe55: onEmitirNfe55,
@@ -307,6 +313,7 @@ class _AcoesFiscais extends StatelessWidget {
     required this.exigeNfe55,
     required this.jaTemNfe55,
     required this.nfceEmitida,
+    required this.bloqueiaNovaNfce,
     required this.onCupom,
     required this.onNfce,
     required this.onNfe55,
@@ -316,6 +323,7 @@ class _AcoesFiscais extends StatelessWidget {
   final bool exigeNfe55;
   final bool jaTemNfe55;
   final bool nfceEmitida;
+  final bool bloqueiaNovaNfce;
   final VoidCallback onCupom;
   final VoidCallback onNfce;
   final VoidCallback onNfe55;
@@ -375,11 +383,17 @@ class _AcoesFiscais extends StatelessWidget {
             _botaoAcao(
               context,
               icone: Icons.receipt_long_outlined,
-              titulo: nfceEmitida ? 'NFC-e ja emitida — reemitir?' : 'Emitir NFC-e',
-              subtitulo: 'Cupom fiscal eletronico (consumidor final)',
-              atalho: '3 · Enter',
-              destaque: !nfceEmitida,
-              onPressed: processando ? null : onNfce,
+              titulo: bloqueiaNovaNfce
+                  ? (jaTemNfe55
+                      ? 'NFC-e indisponivel (ja tem NF-e)'
+                      : 'NFC-e ja emitida')
+                  : 'Emitir NFC-e',
+              subtitulo: bloqueiaNovaNfce && jaTemNfe55
+                  ? 'Uma venda nao pode ter NFC-e e NF-e juntas'
+                  : 'Cupom fiscal eletronico (consumidor final)',
+              atalho: bloqueiaNovaNfce ? '—' : '3 · Enter',
+              destaque: !bloqueiaNovaNfce,
+              onPressed: processando || bloqueiaNovaNfce ? null : onNfce,
             ),
             const SizedBox(height: 8),
             _botaoAcao(

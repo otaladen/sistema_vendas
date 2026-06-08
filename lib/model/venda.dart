@@ -215,6 +215,18 @@ class Venda {
   /// NFC-e autorizada e ainda nao cancelada na SEFAZ.
   bool get nfceAutorizadaAtiva => nfceEmitida && !nfceCancelada;
 
+  /// NFC-e enviada a Focus, aguardando retorno da SEFAZ (reconsulta automatica).
+  bool get nfceProcessandoPendenteFocus {
+    if (nfceEmitida) return false;
+    final status = nfceStatusFocus.trim().toLowerCase();
+    if (status == 'processando_autorizacao') return true;
+    return nfceProtocolo.trim().contains('focus_pendente');
+  }
+
+  /// Outro passo da emissao NFC-e em curso neste PC ou na rede.
+  bool get nfceEmissaoEmAndamento =>
+      nfceStatusFocus.trim() == 'emissao_em_andamento';
+
   bool get nfe55Cancelada =>
       nfeStatusFocus == 'cancelado' ||
       nfeUrlXmlCancelamento.trim().isNotEmpty;

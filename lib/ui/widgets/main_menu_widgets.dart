@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'package:flutter/material.dart';
-
 import '../../domain/main_menu_destino.dart';
 
 /// Faixa horizontal de atalhos favoritos no dashboard.
@@ -162,6 +160,7 @@ class MainMenuModuleTile extends StatelessWidget {
     this.alturaMinima = 104,
     this.favorito = false,
     this.onAlternarFavorito,
+    this.badgeContagem,
   });
 
   final IconData icon;
@@ -173,6 +172,7 @@ class MainMenuModuleTile extends StatelessWidget {
   final double alturaMinima;
   final bool favorito;
   final VoidCallback? onAlternarFavorito;
+  final int? badgeContagem;
 
   @override
   Widget build(BuildContext context) {
@@ -207,20 +207,10 @@ class MainMenuModuleTile extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: habilitado
-                              ? corDestaque.withValues(alpha: 0.18)
-                              : Colors.grey.withValues(alpha: 0.18),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          icon,
-                          size: 24,
-                          color:
-                              habilitado ? corDestaque : Colors.grey.shade600,
-                        ),
+                      _iconeComBadge(
+                        icone: icon,
+                        cor: habilitado ? corDestaque : Colors.grey.shade600,
+                        badge: badgeContagem,
                       ),
                       const Spacer(),
                       Text(
@@ -273,6 +263,27 @@ class MainMenuModuleTile extends StatelessWidget {
       ),
     );
   }
+}
+
+Widget _iconeComBadge({
+  required IconData icone,
+  required Color cor,
+  int? badge,
+}) {
+  final iconeWidget = Container(
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(
+      color: cor.withValues(alpha: 0.18),
+      shape: BoxShape.circle,
+    ),
+    child: Icon(icone, size: 24, color: cor),
+  );
+  final n = badge ?? 0;
+  if (n <= 0) return iconeWidget;
+  return Badge(
+    label: Text(n > 99 ? '99+' : '$n'),
+    child: iconeWidget,
+  );
 }
 
 /// Tile em destaque para Vendas (PDV + atalhos).

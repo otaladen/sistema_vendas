@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../config/fiscal_config.dart';
+import '../../domain/fiscal/focus_documento_fiscal_url.dart';
+
 /// Abre DANFE/XML da Focus no navegador ou visualizador padrao do SO.
 Future<void> abrirUrlDocumentoFiscal(
   BuildContext context,
@@ -10,7 +13,7 @@ Future<void> abrirUrlDocumentoFiscal(
   String mensagemSeVazio =
       'Link do documento fiscal nao disponivel para esta venda.',
 }) async {
-  final link = url.trim();
+  var link = url.trim();
   if (link.isEmpty) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -18,6 +21,12 @@ Future<void> abrirUrlDocumentoFiscal(
       );
     }
     return;
+  }
+  if (!link.startsWith('http://') && !link.startsWith('https://')) {
+    link = FocusDocumentoFiscalUrl.normalizar(
+      link,
+      apiBaseUrl: FiscalConfig.apiBaseUrl,
+    );
   }
   final uri = Uri.tryParse(link);
   if (uri == null || !uri.hasScheme) {

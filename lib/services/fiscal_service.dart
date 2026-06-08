@@ -297,7 +297,7 @@ class FiscalService {
     if (!FiscalConfig.configurado) {
       throw FiscalConfigIncompletaException(
         'Configure FiscalConfig (apiBaseUrl, apiToken, cnpjEmitente) '
-        'em lib/config/fiscal_config.dart antes de emitir NFC-e.',
+        'em Configuracoes → Fiscal — Focus NFe antes de emitir NFC-e.',
       );
     }
     if (FiscalConfig.csc.trim().isEmpty || FiscalConfig.idCsc.trim().isEmpty) {

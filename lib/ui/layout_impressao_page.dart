@@ -310,35 +310,62 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: _campoDropdown<LayoutImpressaoPreset>(
-              rotulo: 'Modelo rapido',
-              value: l.preset == LayoutImpressaoPreset.personalizado
-                  ? null
-                  : l.preset,
-              hint: l.preset == LayoutImpressaoPreset.personalizado
-                  ? 'Personalizado'
-                  : null,
-              items: const [
-                DropdownMenuItem(
-                  value: LayoutImpressaoPreset.padrao,
-                  child: Text('Padrao'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _campoDropdown<LayoutImpressaoPreset>(
+                  rotulo: 'Modelo rapido',
+                  value: l.preset == LayoutImpressaoPreset.personalizado
+                      ? null
+                      : l.preset,
+                  hint: l.preset == LayoutImpressaoPreset.personalizado
+                      ? 'Personalizado'
+                      : null,
+                  items: const [
+                    DropdownMenuItem(
+                      value: LayoutImpressaoPreset.bematechMp4200,
+                      child: Text('Bematech MP-4200 TH (72 mm)'),
+                    ),
+                    DropdownMenuItem(
+                      value: LayoutImpressaoPreset.padrao,
+                      child: Text('Padrao'),
+                    ),
+                    DropdownMenuItem(
+                      value: LayoutImpressaoPreset.economico,
+                      child: Text('Economico (minimo de papel)'),
+                    ),
+                    DropdownMenuItem(
+                      value: LayoutImpressaoPreset.compacto,
+                      child: Text('Compacto (menos papel)'),
+                    ),
+                    DropdownMenuItem(
+                      value: LayoutImpressaoPreset.destaque,
+                      child: Text('Destaque'),
+                    ),
+                  ],
+                  onChanged: (p) {
+                    if (p != null) _aplicarPreset(p);
+                  },
                 ),
-                DropdownMenuItem(
-                  value: LayoutImpressaoPreset.economico,
-                  child: Text('Economico (minimo de papel)'),
+                const SizedBox(height: 10),
+                FilledButton.tonalIcon(
+                  onPressed: () =>
+                      _aplicarPreset(LayoutImpressaoPreset.bematechMp4200),
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  label: Text(
+                    _orcamento
+                        ? 'Aplicar MP-4200 (orcamento economico 72 mm)'
+                        : 'Aplicar Bematech MP-4200 TH',
+                  ),
                 ),
-                DropdownMenuItem(
-                  value: LayoutImpressaoPreset.compacto,
-                  child: Text('Compacto (menos papel)'),
-                ),
-                DropdownMenuItem(
-                  value: LayoutImpressaoPreset.destaque,
-                  child: Text('Destaque'),
+                const SizedBox(height: 6),
+                Text(
+                  _orcamento
+                      ? 'Orcamento: papel minimo com PDF 72 mm e coluna de valores 32 mm.'
+                      : 'Cupom: DANFE NFC-e, PDF 72 mm, valores com coluna fixa 32 mm.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
-              onChanged: (p) {
-                if (p != null) _aplicarPreset(p);
-              },
             ),
           ),
         ),
@@ -481,6 +508,15 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
           ),
         ]),
         _secao('Papel vertical (bobina 80 mm)', [
+          if (!_orcamento)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Se o cupom cortar na bobina, use Altura da pagina 100% ou 105% '
+                'e evite valores abaixo de 100%. O sistema ja aplica folga de seguranca.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           _campoDropdown<double>(
             rotulo: 'Margem da pagina (mm)',
             value: l.margemPaginaMm,
@@ -525,9 +561,10 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
             rotulo: 'Altura calculada da pagina PDF',
             value: l.fatorAlturaPaginaPdf,
             items: const [
-              DropdownMenuItem(value: 0.85, child: Text('Apertada (85%)')),
-              DropdownMenuItem(value: 0.92, child: Text('Normal (92%)')),
-              DropdownMenuItem(value: 1, child: Text('Com folga (100%)')),
+              DropdownMenuItem(value: 0.92, child: Text('Legado (92% — nao reduz)')),
+              DropdownMenuItem(value: 1, child: Text('Normal (100%)')),
+              DropdownMenuItem(value: 1.05, child: Text('Com folga (105% — padrao)')),
+              DropdownMenuItem(value: 1.1, child: Text('Extra (110%)')),
             ],
             onChanged: (v) {
               if (v != null) {
@@ -586,13 +623,41 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'Para gastar menos papel: preset Economico, avanco 0 mm, altura PDF 85%, '
-              'desligue divisorias extras e use Preview + Teste 80 mm antes de salvar.',
+              'Orcamento: preset Economico (padrao novo). Cupom: se cortar na bobina, '
+              'altura 105% e modo Altura do PDF. Teste 80 mm antes de salvar.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
         ]),
         _secao('Colunas e valores (bobina)', [
+          _campoDropdown<double>(
+            rotulo: 'Largura do PDF na impressora (mm)',
+            value: l.larguraPaginaPdfMm.clamp(68, 80),
+            items: const [
+              DropdownMenuItem(
+                value: 72,
+                child: Text('72 mm — Bematech MP-4200 TH (recomendado)'),
+              ),
+              DropdownMenuItem(value: 76, child: Text('76 mm')),
+              DropdownMenuItem(
+                value: 80,
+                child: Text('80 mm — papel inteiro (pode cortar valores)'),
+              ),
+            ],
+            onChanged: (v) {
+              if (v != null) {
+                _patchLayout((c) => c.copyWith(larguraPaginaPdfMm: v));
+              }
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Papel 80 mm: a area imprimivel costuma ser ~72 mm. Se R\$ corta na '
+              'direita, use 72 mm e coluna de valores 32 mm.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
           _switch(
             'Reservar coluna fixa para valores (R\$)',
             l.reservarColunaValorFixa,
@@ -602,11 +667,11 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
             rotulo: 'Largura da coluna de valores (mm)',
             value: l.larguraColunaValorMm,
             items: const [
-              DropdownMenuItem(value: 24, child: Text('24 mm')),
               DropdownMenuItem(value: 26, child: Text('26 mm')),
-              DropdownMenuItem(value: 28, child: Text('28 mm (recomendado)')),
+              DropdownMenuItem(value: 28, child: Text('28 mm')),
               DropdownMenuItem(value: 30, child: Text('30 mm')),
-              DropdownMenuItem(value: 32, child: Text('32 mm')),
+              DropdownMenuItem(value: 32, child: Text('32 mm (recomendado)')),
+              DropdownMenuItem(value: 34, child: Text('34 mm')),
             ],
             onChanged: (v) {
               if (v != null) {

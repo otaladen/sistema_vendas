@@ -78,19 +78,54 @@ abstract final class NfePendenciasService {
     return out;
   }
 
+  /// Registro de tentativa falha/processando que ja foi resolvido com NF-e autorizada.
+  static bool registroSuperadoPorNfeAutorizada(
+    NfeSaidaFiscalRegistro registro, {
+    required Set<int> vendasComNfeAutorizada,
+  }) =>
+      registro.vendaId > 0 &&
+      vendasComNfeAutorizada.contains(registro.vendaId);
+
   static List<NfeSaidaFiscalRegistro> listarProcessando(
-    NfeSaidaFiscalStore store,
-  ) {
-    return store.listar().where((r) => r.processando).toList();
+    NfeSaidaFiscalStore store, {
+    VendaRepository? vendaRepository,
+  }) {
+    final comAuth = idsVendasComNfeAutorizada(
+      store,
+      vendaRepository: vendaRepository,
+    );
+    return store
+        .listar()
+        .where(
+          (r) =>
+              r.processando &&
+              !registroSuperadoPorNfeAutorizada(
+                r,
+                vendasComNfeAutorizada: comAuth,
+              ),
+        )
+        .toList();
   }
 
   static List<NfeSaidaFiscalRegistro> listarRejeitadasRecentes(
     NfeSaidaFiscalStore store, {
+    VendaRepository? vendaRepository,
     int limit = 20,
   }) {
+    final comAuth = idsVendasComNfeAutorizada(
+      store,
+      vendaRepository: vendaRepository,
+    );
     return store
         .listar()
-        .where((r) => r.rejeitada)
+        .where(
+          (r) =>
+              r.rejeitada &&
+              !registroSuperadoPorNfeAutorizada(
+                r,
+                vendasComNfeAutorizada: comAuth,
+              ),
+        )
         .take(limit)
         .toList();
   }
