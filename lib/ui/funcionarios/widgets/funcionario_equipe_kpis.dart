@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../../main.dart';
+import '../../theme/app_semantic_helper.dart';
 
 final NumberFormat _moedaKpi = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
 
@@ -21,7 +21,8 @@ class FuncionarioEquipeKpis extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
+    final scheme = theme.colorScheme;
     final inativos = totalCadastrados - totalAtivos;
 
     return LayoutBuilder(
@@ -33,8 +34,8 @@ class FuncionarioEquipeKpis extends StatelessWidget {
             rotulo: 'Cadastrados',
             valor: '$totalCadastrados',
             detalhe: '$totalAtivos ativo(s) · $inativos inativo(s)',
-            cor: const Color(0xFF455A64),
-            bg: theme.colorScheme.surfaceContainerHighest,
+            cor: scheme.onSurfaceVariant,
+            bg: scheme.surfaceContainerHighest,
           ),
           _KpiEquipe(
             icone: Icons.badge_outlined,
@@ -43,16 +44,16 @@ class FuncionarioEquipeKpis extends StatelessWidget {
             detalhe: totalCadastrados == 0
                 ? 'Nenhum cadastro'
                 : '${((totalAtivos / totalCadastrados) * 100).round()}% do quadro',
-            cor: const Color(0xFF2E7D32),
-            bg: semantic?.successBg ?? const Color(0xFFEAF8EF),
+            cor: semantic.successFg,
+            bg: semantic.successBg,
           ),
           _KpiEquipe(
             icone: Icons.payments_outlined,
             rotulo: 'Folha base (ativos)',
             valor: _moedaKpi.format(folhaBaseAtivos),
             detalhe: 'Soma dos salarios cadastrados',
-            cor: const Color(0xFF1565C0),
-            bg: semantic?.infoBg ?? const Color(0xFFEAF2FF),
+            cor: semantic.infoFg,
+            bg: semantic.infoBg,
           ),
         ];
 

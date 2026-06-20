@@ -22,12 +22,17 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     required this.onDiminuir,
     required this.onAumentar,
     required this.onDividir,
+    required this.onAlterarPreco,
     required this.onRemover,
     this.emPromocao = false,
+    this.estoqueInsuficiente = false,
+    this.precoManual = false,
   });
 
   final String nomeProduto;
   final bool emPromocao;
+  final bool estoqueInsuficiente;
+  final bool precoManual;
   final String rotuloPreco;
   final String precoUnitarioFormatado;
   final String subtotalFormatado;
@@ -42,6 +47,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final VoidCallback onDiminuir;
   final VoidCallback onAumentar;
   final VoidCallback onDividir;
+  final VoidCallback onAlterarPreco;
   final VoidCallback onRemover;
 
   static const double alturaLinha = 52;
@@ -100,6 +106,28 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                               const PromocaoBadge(compacto: true),
                               const SizedBox(width: 4),
                             ],
+                            if (estoqueInsuficiente) ...[
+                              Tooltip(
+                                message: 'Quantidade no orcamento acima do estoque disponivel',
+                                child: Icon(
+                                  Icons.warning_amber_rounded,
+                                  size: 16,
+                                  color: scheme.error,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            if (precoManual) ...[
+                              Tooltip(
+                                message: 'Preco negociado manualmente',
+                                child: Icon(
+                                  Icons.price_change_outlined,
+                                  size: 16,
+                                  color: scheme.tertiary,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
                             Expanded(
                               child: Text(
                                 nomeProduto,
@@ -119,7 +147,11 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
+                            color: precoManual
+                                ? scheme.tertiary
+                                : scheme.onSurfaceVariant,
+                            fontWeight:
+                                precoManual ? FontWeight.w700 : FontWeight.normal,
                           ),
                         ),
                       ],
@@ -127,10 +159,21 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                   ),
                   Padding(
                     padding: const EdgeInsets.only(right: 4),
-                    child: Text(
-                      subtotalFormatado,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    child: InkWell(
+                      onTap: onAlterarPreco,
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 2,
+                          vertical: 2,
+                        ),
+                        child: Text(
+                          subtotalFormatado,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: precoManual ? scheme.tertiary : null,
+                          ),
+                        ),
                       ),
                     ),
                   ),

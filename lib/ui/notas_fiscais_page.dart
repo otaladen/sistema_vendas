@@ -96,7 +96,7 @@ class NotasFiscaisPage extends StatelessWidget {
         children: [
             HubNavButton(
               icon: Icons.receipt_long_outlined,
-              corDestaque: HubNavColors.menuNotasFiscais,
+              corDestaque: HubNavColors.menuNotasFiscais(context),
               titulo: 'Importar NF-e (XML)',
               subtitulo:
                   'Leia o XML da nota, confira os itens e lance a entrada no estoque.',
@@ -104,7 +104,7 @@ class NotasFiscaisPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.fact_check_outlined,
-              corDestaque: HubNavColors.menuNotasFiscais,
+              corDestaque: HubNavColors.menuNotasFiscais(context),
               titulo: 'Notas ja importadas',
               onTap: () {
                 Navigator.of(context).push<void>(
@@ -118,7 +118,7 @@ class NotasFiscaisPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.pending_actions_outlined,
-              corDestaque: HubNavColors.menuNotasFiscais,
+              corDestaque: HubNavColors.menuNotasFiscais(context),
               titulo: 'Pendencias fiscais',
               subtitulo:
                   'NFC-e aguardando SEFAZ (reconsulta manual) e atalho para NF-e 55.',
@@ -137,7 +137,7 @@ class NotasFiscaisPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.description_outlined,
-              corDestaque: HubNavColors.menuNotasFiscais,
+              corDestaque: HubNavColors.menuNotasFiscais(context),
               titulo: 'NF-e de saida (Modelo 55)',
               subtitulo:
                   'Faturamento para construtoras e cargas pesadas. Emissao Focus NFe.',
@@ -156,7 +156,7 @@ class NotasFiscaisPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.analytics_outlined,
-              corDestaque: HubNavColors.menuNotasFiscais,
+              corDestaque: HubNavColors.menuNotasFiscais(context),
               titulo: 'Relatorio fiscal do mes',
               subtitulo:
                   'Resumo de saidas (NF-e/NFC-e), entradas e totais antes do ZIP.',
@@ -172,7 +172,7 @@ class NotasFiscaisPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.folder_zip_outlined,
-              corDestaque: HubNavColors.menuNotasFiscais,
+              corDestaque: HubNavColors.menuNotasFiscais(context),
               titulo: 'Exportar Fechamento do Mes',
               subtitulo:
                   'ZIP com XMLs autorizados e planilha Excel para a contabilidade.',

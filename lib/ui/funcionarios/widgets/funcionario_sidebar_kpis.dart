@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../theme/app_modulo_cores.dart';
+
 /// KPIs compactos no topo da sidebar (notebooks 15").
 class FuncionarioSidebarKpis extends StatelessWidget {
   const FuncionarioSidebarKpis({
@@ -21,7 +23,6 @@ class FuncionarioSidebarKpis extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
       child: Row(
@@ -30,7 +31,7 @@ class FuncionarioSidebarKpis extends StatelessWidget {
             child: _MiniKpi(
               rotulo: 'Cad.',
               valor: '$totalCadastrados',
-              cor: const Color(0xFF455A64),
+              cor: Theme.of(context).colorScheme.secondary,
             ),
           ),
           const SizedBox(width: 6),
@@ -38,7 +39,7 @@ class FuncionarioSidebarKpis extends StatelessWidget {
             child: _MiniKpi(
               rotulo: 'Ativos',
               valor: '$totalAtivos',
-              cor: const Color(0xFF2E7D32),
+              cor: Theme.of(context).colorScheme.primary,
             ),
           ),
           const SizedBox(width: 6),
@@ -46,7 +47,10 @@ class FuncionarioSidebarKpis extends StatelessWidget {
             child: _MiniKpi(
               rotulo: 'Folha',
               valor: _moeda.format(folhaBaseAtivos),
-              cor: const Color(0xFF1565C0),
+              cor: AppModuloCores.harmonizar(
+                Theme.of(context).colorScheme,
+                210,
+              ),
             ),
           ),
         ],

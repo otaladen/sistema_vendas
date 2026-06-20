@@ -9,6 +9,7 @@ import '../domain/produto_embalagem.dart';
 import '../model/item_nota_temporario.dart';
 import '../model/produto.dart';
 import 'widgets/produto_busca_input.dart';
+import 'theme/app_semantic_helper.dart';
 
 /// Conferencia de itens da NF-e antes de gravar estoque e vinculos.
 class ConferenciaXmlScreen extends StatefulWidget {
@@ -65,17 +66,6 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
 
   static final NumberFormat _nfQtd = NumberFormat('#,##0.###', 'pt_BR');
   static final NumberFormat _nfMoeda = NumberFormat('#,##0.00', 'pt_BR');
-
-  static const Color _custoAumentoFg = Color(0xFFB91C1C);
-  static const Color _custoQuedaFg = Color(0xFF15803D);
-  static const Color _chipEanBg = Color(0xFFE8F5E9);
-  static const Color _chipEanFg = Color(0xFF1B5E20);
-  static const Color _chipFornBg = Color(0xFFE3F2FD);
-  static const Color _chipFornFg = Color(0xFF0D47A1);
-  static const Color _chipNovoBg = Color(0xFFFFF3E0);
-  static const Color _chipNovoFg = Color(0xFFE65100);
-  static const Color _chipManualBg = Color(0xFFE8EAF6);
-  static const Color _chipManualFg = Color(0xFF283593);
 
   /// Mesmos gaps usados em telas ERP (ex.: produtos_page).
   static const double _erpGap8 = 8;
@@ -261,6 +251,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     }
 
     final cs = Theme.of(context).colorScheme;
+    final semantic = context.semanticColors;
     final textoCustoCadastro = Text(
       'Custo cadastro (precoCusto): ${_formatarReais(atual)} / $uInt',
       style: Theme.of(context).textTheme.bodySmall,
@@ -300,15 +291,15 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
             Text(
               '⚠️',
               style: TextStyle(
-                color: _custoAumentoFg,
+                color: semantic.errorFg,
                 fontSize: 18,
                 height: 1,
               ),
             ),
             Text(
               '+$pctTxt% de aumento',
-              style: const TextStyle(
-                color: _custoAumentoFg,
+              style: TextStyle(
+                color: semantic.errorFg,
                 fontWeight: FontWeight.w800,
                 fontSize: 13,
               ),
@@ -323,8 +314,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
             : pctAbs.toStringAsFixed(1);
         indicadorVariacao = Text(
           '$pctTxt% menor que o cadastro',
-          style: const TextStyle(
-            color: _custoQuedaFg,
+          style: TextStyle(
+            color: semantic.successFg,
             fontWeight: FontWeight.w700,
             fontSize: 13,
           ),
@@ -564,40 +555,45 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         '$qtd $uIntLabel no estoque.';
   }
 
-  ({Color bg, Color fg, String label}) _coresStatusChip(_LinhaEdicao linha) {
+  ({Color bg, Color fg, String label}) _coresStatusChip(
+    BuildContext context,
+    _LinhaEdicao linha,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final semantic = context.semanticColors;
     final manual = linha.vinculoManualProdutoId != null;
     final tipo = linha.sugestao.tipoMatch;
     if (manual && tipo == ConferenciaNfeMatchTipo.produtoNovo) {
       return (
-        bg: _chipManualBg,
-        fg: _chipManualFg,
+        bg: scheme.secondaryContainer,
+        fg: scheme.onSecondaryContainer,
         label: 'Vinculo manual - produto cadastrado',
       );
     }
     switch (tipo) {
       case ConferenciaNfeMatchTipo.vinculadoPorEan:
         return (
-          bg: _chipEanBg,
-          fg: _chipEanFg,
+          bg: semantic.successBg,
+          fg: semantic.successFg,
           label: 'Produto vinculado por EAN',
         );
       case ConferenciaNfeMatchTipo.vinculoFornecedor:
         return (
-          bg: _chipFornBg,
-          fg: _chipFornFg,
+          bg: semantic.infoBg,
+          fg: semantic.infoFg,
           label: 'Vinculo por fornecedor encontrado',
         );
       case ConferenciaNfeMatchTipo.produtoNovo:
         return (
-          bg: _chipNovoBg,
-          fg: _chipNovoFg,
+          bg: semantic.warningBg,
+          fg: semantic.warningFg,
           label: 'Novo produto (sera cadastrado)',
         );
     }
   }
 
-  Widget _buildStatusChip(_LinhaEdicao linha) {
-    final s = _coresStatusChip(linha);
+  Widget _buildStatusChip(BuildContext context, _LinhaEdicao linha) {
+    final s = _coresStatusChip(context, linha);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -639,7 +635,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Flexible(child: _buildStatusChip(linha)),
+                Flexible(child: _buildStatusChip(context, linha)),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(

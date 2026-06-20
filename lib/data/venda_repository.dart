@@ -3,6 +3,8 @@ import 'dart:async';
 import '../domain/auditoria_catalogo.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/entrega_filtro_util.dart';
+import '../data/conferencia_carga_repository.dart';
+import '../domain/entregas/conferencia_carga_validacao.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/limite_credito_helper.dart';
@@ -16,6 +18,8 @@ import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/promocao_cadastro.dart';
 import '../domain/promocao_preco_service.dart';
+import '../domain/ultimas_vendas_finalizadas_ordenacao.dart';
+import '../domain/venda_finalizacao_caixa_helper.dart';
 import 'promocao_repository.dart';
 import '../services/auditoria_registrar.dart';
 import '../services/compras_preditivas_service.dart';
@@ -414,7 +418,6 @@ class VendaRepository {
     : _onAposEscrita = onAposEscrita {
     titulos = TituloReceberRepository(_db);
     recebimentos = RecebimentoFiadoRepository(_db, titulos);
-    _estoque.migrarEstoqueBaixadoCupomLegadoUmaVez();
   }
 
   final ObjectBox _db;
@@ -422,6 +425,8 @@ class VendaRepository {
   late final TituloReceberRepository titulos;
   late final RecebimentoFiadoRepository recebimentos;
   late final GerenciadorEstoqueService _estoque = GerenciadorEstoqueService(_db);
+  late final ConferenciaCargaRepository _conferenciaCarga =
+      ConferenciaCargaRepository(_db);
 
   ObjectBox get objectBox => _db;
 
@@ -453,22 +458,110 @@ class VendaRepository {
   }
 
   /// Ultimas vendas finalizadas ativas (consulta limitada no ObjectBox).
-  List<Venda> listarUltimasVendasFinalizadas({int limit = 20}) {
+  List<Venda> listarUltimasVendasFinalizadas({
+    int limit = 20,
+    UltimasVendasFinalizadasOrdenacao ordenacao =
+        UltimasVendasFinalizadasOrdenacao.padrao,
+  }) {
     if (limit <= 0) return const [];
+    switch (ordenacao) {
+      case UltimasVendasFinalizadasOrdenacao.porControle:
+        return _listarUltimasFinalizadasPorControle(limit);
+      case UltimasVendasFinalizadasOrdenacao.porFinalizacao:
+        return _listarUltimasFinalizadasPorFinalizacaoCaixa(limit);
+    }
+  }
+
+  List<Venda> _listarUltimasFinalizadasPorControle(int limit) {
     final query = _db.vendaBox
         .query(
           Venda_.status
               .equals('finalizada')
               .and(Venda_.cancelada.equals(false)),
         )
-        .order(Venda_.data, flags: Order.descending)
+        .order(Venda_.numeroOrcamento, flags: Order.descending)
         .build();
     try {
-      query.limit = limit;
-      return query.find();
+      query.limit = (limit * 3).clamp(limit, 120);
+      final lista = query.find();
+      lista.sort((a, b) {
+        final na = a.numeroOrcamento > 0 ? a.numeroOrcamento : a.id;
+        final nb = b.numeroOrcamento > 0 ? b.numeroOrcamento : b.id;
+        final cmp = nb.compareTo(na);
+        if (cmp != 0) return cmp;
+        return b.id.compareTo(a.id);
+      });
+      return lista.take(limit).toList();
     } finally {
       query.close();
     }
+  }
+
+  List<Venda> _listarUltimasFinalizadasPorFinalizacaoCaixa(int limit) {
+    final base = Venda_.status
+        .equals('finalizada')
+        .and(Venda_.cancelada.equals(false));
+    final pool = <int, Venda>{};
+
+    void absorver(Query<Venda> query) {
+      try {
+        for (final v in query.find()) {
+          pool.putIfAbsent(v.id, () => v);
+        }
+      } finally {
+        query.close();
+      }
+    }
+
+    absorver(
+      _db.vendaBox
+          .query(base)
+          .order(Venda_.finalizadaEm, flags: Order.descending)
+          .build()
+        ..limit = (limit * 8).clamp(limit, 240),
+    );
+    absorver(
+      _db.vendaBox
+          .query(base)
+          .order(Venda_.cupomNaoFiscalEmitidoEm, flags: Order.descending)
+          .build()
+        ..limit = (limit * 4).clamp(limit, 120),
+    );
+
+    final lista = pool.values.toList()
+      ..sort((a, b) {
+        final cmp = VendaFinalizacaoCaixaHelper.momentoFinalizacao(b)
+            .compareTo(VendaFinalizacaoCaixaHelper.momentoFinalizacao(a));
+        if (cmp != 0) return cmp;
+        return b.id.compareTo(a.id);
+      });
+    return lista.take(limit).toList();
+  }
+
+  /// Corrige registros em que [Venda.finalizadaEm] foi copiado da data do orcamento.
+  void corrigirFinalizadaEmCopiadaDaDataOrcamento() {
+    _db.store.runInTransaction(TxMode.write, () {
+      final query = _db.vendaBox
+          .query(
+            Venda_.status
+                .equals('finalizada')
+                .and(Venda_.cancelada.equals(false)),
+          )
+          .build();
+      try {
+        for (final venda in query.find()) {
+          if (!VendaFinalizacaoCaixaHelper.ehFinalizadaEmCopiaDaDataOrcamento(
+            venda,
+          )) {
+            continue;
+          }
+          venda.finalizadaEm = null;
+          _db.vendaBox.put(venda);
+        }
+      } finally {
+        query.close();
+      }
+    });
   }
 
   /// Vendas finalizadas a partir de [desde] (painel NF-e / pendencias).
@@ -499,7 +592,8 @@ class VendaRepository {
   DateTime? dataUltimaVendaFinalizada() {
     final ultimas = listarUltimasVendasFinalizadas(limit: 1);
     if (ultimas.isEmpty) return null;
-    return ultimas.first.data;
+    final v = ultimas.first;
+    return VendaFinalizacaoCaixaHelper.momentoFinalizacao(v);
   }
 
   /// Segunda via: busca por numero do orcamento ou id interno da venda.
@@ -895,10 +989,69 @@ class VendaRepository {
 
   Venda? obterPorId(int id) => _db.vendaBox.get(id);
 
-  List<Venda> listarOrcamentosPendentes() {
-    return listarTodas()
-        .where((venda) => venda.status == 'orcamento' && !venda.cancelada)
-        .toList();
+  /// Orcamentos salvos no PDV ainda nao finalizados no caixa (consulta indexada).
+  List<Venda> listarOrcamentosPendentes({
+    DateTime? desde,
+    DateTime? ate,
+    int? limit,
+  }) {
+    var cond = Venda_.status
+        .equals('orcamento')
+        .and(Venda_.cancelada.equals(false));
+    if (desde != null) {
+      final inicioUtc = DateTime(desde.year, desde.month, desde.day).toUtc();
+      cond = cond.and(Venda_.data.greaterOrEqualDate(inicioUtc));
+    }
+    if (ate != null) {
+      final fimUtc = DateTime(
+        ate.year,
+        ate.month,
+        ate.day,
+        23,
+        59,
+        59,
+        999,
+      ).toUtc();
+      cond = cond.and(Venda_.data.lessOrEqualDate(fimUtc));
+    }
+    final query = _db.vendaBox
+        .query(cond)
+        .order(Venda_.data, flags: Order.descending)
+        .build();
+    try {
+      if (limit != null && limit > 0) {
+        query.limit = limit;
+      }
+      return query.find();
+    } finally {
+      query.close();
+    }
+  }
+
+  /// Quantidade de orcamentos pendentes com data ate o fim do dia [ate] (inclusive).
+  int contarOrcamentosPendentesAte(DateTime ate) {
+    final fimUtc = DateTime(
+      ate.year,
+      ate.month,
+      ate.day,
+      23,
+      59,
+      59,
+      999,
+    ).toUtc();
+    final query = _db.vendaBox
+        .query(
+          Venda_.status
+              .equals('orcamento')
+              .and(Venda_.cancelada.equals(false))
+              .and(Venda_.data.lessOrEqualDate(fimUtc)),
+        )
+        .build();
+    try {
+      return query.count();
+    } finally {
+      query.close();
+    }
   }
 
   /// Cancela orcamentos pendentes com data de criacao ate o fim do dia [ate] (inclusive).
@@ -907,10 +1060,7 @@ class VendaRepository {
     String motivo = '',
     String canceladaPor = '',
   }) {
-    final fimDia = DateTime(ate.year, ate.month, ate.day, 23, 59, 59, 999);
-    final alvo = listarOrcamentosPendentes()
-        .where((v) => !v.data.toLocal().isAfter(fimDia))
-        .toList();
+    final alvo = listarOrcamentosPendentes(ate: ate);
     final motivoPadrao = motivo.trim().isEmpty
         ? 'Manutencao: limpeza de orcamentos em aberto'
         : motivo.trim();
@@ -1275,11 +1425,6 @@ class VendaRepository {
           throw StateError('Quantidade invalida para ${produto.nome}.');
         }
 
-        if (!permitirVendaSemEstoque &&
-            produto.estoqueLivreParaVenda < input.quantidade) {
-          throw StateError('Estoque insuficiente para ${produto.nome}.');
-        }
-
         _estoque.baixarEstoqueVendaDiretaLegada(
           produto: produto,
           quantidade: input.quantidade,
@@ -1416,10 +1561,6 @@ class VendaRepository {
       for (final item in itens) {
         item.venda.target = venda;
         _db.itemVendaBox.put(item);
-        _estoque.reservarEstoqueItemOrcamento(
-          item: item,
-          permitirVendaSemEstoque: permitirVendaSemEstoque,
-        );
       }
 
       return vendaId;
@@ -1869,12 +2010,6 @@ class VendaRepository {
         ignorarVendaId: vendaId,
       );
       _db.vendaBox.put(venda);
-      for (final item in itensNovos) {
-        _estoque.reservarEstoqueItemOrcamento(
-          item: item,
-          permitirVendaSemEstoque: permitirVendaSemEstoque,
-        );
-      }
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
     if (descontoRegistrado > 0.004) {
@@ -1993,11 +2128,16 @@ class VendaRepository {
       }
 
       venda.status = 'finalizada';
+      venda.finalizadaEm = DateTime.now().toUtc();
       venda.cancelada = false;
       venda.motivoCancelamento = '';
       venda.canceladaPor = '';
       venda.canceladaEm = null;
       _marcarUltimaVendaNosProdutos(_db, venda);
+      _estoque.registrarBaixaEstoqueCupomNaoFiscal(
+        venda: venda,
+        permitirVendaSemEstoque: permitirVendaSemEstoque,
+      );
       _db.vendaBox.put(venda);
       titulos.gerarTitulosDaVenda(venda);
 
@@ -2009,14 +2149,25 @@ class VendaRepository {
     _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
-  /// Cupom interno (baixa de retirada imediata) apos NFC-e/NF-e autorizada.
+  /// Reaplica baixa de estoque para venda ja documentada (idempotente).
   ///
-  /// Mesma regra do cupom manual: carreto e retirada futura permanecem reservados.
-  void registrarCupomInternoPosAutorizacaoFiscal(
+  /// Usado em recuperacao manual quando a autorizacao fiscal e a baixa divergiram.
+  void reprocessarBaixaEstoqueDocumentoVenda(
     int vendaId, {
     bool permitirVendaSemEstoque = true,
   }) {
     registrarBaixaEstoqueCupomNaoFiscal(
+      vendaId,
+      permitirVendaSemEstoque: permitirVendaSemEstoque,
+    );
+  }
+
+  /// Alias legado — preferir [reprocessarBaixaEstoqueDocumentoVenda].
+  void registrarCupomInternoPosAutorizacaoFiscal(
+    int vendaId, {
+    bool permitirVendaSemEstoque = true,
+  }) {
+    reprocessarBaixaEstoqueDocumentoVenda(
       vendaId,
       permitirVendaSemEstoque: permitirVendaSemEstoque,
     );
@@ -2090,22 +2241,83 @@ class VendaRepository {
       if (venda == null) {
         throw StateError('Venda $vendaId nao encontrada.');
       }
-      venda.nfeReferenciaFocus = referenciaFocus.trim();
-      venda.nfeChaveAcesso = chaveAcesso.trim();
-      venda.nfeNumero = numero.trim();
-      venda.nfeSerie = serie.trim();
-      venda.nfeProtocolo = protocolo.trim();
-      venda.nfeUrlDanfe = urlDanfe.trim();
-      venda.nfeUrlXml = urlXml.trim();
-      venda.nfeStatusFocus = statusFocus.trim().isEmpty
-          ? venda.nfeStatusFocus
-          : statusFocus.trim();
-      venda.nfeUrlXmlCancelamento = urlXmlCancelamento.trim();
-      if (emitidaEm != null) {
-        venda.nfeEmitidaEm = emitidaEm.toUtc();
-      } else if (venda.nfeEmitidaEm == null && chaveAcesso.isNotEmpty) {
-        venda.nfeEmitidaEm = DateTime.now().toUtc();
+      _preencherVendaNfe55Situacao(
+        venda,
+        referenciaFocus: referenciaFocus,
+        chaveAcesso: chaveAcesso,
+        numero: numero,
+        serie: serie,
+        protocolo: protocolo,
+        urlDanfe: urlDanfe,
+        urlXml: urlXml,
+        statusFocus: statusFocus,
+        urlXmlCancelamento: urlXmlCancelamento,
+        emitidaEm: emitidaEm,
+      );
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+    final chave = chaveAcesso.trim();
+    final xml = urlXml.trim();
+    if (chave.length >= 40 && xml.isNotEmpty) {
+      unawaited(
+        NfeXmlLocalService.arquivarOuEnfileirar(
+          storeDirectoryPath: _db.storeDirectoryPath,
+          chaveAcesso: chave,
+          urlXml: xml,
+        ),
+      );
+    }
+    final xmlCancel = urlXmlCancelamento.trim();
+    if (chave.length >= 40 && xmlCancel.isNotEmpty) {
+      unawaited(
+        NfeXmlLocalService.arquivarOuEnfileirar(
+          storeDirectoryPath: _db.storeDirectoryPath,
+          chaveAcesso: chave,
+          urlXml: xmlCancel,
+          cancelada: true,
+        ),
+      );
+    }
+  }
+
+  /// NF-e 55 autorizada; baixa idempotente (retirada imediata ja na finalizacao).
+  void registrarNfe55SituacaoComBaixaEstoque({
+    required int vendaId,
+    required String referenciaFocus,
+    String chaveAcesso = '',
+    String numero = '',
+    String serie = '',
+    String protocolo = '',
+    String urlDanfe = '',
+    String urlXml = '',
+    String statusFocus = '',
+    String urlXmlCancelamento = '',
+    DateTime? emitidaEm,
+    bool permitirVendaSemEstoque = true,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
       }
+      _preencherVendaNfe55Situacao(
+        venda,
+        referenciaFocus: referenciaFocus,
+        chaveAcesso: chaveAcesso,
+        numero: numero,
+        serie: serie,
+        protocolo: protocolo,
+        urlDanfe: urlDanfe,
+        urlXml: urlXml,
+        statusFocus: statusFocus,
+        urlXmlCancelamento: urlXmlCancelamento,
+        emitidaEm: emitidaEm,
+      );
+      _aplicarBaixaEstoqueDocumentoVendaNaTransacao(
+        venda,
+        permitirVendaSemEstoque: permitirVendaSemEstoque,
+      );
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
@@ -2192,12 +2404,13 @@ class VendaRepository {
       _estoque.liberarReservaEstoqueItemOrcamento(item);
       item.quantidade = novaQuantidade;
       _db.itemVendaBox.put(item);
-      _estoque.reservarEstoqueItemOrcamento(
-        item: item,
-        permitirVendaSemEstoque: permitirVendaSemEstoque,
-      );
       final totalAntes = venda.total;
-      _recalcularTotaisVenda(venda);
+      final brutoAntes = _calcularBrutoOrcamento(venda.id, venda.valorFrete);
+      _recalcularTotaisVenda(
+        venda,
+        totalAntes: totalAntes,
+        brutoAntes: brutoAntes,
+      );
       _reescalarPagamentosMistoAposMudancaTotal(venda, totalAntes);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
@@ -2216,14 +2429,19 @@ class VendaRepository {
       if (item == null) {
         throw StateError('Item $itemId nao encontrado no orcamento.');
       }
+      final totalAntes = venda.total;
+      final brutoAntes = _calcularBrutoOrcamento(venda.id, venda.valorFrete);
       _estoque.liberarReservaEstoqueItemOrcamento(item);
       venda.itens.removeWhere((i) => i.id == itemId);
       _db.itemVendaBox.remove(itemId);
       if (venda.itens.isEmpty) {
         throw StateError('O orcamento precisa manter ao menos 1 item.');
       }
-      final totalAntes = venda.total;
-      _recalcularTotaisVenda(venda);
+      _recalcularTotaisVenda(
+        venda,
+        totalAntes: totalAntes,
+        brutoAntes: brutoAntes,
+      );
       _reescalarPagamentosMistoAposMudancaTotal(venda, totalAntes);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
@@ -2259,6 +2477,7 @@ class VendaRepository {
       final tipoNorm =
           EntregaVendaHelper.normalizarTipoItem(input.tipoEntregaItem);
       final totalAntes = venda.total;
+      final brutoAntes = _calcularBrutoOrcamento(venda.id, venda.valorFrete);
 
       ItemVenda? existente;
       for (final item in venda.itens) {
@@ -2275,22 +2494,18 @@ class VendaRepository {
         _estoque.liberarReservaEstoqueItemOrcamento(existente);
         existente.quantidade += input.quantidade;
         _db.itemVendaBox.put(existente);
-        _estoque.reservarEstoqueItemOrcamento(
-          item: existente,
-          permitirVendaSemEstoque: permitirVendaSemEstoque,
-        );
       } else {
         final item = _criarItemVendaFromInput(input, produto);
         item.produto.target = produto;
         item.venda.target = venda;
         _db.itemVendaBox.put(item);
-        _estoque.reservarEstoqueItemOrcamento(
-          item: item,
-          permitirVendaSemEstoque: permitirVendaSemEstoque,
-        );
       }
 
-      _recalcularTotaisVenda(venda);
+      _recalcularTotaisVenda(
+        venda,
+        totalAntes: totalAntes,
+        brutoAntes: brutoAntes,
+      );
       _reescalarPagamentosMistoAposMudancaTotal(venda, totalAntes);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
@@ -2335,26 +2550,143 @@ class VendaRepository {
       if (venda == null) {
         throw StateError('Venda $vendaId nao encontrada.');
       }
-      venda.nfceChaveAcesso = chaveAcesso.trim();
-      venda.nfceNumero = numero.trim();
-      venda.nfceSerie = serie.trim();
-      venda.nfceProtocolo = protocolo.trim();
-      venda.nfceUrlDanfe = FocusDocumentoFiscalUrl.normalizar(
-        urlDanfe,
-        apiBaseUrl: FiscalConfig.apiBaseUrl,
+      _preencherVendaNfceEmitida(
+        venda,
+        chaveAcesso: chaveAcesso,
+        numero: numero,
+        serie: serie,
+        protocolo: protocolo,
+        urlDanfe: urlDanfe,
+        urlXml: urlXml,
+        statusFocus: statusFocus,
+        urlXmlCancelamento: urlXmlCancelamento,
       );
-      venda.nfceUrlXml = FocusDocumentoFiscalUrl.normalizar(
-        urlXml,
-        apiBaseUrl: FiscalConfig.apiBaseUrl,
-      );
-      venda.nfceStatusFocus = statusFocus.trim().isEmpty
-          ? 'autorizado'
-          : statusFocus.trim();
-      venda.nfceUrlXmlCancelamento = urlXmlCancelamento.trim();
-      venda.nfceEmitidaEm = DateTime.now().toUtc();
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
+    _arquivarXmlNfceEmitida(
+      chaveAcesso: chaveAcesso,
+      urlXml: urlXml,
+    );
+  }
+
+  /// NFC-e autorizada; baixa de estoque e idempotente (ja ocorre na finalizacao).
+  void registrarNfceEmitidaComBaixaEstoque({
+    required int vendaId,
+    required String chaveAcesso,
+    String numero = '',
+    String serie = '',
+    String protocolo = '',
+    String urlDanfe = '',
+    String urlXml = '',
+    String statusFocus = 'autorizado',
+    String urlXmlCancelamento = '',
+    bool permitirVendaSemEstoque = true,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      _preencherVendaNfceEmitida(
+        venda,
+        chaveAcesso: chaveAcesso,
+        numero: numero,
+        serie: serie,
+        protocolo: protocolo,
+        urlDanfe: urlDanfe,
+        urlXml: urlXml,
+        statusFocus: statusFocus,
+        urlXmlCancelamento: urlXmlCancelamento,
+      );
+      _aplicarBaixaEstoqueDocumentoVendaNaTransacao(
+        venda,
+        permitirVendaSemEstoque: permitirVendaSemEstoque,
+      );
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+    _arquivarXmlNfceEmitida(
+      chaveAcesso: chaveAcesso,
+      urlXml: urlXml,
+    );
+  }
+
+  void _preencherVendaNfceEmitida(
+    Venda venda, {
+    required String chaveAcesso,
+    String numero = '',
+    String serie = '',
+    String protocolo = '',
+    String urlDanfe = '',
+    String urlXml = '',
+    String statusFocus = 'autorizado',
+    String urlXmlCancelamento = '',
+  }) {
+    venda.nfceChaveAcesso = chaveAcesso.trim();
+    venda.nfceNumero = numero.trim();
+    venda.nfceSerie = serie.trim();
+    venda.nfceProtocolo = protocolo.trim();
+    venda.nfceUrlDanfe = FocusDocumentoFiscalUrl.normalizar(
+      urlDanfe,
+      apiBaseUrl: FiscalConfig.apiBaseUrl,
+    );
+    venda.nfceUrlXml = FocusDocumentoFiscalUrl.normalizar(
+      urlXml,
+      apiBaseUrl: FiscalConfig.apiBaseUrl,
+    );
+    venda.nfceStatusFocus = statusFocus.trim().isEmpty
+        ? 'autorizado'
+        : statusFocus.trim();
+    venda.nfceUrlXmlCancelamento = urlXmlCancelamento.trim();
+    venda.nfceEmitidaEm = DateTime.now().toUtc();
+  }
+
+  void _preencherVendaNfe55Situacao(
+    Venda venda, {
+    required String referenciaFocus,
+    String chaveAcesso = '',
+    String numero = '',
+    String serie = '',
+    String protocolo = '',
+    String urlDanfe = '',
+    String urlXml = '',
+    String statusFocus = '',
+    String urlXmlCancelamento = '',
+    DateTime? emitidaEm,
+  }) {
+    venda.nfeReferenciaFocus = referenciaFocus.trim();
+    venda.nfeChaveAcesso = chaveAcesso.trim();
+    venda.nfeNumero = numero.trim();
+    venda.nfeSerie = serie.trim();
+    venda.nfeProtocolo = protocolo.trim();
+    venda.nfeUrlDanfe = urlDanfe.trim();
+    venda.nfeUrlXml = urlXml.trim();
+    venda.nfeStatusFocus = statusFocus.trim().isEmpty
+        ? venda.nfeStatusFocus
+        : statusFocus.trim();
+    venda.nfeUrlXmlCancelamento = urlXmlCancelamento.trim();
+    if (emitidaEm != null) {
+      venda.nfeEmitidaEm = emitidaEm.toUtc();
+    } else if (venda.nfeEmitidaEm == null && chaveAcesso.isNotEmpty) {
+      venda.nfeEmitidaEm = DateTime.now().toUtc();
+    }
+  }
+
+  void _aplicarBaixaEstoqueDocumentoVendaNaTransacao(
+    Venda venda, {
+    required bool permitirVendaSemEstoque,
+  }) {
+    _estoque.registrarBaixaEstoqueCupomNaoFiscal(
+      venda: venda,
+      permitirVendaSemEstoque: permitirVendaSemEstoque,
+    );
+  }
+
+  void _arquivarXmlNfceEmitida({
+    required String chaveAcesso,
+    required String urlXml,
+  }) {
     final chave = chaveAcesso.trim();
     final xml = urlXml.trim();
     if (chave.length >= 40 && xml.isNotEmpty) {
@@ -3043,6 +3375,11 @@ class VendaRepository {
           venda.status == 'finalizada' &&
           !venda.cancelada) {
         if (!saiuAntes && saiuDepois) {
+          final vendasEscopo = _vendasEscopoConferenciaCarreto(venda);
+          ConferenciaCargaValidacao.validarAntesMarcarSaiu(
+            repository: _conferenciaCarga,
+            vendasEscopo: vendasEscopo,
+          );
           _estoque.validarEstoqueAntesDespachoCarreto(venda);
           _estoque.baixarEstoqueCarretoAoMarcarSaida(venda);
         } else if (saiuAntes && !saiuDepois) {
@@ -3056,6 +3393,25 @@ class VendaRepository {
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  List<Venda> _vendasEscopoConferenciaCarreto(Venda venda) {
+    final grupoId = venda.grupoEntregaFreteId;
+    if (grupoId <= 0) return [venda];
+    final query = _db.vendaBox
+        .query(Venda_.grupoEntregaFreteId.equals(grupoId))
+        .build();
+    try {
+      final grupo = query.find().where(
+        (v) =>
+            v.status == 'finalizada' &&
+            !v.cancelada &&
+            EntregaVendaHelper.vendaTemItensCarreto(v),
+      ).toList();
+      return grupo.isEmpty ? [venda] : grupo;
+    } finally {
+      query.close();
+    }
   }
 
   void atualizarMotoristaEntrega(int vendaId, String motorista) {
@@ -3338,17 +3694,54 @@ class VendaRepository {
     return maior + 1;
   }
 
-  void _recalcularTotaisVenda(Venda venda) {
-    double total = 0;
-    double custoTotal = 0;
-    for (final item in venda.itens) {
-      total += item.subtotal;
-      custoTotal += item.subtotalCusto;
+  double _calcularBrutoOrcamento(int vendaId, double valorFrete) {
+    final query =
+        _db.itemVendaBox.query(ItemVenda_.venda.equals(vendaId)).build();
+    try {
+      var subtotal = 0.0;
+      for (final item in query.find()) {
+        subtotal += item.subtotal;
+      }
+      return subtotal + (valorFrete > 0 ? valorFrete : 0);
+    } finally {
+      query.close();
     }
-    venda.total = total + (venda.valorFrete > 0 ? venda.valorFrete : 0);
-    venda.custoTotal = custoTotal;
-    venda.lucroTotal = venda.total - custoTotal;
-    _db.vendaBox.put(venda);
+  }
+
+  /// Recalcula [Venda.total] a partir dos itens persistidos.
+  /// Preserva desconto implicito (ex.: PDV) quando [totalAntes] e [brutoAntes]
+  /// sao informados antes de alterar linhas do orcamento.
+  void _recalcularTotaisVenda(
+    Venda venda, {
+    double? totalAntes,
+    double? brutoAntes,
+  }) {
+    final query =
+        _db.itemVendaBox.query(ItemVenda_.venda.equals(venda.id)).build();
+    try {
+      final itens = query.find();
+      var subtotal = 0.0;
+      var custoTotal = 0.0;
+      for (final item in itens) {
+        subtotal += item.subtotal;
+        custoTotal += item.subtotalCusto;
+      }
+      final brutoDepois =
+          subtotal + (venda.valorFrete > 0 ? venda.valorFrete : 0);
+      final preservarDesconto =
+          totalAntes != null && brutoAntes != null && brutoAntes > 0.001;
+      final descontoImplicito = preservarDesconto
+          ? (brutoAntes - totalAntes).clamp(0.0, double.infinity)
+          : 0.0;
+      venda.total = preservarDesconto
+          ? (brutoDepois - descontoImplicito).clamp(0.0, double.infinity)
+          : brutoDepois;
+      venda.custoTotal = custoTotal;
+      venda.lucroTotal = venda.total - custoTotal;
+      _db.vendaBox.put(venda);
+    } finally {
+      query.close();
+    }
   }
 
   /// Mantem soma do misto alinhada ao novo [Venda.total] apos ajuste de itens/desconto.

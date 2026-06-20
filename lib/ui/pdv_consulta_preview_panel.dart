@@ -113,6 +113,10 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
     this.tituloPainel = 'Selecionado',
     this.promocaoAtiva,
     this.campanhaPromo,
+    this.quantidadeNoOrcamento = 0,
+    this.precoUnitarioLinha,
+    this.precoUnitarioManual = false,
+    this.onAlterarPreco,
   });
 
   final Produto produto;
@@ -127,10 +131,15 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
   final String tituloPainel;
   final PromocaoPrecoResult? promocaoAtiva;
   final PromocaoInfoVigente? campanhaPromo;
+  final int quantidadeNoOrcamento;
+  final double? precoUnitarioLinha;
+  final bool precoUnitarioManual;
+  final VoidCallback? onAlterarPreco;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final alturaFoto = compacto ? 140.0 : 200.0;
 
     return Material(
@@ -223,6 +232,56 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
                 formatarMoeda: formatarMoeda,
                 compacto: compacto,
               ),
+              if (precoUnitarioLinha != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: precoUnitarioManual
+                        ? scheme.tertiaryContainer.withValues(alpha: 0.45)
+                        : scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: precoUnitarioManual
+                          ? scheme.tertiary
+                          : scheme.outlineVariant.withValues(alpha: 0.45),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        precoUnitarioManual
+                            ? 'Preco negociado nesta venda'
+                            : 'Preco na linha do carrinho',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        formatarMoeda(precoUnitarioLinha!),
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: precoUnitarioManual
+                              ? scheme.tertiary
+                              : scheme.onSurface,
+                        ),
+                      ),
+                      if (onAlterarPreco != null) ...[
+                        const SizedBox(height: 6),
+                        TextButton.icon(
+                          onPressed: onAlterarPreco,
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          label: const Text('Alterar preco (Ctrl+P)'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
               if (produto.rotuloConversaoEmbalagem.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(
@@ -243,7 +302,11 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 8),
-              PdvEstoqueResumoPanel(produto: produto, compacto: compacto),
+              PdvEstoqueResumoPanel(
+                produto: produto,
+                compacto: compacto,
+                quantidadeNoOrcamento: quantidadeNoOrcamento,
+              ),
               if (mostrarDescricaoInline) ...[
                 const SizedBox(height: 10),
                 ProdutoDescricaoTecnicaInline(
@@ -286,10 +349,10 @@ class _PainelPromocaoVendedor extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: PromocaoBadge.corFundo.withValues(alpha: 0.08),
+        color: PromocaoBadge.corDe(context).withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: PromocaoBadge.corFundo.withValues(alpha: 0.45),
+          color: PromocaoBadge.corDe(context).withValues(alpha: 0.45),
         ),
       ),
       child: Column(
@@ -303,7 +366,7 @@ class _PainelPromocaoVendedor extends StatelessWidget {
                 child: Text(
                   campanha.nome.isNotEmpty ? campanha.nome : 'Promocao',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: PromocaoBadge.corFundo,
+                        color: PromocaoBadge.corDe(context),
                         fontWeight: FontWeight.w800,
                       ),
                 ),
@@ -328,7 +391,7 @@ class _PainelPromocaoVendedor extends StatelessWidget {
             campanha.textoPrecoParaVendedor,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: PromocaoBadge.corFundo,
+                  color: PromocaoBadge.corDe(context),
                   height: 1.35,
                 ),
           ),

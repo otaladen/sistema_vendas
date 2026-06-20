@@ -21,7 +21,11 @@ Future<void> showNfeRegistroDetalheDialog(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _linha('Emitida em', fmt.format(registro.emitidaEm.toLocal())),
-              _linha('Venda / orcamento', '${registro.vendaId} / ${registro.numeroOrcamento}'),
+              _linha(
+                'Controle interno',
+                '${registro.numeroOrcamento}',
+              ),
+              _linha('ID venda', '${registro.vendaId}'),
               _linha('Cliente', registro.clienteNome),
               _linha('Referencia Focus', registro.referenciaFocus),
               if (registro.numero.isNotEmpty)

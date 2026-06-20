@@ -27,6 +27,7 @@ import '../domain/fiscal/nfe_cobranca_helper.dart';
 import '../domain/fiscal/produto_fiscal_catalog.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/pagamento_orcamento.dart';
+import '../domain/venda_documento_rotulo_helper.dart';
 import '../model/cliente.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
@@ -2153,16 +2154,8 @@ class FocusNfeService {
     return 'venda_tmp_${DateTime.now().millisecondsSinceEpoch}_$sufixoDocumento';
   }
 
-  static String _observacaoVenda(Venda venda) {
-    final partes = <String>[];
-    if (venda.numeroOrcamento > 0) {
-      partes.add('Orcamento ${venda.numeroOrcamento}');
-    }
-    if (venda.enderecoEntrega.trim().isNotEmpty) {
-      partes.add('Entrega: ${venda.enderecoEntrega.trim()}');
-    }
-    return partes.join(' | ');
-  }
+  static String _observacaoVenda(Venda venda) =>
+      VendaDocumentoRotuloHelper.observacaoFiscalNota(venda);
 
   static double _somaValorBrutoItens(List<Map<String, dynamic>> itens) {
     var total = 0.0;

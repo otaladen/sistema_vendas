@@ -26,7 +26,6 @@ class DashboardAlerta {
     required this.tipo,
     required this.titulo,
     required this.detalhe,
-    required this.cor,
     required this.icone,
     this.destino,
     this.filtroContasReceber,
@@ -37,7 +36,6 @@ class DashboardAlerta {
   final DashboardAlertaTipo tipo;
   final String titulo;
   final String detalhe;
-  final Color cor;
   final IconData icone;
   final MainMenuDestino? destino;
   final FiltroContasReceber? filtroContasReceber;
@@ -78,7 +76,6 @@ class DashboardAlertasService {
             titulo: 'Fiado vencido',
             detalhe:
                 '${vencidos.length} titulo(s) · R\$ ${_fmt(saldoVencido)}',
-            cor: const Color(0xFFC62828),
             icone: Icons.warning_amber_rounded,
             destino: MainMenuDestino.financeiro,
             filtroContasReceber: FiltroContasReceber.vencidos,
@@ -94,7 +91,6 @@ class DashboardAlertasService {
             titulo: 'Fiado vence hoje',
             detalhe:
                 '${venceHoje.length} titulo(s) · R\$ ${_fmt(saldoHoje)}',
-            cor: const Color(0xFFE65100),
             icone: Icons.schedule_outlined,
             destino: MainMenuDestino.financeiro,
             filtroContasReceber: FiltroContasReceber.venceHoje,
@@ -110,7 +106,6 @@ class DashboardAlertasService {
             tipo: DashboardAlertaTipo.contaPagarVencida,
             titulo: 'Contas a pagar vencidas',
             detalhe: '$cpAtrasadas parcela(s) em atraso',
-            cor: const Color(0xFFAD1457),
             icone: Icons.account_balance_outlined,
             destino: MainMenuDestino.financeiro,
             filtroContasPagar: FiltroContasPagar.atrasados,
@@ -130,7 +125,6 @@ class DashboardAlertasService {
             tipo: DashboardAlertaTipo.entregaAtrasada,
             titulo: 'Entregas atrasadas',
             detalhe: '$atrasadas entrega(s) com data passada',
-            cor: const Color(0xFF0277BD),
             icone: Icons.local_shipping_outlined,
             destino: MainMenuDestino.entregas,
             prioridade: 15,
@@ -150,7 +144,6 @@ class DashboardAlertasService {
             tipo: DashboardAlertaTipo.estoqueCritico,
             titulo: 'Estoque abaixo do minimo',
             detalhe: '$critico produto(s) precisam reposicao',
-            cor: const Color(0xFFE65100),
             icone: Icons.inventory_2_outlined,
             destino: MainMenuDestino.estoque,
             prioridade: 30,
@@ -173,7 +166,6 @@ class DashboardAlertasService {
           tipo: DashboardAlertaTipo.orcamentoAntigo,
           titulo: 'Orcamentos antigos',
           detalhe: '$orcsAntigos orcamento(s) com 7+ dias',
-          cor: const Color(0xFF6A1B9A),
           icone: Icons.description_outlined,
           destino: MainMenuDestino.vendas,
           prioridade: 40,

@@ -48,7 +48,7 @@ class CupomLayoutPreviewPdf {
     final dataHora = DateFormat('dd/MM/yyyy HH:mm:ss').format(agora);
     final qtdLegado = NumberFormat('#,##0.000', 'pt_BR');
     final modelo = empresaModeloPdfDeString(empresa.modeloPdf);
-    final doc = pw.Document();
+    final doc = CupomPdfLayout.criarDocumento(layout);
 
     final pageFormat = CupomPdfLayout.formatoPagina(
       modelo,
@@ -199,9 +199,11 @@ class CupomLayoutPreviewPdf {
                 subtitulo: orcamento ? null : 'SEGUNDA VIA',
               ),
               CupomPdfLayout.tituloSecao(
-                orcamento ? 'ORCAMENTO 1042' : 'VENDA 1042',
+                orcamento ? 'ORCAMENTO 1042' : 'CONTROLE 1042',
                 layout,
               ),
+              if (!orcamento)
+                CupomPdfLayout.textoCorpo('NFC-e 4521', layout),
               CupomPdfLayout.textoCorpo('Data: $dataHora', layout),
               if (!orcamento)
                 CupomPdfLayout.textoCorpo(

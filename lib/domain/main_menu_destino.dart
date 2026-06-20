@@ -125,32 +125,6 @@ enum MainMenuDestino {
     }
   }
 
-  Color get cor {
-    switch (this) {
-      case MainMenuDestino.vendas:
-      case MainMenuDestino.pdv:
-        return const Color(0xFF2E7D32);
-      case MainMenuDestino.caixa:
-        return const Color(0xFF00897B);
-      case MainMenuDestino.estoque:
-        return const Color(0xFFE65100);
-      case MainMenuDestino.notasFiscais:
-        return const Color(0xFF00838F);
-      case MainMenuDestino.entregas:
-        return const Color(0xFF0277BD);
-      case MainMenuDestino.financeiro:
-        return const Color(0xFF455A64);
-      case MainMenuDestino.cadastros:
-        return const Color(0xFF1565C0);
-      case MainMenuDestino.configuracoes:
-        return const Color(0xFF6A1B9A);
-      case MainMenuDestino.motorista:
-        return const Color(0xFF455A64);
-      case MainMenuDestino.inicio:
-        return const Color(0xFF00695C);
-    }
-  }
-
   bool podeAcessar(UsuarioSistema u) {
     switch (this) {
       case MainMenuDestino.inicio:

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../domain/venda_documento_rotulo_helper.dart';
+
 /// Rodape com total em destaque (padrao PDV), compartilhado entre etapas do caixa.
 class CaixaRodapeTotalDestaque extends StatelessWidget {
   const CaixaRodapeTotalDestaque({
@@ -10,8 +12,10 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
     required this.totalFormatado,
     required this.formatarMoeda,
     this.descontoPdvOrcamento = 0,
+    this.descontoCaixa = 0,
     this.valorRecebido,
     this.troco,
+    this.onDesconto,
   });
 
   final String tituloSecaoPagamento;
@@ -19,8 +23,10 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
   final String totalFormatado;
   final String Function(double) formatarMoeda;
   final double descontoPdvOrcamento;
+  final double descontoCaixa;
   final double? valorRecebido;
   final double? troco;
+  final VoidCallback? onDesconto;
 
   @override
   Widget build(BuildContext context) {
@@ -65,20 +71,49 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
               ),
             ),
           ],
+          if (descontoCaixa > 0.001) ...[
+            const SizedBox(height: 2),
+            Text(
+              'Desconto (caixa): -${formatarMoeda(descontoCaixa)}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: scheme.secondary,
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  'TOTAL',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: scheme.onSurfaceVariant,
-                    letterSpacing: 0.5,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      'TOTAL',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurfaceVariant,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
                   ),
-                ),
+                  if (onDesconto != null)
+                    TextButton.icon(
+                      onPressed: onDesconto,
+                      icon: const Icon(Icons.sell_outlined, size: 16),
+                      label: const Text('Desconto (F6)'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                ],
               ),
               const Spacer(),
               Text(
@@ -172,8 +207,10 @@ class CaixaCobrancaPainel extends StatelessWidget {
     required this.rotuloPagamento,
     required this.totalComDesconto,
     required this.descontoPdvOrcamento,
+    this.descontoCaixa = 0,
     required this.formatarMoeda,
     this.onAlterarForma,
+    this.onDesconto,
     required this.recebimento,
     required this.valorRecebidoExibicao,
     required this.troco,
@@ -186,8 +223,10 @@ class CaixaCobrancaPainel extends StatelessWidget {
   final String rotuloPagamento;
   final double totalComDesconto;
   final double descontoPdvOrcamento;
+  final double descontoCaixa;
   final String Function(double) formatarMoeda;
   final VoidCallback? onAlterarForma;
+  final VoidCallback? onDesconto;
   final Widget recebimento;
   final double valorRecebidoExibicao;
   final double troco;
@@ -197,8 +236,9 @@ class CaixaCobrancaPainel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final numLabel =
-        numeroOrcamento > 0 ? 'Orc. $numeroOrcamento' : 'Venda';
+    final numLabel = numeroOrcamento > 0
+        ? VendaDocumentoRotuloHelper.rotuloControlePorNumero(numeroOrcamento)
+        : 'Controle pendente';
 
     return Card(
       margin: EdgeInsets.zero,
@@ -283,8 +323,10 @@ class CaixaCobrancaPainel extends StatelessWidget {
               totalFormatado: formatarMoeda(totalComDesconto),
               formatarMoeda: formatarMoeda,
               descontoPdvOrcamento: descontoPdvOrcamento,
+              descontoCaixa: descontoCaixa,
               valorRecebido: valorRecebidoExibicao,
               troco: troco,
+              onDesconto: onDesconto,
             ),
             const SizedBox(height: 8),
             acaoConfirmar,

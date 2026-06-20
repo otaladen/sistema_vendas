@@ -434,7 +434,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(64, 3930676945577310312),
+    lastPropertyId: const obx_int.IdUid(65, 7538825013182930492),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -818,6 +818,12 @@ final _entities = <obx_int.ModelEntity>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(64, 3930676945577310312),
         name: 'podRegistradoEm',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(65, 7538825013182930492),
+        name: 'finalizadaEm',
         type: 10,
         flags: 0,
       ),
@@ -3720,7 +3726,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final podFotoPathServidorOffset = fbb.writeString(
           object.podFotoPathServidor,
         );
-        fbb.startTable(65);
+        fbb.startTable(66);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -3787,6 +3793,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(61, podFotoPathOffset);
         fbb.addOffset(62, podFotoPathServidorOffset);
         fbb.addInt64(63, object.podRegistradoEm?.millisecondsSinceEpoch);
+        fbb.addInt64(64, object.finalizadaEm?.millisecondsSinceEpoch);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -3816,6 +3823,11 @@ obx_int.ModelDefinition getObjectBoxModel() {
           buffer,
           rootOffset,
           130,
+        );
+        final finalizadaEmValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          132,
         );
         final idParam = const fb.Int64Reader().vTableGet(
           buffer,
@@ -3948,6 +3960,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
             ? null
             : DateTime.fromMillisecondsSinceEpoch(
                 canceladaEmValue,
+                isUtc: true,
+              );
+        final finalizadaEmParam = finalizadaEmValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                finalizadaEmValue,
                 isUtc: true,
               );
         final vendaOrigemFreteRetiradaIdParam = const fb.Int64Reader()
@@ -4096,6 +4114,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           motivoCancelamento: motivoCancelamentoParam,
           canceladaPor: canceladaPorParam,
           canceladaEm: canceladaEmParam,
+          finalizadaEm: finalizadaEmParam,
           vendaOrigemFreteRetiradaId: vendaOrigemFreteRetiradaIdParam,
           idOrcamentoFreteRetiradaAberto: idOrcamentoFreteRetiradaAbertoParam,
           grupoEntregaFreteId: grupoEntregaFreteIdParam,
@@ -7731,6 +7750,11 @@ class Venda_ {
   /// See [Venda.podRegistradoEm].
   static final podRegistradoEm = obx.QueryDateProperty<Venda>(
     _entities[2].properties[62],
+  );
+
+  /// See [Venda.finalizadaEm].
+  static final finalizadaEm = obx.QueryDateProperty<Venda>(
+    _entities[2].properties[63],
   );
 
   /// see [Venda.itens]

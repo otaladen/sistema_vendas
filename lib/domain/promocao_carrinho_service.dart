@@ -15,6 +15,7 @@ abstract class PromocaoCarrinhoLinha {
   set precoTipo(String value);
   String get promocaoNome;
   set promocaoNome(String value);
+  bool get precoManual => false;
 }
 
 /// Ajusta precos de combo A+B e leve/pague no carrinho.
@@ -39,6 +40,7 @@ class PromocaoCarrinhoService {
       }
     }
     for (final linha in linhas) {
+      if (linha.precoManual) continue;
       if (linha.promocaoId <= 0) continue;
       final promo = _repo.obterPorId(linha.promocaoId);
       if (promo == null) continue;
@@ -70,6 +72,7 @@ class PromocaoCarrinhoService {
 
     final linhasCombo = <PromocaoCarrinhoLinha>[];
     for (final l in linhas) {
+      if (l.precoManual) continue;
       final req = requisitos[l.produto.id];
       if (req != null && l.quantidadeEstoque >= req) {
         linhasCombo.add(l);

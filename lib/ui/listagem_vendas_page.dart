@@ -15,6 +15,7 @@ import '../data/usuario_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
@@ -106,38 +107,36 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
 
   String _rotuloCupomFiscalLista(Venda v) {
-    final cupom = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
-    final partes = <String>['Venda $cupom'];
-    if (v.nfceNumero.trim().isNotEmpty) {
-      partes.add('NFC-e ${v.nfceNumero.trim()}');
-    } else if (v.nfceEmitida) {
-      partes.add('NFC-e (sem numero)');
-    }
     final nfe55 = widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id);
-    if (nfe55 != null && nfe55.numero.trim().isNotEmpty) {
-      partes.add('NF-e ${nfe55.numero.trim()}');
-    } else if (nfe55 != null) {
-      partes.add('NF-e 55');
-    }
-    return partes.join(' · ');
+    return VendaDocumentoRotuloHelper.rotuloIdentificacaoLista(
+      v,
+      nfe55: nfe55 == null
+          ? null
+          : VendaDocumentoNfe55Resumo(
+              numero: nfe55.numero,
+              autorizada: nfe55.autorizada,
+            ),
+    );
   }
 
   String _statusOperacionalLista(Venda v) {
-    if (v.nfceProcessandoPendenteFocus) {
-      return 'NFC-e aguardando SEFAZ';
-    }
-    if (v.nfceEmissaoEmAndamento) {
-      return 'Emitindo NFC-e...';
-    }
-    if (v.estoqueBaixadoCupom) {
-      if (v.nfceEmitida ||
-          widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null) {
-        return 'Cupom interno + nota fiscal';
-      }
-      return 'Cupom interno (estoque baixado)';
-    }
-    if (v.nfceEmitida) return 'NFC-e sem baixa de estoque';
-    return 'Sem cupom interno / aguardando nota';
+    final nfe55 = widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id);
+    return VendaDocumentoRotuloHelper.statusOperacionalLista(
+      v,
+      nfe55: nfe55 == null
+          ? null
+          : VendaDocumentoNfe55Resumo(
+              numero: nfe55.numero,
+              autorizada: nfe55.autorizada,
+            ),
+    );
+  }
+
+  Color _corStatusOperacionalLista(Venda v) {
+    return VendaDocumentoRotuloHelper.corStatusLista(
+      v,
+      Theme.of(context).colorScheme,
+    );
   }
 
   Future<void> _verDanfeNfce(Venda v) async {
@@ -332,16 +331,11 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     );
   }
 
-  /// Numero da venda no cupom; se nao houver sequencial, cai no ID interno (caso raro).
-  String _rotuloVendaUsuario(Venda v) {
-    if (v.numeroOrcamento > 0) return 'Venda ${v.numeroOrcamento}';
-    return 'Venda ${v.id}';
-  }
+  String _rotuloVendaUsuario(Venda v) =>
+      VendaDocumentoRotuloHelper.rotuloTituloLista(v);
 
-  String _badgeNumeroVenda(Venda v) {
-    if (v.numeroOrcamento > 0) return '${v.numeroOrcamento}';
-    return '${v.id}';
-  }
+  String _badgeNumeroVenda(Venda v) =>
+      VendaDocumentoRotuloHelper.badgeNumeroCurto(v);
 
   Cliente? _clienteDaVenda(Venda venda) {
     final ligado = venda.cliente.target;
@@ -611,15 +605,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   Future<void> _segundaViaCupom(Venda vIn) async {
-    var v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
-    if (!v.estoqueBaixadoCupom &&
-        (v.nfceEmitida ||
-            widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null)) {
-      try {
-        widget.vendaRepository.registrarCupomInternoPosAutorizacaoFiscal(v.id);
-        v = widget.vendaRepository.obterPorId(vIn.id) ?? v;
-      } catch (_) {}
-    }
+    final v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
     if (v.cancelada) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1467,13 +1453,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                       .textTheme
                                       .labelMedium
                                       ?.copyWith(
-                                        color: v.estoqueBaixadoCupom
-                                            ? Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                            : Theme.of(context)
-                                                .colorScheme
-                                                .error,
+                                        color: _corStatusOperacionalLista(v),
                                         fontWeight: FontWeight.w600,
                                       ),
                                 ),
@@ -1640,7 +1620,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                         const PopupMenuItem<String>(
                                           value: 'segunda_via',
                                           child: Text(
-                                            'Cupom interno (2ª via / PDF)',
+                                            'Controle interno (2ª via / PDF)',
                                           ),
                                         ),
                                       if (_podePagarFreteCarreto(v))

@@ -107,8 +107,16 @@ class VendaService {
     _vendaRepository.converterOrcamentoParaVenda(vendaId);
   }
 
-  List<Venda> listarOrcamentosPendentes() {
-    return _vendaRepository.listarOrcamentosPendentes();
+  List<Venda> listarOrcamentosPendentes({
+    DateTime? desde,
+    DateTime? ate,
+    int? limit,
+  }) {
+    return _vendaRepository.listarOrcamentosPendentes(
+      desde: desde,
+      ate: ate,
+      limit: limit,
+    );
   }
 
   void cancelarVenda(int vendaId) {

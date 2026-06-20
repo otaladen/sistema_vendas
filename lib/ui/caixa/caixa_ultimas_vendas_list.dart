@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/ultimas_vendas_finalizadas_ordenacao.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
+import '../../domain/venda_finalizacao_caixa_helper.dart';
 import '../../model/cliente.dart';
 import '../../model/venda.dart';
 
@@ -12,12 +15,14 @@ class CaixaUltimasVendasList extends StatelessWidget {
     required this.clienteDaVenda,
     required this.formatarMoeda,
     required this.onVendaTap,
+    this.ordenacao = UltimasVendasFinalizadasOrdenacao.padrao,
   });
 
   final List<Venda> vendas;
   final Cliente? Function(Venda venda) clienteDaVenda;
   final String Function(double valor) formatarMoeda;
   final void Function(Venda venda) onVendaTap;
+  final UltimasVendasFinalizadasOrdenacao ordenacao;
 
   @override
   Widget build(BuildContext context) {
@@ -44,8 +49,17 @@ class CaixaUltimasVendasList extends StatelessWidget {
           itemBuilder: (context, index) {
             final v = vendas[index];
             final cliente = clienteDaVenda(v);
-            final badge =
-                v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '${v.id}';
+            final badge = VendaDocumentoRotuloHelper.badgeNumeroCurto(v);
+            final docFiscal =
+                VendaDocumentoRotuloHelper.subtituloListaComDocumentos(v);
+            final dataRef = ordenacao ==
+                    UltimasVendasFinalizadasOrdenacao.porFinalizacao
+                ? VendaFinalizacaoCaixaHelper.momentoFinalizacao(v).toLocal()
+                : v.data.toLocal();
+            final prefixoData = ordenacao ==
+                    UltimasVendasFinalizadasOrdenacao.porFinalizacao
+                ? 'Finalizada ${dtCurto.format(dataRef)}'
+                : dtCurto.format(dataRef);
             return ListTile(
               dense: true,
               visualDensity: VisualDensity.compact,
@@ -57,13 +71,16 @@ class CaixaUltimasVendasList extends StatelessWidget {
                 ),
               ),
               title: Text(
-                'Venda ${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
+                VendaDocumentoRotuloHelper.rotuloTituloLista(v),
                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
               ),
               subtitle: Text(
-                '${dtCurto.format(v.data.toLocal())} · '
-                '${cliente?.nomeRazao ?? 'Sem cliente'} · '
-                '${v.itens.length} itens',
+                [
+                  '$prefixoData · '
+                  '${cliente?.nomeRazao ?? 'Sem cliente'} · '
+                  '${v.itens.length} itens',
+                  if (docFiscal.isNotEmpty) docFiscal,
+                ].join('\n'),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodySmall,
@@ -95,9 +112,11 @@ class CaixaUltimasVendasList extends StatelessWidget {
     if (v.nfceEmitida) {
       icones.add(
         Tooltip(
-          message: v.nfceNumero.trim().isNotEmpty
-              ? 'NFC-e ${v.nfceNumero.trim()} emitida'
-              : 'NFC-e emitida',
+          message: [
+            VendaDocumentoRotuloHelper.rotuloControleInterno(v),
+            if (v.nfceNumero.trim().isNotEmpty)
+              'NFC-e ${v.nfceNumero.trim()}',
+          ].join(' · '),
           child: Icon(Icons.receipt_long, size: 18, color: verde),
         ),
       );
@@ -106,9 +125,11 @@ class CaixaUltimasVendasList extends StatelessWidget {
       if (icones.isNotEmpty) icones.add(const SizedBox(width: 4));
       icones.add(
         Tooltip(
-          message: v.nfeNumero.trim().isNotEmpty
-              ? 'NF-e ${v.nfeNumero.trim()} emitida'
-              : 'NF-e emitida',
+          message: [
+            VendaDocumentoRotuloHelper.rotuloControleInterno(v),
+            if (v.nfeNumero.trim().isNotEmpty)
+              'NF-e ${v.nfeNumero.trim()}',
+          ].join(' · '),
           child: Icon(Icons.description_outlined, size: 18, color: verde),
         ),
       );

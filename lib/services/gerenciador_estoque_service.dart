@@ -1,8 +1,3 @@
-import 'dart:io';
-
-import 'package:objectbox/objectbox.dart';
-import 'package:path/path.dart' as p;
-
 import '../data/movimento_estoque_repository.dart';
 import '../data/objectbox.dart';
 import '../data/produto_busca_util.dart';
@@ -10,6 +5,7 @@ import '../domain/complemento_entrega_codec.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/estoque/tipo_movimento_estoque.dart';
 import '../domain/produto_estoque_sync.dart';
+import '../domain/venda_documento_rotulo_helper.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
@@ -30,8 +26,6 @@ class GerenciadorEstoqueService {
 
   final ObjectBox _db;
   final MovimentoEstoqueRepository _movimentos;
-  static bool _migracaoBaixadoCupomLegadoOk = false;
-
   EstoqueAntes _snap(Produto p) =>
       (fisico: p.estoqueReal, reserva: p.estoqueReservado);
 
@@ -226,41 +220,8 @@ class GerenciadorEstoqueService {
     ProdutoEstoqueSync.marcarEstoqueAlterado(produtoAlvo);
   }
 
-  // --- Migracao legado cupom ---
-
-  void migrarEstoqueBaixadoCupomLegadoUmaVez() {
-    if (_migracaoBaixadoCupomLegadoOk) return;
-    try {
-      final flag = File(
-        p.join(_db.storeDirectoryPath, '.migracao_estoque_baixado_cupom_v1'),
-      );
-      if (flag.existsSync()) {
-        _migracaoBaixadoCupomLegadoOk = true;
-        return;
-      }
-      _db.store.runInTransaction(TxMode.write, () {
-        final query = _db.vendaBox
-            .query(Venda_.status.equals('finalizada'))
-            .build();
-        try {
-          for (final v in query.find()) {
-            if (!v.estoqueBaixadoCupom) {
-              v.estoqueBaixadoCupom = true;
-              _db.vendaBox.put(v);
-            }
-          }
-        } finally {
-          query.close();
-        }
-      });
-      flag.writeAsStringSync('ok');
-      _migracaoBaixadoCupomLegadoOk = true;
-    } catch (_) {
-      // Proxima abertura tenta de novo.
-    }
-  }
-
-  // --- Orcamento: reserva ---
+  // --- Orcamento pendente (PDV): sem reserva; liberacao limpa reservas legadas.
+  // Reserva de retirada futura / carreto ocorre em converterOrcamentoParaVenda (caixa).
 
   int quantidadeReservavelOrcamentoItem(ItemVenda item) {
     final tipo = EntregaVendaHelper.tipoEfetivoItem(item);
@@ -281,12 +242,6 @@ class GerenciadorEstoqueService {
     final produto = item.produto.target;
     if (produto == null) {
       throw StateError('Produto do item "${item.nomeProduto}" nao encontrado.');
-    }
-    if (!permitirVendaSemEstoque && produto.estoqueLivreParaVenda < q) {
-      throw StateError(
-        'Estoque insuficiente para reservar ${produto.nome} '
-        '(livre ${produto.estoqueLivreParaVenda}, necessario $q).',
-      );
     }
     final antes = _snap(produto);
     produto.estoqueReservado += q;
@@ -347,26 +302,13 @@ class GerenciadorEstoqueService {
 
     final tipo = EntregaVendaHelper.tipoEfetivoItem(item);
     if (tipo == EntregaVendaHelper.tipoRetirada) {
-      if (!permitirVendaSemEstoque && produto.estoqueLivreParaVenda < q) {
-        throw StateError('Estoque insuficiente para ${produto.nome}.');
-      }
       return;
-    }
-
-    if (!permitirVendaSemEstoque && produto.estoqueLivreParaVenda < q) {
-      throw StateError('Estoque insuficiente para ${produto.nome}.');
     }
 
     switch (tipo) {
       case EntregaVendaHelper.tipoRetiradaFutura:
         if (produto.estoqueReservado < q) {
           final falta = q - produto.estoqueReservado;
-          if (!permitirVendaSemEstoque &&
-              produto.estoqueLivreParaVenda < falta) {
-            throw StateError(
-              'Reserva de estoque insuficiente para ${produto.nome}.',
-            );
-          }
           final antes = _snap(produto);
           produto.estoqueReservado += falta;
           persistirProduto(
@@ -380,12 +322,6 @@ class GerenciadorEstoqueService {
       case EntregaVendaHelper.tipoEntregaLoja:
         if (produto.estoqueReservado < q) {
           final falta = q - produto.estoqueReservado;
-          if (!permitirVendaSemEstoque &&
-              produto.estoqueLivreParaVenda < falta) {
-            throw StateError(
-              'Reserva de estoque insuficiente para ${produto.nome}.',
-            );
-          }
           final antes = _snap(produto);
           produto.estoqueReservado += falta;
           item.quantidadeNoCarreto = q;
@@ -406,7 +342,7 @@ class GerenciadorEstoqueService {
     }
   }
 
-  // --- Cupom nao fiscal ---
+  // --- Cupom nao fiscal (baixa retirada imediata; na finalizacao do caixa) ---
 
   void baixarEstoqueRetiradaImediataCupomNaoFiscal({
     required ItemVenda item,
@@ -425,8 +361,11 @@ class GerenciadorEstoqueService {
     if (q <= 0) return;
     if (item.quantidadeJaRetirada >= q) return;
 
-    if (!permitirVendaSemEstoque && produto.estoqueLivreParaVenda < q) {
-      throw StateError('Estoque insuficiente para ${produto.nome}.');
+    if (!permitirVendaSemEstoque && produto.estoqueReal < q) {
+      throw StateError(
+        'Estoque insuficiente para "${produto.nome}": '
+        'disponivel ${produto.estoqueReal}, necessario $q.',
+      );
     }
 
     PoliticaMovimentoEstoque.validarPermiteAlteracaoFisica(
@@ -485,10 +424,6 @@ class GerenciadorEstoqueService {
   }) {
     if (quantidade <= 0) {
       throw StateError('Quantidade invalida para ${produto.nome}.');
-    }
-    if (!permitirVendaSemEstoque &&
-        produto.estoqueLivreParaVenda < quantidade) {
-      throw StateError('Estoque insuficiente para ${produto.nome}.');
     }
     PoliticaMovimentoEstoque.validarPermiteAlteracaoFisica(
       TipoMovimentoEstoque.vendaDiretaLegada,
@@ -643,23 +578,48 @@ class GerenciadorEstoqueService {
   }
 
   void baixarEstoqueCarretoAoMarcarSaida(Venda venda) {
+    final falhas = <String>[];
     for (final item in venda.itens) {
-      final produto = item.produto.target;
-      if (produto == null) continue;
       final q = quantidadeItemParaEstoqueCarreto(item);
       if (q <= 0) continue;
 
-      final qReserva = q.clamp(0, produto.estoqueReservado);
-      if (qReserva <= 0) continue;
+      final produto = item.produto.target;
+      if (produto == null) {
+        falhas.add(
+          'Item "${item.nomeProduto}" sem produto vinculado — '
+          'nao e possivel baixar estoque do carreto.',
+        );
+        continue;
+      }
+      if (produto.estoqueReservado < q) {
+        falhas.add(
+          '${produto.nome}: reservado ${produto.estoqueReservado}, '
+          'necessario $q para saida do carro.',
+        );
+        continue;
+      }
+      if (produto.estoqueReal < q) {
+        falhas.add(
+          '${produto.nome}: fisico ${produto.estoqueReal}, '
+          'necessario $q para saida do carro.',
+        );
+        continue;
+      }
 
       final antes = _snap(produto);
-      produto.estoqueReservado -= qReserva;
-      produto.estoqueReal -= qReserva;
+      produto.estoqueReservado -= q;
+      produto.estoqueReal -= q;
       persistirProduto(
         produto,
         TipoMovimentoEstoque.carretoSaida,
         antes: antes,
         documentoReferencia: _refVenda(venda),
+      );
+    }
+    if (falhas.isNotEmpty) {
+      throw StateError(
+        'Nao foi possivel baixar estoque do carreto ao marcar "Saiu".\n'
+        '${falhas.join('\n')}',
       );
     }
   }
@@ -954,11 +914,6 @@ class GerenciadorEstoqueService {
     required bool permitirVendaSemEstoque,
   }) {
     if (quantidade <= 0) return;
-    if (!permitirVendaSemEstoque && produto.estoqueReal < quantidade) {
-      throw StateError(
-        'Estoque insuficiente na troca para ${produto.nome} (precisa $quantidade).',
-      );
-    }
     PoliticaMovimentoEstoque.validarPermiteAlteracaoFisica(
       TipoMovimentoEstoque.devolucaoCliente,
     );
@@ -972,12 +927,8 @@ class GerenciadorEstoqueService {
     );
   }
 
-  String _refVenda(Venda venda) {
-    if (venda.numeroOrcamento > 0) {
-      return 'Venda ${venda.numeroOrcamento}';
-    }
-    return 'Venda id ${venda.id}';
-  }
+  String _refVenda(Venda venda) =>
+      VendaDocumentoRotuloHelper.rotuloControleInterno(venda);
 
   String _refItemVenda(ItemVenda item) {
     final venda = item.venda.target;

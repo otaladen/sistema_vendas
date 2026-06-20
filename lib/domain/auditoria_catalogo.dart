@@ -51,6 +51,8 @@ class AuditoriaAcao {
   static const nfeWhatsapp = 'nfe_whatsapp';
   static const nfeInutilizar = 'nfe_inutilizar';
   static const descontoOrcamento = 'desconto_orcamento';
+  static const autorizacaoDescontoAcimaTeto = 'autorizacao_desconto_acima_teto';
+  static const alterarPrecoUnitarioPdv = 'alterar_preco_unitario_pdv';
   static const autorizacaoMargemPromocao = 'autorizacao_margem_promocao';
   static const autorizacaoReajustePreco = 'autorizacao_reajuste_preco';
   static const reajustePrecoLote = 'reajuste_preco_lote';
@@ -134,6 +136,10 @@ String auditoriaRotuloAcao(String acao) {
       return 'Inutilizacao numeracao NF-e';
     case AuditoriaAcao.descontoOrcamento:
       return 'Desconto no orcamento';
+    case AuditoriaAcao.autorizacaoDescontoAcimaTeto:
+      return 'Autorizacao desconto acima do teto';
+    case AuditoriaAcao.alterarPrecoUnitarioPdv:
+      return 'Preco unitario alterado no PDV';
     case AuditoriaAcao.autorizacaoMargemPromocao:
       return 'Autorizacao margem promocional';
     case AuditoriaAcao.autorizacaoReajustePreco:

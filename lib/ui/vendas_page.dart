@@ -13,17 +13,14 @@ import '../services/print_service.dart';
 import 'caixa_page.dart';
 import 'entregas_page.dart';
 import 'listagem_vendas_page.dart';
+import 'orcamentos_page.dart';
 import 'ponto_de_venda_page.dart';
 import 'relatorios_page.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
 import 'layout/app_layout.dart';
-
-const Color _corPontoDeVenda = Color(0xFF2E7D32);
-const Color _corCaixa = Color(0xFF00897B);
-const Color _corEntregas = Color(0xFF0277BD);
-const Color _corListagem = Color(0xFF3949AB);
-const Color _corRelatorios = Color(0xFFEF6C00);
+import '../domain/main_menu_destino.dart';
+import 'theme/app_modulo_cores.dart';
 
 class VendasPage extends StatelessWidget {
   const VendasPage({
@@ -65,6 +62,7 @@ class VendasPage extends StatelessWidget {
       u,
       PermissaoUsuario.acessarListagemVendas,
     );
+    final podeOrcamentos = podePdv || podeCaixa || podeListagem;
 
     return Scaffold(
       appBar: AppBar(
@@ -80,7 +78,7 @@ class VendasPage extends StatelessWidget {
         children: [
             HubNavButton(
               icon: Icons.point_of_sale_outlined,
-              corDestaque: _corPontoDeVenda,
+              corDestaque: MainMenuDestino.pdv.cor(context),
               titulo: 'Ponto de Venda',
               habilitado: podePdv,
               onTap: () {
@@ -103,7 +101,7 @@ class VendasPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.receipt_long_outlined,
-              corDestaque: _corCaixa,
+              corDestaque: MainMenuDestino.caixa.cor(context),
               titulo: 'Caixa',
               habilitado: podeCaixa,
               onTap: () {
@@ -140,7 +138,7 @@ class VendasPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.local_shipping_outlined,
-              corDestaque: _corEntregas,
+              corDestaque: MainMenuDestino.entregas.cor(context),
               titulo: 'Entregas',
               habilitado: podeEntregas,
               onTap: () {
@@ -164,8 +162,31 @@ class VendasPage extends StatelessWidget {
               },
             ),
             HubNavButton(
+              icon: Icons.request_quote_outlined,
+              corDestaque: AppModuloCores.modulo(context, AppModuloId.orcamentos),
+              titulo: 'Orcamentos',
+              habilitado: podeOrcamentos,
+              onTap: () {
+                if (!podeOrcamentos) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => OrcamentosPage(
+                      vendaRepository: vendaRepository,
+                      clienteRepository: clienteRepository,
+                      produtoRepository: produtoRepository,
+                      vendedorRepository: vendedorRepository,
+                      appConfigRepository: appConfigRepository,
+                      printService: printService,
+                      usuarioLogado: u,
+                    ),
+                  ),
+                );
+              },
+            ),
+            HubNavButton(
               icon: Icons.view_list_outlined,
-              corDestaque: _corListagem,
+              corDestaque: AppModuloCores.modulo(context, AppModuloId.listagemVendas),
               titulo: 'Listagem de Vendas',
               habilitado: podeListagem,
               onTap: () {
@@ -190,7 +211,7 @@ class VendasPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.assessment_outlined,
-              corDestaque: _corRelatorios,
+              corDestaque: AppModuloCores.modulo(context, AppModuloId.relatoriosVendas),
               titulo: 'Relatorios',
               habilitado: podeRelatorios,
               onTap: () {

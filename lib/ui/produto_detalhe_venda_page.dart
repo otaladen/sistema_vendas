@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../domain/promocao_info_vigente.dart';
 import '../model/produto.dart';
+import 'theme/app_modulo_cores.dart';
 
 /// Modal compacto com foto e descricao (PDV e demais telas de venda).
 Future<void> mostrarModalDetalheProdutoVenda(
@@ -45,8 +46,6 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
 
   final Produto produto;
   final List<PromocaoInfoVigente> campanhasVigentes;
-
-  static const Color _corPromo = Color(0xFFC62828);
 
   Future<void> _abrirZoomFoto(BuildContext context) async {
     if (produto.fotoPath.trim().isEmpty) return;
@@ -162,26 +161,27 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
     if (campanhasVigentes.isEmpty) return const SizedBox.shrink();
     final fmtData = DateFormat('dd/MM/yyyy');
     final scheme = Theme.of(context).colorScheme;
+    final corPromo = AppModuloCores.modulo(context, AppModuloId.promocoes);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: _corPromo.withValues(alpha: 0.08),
+        color: corPromo.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _corPromo.withValues(alpha: 0.5)),
+        border: Border.all(color: corPromo.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.local_offer, color: _corPromo, size: 20),
+              Icon(Icons.local_offer, color: corPromo, size: 20),
               const SizedBox(width: 6),
               Text(
                 'Campanha promocional ativa',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: _corPromo,
+                      color: corPromo,
                       fontWeight: FontWeight.w700,
                     ),
               ),
@@ -211,7 +211,7 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
                     c.textoPrecoParaVendedor,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: _corPromo,
+                          color: corPromo,
                         ),
                   ),
                   if (c.textoPrecoComplementar != null)

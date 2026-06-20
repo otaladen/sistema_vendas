@@ -46,6 +46,7 @@ class PdvConsultaProdutosPage extends StatefulWidget {
     required this.precoUnitarioDe,
     this.resolverPromocao,
     this.campanhasVigentesDe,
+    this.quantidadeNoOrcamentoDe,
   });
 
   final ProdutoRepository produtoRepository;
@@ -61,6 +62,7 @@ class PdvConsultaProdutosPage extends StatefulWidget {
       resolverPromocao;
   final List<PromocaoInfoVigente> Function(Produto produto)?
       campanhasVigentesDe;
+  final int Function(int produtoId)? quantidadeNoOrcamentoDe;
 
   @override
   State<PdvConsultaProdutosPage> createState() =>
@@ -415,6 +417,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       promocaoAtiva: widget.resolverPromocao?.call(produto, _precoListaAtivo),
       estoqueCritico: _estoqueCritico(produto),
       compacto: compacto,
+      quantidadeNoOrcamento:
+          widget.quantidadeNoOrcamentoDe?.call(produto.id) ?? 0,
       onDetalhes: _abrirDetalhesProduto,
     );
   }

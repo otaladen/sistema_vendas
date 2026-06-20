@@ -194,7 +194,7 @@ class _RelatorioTabelaPrecosPageState extends State<RelatorioTabelaPrecosPage> {
                   title: const Text('Somente produtos ativos'),
                   secondary: Icon(
                     Icons.inventory_2_outlined,
-                    color: corRelTabelaPrecos,
+                    color: corRelTabelaPrecos(context),
                   ),
                 ),
                 Row(

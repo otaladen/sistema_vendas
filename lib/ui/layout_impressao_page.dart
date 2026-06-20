@@ -394,7 +394,7 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              'Courier alinha melhor colunas de preco; Helvetica e a padrao.',
+              'Courier e recomendada (acentos e colunas de preco na bobina).',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

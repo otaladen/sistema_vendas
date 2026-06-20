@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../../data/produto_repository.dart';
 import '../../model/historico_entrada.dart';
+import '../theme/app_semantic_helper.dart';
 
 /// Aba com historico de compras (NF-e) do produto, mais recente primeiro.
 class AbasHistoricoProdutoWidget extends StatefulWidget {
@@ -78,10 +79,11 @@ class _AbasHistoricoProdutoWidgetState extends State<AbasHistoricoProdutoWidget>
             100;
     final texto =
         '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(1)}% vs compra anterior';
+    final semantic = context.semanticColors;
     final cor = pct > 0.5
-        ? const Color(0xFFB91C1C)
+        ? semantic.errorFg
         : pct < -0.5
-            ? const Color(0xFF166534)
+            ? semantic.successFg
             : Theme.of(context).colorScheme.onSurfaceVariant;
     return Text(
       texto,

@@ -1,21 +1,59 @@
 import 'package:flutter/material.dart';
 
-/// Cores de destaque dos cards do hub e telas de relatorio.
-const Color corRelFiados = Color(0xFFC62828);
-const Color corRelVendasPeriodo = Color(0xFF1565C0);
-const Color corRelProdutosRanking = Color(0xFF2E7D32);
-const Color corRelVendasVendedor = Color(0xFF00897B);
-const Color corRelComissao = Color(0xFF6A1B9A);
-const Color corRelTopClientes = Color(0xFF0277BD);
-const Color corRelEstoqueMin = Color(0xFFE65100);
-const Color corRelOrcamentos = Color(0xFF3949AB);
-const Color corRelTabelaPrecos = Color(0xFF455A64);
-const Color corRelSaidasProduto = Color(0xFF5D4037);
-const Color corRelVendasPromocao = Color(0xFFC62828);
-const Color corRelDashboard = Color(0xFF283593);
-const Color corRelAbc = Color(0xFFAD1457);
-const Color corRelFechamentoHist = Color(0xFF00695C);
-const Color corRelEntregasResumo = Color(0xFF0288D1);
-const Color corRelHorariosPico = Color(0xFF7B1FA2);
-const Color corRelMetasVendedor = Color(0xFF00897B);
-const Color corRelLogSistema = Color(0xFF5E35B1);
+export '../theme/app_relatorio_cores.dart';
+
+import '../theme/app_relatorio_cores.dart';
+
+Color corRelDashboard(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.dashboard);
+
+Color corRelAbc(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.abc);
+
+Color corRelFiados(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.fiados);
+
+Color corRelVendasPeriodo(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.vendasPeriodo);
+
+Color corRelProdutosRanking(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.produtosRanking);
+
+Color corRelVendasVendedor(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.vendasVendedor);
+
+Color corRelComissao(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.comissao);
+
+Color corRelTopClientes(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.topClientes);
+
+Color corRelEstoqueMin(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.estoqueMin);
+
+Color corRelOrcamentos(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.orcamentos);
+
+Color corRelTabelaPrecos(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.tabelaPrecos);
+
+Color corRelSaidasProduto(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.saidasProduto);
+
+Color corRelVendasPromocao(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.vendasPromocao);
+
+Color corRelFechamentoHist(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.fechamentoHist);
+
+Color corRelEntregasResumo(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.entregasResumo);
+
+Color corRelHorariosPico(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.horariosPico);
+
+Color corRelMetasVendedor(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.metasVendedor);
+
+Color corRelLogSistema(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.logSistema);

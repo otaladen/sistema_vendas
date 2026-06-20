@@ -20,7 +20,7 @@ enum LayoutFamiliaFonte {
   String get rotulo {
     switch (this) {
       case LayoutFamiliaFonte.helvetica:
-        return 'Padrao (Helvetica)';
+        return 'Compativel (Courier — acentos PT-BR)';
       case LayoutFamiliaFonte.courier:
         return 'Monoespacada (Courier)';
       case LayoutFamiliaFonte.times:

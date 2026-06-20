@@ -1,14 +1,11 @@
 import '../../model/venda.dart';
 import 'logistica_entregas.dart';
 
+import '../../domain/entrega_venda_helper.dart';
+
 /// Escopo persistido da conferencia de carga (`g:grupo` ou `s:vendaId`).
-String escopoViagemLogistica(List<Venda> vendas) {
-  if (vendas.isEmpty) return '';
-  if (vendas.length >= 2 && vendas.first.grupoEntregaFreteId > 0) {
-    return 'g:${vendas.first.grupoEntregaFreteId}';
-  }
-  return 's:${vendas.first.id}';
-}
+String escopoViagemLogistica(List<Venda> vendas) =>
+    EntregaVendaHelper.escopoConferenciaCargaRomaneio(vendas);
 
 /// Uma viagem (grupo mesmo carro) ou entrega avulsa para o painel de montagem.
 class MontagemEntregaViagem {

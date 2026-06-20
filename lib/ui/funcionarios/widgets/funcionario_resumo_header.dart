@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../../domain/main_menu_destino.dart';
+import '../../theme/app_modulo_cores.dart';
+import '../../theme/app_semantic_helper.dart';
+
 /// Faixa resumo do funcionario em edicao (estilo hub financeiro).
 class FuncionarioResumoHeader extends StatelessWidget {
   const FuncionarioResumoHeader({
@@ -57,6 +61,7 @@ class FuncionarioResumoHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final semantic = context.semanticColors;
     final nomeExibicao = nomeController.text.trim();
     final titulo = nomeExibicao.isEmpty ? 'Novo funcionario' : nomeExibicao;
 
@@ -144,8 +149,8 @@ class FuncionarioResumoHeader extends StatelessWidget {
                               rotulo: motoristaVinculadoId > 0
                                   ? 'Motorista #$motoristaVinculadoId'
                                   : 'Motorista',
-                              cor: const Color(0xFF0277BD),
-                              bg: const Color(0xFFE1F5FE),
+                              cor: MainMenuDestino.entregas.cor(context),
+                              bg: semantic.infoBg,
                             ),
                           if (temUsuarioSistema)
                             _BadgeStatus(
@@ -240,14 +245,14 @@ class FuncionarioResumoHeader extends StatelessWidget {
                     icone: Icons.account_balance_wallet_outlined,
                     rotulo: 'Liquido ref.',
                     valor: liquidoFormatado,
-                    cor: const Color(0xFF1565C0),
+                    cor: semantic.infoFg,
                     compact: compact,
                   ),
                   _MetricaResumo(
                     icone: Icons.event_outlined,
                     rotulo: 'Prox. pagamento',
                     valor: proximoPagamentoFormatado,
-                    cor: const Color(0xFF2E7D32),
+                    cor: semantic.successFg,
                     compact: compact,
                   ),
                 ];

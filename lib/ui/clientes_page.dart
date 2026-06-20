@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../domain/cliente_cadastro.dart';
-import '../main.dart';
 import '../data/cliente_repository.dart';
 import '../data/mensageria_repository.dart';
 import '../data/venda_repository.dart';
@@ -20,6 +19,7 @@ import '../services/brasil_api_cnpj_service.dart';
 import '../model/mensagem_template.dart';
 import '../model/venda.dart';
 import 'layout/app_layout.dart';
+import 'theme/app_semantic_helper.dart';
 import 'widgets/cliente/cliente_cadastro_header.dart';
 import 'widgets/cliente/cliente_cadastro_rodape.dart';
 import 'widgets/extrato_fiado_cliente_card.dart';
@@ -89,11 +89,6 @@ class _ClientesPageState extends State<ClientesPage>
   static const double _wNumero = 88;
   static const double _wUf = 72;
   static const double _maxLarguraFormulario = 1120;
-  static const Color _fundoPainelCadastro = Color(0xFFE8EEF5);
-  static const Color _bordaPainelCadastro = Color(0xFFB0BEC5);
-  static const Color _corLimiteDestaque = Color(0xFF1B5E20);
-  static const Color _fundoLimiteCredito = Color(0xFFE8F5E9);
-  static const Color _bordaLimiteCredito = Color(0xFFC8E6C9);
 
   final _nomeRazaoController = TextEditingController();
   final _nomeFantasiaController = TextEditingController();
@@ -1575,6 +1570,7 @@ class _ClientesPageState extends State<ClientesPage>
 
   Widget _buildCardComercialComLimiteDestaque() {
     final theme = Theme.of(context);
+    final semantic = context.semanticColors;
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -1608,9 +1604,9 @@ class _ClientesPageState extends State<ClientesPage>
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
               decoration: BoxDecoration(
-                color: _fundoLimiteCredito,
+                color: semantic.successBg,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _bordaLimiteCredito),
+                border: Border.all(color: semantic.successBorder),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1620,7 +1616,7 @@ class _ClientesPageState extends State<ClientesPage>
                       Icon(
                         Icons.attach_money,
                         size: 26,
-                        color: _corLimiteDestaque,
+                        color: semantic.successFg,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -1628,7 +1624,7 @@ class _ClientesPageState extends State<ClientesPage>
                           'Limite de credito',
                           style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w800,
-                            color: _corLimiteDestaque,
+                            color: semantic.successFg,
                           ),
                         ),
                       ),
@@ -1638,7 +1634,7 @@ class _ClientesPageState extends State<ClientesPage>
                   Text(
                     'Valor maximo que o cliente pode manter em aberto na loja.',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: _corLimiteDestaque.withValues(alpha: 0.85),
+                      color: semantic.successFg.withValues(alpha: 0.85),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -1883,6 +1879,7 @@ class _ClientesPageState extends State<ClientesPage>
     required int quantidadeItens,
     required List<MapEntry<String, int>> topProdutos,
   }) {
+    final scheme = theme.colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1902,8 +1899,8 @@ class _ClientesPageState extends State<ClientesPage>
         Expanded(
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: _fundoPainelCadastro,
-              border: Border.all(color: _bordaPainelCadastro),
+              color: scheme.surfaceContainerLow,
+              border: Border.all(color: scheme.outlineVariant),
             ),
             child: TabBarView(
               controller: _tabController,
@@ -3060,18 +3057,11 @@ class _ClientesPageState extends State<ClientesPage>
   }
 
   Widget _buildStatusBanner(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
     final sucesso = message.toLowerCase().contains('sucesso');
-    final bg = sucesso
-        ? semantic?.successBg ?? const Color(0xFFEAF8EF)
-        : semantic?.errorBg ?? const Color(0xFFFDECEC);
-    final border = sucesso
-        ? semantic?.successBorder ?? const Color(0xFF8FD1A8)
-        : semantic?.errorBorder ?? const Color(0xFFF1A3A3);
-    final fg = sucesso
-        ? semantic?.successFg ?? const Color(0xFF166534)
-        : semantic?.errorFg ?? const Color(0xFF9B1C1C);
+    final bg = sucesso ? semantic.successBg : semantic.errorBg;
+    final border = sucesso ? semantic.successBorder : semantic.errorBorder;
+    final fg = sucesso ? semantic.successFg : semantic.errorFg;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

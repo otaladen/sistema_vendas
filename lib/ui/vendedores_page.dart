@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/vendedor_repository.dart';
-import '../main.dart';
+import 'theme/app_semantic_helper.dart';
 import '../model/vendedor.dart';
 
 /// Cadastro de **vendedores** (balcao, comissoes, contato com cliente).
@@ -601,18 +601,11 @@ class _VendedoresPageState extends State<VendedoresPage> {
   }
 
   Widget _buildStatusBanner(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
     final sucesso = message.toLowerCase().contains('sucesso');
-    final bg = sucesso
-        ? semantic?.successBg ?? const Color(0xFFEAF8EF)
-        : semantic?.errorBg ?? const Color(0xFFFDECEC);
-    final border = sucesso
-        ? semantic?.successBorder ?? const Color(0xFF8FD1A8)
-        : semantic?.errorBorder ?? const Color(0xFFF1A3A3);
-    final fg = sucesso
-        ? semantic?.successFg ?? const Color(0xFF166534)
-        : semantic?.errorFg ?? const Color(0xFF9B1C1C);
+    final bg = sucesso ? semantic.successBg : semantic.errorBg;
+    final border = sucesso ? semantic.successBorder : semantic.errorBorder;
+    final fg = sucesso ? semantic.successFg : semantic.errorFg;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

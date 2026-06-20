@@ -14,10 +14,20 @@ class RelatorioOrcamentosAbertosPage extends StatefulWidget {
     super.key,
     required this.vendaRepository,
     required this.clienteRepository,
+    this.tituloAppBar = 'Orcamentos em aberto',
+    this.textoResumo,
+    this.exibirExportacoesRelatorio = true,
+    this.podeEditarNoPdv = false,
+    this.onEditarNoPdv,
   });
 
   final VendaRepository vendaRepository;
   final ClienteRepository clienteRepository;
+  final String tituloAppBar;
+  final String? textoResumo;
+  final bool exibirExportacoesRelatorio;
+  final bool podeEditarNoPdv;
+  final Future<void> Function(BuildContext context, Venda venda)? onEditarNoPdv;
 
   @override
   State<RelatorioOrcamentosAbertosPage> createState() =>
@@ -48,8 +58,7 @@ class _RelatorioOrcamentosAbertosPageState
 
   void _carregar() {
     setState(() {
-      _todos = widget.vendaRepository.listarOrcamentosPendentes()
-        ..sort((a, b) => b.data.compareTo(a.data));
+      _todos = widget.vendaRepository.listarOrcamentosPendentes();
     });
   }
 
@@ -121,8 +130,7 @@ class _RelatorioOrcamentosAbertosPageState
   }
 
   int _contarOrcamentosAte(DateTime ate) {
-    final fimDia = DateTime(ate.year, ate.month, ate.day, 23, 59, 59, 999);
-    return _todos.where((v) => !v.data.toLocal().isAfter(fimDia)).length;
+    return widget.vendaRepository.contarOrcamentosPendentesAte(ate);
   }
 
   bool get _filtrosAtivos =>
@@ -398,17 +406,18 @@ class _RelatorioOrcamentosAbertosPageState
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Orcamentos em aberto'),
+        title: Text(widget.tituloAppBar),
         actions: [
           TextButton(
             onPressed: _abrirManutencaoOrcamentos,
             child: const Text('Manutencao'),
           ),
-          RelatorioExportacoesMenu(
-            nomeArquivo: 'orcamentos_abertos',
-            paginasPdf: () => _paginasPdf(visiveis),
-            linhasCsv: () => _linhasCsv(visiveis),
-          ),
+          if (widget.exibirExportacoesRelatorio)
+            RelatorioExportacoesMenu(
+              nomeArquivo: 'orcamentos_abertos',
+              paginasPdf: () => _paginasPdf(visiveis),
+              linhasCsv: () => _linhasCsv(visiveis),
+            ),
           IconButton(
             tooltip: 'Atualizar',
             onPressed: _carregar,
@@ -425,6 +434,15 @@ class _RelatorioOrcamentosAbertosPageState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (widget.textoResumo != null) ...[
+                  Text(
+                    widget.textoResumo!,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 Text(
                   _filtrosAtivos
                       ? '${visiveis.length} de ${_todos.length} orcamento(s) · '
@@ -491,6 +509,17 @@ class _RelatorioOrcamentosAbertosPageState
                                       .colorScheme
                                       .errorContainer,
                                 ),
+                              ),
+                            if (widget.podeEditarNoPdv &&
+                                widget.onEditarNoPdv != null)
+                              IconButton(
+                                tooltip: 'Editar no PDV',
+                                icon: Icon(
+                                  Icons.edit_note_outlined,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                onPressed: () =>
+                                    widget.onEditarNoPdv!(context, v),
                               ),
                             IconButton(
                               tooltip: 'Apagar orcamento',

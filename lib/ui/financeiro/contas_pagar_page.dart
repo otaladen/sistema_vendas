@@ -11,7 +11,7 @@ import '../../data/conta_pagar_repository.dart';
 import '../../data/models/conta_pagar.dart';
 import '../../data/objectbox.dart';
 import '../../domain/filtro_contas_pagar.dart';
-import '../../main.dart';
+import '../theme/app_semantic_helper.dart';
 import 'widgets/grafico_vencimentos.dart';
 
 final NumberFormat _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
@@ -436,16 +436,16 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
     BuildContext context,
     BoxConstraints constraints,
   ) {
-    final semantic = Theme.of(context).extension<AppSemanticColors>();
-    final infoBg = semantic?.infoBg ?? const Color(0xFFEAF2FF);
-    final infoBorder = semantic?.infoBorder ?? const Color(0xFF9EC0FF);
-    final infoFg = semantic?.infoFg ?? const Color(0xFF1E3A8A);
-    final okBg = semantic?.successBg ?? const Color(0xFFEAF8EF);
-    final okBorder = semantic?.successBorder ?? const Color(0xFF8FD1A8);
-    final okFg = semantic?.successFg ?? const Color(0xFF166534);
-    final errBg = semantic?.errorBg ?? const Color(0xFFFDECEC);
-    final errBorder = semantic?.errorBorder ?? const Color(0xFFF1A3A3);
-    final errFg = semantic?.errorFg ?? const Color(0xFF9B1C1C);
+    final semantic = context.semanticColors;
+    final infoBg = semantic.infoBg;
+    final infoBorder = semantic.infoBorder;
+    final infoFg = semantic.infoFg;
+    final okBg = semantic.successBg;
+    final okBorder = semantic.successBorder;
+    final okFg = semantic.successFg;
+    final errBg = semantic.errorBg;
+    final errBorder = semantic.errorBorder;
+    final errFg = semantic.errorFg;
 
     final narrowKpi = constraints.maxWidth < 720;
     final largoComGrafico = constraints.maxWidth >= 1040;
@@ -746,23 +746,24 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = context.semanticColors;
     late Color bg;
     late Color fg;
     late String label;
     switch (status) {
       case ContaPagarStatus.pago:
-        bg = const Color(0xFFEAF8EF);
-        fg = const Color(0xFF166534);
+        bg = semantic.successBg;
+        fg = semantic.successFg;
         label = 'Pago';
         break;
       case ContaPagarStatus.atrasado:
-        bg = const Color(0xFFFDECEC);
-        fg = const Color(0xFF9B1C1C);
+        bg = semantic.errorBg;
+        fg = semantic.errorFg;
         label = 'Atrasado';
         break;
       default:
-        bg = const Color(0xFFEAF2FF);
-        fg = const Color(0xFF1E3A8A);
+        bg = semantic.infoBg;
+        fg = semantic.infoFg;
         label = 'Pendente';
     }
     return Chip(

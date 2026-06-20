@@ -30,9 +30,11 @@ import '../../domain/promocao_preco_service.dart';
 import '../../config/fiscal_config.dart';
 import '../../domain/fiscal/cliente_fiscal_helper.dart';
 import '../../domain/venda_documento_pos_caixa.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../config/focus_nfe_runtime.dart';
 import '../../domain/pagamento_orcamento.dart';
 import '../../domain/plano_fiado.dart';
+import '../../domain/ultimas_vendas_finalizadas_ordenacao.dart';
 import '../../model/caixa_sessao.dart';
 import '../../model/cliente.dart';
 import '../../data/promocao_repository.dart';
@@ -62,10 +64,12 @@ import '../../services/recibo_recebimento_fiado_pdf.dart';
 import '../fiscal/nfe_gerenciamento_page.dart';
 import '../pdv_consulta_produtos_page.dart';
 import '../pdv_pesquisa_comando.dart';
+import '../pdv_desconto_autorizacao.dart';
 import '../promocao_margem_autorizacao.dart';
 import '../../model/usuario_sistema.dart';
 import 'alterar_pagamento_caixa_dialog.dart';
 import 'autorizacao_gerente_caixa.dart';
+import 'caixa_desconto_dialog.dart';
 import 'caixa_etapa.dart';
 import 'caixa_feedback.dart';
 import 'caixa_pos_venda_sessao.dart';
@@ -120,6 +124,9 @@ class _CaixaPageState extends State<CaixaPage> {
 
   static String _prefsUltimoTrocoVendaId(String terminalId) =>
       'caixa_${terminalId}_ultimo_troco_venda_id_v1';
+
+  static const _prefsOrdenacaoUltimasVendas =
+      'caixa_ultimas_vendas_ordenacao_v2';
   final _sessaoRepo = CaixaSessaoRepository();
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   static const double _valorMinimoParcela = 5.0;
@@ -134,6 +141,7 @@ class _CaixaPageState extends State<CaixaPage> {
   PromocaoPrecoService? _promoPrecoCache;
   final _pesquisaProdutoConferenciaController = TextEditingController();
   final _pesquisaProdutoConferenciaFocus = FocusNode();
+  final _focusAtalhosCaixa = FocusNode(debugLabel: 'caixaAtalhosGlobais');
   final List<int> _produtosRecentesConferencia = [];
   GavetaEscPosService? _gavetaService;
   double? _valorRecebido;
@@ -148,6 +156,9 @@ class _CaixaPageState extends State<CaixaPage> {
   double _limiteDivergenciaSemSupervisor = 20;
   bool _exigirAutorizacaoSegundaViaCupom = true;
   bool _permitirVendaSemEstoque = false;
+  bool _mostrarDescontoCaixa = true;
+  double _maxDescontoPercentualPdv = 15;
+  final Map<int, double> _descontoPdvBasePorVendaId = {};
   int? _mistoPreparadoParaId;
   List<PagamentoOrcamentoLinha> _mistoLinhasModelo = [];
   final List<TextEditingController> _mistoValorControllers = [];
@@ -155,6 +166,7 @@ class _CaixaPageState extends State<CaixaPage> {
   String _terminalId = '';
   Map<String, CaixaSessao> _sessoesRede = const {};
   bool _pesquisaOrcamentoDialogAberta = false;
+  bool _documentoFiscalAutomaticoDisparado = false;
   bool _gestaoCaixaExpandida = false;
   int? _ultimoTrocoVendaId;
   int _ultimoTrocoNumeroOrcamento = 0;
@@ -163,6 +175,9 @@ class _CaixaPageState extends State<CaixaPage> {
   late final NfceReconciliacaoService _nfceReconciliacao;
   Timer? _timerReconciliacaoNfce;
   String? _deviceIdSync;
+  UltimasVendasFinalizadasOrdenacao _ordenacaoUltimasVendas =
+      UltimasVendasFinalizadasOrdenacao.padrao;
+  bool _correcaoFinalizadaEmDisparada = false;
 
   PromocaoPrecoService get _promoPreco => _promoPrecoCache ??= PromocaoPrecoService(
         PromocaoRepository(widget.produtoRepository.objectBox),
@@ -180,9 +195,15 @@ class _CaixaPageState extends State<CaixaPage> {
     _carregarLimiteDivergenciaCaixa();
     _carregarSessaoCaixa();
     _carregarOrcamentos();
+    unawaited(_carregarOrdenacaoUltimasVendas());
     unawaited(_carregarDeviceIdSync());
     unawaited(_reconciliarNfcePendentes(mostrarFeedback: false));
     _iniciarPollReconciliacaoNfce();
+    HardwareKeyboard.instance.addHandler(_handlerTeclasHardwareCaixa);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focusAtalhosCaixa.requestFocus();
+    });
   }
 
   Future<String> _obterDeviceIdSync() async {
@@ -232,7 +253,134 @@ class _CaixaPageState extends State<CaixaPage> {
       _exigirAutorizacaoSegundaViaCupom =
           config.exigirAutorizacaoSegundaViaCupom;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
+      _mostrarDescontoCaixa = config.mostrarCampoDescontoCaixa;
+      _maxDescontoPercentualPdv = config.maxDescontoPercentualPdv;
     });
+  }
+
+  bool _descontoCaixaDisponivel() =>
+      _mostrarDescontoCaixa && _maxDescontoPercentualPdv > 0.004;
+
+  String _textoAtalhoDescontoCaixa() =>
+      _descontoCaixaDisponivel() ? 'F6 = desconto | ' : '';
+
+  void _garantirBaseDescontoPdv(Venda v) {
+    _descontoPdvBasePorVendaId.putIfAbsent(
+      v.id,
+      () => v.descontoImplicitoTotal,
+    );
+  }
+
+  double _descontoPdvOrcamentoExibicao(Venda v) {
+    _garantirBaseDescontoPdv(v);
+    return _descontoPdvBasePorVendaId[v.id] ?? v.descontoImplicitoTotal;
+  }
+
+  double _descontoCaixaAplicado(Venda v) {
+    _garantirBaseDescontoPdv(v);
+    final base = _descontoPdvBasePorVendaId[v.id] ?? 0;
+    return (v.descontoImplicitoTotal - base).clamp(0, double.infinity);
+  }
+
+  double _subtotalBrutoOrcamento(Venda v) =>
+      v.somaSubtotalItens + (v.valorFrete > 0 ? v.valorFrete : 0);
+
+  double _valorMaximoDescontoAdicionalCaixa(Venda v) {
+    if (_maxDescontoPercentualPdv <= 0) return 0;
+    final tetoTotal =
+        _subtotalBrutoOrcamento(v) * _maxDescontoPercentualPdv / 100;
+    final ja = v.descontoImplicitoTotal;
+    return (tetoTotal - ja).clamp(0, v.total).toDouble();
+  }
+
+  Future<UsuarioSistema> _usuarioLogadoCaixa() async {
+    final lista = await _usuarioRepository.listarTodos();
+    for (final u in lista) {
+      if (u.login == widget.usuarioAtual) return u;
+    }
+    return UsuarioSistema(
+      id: '0',
+      nome: widget.usuarioAtual,
+      login: widget.usuarioAtual,
+      senha: '',
+    );
+  }
+
+  Future<void> _abrirDescontoCaixa() async {
+    if (!_descontoCaixaDisponivel()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Desconto no caixa desativado nas configuracoes da empresa.',
+          ),
+        ),
+      );
+      return;
+    }
+    final v = _selecionado;
+    if (v == null) return;
+    if (_etapaCaixa != CaixaEtapa.conferencia &&
+        _etapaCaixa != CaixaEtapa.cobranca) {
+      return;
+    }
+
+    final maxAdicional = _valorMaximoDescontoAdicionalCaixa(v);
+
+    final pedido = await mostrarDialogoDescontoCaixa(
+      context,
+      totalAtual: v.total,
+      descontoPdv: _descontoPdvOrcamentoExibicao(v),
+      descontoCaixaAtual: _descontoCaixaAplicado(v),
+      maximoAdicionalReais: maxAdicional,
+      maximoPercentual: _maxDescontoPercentualPdv,
+      formatarMoeda: _formatarMoeda,
+    );
+    if (pedido == null || !mounted) return;
+
+    var valor = pedido.valorReais;
+    if (valor > maxAdicional + 0.009) {
+      final usuario = await _usuarioLogadoCaixa();
+      if (!mounted) return;
+      final autorizado = await solicitarAutorizacaoDescontoAcimaTetoPdv(
+        context,
+        _usuarioRepository,
+        usuarioLogado: usuario,
+        maximoPermitidoReais: maxAdicional,
+        descontoSolicitadoReais: valor,
+        formatarMoeda: _formatarMoeda,
+      );
+      if (autorizado == null || !mounted) return;
+    }
+
+    valor = valor.clamp(0, v.total).toDouble();
+    if (valor <= 0.009) return;
+
+    try {
+      widget.vendaRepository.aplicarDescontoNoOrcamento(v.id, valor);
+      await _registrarAuditoriaCaixa(
+        'desconto_caixa',
+        detalhes: {
+          'vendaId': v.id,
+          'numeroOrcamento': v.numeroOrcamento,
+          'descontoReais': valor,
+          'totalAnterior': v.total,
+          'totalNovo': v.total - valor,
+        },
+      );
+      if (!mounted) return;
+      _carregarOrcamentos();
+      if (_etapaCaixa == CaixaEtapa.cobranca) {
+        _sincronizarRecebidoPdVComOrcamento();
+        _focarEntradaPrincipalCaixa();
+      }
+      CaixaFeedback.sucesso(
+        context,
+        'Desconto de ${_formatarMoeda(valor)} aplicado.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(context, 'Nao foi possivel aplicar desconto: $e');
+    }
   }
 
   /// Limpa selecao e campos apos finalizar venda — caixa pronto para o proximo orcamento.
@@ -243,14 +391,17 @@ class _CaixaPageState extends State<CaixaPage> {
       _selecionado = null;
       _posVenda = null;
       _posVendaProcessando = false;
+      _documentoFiscalAutomaticoDisparado = false;
       _etapaCaixa = CaixaEtapa.fila;
       _valorRecebidoController.clear();
       _valorRecebido = null;
       _valorRecebidoFocusNode.unfocus();
     });
+    _focarAtalhosCaixaSeFila();
   }
 
   void _selecionarOrcamentoParaConferencia(Venda venda) {
+    _garantirBaseDescontoPdv(venda);
     setState(() {
       _selecionado = venda;
       _etapaCaixa = CaixaEtapa.conferencia;
@@ -268,10 +419,15 @@ class _CaixaPageState extends State<CaixaPage> {
       _valorRecebido = null;
       _valorRecebidoFocusNode.unfocus();
     });
+    _focarAtalhosCaixaSeFila();
   }
 
   void _irParaCobranca() {
     if (_selecionado == null) return;
+    if (_caixaPrecisaValorRecebidoDinheiro(_selecionado!)) {
+      _valorRecebidoController.clear();
+      _valorRecebido = null;
+    }
     setState(() => _etapaCaixa = CaixaEtapa.cobranca);
     _focarEntradaPrincipalCaixa();
   }
@@ -349,6 +505,61 @@ class _CaixaPageState extends State<CaixaPage> {
   bool _atalhoCaixaAtivo() {
     if (!mounted || _pesquisaOrcamentoDialogAberta) return false;
     return ModalRoute.of(context)?.isCurrent ?? false;
+  }
+
+  /// F1-F5 no Windows: Shortcuts so disparam com foco na arvore do Caixa
+  /// (menu lateral ou lista sem foco bloqueava). Handler global corrige isso.
+  bool _handlerTeclasHardwareCaixa(KeyEvent event) {
+    if (!mounted || event is! KeyDownEvent) return false;
+    if (!_atalhoCaixaAtivo()) return false;
+
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.f1) {
+      unawaited(_abrirPesquisaOrcamento());
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f2) {
+      unawaited(_abrirSegundaViaCupom());
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f3) {
+      if (_caixaAberto) {
+        unawaited(_abrirReceberFiado());
+      }
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f4) {
+      if (_selecionado != null &&
+          (_etapaCaixa == CaixaEtapa.conferencia ||
+              _etapaCaixa == CaixaEtapa.cobranca)) {
+        _vincularClienteAgora();
+      }
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f5) {
+      if (_etapaCaixa == CaixaEtapa.conferencia && _selecionado != null) {
+        unawaited(_abrirConsultaProdutoConferencia());
+      }
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f6) {
+      if (_selecionado != null &&
+          (_etapaCaixa == CaixaEtapa.conferencia ||
+              _etapaCaixa == CaixaEtapa.cobranca)) {
+        unawaited(_abrirDescontoCaixa());
+      }
+      return true;
+    }
+    return false;
+  }
+
+  void _focarAtalhosCaixaSeFila() {
+    if (!mounted || _etapaCaixa != CaixaEtapa.fila) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _etapaCaixa != CaixaEtapa.fila) return;
+      if (_campoTextoComFoco()) return;
+      _focusAtalhosCaixa.requestFocus();
+    });
   }
 
   Future<void> _abrirPesquisaOrcamento() async {
@@ -1994,7 +2205,7 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
-  double _descontoAplicado(Venda venda) => 0;
+  double _descontoAplicado(Venda venda) => _descontoCaixaAplicado(venda);
 
   double _totalComDesconto(Venda venda) => venda.total;
 
@@ -2700,7 +2911,8 @@ class _CaixaPageState extends State<CaixaPage> {
     return v.formaPagamento == 'dinheiro';
   }
 
-  /// Preenche valor recebido com a parte em dinheiro ja definida no PDV (apos desconto).
+  /// Pagamento misto: mantem valores do PDV no painel misto.
+  /// Dinheiro puro: campo "Valor recebido" vazio para o operador digitar.
   void _sincronizarRecebidoPdVComOrcamento() {
     final v = _selecionado;
     if (v == null) return;
@@ -2720,19 +2932,13 @@ class _CaixaPageState extends State<CaixaPage> {
       }
       return;
     }
-    final tv = _totalComDesconto(v);
-    final parte = _parteDinheiroNaFinalizacao(v, tv);
-    if (parte > 0.001) {
-      final texto = parte.toStringAsFixed(2).replaceAll('.', ',');
-      _valorRecebidoController.value = TextEditingValue(
-        text: texto,
-        selection: TextSelection.collapsed(offset: texto.length),
-      );
-      _valorRecebido = parte;
-    } else {
+    if (v.formaPagamento == 'dinheiro') {
       _valorRecebidoController.clear();
       _valorRecebido = null;
+      return;
     }
+    _valorRecebidoController.clear();
+    _valorRecebido = null;
   }
 
   String _textoDetalheLinhasPagamento(List<PagamentoOrcamentoLinha> linhas) {
@@ -3166,10 +3372,69 @@ class _CaixaPageState extends State<CaixaPage> {
         _valorRecebido = null;
         _disposeMistoEdicao();
       });
+      _agendarDocumentoFiscalAutomatico();
     } catch (e) {
       if (!mounted) return;
       CaixaFeedback.erro(context, 'Nao foi possivel finalizar: $e');
     }
+  }
+
+  /// Dinheiro/fiado -> cupom interno; PIX/cartao -> NFC-e.
+  String? _acaoFiscalAutomaticaPorPagamento(Venda venda) {
+    switch (venda.formaPagamento) {
+      case 'dinheiro':
+      case 'fiado':
+        return 'cupom';
+      case 'pix':
+      case 'cartao_credito':
+      case 'cartao_debito':
+      case 'transferencia':
+        return 'nfce';
+      case 'misto':
+        return _acaoFiscalAutomaticaPagamentoMisto(venda);
+      default:
+        return 'nfce';
+    }
+  }
+
+  String? _acaoFiscalAutomaticaPagamentoMisto(Venda venda) {
+    final linhas = PagamentoOrcamentoCodec.decode(venda.pagamentosJson);
+    if (linhas.isEmpty) return null;
+    const eletronicos = {'pix', 'cartao_credito', 'cartao_debito'};
+    if (linhas.any((l) => eletronicos.contains(l.meio))) {
+      return 'nfce';
+    }
+    if (linhas.any((l) => l.meio == 'fiado' || l.meio == 'dinheiro')) {
+      return 'cupom';
+    }
+    return 'cupom';
+  }
+
+  void _agendarDocumentoFiscalAutomatico() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_dispararDocumentoFiscalAutomatico());
+    });
+  }
+
+  Future<void> _dispararDocumentoFiscalAutomatico() async {
+    if (!mounted ||
+        _posVendaProcessando ||
+        _documentoFiscalAutomaticoDisparado) {
+      return;
+    }
+    if (_etapaCaixa != CaixaEtapa.fiscal || _posVenda == null) return;
+
+    final venda = _vendaPosCaixaAtualizada() ?? _posVenda!.venda;
+    final acao = _acaoFiscalAutomaticaPorPagamento(venda);
+    if (acao == null) return;
+
+    if (_documentoFiscalCaixaJaAtendido(venda, acao)) {
+      await _encerrarPosVendaFiscal();
+      return;
+    }
+
+    _documentoFiscalAutomaticoDisparado = true;
+    await _executarAcaoPosVendaFiscal(acao);
   }
 
   GavetaEscPosService get _gaveta =>
@@ -3254,36 +3519,52 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   bool _vendaComDocumentoPosCaixaObrigatorio(Venda venda) {
-    return VendaDocumentoPosCaixa.registrado(
-      venda,
-      temNfe55Autorizada:
-          widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id) != null,
-    );
+    return VendaDocumentoPosCaixa.podeEncerrarEtapaFiscal(venda);
   }
 
-  Future<bool> _mostrarBloqueioDocumentoPosCaixa() async {
+  bool _documentoFiscalCaixaJaAtendido(Venda venda, String acao) {
+    switch (acao) {
+      case 'nfce':
+        return venda.nfceEmitida || venda.nfceProcessandoPendenteFocus;
+      case 'cupom':
+        return venda.cupomNaoFiscalEmitidoEm != null;
+      default:
+        return false;
+    }
+  }
+
+  Future<void> _mostrarErroBaixaEstoqueAnomala(Venda venda) async {
     final r = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        icon: Icon(Icons.receipt_long_outlined, color: Colors.orange.shade800),
-        title: const Text('Documento obrigatorio'),
-        content: const Text(
-          'Esta venda foi paga, mas ainda nao tem registro fiscal.\n\n'
-          'Escolha uma opcao antes de concluir:\n'
-          '· Tecla 2 — Cupom nao fiscal (cupom interno)\n'
-          '· Tecla 3 — Emitir NFC-e\n'
-          '· Tecla 4 — Emitir NF-e modelo 55',
+        icon: Icon(Icons.warning_amber_rounded, color: Colors.orange.shade800),
+        title: const Text('Baixa de estoque pendente'),
+        content: Text(
+          'A venda foi finalizada, mas a baixa de estoque de '
+          '${VendaDocumentoRotuloHelper.rotuloControleInterno(venda)} nao concluiu.\n\n'
+          'Isso nao deveria ocorrer apos a finalizacao normal. Tente reprocessar. '
+          'Se persistir, verifique produtos desvinculados nos itens.',
         ),
         actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Depois'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Entendi'),
+            child: const Text('Tentar novamente'),
           ),
         ],
       ),
     );
-    return r == true;
+    if (!mounted || r != true) return;
+    final ok = await _reprocessarBaixaEstoquePosFiscal(venda.id);
+    if (!mounted || !ok) return;
+    final atualizado = widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    if (_vendaComDocumentoPosCaixaObrigatorio(atualizado)) {
+      await _encerrarPosVendaFiscal();
+    }
   }
 
   Future<void> _encerrarPosVendaFiscal() async {
@@ -3293,14 +3574,11 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
     final venda = _vendaPosCaixaAtualizada() ?? sessao.venda;
-    if (!_vendaComDocumentoPosCaixaObrigatorio(venda)) {
-      if (!mounted) return;
-      await _mostrarBloqueioDocumentoPosCaixa();
+    if (!VendaDocumentoPosCaixa.estoqueOperacionalOk(venda)) {
+      await _mostrarErroBaixaEstoqueAnomala(venda);
       return;
     }
     await _alertarVendaSemNfe55SeNecessario(venda);
-    if (!mounted) return;
-    await _alertarVendaSemBaixaEstoqueSeNecessario(venda);
     if (!mounted) return;
     _prepararCaixaPosProximaVenda();
   }
@@ -3328,7 +3606,7 @@ class _CaixaPageState extends State<CaixaPage> {
           ),
         );
         if (!mounted) return;
-        await _tentarCupomInternoPosNfe55Autorizada(vendaId);
+        await _tentarBaixaEstoquePosNfe55Autorizada(vendaId);
         _atualizarPosVendaDoRepositorio();
       } finally {
         if (mounted) setState(() => _posVendaProcessando = false);
@@ -3356,6 +3634,11 @@ class _CaixaPageState extends State<CaixaPage> {
         if (!mounted) return;
         await _emitirNfceParaVenda(venda);
         _atualizarPosVendaDoRepositorio();
+        if (!mounted) return;
+        final vendaAtual = _vendaPosCaixaAtualizada() ?? venda;
+        if (_vendaComDocumentoPosCaixaObrigatorio(vendaAtual)) {
+          await _encerrarPosVendaFiscal();
+        }
       } finally {
         if (mounted) setState(() => _posVendaProcessando = false);
       }
@@ -3371,27 +3654,34 @@ class _CaixaPageState extends State<CaixaPage> {
           troco: sessao.troco,
         );
         _atualizarPosVendaDoRepositorio();
+        if (!mounted) return;
+        final vendaAtual = _vendaPosCaixaAtualizada() ?? venda;
+        if (_vendaComDocumentoPosCaixaObrigatorio(vendaAtual)) {
+          await _encerrarPosVendaFiscal();
+        }
       } finally {
         if (mounted) setState(() => _posVendaProcessando = false);
       }
     }
   }
 
-  Future<void> _registrarCupomInternoPosFiscalAutorizada(
+  Future<bool> _reprocessarBaixaEstoquePosFiscal(
     int vendaId, {
     String origem = 'nota fiscal',
   }) async {
     try {
-      widget.vendaRepository.registrarCupomInternoPosAutorizacaoFiscal(
+      widget.vendaRepository.reprocessarBaixaEstoqueDocumentoVenda(
         vendaId,
         permitirVendaSemEstoque: _permitirVendaSemEstoque,
       );
+      return true;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       CaixaFeedback.erro(
         context,
-        'Nota autorizada, mas falhou ao registrar cupom interno (estoque): $e',
+        'Falha ao reprocessar baixa de estoque: $e',
       );
+      return false;
     }
   }
 
@@ -3411,12 +3701,12 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
-  Future<void> _tentarCupomInternoPosNfe55Autorizada(int vendaId) async {
+  Future<void> _tentarBaixaEstoquePosNfe55Autorizada(int vendaId) async {
     final v = widget.vendaRepository.obterPorId(vendaId);
     if (v == null || v.estoqueBaixadoCupom) return;
     final nfe = widget.vendaRepository.obterNfe55AutorizadaPorVenda(vendaId);
     if (nfe == null) return;
-    await _registrarCupomInternoPosFiscalAutorizada(
+    await _reprocessarBaixaEstoquePosFiscal(
       vendaId,
       origem: 'NF-e 55',
     );
@@ -3427,7 +3717,7 @@ class _CaixaPageState extends State<CaixaPage> {
         SnackBar(
           content: Text(
             'NF-e ${nfe.numero.isNotEmpty ? nfe.numero : nfe.referenciaFocus} '
-            'vinculada — cupom interno e estoque atualizados.',
+            'vinculada — estoque atualizado.',
           ),
           backgroundColor: Colors.green.shade700,
         ),
@@ -3452,7 +3742,7 @@ class _CaixaPageState extends State<CaixaPage> {
           'A venda para ${cliente?.nomeRazao ?? 'cliente CNPJ'} foi finalizada '
           'sem NF-e autorizada.\n\n'
           'Construtoras e revendas costumam exigir NF-e 55. '
-          'Abra Notas Fiscais → NF-e de saida ou use a tecla 4 neste dialogo.',
+          'Abra o menu Notas fiscais → NF-e de saida.',
         ),
         actions: [
           TextButton(
@@ -3478,37 +3768,6 @@ class _CaixaPageState extends State<CaixaPage> {
           usuarioLogado: usuarioNfe,
           vendaIdInicial: venda.id,
         ),
-      ),
-    );
-  }
-
-  Future<void> _alertarVendaSemBaixaEstoqueSeNecessario(Venda venda) async {
-    final v = widget.vendaRepository.obterPorId(venda.id) ?? venda;
-    if (v.estoqueBaixadoCupom) return;
-    final temNfce = v.nfceEmitida;
-    final nfe55 =
-        widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null;
-    if (temNfce || nfe55) return;
-
-    await showDialog<void>(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) => AlertDialog(
-        icon: Icon(Icons.warning_amber_rounded, color: Colors.orange.shade800),
-        title: const Text('Venda sem baixa de estoque'),
-        content: const Text(
-          'Esta venda foi finalizada sem cupom interno e sem nota fiscal '
-          'autorizada.\n\n'
-          'Itens retirados agora na loja ainda nao tiveram baixa no estoque. '
-          'Emita NFC-e/NF-e autorizada ou use o cupom nao fiscal (2) / '
-          'listagem de vendas.',
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Entendi'),
-          ),
-        ],
       ),
     );
   }
@@ -3927,10 +4186,12 @@ class _CaixaPageState extends State<CaixaPage> {
                 content: Text(
                   r.mensagem.isEmpty
                       ? 'A nota foi enviada a Focus NFe e aguarda retorno da '
-                          'SEFAZ. Consulte novamente pelo painel Focus ou '
-                          'reemita quando o servico normalizar.\n\n'
+                          'SEFAZ. O estoque ja foi baixado na finalizacao da venda.\n\n'
+                          'A reconciliacao automatica tenta autorizar ao reabrir o caixa.\n\n'
                           'Referencia: ${r.referencia}'
-                      : '${r.mensagem}\n\nReferencia: ${r.referencia}',
+                      : '${r.mensagem}\n\n'
+                          'Estoque ja baixado na finalizacao.\n\n'
+                          'Referencia: ${r.referencia}',
                   textAlign: TextAlign.center,
                 ),
                 actionsAlignment: MainAxisAlignment.center,
@@ -3948,7 +4209,7 @@ class _CaixaPageState extends State<CaixaPage> {
           final r = dialogResult.resultado!;
           final vSalvar = dialogResult.vendaAtual ?? vendaAtual;
           try {
-            widget.vendaRepository.registrarNfceEmitida(
+            widget.vendaRepository.registrarNfceEmitidaComBaixaEstoque(
               vendaId: vSalvar.id,
               chaveAcesso: r.chaveNfe,
               numero: r.numero,
@@ -3961,16 +4222,15 @@ class _CaixaPageState extends State<CaixaPage> {
                       ? r.statusFocus
                       : 'autorizado'),
               urlXmlCancelamento: r.urlXmlCancelamento,
-            );
-            await _registrarCupomInternoPosFiscalAutorizada(
-              vSalvar.id,
-              origem: 'NFC-e',
+              permitirVendaSemEstoque: _permitirVendaSemEstoque,
             );
           } catch (e) {
             messenger.showSnackBar(
               SnackBar(
                 content: Text(
-                  'NFC-e autorizada, mas falhou ao salvar na venda: $e',
+                  'NFC-e autorizada, mas falhou ao gravar os dados fiscais: $e\n\n'
+                  'O estoque ja foi baixado na finalizacao. Tente reconsultar ou '
+                  'registre a nota pelo painel fiscal.',
                 ),
                 backgroundColor: Colors.orange.shade800,
                 duration: const Duration(seconds: 10),
@@ -3982,8 +4242,27 @@ class _CaixaPageState extends State<CaixaPage> {
           final vendaComNfce =
               widget.vendaRepository.obterPorId(vSalvar.id) ?? vSalvar;
           _atualizarListaUltimasVendasFinalizadasCaixa();
+          final resumoPos = VendaDocumentoRotuloHelper.resumoPosAutorizacaoFiscal(
+            vendaComNfce,
+          );
+          final fluxoAutomatico = _documentoFiscalAutomaticoDisparado;
+          final estoqueOk = vendaComNfce.estoqueBaixadoCupom;
+
+          if (fluxoAutomatico && estoqueOk) {
+            if (!mounted) return;
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text('$resumoPos — proxima venda.'),
+                backgroundColor: Colors.green.shade700,
+                duration: const Duration(seconds: 5),
+              ),
+            );
+            return;
+          }
+
           final detalhe = <String>[
-            if (r.numero.isNotEmpty) 'Numero: ${r.numero}',
+            resumoPos,
+            if (r.numero.isNotEmpty) 'Numero NFC-e: ${r.numero}',
             if (r.serie.isNotEmpty) 'Serie: ${r.serie}',
             if (r.chaveNfe.isNotEmpty) 'Chave: ${r.chaveNfe}',
             if (r.protocolo.isNotEmpty) 'Protocolo: ${r.protocolo}',
@@ -4037,20 +4316,16 @@ class _CaixaPageState extends State<CaixaPage> {
             },
           );
           if (!mounted) return;
-          final vPosCupom =
-              widget.vendaRepository.obterPorId(vSalvar.id) ?? vendaComNfce;
-          final msgCupom = vPosCupom.estoqueBaixadoCupom
-              ? ' Cupom interno vinculado — estoque dos itens retirados agora atualizado.'
-              : '';
           messenger.showSnackBar(
             SnackBar(
               content: Text(
-                temDanfe
-                    ? 'NFC-e ${r.numero.isNotEmpty ? r.numero : ''} autorizada.$msgCupom '
-                        'Use Imprimir cupom NFC-e (uma via).'
-                    : 'NFC-e autorizada.$msgCupom',
+                estoqueOk
+                    ? '$resumoPos. Imprima o cupom NFC-e se desejar.'
+                    : '$resumoPos — verifique a baixa de estoque.',
               ),
-              backgroundColor: Colors.green.shade700,
+              backgroundColor: estoqueOk
+                  ? Colors.green.shade700
+                  : Colors.orange.shade800,
               duration: const Duration(seconds: 8),
             ),
           );
@@ -4065,9 +4340,44 @@ class _CaixaPageState extends State<CaixaPage> {
 
   static const int _ultimasVendasFinalizadasLimite = 20;
 
+  Future<void> _carregarOrdenacaoUltimasVendas() async {
+    final prefs = await SharedPreferences.getInstance();
+    final salva = UltimasVendasFinalizadasOrdenacao.fromChave(
+      prefs.getString(_prefsOrdenacaoUltimasVendas),
+    );
+    if (!mounted) return;
+    setState(() {
+      _ordenacaoUltimasVendas =
+          salva ?? UltimasVendasFinalizadasOrdenacao.padrao;
+    });
+    unawaited(_garantirCorrecaoFinalizadaEmLegado());
+  }
+
+  Future<void> _garantirCorrecaoFinalizadaEmLegado() async {
+    if (_correcaoFinalizadaEmDisparada) return;
+    _correcaoFinalizadaEmDisparada = true;
+    final prefs = await SharedPreferences.getInstance();
+    const chave = 'caixa_finalizada_em_corrigido_v2';
+    if (prefs.getBool(chave) != true) {
+      widget.vendaRepository.corrigirFinalizadaEmCopiadaDaDataOrcamento();
+      await prefs.setBool(chave, true);
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _alterarOrdenacaoUltimasVendas(
+    UltimasVendasFinalizadasOrdenacao ordenacao,
+  ) async {
+    if (_ordenacaoUltimasVendas == ordenacao) return;
+    setState(() => _ordenacaoUltimasVendas = ordenacao);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsOrdenacaoUltimasVendas, ordenacao.chave);
+  }
+
   List<Venda> _ultimasVendasFinalizadasParaCaixa() {
     return widget.vendaRepository.listarUltimasVendasFinalizadas(
       limit: _ultimasVendasFinalizadasLimite,
+      ordenacao: _ordenacaoUltimasVendas,
     );
   }
 
@@ -4279,18 +4589,6 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _emitirSegundaViaCupomParaVenda(Venda v) async {
-    if (!v.estoqueBaixadoCupom) {
-      try {
-        widget.vendaRepository.registrarBaixaEstoqueCupomNaoFiscal(
-          v.id,
-          permitirVendaSemEstoque: _permitirVendaSemEstoque,
-        );
-      } catch (e) {
-        if (!mounted) return;
-        CaixaFeedback.erro(context, 'Nao foi possivel baixar estoque: $e');
-        return;
-      }
-    }
     final vendaAtualizada = widget.vendaRepository.obterPorId(v.id) ?? v;
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
@@ -4443,102 +4741,18 @@ class _CaixaPageState extends State<CaixaPage> {
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (context) {
-        final semantic = Theme.of(context).extension<AppSemanticColors>();
-        return AlertDialog(
-          title: Text('Venda $numeroOrcamento finalizada'),
-          content: SizedBox(
-            width: 520,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Pagamento: $textoPagamento'),
-                if (textoPlanoFiado != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    'Plano fiado (definido no PDV):',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  Text(textoPlanoFiado),
-                ],
-                const SizedBox(height: 4),
-                Text('Itens: $quantidadeItens'),
-                const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: semantic?.successBg ?? Colors.green.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: semantic?.successBorder ?? Colors.green.shade200,
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      const Text('TROCO'),
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatarMoeda(troco),
-                        style: Theme.of(context).textTheme.headlineMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color:
-                                  semantic?.successFg ?? Colors.green.shade800,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    if (descontoAplicado > 0) ...[
-                      Expanded(
-                        child: _buildResumoCard(
-                          context,
-                          label: 'DESCONTO',
-                          valor: '- ${_formatarMoeda(descontoAplicado)}',
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    Expanded(
-                      child: _buildResumoCard(
-                        context,
-                        label: 'TOTAL DA VENDA',
-                        valor: _formatarMoeda(totalVenda),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildResumoCard(
-                        context,
-                        label: 'TOTAL RECEBIDO',
-                        valor: _formatarMoeda(totalRecebido),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Voltar e nao finalizar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Concluir venda'),
-            ),
-          ],
-        );
-      },
+      builder: (context) => _DialogoResumoFechamentoVenda(
+        numeroOrcamento: numeroOrcamento,
+        textoPagamento: textoPagamento,
+        textoPlanoFiado: textoPlanoFiado,
+        totalVenda: totalVenda,
+        descontoAplicado: descontoAplicado,
+        totalRecebido: totalRecebido,
+        troco: troco,
+        quantidadeItens: quantidadeItens,
+        formatarMoeda: _formatarMoeda,
+        buildResumoCard: _buildResumoCard,
+      ),
     );
   }
 
@@ -5064,6 +5278,7 @@ class _CaixaPageState extends State<CaixaPage> {
     required Venda selecionado,
     required double totalComDesconto,
     required double descontoPdvOrcamento,
+    required double descontoCaixa,
   }) {
     return CaixaRodapeTotalDestaque(
       tituloSecaoPagamento: 'Pagamento previsto',
@@ -5071,6 +5286,10 @@ class _CaixaPageState extends State<CaixaPage> {
       totalFormatado: _formatarMoeda(totalComDesconto),
       formatarMoeda: _formatarMoeda,
       descontoPdvOrcamento: descontoPdvOrcamento,
+      descontoCaixa: descontoCaixa,
+      onDesconto: _descontoCaixaDisponivel()
+          ? () => unawaited(_abrirDescontoCaixa())
+          : null,
     );
   }
 
@@ -5080,6 +5299,7 @@ class _CaixaPageState extends State<CaixaPage> {
     required Cliente? clienteSelecionado,
     required double totalComDesconto,
     required double descontoPdvOrcamento,
+    required double descontoCaixa,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5133,13 +5353,15 @@ class _CaixaPageState extends State<CaixaPage> {
                     selecionado: selecionado,
                     totalComDesconto: totalComDesconto,
                     descontoPdvOrcamento: descontoPdvOrcamento,
+                    descontoCaixa: descontoCaixa,
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Atalhos: Enter = cobranca | F5 = buscar produto | Esc = inicio | F4 = cliente | +/- = qtd',
+                        'Atalhos: ${_textoAtalhoDescontoCaixa()}Enter = cobranca | '
+                        'F5 = buscar produto | Esc = inicio | F4 = cliente | +/- = qtd',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -5224,6 +5446,7 @@ class _CaixaPageState extends State<CaixaPage> {
     required Cliente? clienteSelecionado,
     required double totalComDesconto,
     required double descontoPdvOrcamento,
+    required double descontoCaixa,
     required List<PagamentoOrcamentoLinha> linhasMistoCaixa,
     required double valorTotalRecebidoCard,
     required double troco,
@@ -5245,8 +5468,12 @@ class _CaixaPageState extends State<CaixaPage> {
             rotuloPagamento: _rotuloPagamentoCabecalho(selecionado),
             totalComDesconto: totalComDesconto,
             descontoPdvOrcamento: descontoPdvOrcamento,
+            descontoCaixa: descontoCaixa,
             formatarMoeda: _formatarMoeda,
             onAlterarForma: () => _alterarFormaPagamentoCaixa(selecionado),
+            onDesconto: _descontoCaixaDisponivel()
+                ? () => unawaited(_abrirDescontoCaixa())
+                : null,
             recebimento: _buildCorpoRecebimentoCobranca(
               context,
               selecionado: selecionado,
@@ -5260,7 +5487,7 @@ class _CaixaPageState extends State<CaixaPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Atalhos: Enter = confirmar | Esc = conferencia',
+                  'Atalhos: ${_textoAtalhoDescontoCaixa()}Enter = confirmar | Esc = conferencia',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 8),
@@ -5311,9 +5538,10 @@ class _CaixaPageState extends State<CaixaPage> {
             jaTemNfe55: jaTemNfe55,
             podeConcluir: podeConcluir,
             processando: _posVendaProcessando,
+            acaoFiscalSugerida:
+                _acaoFiscalAutomaticaPorPagamento(vendaAtual),
             onCupomNaoFiscal: () => unawaited(_executarAcaoPosVendaFiscal('cupom')),
             onEmitirNfce: () => unawaited(_executarAcaoPosVendaFiscal('nfce')),
-            onEmitirNfe55: () => unawaited(_executarAcaoPosVendaFiscal('nfe55')),
             onConcluir: () => unawaited(_encerrarPosVendaFiscal()),
             onCancelarVenda: () =>
                 unawaited(_cancelarVendaNoCaixa(venda)),
@@ -5341,7 +5569,8 @@ class _CaixaPageState extends State<CaixaPage> {
     final totalComDesconto = _totalComDesconto(selecionado);
     final freteSelecionado = selecionado.valorFrete;
     final subtotalProdutos = selecionado.somaSubtotalItens;
-    final descontoPdvOrcamento = selecionado.descontoImplicitoTotal;
+    final descontoPdvOrcamento = _descontoPdvOrcamentoExibicao(selecionado);
+    final descontoCaixa = descontoSelecionado;
     final parteDinheiroResumo =
         _parteDinheiroNaFinalizacao(selecionado, totalComDesconto);
     final linhasMistoCaixa = selecionado.formaPagamento == 'misto'
@@ -5376,6 +5605,7 @@ class _CaixaPageState extends State<CaixaPage> {
           clienteSelecionado: clienteSelecionado,
           totalComDesconto: totalComDesconto,
           descontoPdvOrcamento: descontoPdvOrcamento,
+          descontoCaixa: descontoCaixa,
           linhasMistoCaixa: linhasMistoCaixa,
           valorTotalRecebidoCard: valorTotalRecebidoCard,
           troco: troco,
@@ -5388,15 +5618,18 @@ class _CaixaPageState extends State<CaixaPage> {
           clienteSelecionado: clienteSelecionado,
           totalComDesconto: totalComDesconto,
           descontoPdvOrcamento: descontoPdvOrcamento,
+          descontoCaixa: descontoCaixa,
         );
     }
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwareCaixa);
     _timerReconciliacaoNfce?.cancel();
     _valorRecebidoController.dispose();
     _valorRecebidoFocusNode.dispose();
+    _focusAtalhosCaixa.dispose();
     _itensScrollController.dispose();
     _pesquisaProdutoConferenciaController.dispose();
     _pesquisaProdutoConferenciaFocus.dispose();
@@ -5467,6 +5700,7 @@ class _CaixaPageState extends State<CaixaPage> {
           ),
         },
         child: Focus(
+          focusNode: _focusAtalhosCaixa,
           autofocus: true,
           onKeyEvent: _tratarTeclaCaixaWizard,
           child: Scaffold(
@@ -5766,18 +6000,70 @@ class _CaixaPageState extends State<CaixaPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Ultimas vendas finalizadas',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Toque na venda para segunda via, NFC-e, cancelar ou DANFE.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.outline,
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Ultimas vendas finalizadas',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Toque na venda para segunda via, NFC-e, cancelar ou DANFE.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.outline,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      PopupMenuButton<UltimasVendasFinalizadasOrdenacao>(
+                        tooltip:
+                            'Ordenar: ${_ordenacaoUltimasVendas.rotuloCurto}',
+                        icon: Icon(
+                          Icons.swap_vert,
+                          size: 20,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                        onSelected: (ordenacao) => unawaited(
+                          _alterarOrdenacaoUltimasVendas(ordenacao),
+                        ),
+                        itemBuilder: (context) => [
+                          for (final o
+                              in UltimasVendasFinalizadasOrdenacao.values)
+                            PopupMenuItem(
+                              value: o,
+                              height: 40,
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 22,
+                                    child: o == _ordenacaoUltimasVendas
+                                        ? Icon(
+                                            Icons.check,
+                                            size: 18,
+                                            color: theme.colorScheme.primary,
+                                          )
+                                        : null,
+                                  ),
+                                  Expanded(child: Text(o.rotuloMenu)),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   Expanded(
@@ -5798,6 +6084,7 @@ class _CaixaPageState extends State<CaixaPage> {
       clienteDaVenda: _clienteDaVenda,
       formatarMoeda: _formatarMoeda,
       onVendaTap: _abrirAcoesVendaFinalizada,
+      ordenacao: _ordenacaoUltimasVendas,
     );
   }
 
@@ -5829,6 +6116,12 @@ class _CaixaPageState extends State<CaixaPage> {
           context,
           label: compacto ? 'DESC. PDV' : 'DESCONTO PDV',
           valor: '- ${_formatarMoeda(descontoPdvOrcamento)}',
+        ),
+      if (descontoSelecionado > 0.001)
+        _buildResumoCard(
+          context,
+          label: compacto ? 'DESC. CX' : 'DESCONTO CAIXA',
+          valor: '- ${_formatarMoeda(descontoSelecionado)}',
         ),
       _buildResumoCard(
         context,
@@ -6313,6 +6606,170 @@ class _EmissaoNfceDialogResult {
         kind: _EmissaoNfceDialogKind.erroGenerico,
         mensagem: mensagem,
       );
+}
+
+/// Resumo de troco apos cobranca — foco no botao Concluir venda.
+class _DialogoResumoFechamentoVenda extends StatefulWidget {
+  const _DialogoResumoFechamentoVenda({
+    required this.numeroOrcamento,
+    required this.textoPagamento,
+    required this.textoPlanoFiado,
+    required this.totalVenda,
+    required this.descontoAplicado,
+    required this.totalRecebido,
+    required this.troco,
+    required this.quantidadeItens,
+    required this.formatarMoeda,
+    required this.buildResumoCard,
+  });
+
+  final int numeroOrcamento;
+  final String textoPagamento;
+  final String? textoPlanoFiado;
+  final double totalVenda;
+  final double descontoAplicado;
+  final double totalRecebido;
+  final double troco;
+  final int quantidadeItens;
+  final String Function(double valor) formatarMoeda;
+  final Widget Function(BuildContext context, {required String label, required String valor})
+      buildResumoCard;
+
+  @override
+  State<_DialogoResumoFechamentoVenda> createState() =>
+      _DialogoResumoFechamentoVendaState();
+}
+
+class _DialogoResumoFechamentoVendaState
+    extends State<_DialogoResumoFechamentoVenda> {
+  final _focusConcluir = FocusNode(debugLabel: 'caixaConcluirVenda');
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focusConcluir.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusConcluir.dispose();
+    super.dispose();
+  }
+
+  void _concluir() {
+    if (!mounted) return;
+    Navigator.pop(context, true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = Theme.of(context).extension<AppSemanticColors>();
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.enter): _concluir,
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): _concluir,
+      },
+      child: AlertDialog(
+        title: Text('Venda ${widget.numeroOrcamento} finalizada'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Pagamento: ${widget.textoPagamento}'),
+              if (widget.textoPlanoFiado != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Plano fiado (definido no PDV):',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                Text(widget.textoPlanoFiado!),
+              ],
+              const SizedBox(height: 4),
+              Text('Itens: ${widget.quantidadeItens}'),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: semantic?.successBg ?? Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: semantic?.successBorder ?? Colors.green.shade200,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const Text('TROCO'),
+                    const SizedBox(height: 4),
+                    Text(
+                      widget.formatarMoeda(widget.troco),
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color:
+                                semantic?.successFg ?? Colors.green.shade800,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (widget.descontoAplicado > 0) ...[
+                    Expanded(
+                      child: widget.buildResumoCard(
+                        context,
+                        label: 'DESCONTO',
+                        valor: '- ${widget.formatarMoeda(widget.descontoAplicado)}',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  Expanded(
+                    child: widget.buildResumoCard(
+                      context,
+                      label: 'TOTAL DA VENDA',
+                      valor: widget.formatarMoeda(widget.totalVenda),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: widget.buildResumoCard(
+                      context,
+                      label: 'TOTAL RECEBIDO',
+                      valor: widget.formatarMoeda(widget.totalRecebido),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Voltar e nao finalizar'),
+          ),
+          Focus(
+            focusNode: _focusConcluir,
+            child: FilledButton(
+              onPressed: _concluir,
+              child: const Text('Concluir venda (Enter)'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Dialogo de pesquisa com ciclo de vida proprio (evita dispose antecipado do campo).

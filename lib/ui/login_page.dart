@@ -5,6 +5,7 @@ import '../domain/auditoria_catalogo.dart';
 import '../model/usuario_sistema.dart';
 import '../services/auditoria_registrar.dart';
 import 'layout/app_layout.dart';
+import 'widgets/app_rodape_status_bar.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
@@ -207,6 +208,7 @@ class _LoginPageState extends State<LoginPage> {
     );
 
     return Scaffold(
+      bottomNavigationBar: const AppRodapeStatusBar(),
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(

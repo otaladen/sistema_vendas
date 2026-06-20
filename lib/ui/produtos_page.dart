@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../main.dart';
+import 'theme/app_semantic_helper.dart';
 import '../data/produto_repository.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/produto_unidade_exibicao.dart';
@@ -540,15 +540,14 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
 
     final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(_erpGap8),
       decoration: BoxDecoration(
         color: critico
-            ? (semantic?.errorBg ?? theme.colorScheme.errorContainer)
-                .withValues(alpha: 0.35)
+            ? semantic.errorBg.withValues(alpha: 0.35)
             : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
@@ -593,7 +592,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                     ? 'Alerta: estoque no ou abaixo do limiar de seguranca.'
                     : 'Alerta: estoque no ou abaixo do ponto de pedido.',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: semantic?.errorFg ?? theme.colorScheme.error,
+                  color: semantic.errorFg,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -1325,7 +1324,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   void _definirStatus(String mensagem, {required bool erro}) {
-    final semantic = Theme.of(context).extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
     setState(() {
       _status = mensagem;
       _statusEhErro = erro;
@@ -1334,8 +1333,8 @@ class _ProdutosPageState extends State<ProdutosPage>
       SnackBar(
         content: Text(mensagem),
         backgroundColor: erro
-            ? semantic?.errorFg ?? Colors.red.shade700
-            : semantic?.successFg ?? Colors.green.shade700,
+            ? semantic.errorFg
+            : semantic.successFg,
       ),
     );
   }
@@ -1627,14 +1626,14 @@ class _ProdutosPageState extends State<ProdutosPage>
         _fotoFoiRemovida = false;
       });
 
-      final semantic = Theme.of(context).extension<AppSemanticColors>();
+      final semantic = context.semanticColors;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(
             'Foto carregada na pre-visualizacao. Salve o produto para gravar.',
           ),
           duration: const Duration(seconds: 4),
-          backgroundColor: semantic?.successFg ?? Colors.green.shade700,
+          backgroundColor: semantic.successFg,
         ),
       );
     } on BuscaImagemConfigException catch (e) {
@@ -2335,7 +2334,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       }
 
       if (!mounted) return;
-      final semantic = Theme.of(context).extension<AppSemanticColors>();
+      final semantic = context.semanticColors;
       final extras = <String>[
         if (codigoBarras.isNotEmpty) 'cod. barras',
         if (model.ncm.length == 8) 'NCM',
@@ -2350,7 +2349,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                 : 'Produto padronizado pela IA (${extras.join(', ')})!',
           ),
           duration: const Duration(seconds: 4),
-          backgroundColor: semantic?.successFg ?? Colors.green.shade700,
+          backgroundColor: semantic.successFg,
         ),
       );
     } on GeminiConfigException catch (e) {
@@ -2370,13 +2369,13 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   void _snackbarBrasilApi(String mensagem, {bool erro = false}) {
     if (!mounted) return;
-    final semantic = Theme.of(context).extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(mensagem),
         duration: Duration(seconds: erro ? 8 : 5),
         backgroundColor: erro
-            ? semantic?.errorFg ?? Colors.red.shade700
+            ? semantic.errorFg
             : null,
       ),
     );
@@ -4116,7 +4115,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     final markup1 = _markupCalculadoPorController(_preco1Controller);
     final markup2 = _markupCalculadoPorController(_preco2Controller);
     final markup3 = _markupCalculadoPorController(_preco3Controller);
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cadastro de Produtos'),
@@ -5873,29 +5872,23 @@ class _ProdutosPageState extends State<ProdutosPage>
                                         ),
                                         decoration: BoxDecoration(
                                           color: _statusEhErro
-                                              ? semantic?.errorBg ??
-                                                    const Color(0xFFFDECEC)
-                                              : semantic?.successBg ??
-                                                    const Color(0xFFEAF8EF),
+                                              ? semantic.errorBg
+                                              : semantic.successBg,
                                           borderRadius: BorderRadius.circular(
                                             10,
                                           ),
                                           border: Border.all(
                                             color: _statusEhErro
-                                                ? semantic?.errorBorder ??
-                                                      const Color(0xFFF1A3A3)
-                                                : semantic?.successBorder ??
-                                                      const Color(0xFF8FD1A8),
+                                                ? semantic.errorBorder
+                                                : semantic.successBorder,
                                           ),
                                         ),
                                         child: Text(
                                           _status,
                                           style: TextStyle(
                                             color: _statusEhErro
-                                                ? semantic?.errorFg ??
-                                                      const Color(0xFF9B1C1C)
-                                                : semantic?.successFg ??
-                                                      const Color(0xFF166534),
+                                                ? semantic.errorFg
+                                                : semantic.successFg,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),

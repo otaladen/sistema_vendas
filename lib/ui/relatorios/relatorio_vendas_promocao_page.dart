@@ -193,7 +193,7 @@ class _RelatorioVendasPromocaoPageState extends State<RelatorioVendasPromocaoPag
                       avatar: Icon(
                         Icons.local_offer,
                         size: 18,
-                        color: corRelVendasPromocao,
+                        color: corRelVendasPromocao(context),
                       ),
                       label: Text(
                         '${e.key}: ${_nfInt.format(e.value.qtd)} un · '
@@ -225,7 +225,7 @@ class _RelatorioVendasPromocaoPageState extends State<RelatorioVendasPromocaoPag
                           dense: true,
                           leading: Icon(
                             Icons.local_offer_outlined,
-                            color: corRelVendasPromocao,
+                            color: corRelVendasPromocao(context),
                           ),
                           title: Text(
                             l.produtoNome,

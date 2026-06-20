@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../data/models/conta_pagar.dart';
 import '../../../data/titulo_receber_repository.dart';
-import '../../../main.dart';
+import '../../../ui/theme/app_semantic_helper.dart';
 import '../../../objectbox.g.dart';
 
 /// Totais de [valorParcela] por faixa de vencimento (contas **PENDENTE** ou **ATRASADO**).
@@ -159,12 +159,14 @@ class GraficoVencimentosContasPagar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
 
-    final corAtraso = semantic?.errorFg ?? const Color(0xFF9B1C1C);
+    final corAtraso = semantic.errorFg;
     final cor7 = scheme.primary;
     final cor815 = scheme.primary.withValues(alpha: 0.72);
     final cor1630 = scheme.outline;
+    final corSaldo = scheme.tertiary;
+    final corSaldoBorda = scheme.tertiary.withValues(alpha: 0.85);
 
     final valores = [
       buckets.atrasadas,
@@ -263,12 +265,12 @@ class GraficoVencimentosContasPagar extends StatelessWidget {
                                     y: saldoLinha,
                                     dashArray: const [6, 4],
                                     strokeWidth: 2,
-                                    color: const Color(0xFF0D9488),
+                                    color: corSaldo,
                                     label: HorizontalLineLabel(
                                       show: true,
                                       alignment: Alignment.topRight,
                                       style: theme.textTheme.labelSmall?.copyWith(
-                                        color: const Color(0xFF0F766E),
+                                        color: corSaldoBorda,
                                         fontWeight: FontWeight.w700,
                                       ),
                                       labelResolver: (_) =>

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
@@ -73,33 +74,11 @@ Future<void> mostrarFluxoImpressaoCupomVenda(
   if (!context.mounted) return;
   final acao = await showDialog<String>(
     context: context,
-    builder: (context) {
-      return AlertDialog(
-        title: Text(title),
-        content: Text(content),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, 'fechar'),
-            child: const Text('Fechar'),
-          ),
-          OutlinedButton.icon(
-            onPressed: () => Navigator.pop(context, 'pdf'),
-            icon: const Icon(Icons.picture_as_pdf_outlined),
-            label: const Text('Mandar cupom em PDF'),
-          ),
-          OutlinedButton.icon(
-            onPressed: () => Navigator.pop(context, 'direto'),
-            icon: const Icon(Icons.print),
-            label: const Text('Impressao direta'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () => Navigator.pop(context, 'imprimir'),
-            icon: const Icon(Icons.print_outlined),
-            label: const Text('Imprimir cupom'),
-          ),
-        ],
-      );
-    },
+    barrierDismissible: false,
+    builder: (context) => _DialogoCupomVendaImpressao(
+      title: title,
+      content: content,
+    ),
   );
   if (!context.mounted || acao == null || acao == 'fechar') return;
   try {
@@ -149,6 +128,122 @@ Future<void> mostrarFluxoImpressaoCupomVenda(
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Nao foi possivel gerar/imprimir nota: $e')),
+    );
+  }
+}
+
+/// Cupom pos-venda: atalhos 1/Esc fechar · 2 PDF · 3 direta · 4/Enter imprimir.
+class _DialogoCupomVendaImpressao extends StatefulWidget {
+  const _DialogoCupomVendaImpressao({
+    required this.title,
+    required this.content,
+  });
+
+  final String title;
+  final String content;
+
+  @override
+  State<_DialogoCupomVendaImpressao> createState() =>
+      _DialogoCupomVendaImpressaoState();
+}
+
+class _DialogoCupomVendaImpressaoState extends State<_DialogoCupomVendaImpressao> {
+  final _focusImprimir = FocusNode(debugLabel: 'cupomVendaImprimir');
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focusImprimir.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusImprimir.dispose();
+    super.dispose();
+  }
+
+  void _fechar(String acao) {
+    if (!mounted) return;
+    Navigator.pop(context, acao);
+  }
+
+  KeyEventResult _atalhoTeclado(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.digit1 ||
+        key == LogicalKeyboardKey.numpad1) {
+      _fechar('fechar');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.digit2 ||
+        key == LogicalKeyboardKey.numpad2) {
+      _fechar('pdf');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.digit3 ||
+        key == LogicalKeyboardKey.numpad3) {
+      _fechar('direto');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.digit4 ||
+        key == LogicalKeyboardKey.numpad4 ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      _fechar('imprimir');
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _atalhoTeclado,
+      child: AlertDialog(
+        title: Text(widget.title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(widget.content),
+            const SizedBox(height: 10),
+            Text(
+              'Teclado: Esc ou 1 — fechar · 2 — PDF · 3 — impressao direta · '
+              '4 ou Enter — imprimir',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => _fechar('fechar'),
+            child: const Text('Fechar (Esc · 1)'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => _fechar('pdf'),
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            label: const Text('Mandar cupom em PDF (2)'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => _fechar('direto'),
+            icon: const Icon(Icons.print),
+            label: const Text('Impressao direta (3)'),
+          ),
+          Focus(
+            focusNode: _focusImprimir,
+            child: FilledButton.icon(
+              onPressed: () => _fechar('imprimir'),
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('Imprimir cupom (4 · Enter)'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

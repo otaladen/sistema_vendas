@@ -153,7 +153,8 @@ class _ConferenciaCargaConsolidadaListaState
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '$conferidos/${widget.linhas.length} conferidos (gravado · sincroniza na rede).',
+          '$conferidos/${widget.linhas.length} conferidos (gravado · sincroniza na rede). '
+          'Obrigatorio antes de marcar "Saiu".',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.w600,
               ),

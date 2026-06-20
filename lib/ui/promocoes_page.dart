@@ -11,9 +11,8 @@ import '../model/promocao.dart';
 import '../model/promocao_combo_item.dart';
 import '../model/promocao_item.dart';
 import '../services/promocao_etiqueta_pdf.dart';
+import 'theme/app_modulo_cores.dart';
 import 'widgets/produto_busca_input.dart';
-
-const Color _corPromocoes = Color(0xFFC62828);
 
 class PromocoesPage extends StatefulWidget {
   const PromocoesPage({
@@ -106,7 +105,9 @@ class _PromocoesPageState extends State<PromocoesPage> {
                   child: ListTile(
                     leading: Icon(
                       vigente ? Icons.local_offer : Icons.event_busy_outlined,
-                      color: vigente ? _corPromocoes : null,
+                      color: vigente
+                          ? AppModuloCores.modulo(context, AppModuloId.promocoes)
+                          : null,
                     ),
                     title: Text(p.nome),
                     subtitle: Text(
@@ -809,7 +810,7 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
               'total ${_fmt(totalLinha)} = paga $_pagueQtd x ${_fmt(precoBasePromo)}',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
-                color: _corPromocoes,
+                color: AppModuloCores.modulo(context, AppModuloId.promocoes),
               ),
             ),
             Text(
@@ -890,7 +891,10 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                           child: Text(
                             detalhePreco,
                             style: TextStyle(
-                              color: _corPromocoes,
+                              color: AppModuloCores.modulo(
+                                context,
+                                AppModuloId.promocoes,
+                              ),
                               fontWeight: FontWeight.w600,
                               fontSize: 13,
                             ),

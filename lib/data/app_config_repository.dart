@@ -24,7 +24,7 @@ class EmpresaConfig {
 
     /// Limite de desconto (%) sobre o subtotal de produtos no PDV ao enviar ao caixa (0 = desabilitado).
     this.maxDescontoPercentualPdv = 15,
-    this.permitirVendaSemEstoque = false,
+    this.permitirVendaSemEstoque = true,
     this.whatsappApiVersion = 'v20.0',
     this.whatsappPhoneNumberId = '',
     this.whatsappAccessToken = '',
@@ -316,7 +316,7 @@ class AppConfigRepository {
         if (v == null) return 15.0;
         return v.clamp(0.0, 100.0).toDouble();
       }(),
-      permitirVendaSemEstoque: prefs.getBool(_kPermitirVendaSemEstoque) ?? false,
+      permitirVendaSemEstoque: prefs.getBool(_kPermitirVendaSemEstoque) ?? true,
       whatsappApiVersion: prefs.getString(_kWhatsappApiVersion) ?? 'v20.0',
       whatsappPhoneNumberId: prefs.getString(_kWhatsappPhoneNumberId) ?? '',
       whatsappAccessToken: prefs.getString(_kWhatsappAccessToken) ?? '',

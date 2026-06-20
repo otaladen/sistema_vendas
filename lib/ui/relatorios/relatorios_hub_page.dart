@@ -14,7 +14,7 @@ import '../relatorio_fiados_page.dart';
 import '../widgets/hub_nav_button.dart';
 import '../widgets/relatorios/relatorio_hub_secao.dart';
 import 'relatorio_comissao_vendedores_page.dart';
-import 'relatorio_cores.dart';
+import '../theme/app_relatorio_cores.dart';
 import 'relatorio_curva_abc_page.dart';
 import 'relatorio_dashboard_executivo_page.dart';
 import 'relatorio_entregas_resumo_page.dart';
@@ -40,7 +40,7 @@ class _RelatorioHubItem {
     required this.categoriaTitulo,
     required this.categoriaIcone,
     required this.icon,
-    required this.cor,
+    required this.relatorioCor,
     required this.titulo,
     required this.subtitulo,
     required this.palavrasChave,
@@ -51,7 +51,7 @@ class _RelatorioHubItem {
   final String categoriaTitulo;
   final IconData categoriaIcone;
   final IconData icon;
-  final Color cor;
+  final AppRelatorioId relatorioCor;
   final String titulo;
   final String subtitulo;
   final List<String> palavrasChave;
@@ -121,7 +121,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Visao executiva',
         categoriaIcone: Icons.dashboard_outlined,
         icon: Icons.insights_outlined,
-        cor: corRelDashboard,
+        relatorioCor: AppRelatorioId.dashboard,
         titulo: 'Painel executivo',
         subtitulo:
             'KPIs do mes, comparativo e alertas (fiado, estoque, orcamentos, entregas).',
@@ -148,7 +148,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Visao executiva',
         categoriaIcone: Icons.dashboard_outlined,
         icon: Icons.pie_chart_outline,
-        cor: corRelAbc,
+        relatorioCor: AppRelatorioId.abc,
         titulo: 'Curva ABC',
         subtitulo:
             'Classificacao A/B/C de clientes e produtos por faturamento no periodo.',
@@ -176,7 +176,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Financeiro e credito',
         categoriaIcone: Icons.account_balance_wallet_outlined,
         icon: Icons.receipt_long_outlined,
-        cor: corRelFiados,
+        relatorioCor: AppRelatorioId.fiados,
         titulo: 'Fiados em aberto',
         subtitulo:
             'Titulos a receber por cliente, vencimento e saldo; filtro de vencidos.',
@@ -204,7 +204,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Financeiro e credito',
         categoriaIcone: Icons.account_balance_wallet_outlined,
         icon: Icons.payments_outlined,
-        cor: const Color(0xFF5D4037),
+        relatorioCor: AppRelatorioId.contasPagar,
         titulo: 'Contas a pagar',
         subtitulo:
             'Parcelas a fornecedores (NF-e e manual); exportar PDF/CSV.',
@@ -230,7 +230,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Vendas e faturamento',
         categoriaIcone: Icons.point_of_sale_outlined,
         icon: Icons.date_range_outlined,
-        cor: corRelVendasPeriodo,
+        relatorioCor: AppRelatorioId.vendasPeriodo,
         titulo: 'Vendas por periodo',
         subtitulo:
             'Lista vendas finalizadas no intervalo; inclui ajuste por devolucoes/trocas.',
@@ -257,7 +257,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Vendas e faturamento',
         categoriaIcone: Icons.point_of_sale_outlined,
         icon: Icons.schedule_outlined,
-        cor: corRelHorariosPico,
+        relatorioCor: AppRelatorioId.horariosPico,
         titulo: 'Horarios de pico',
         subtitulo:
             'Horario com maior numero de vendas no periodo — ideal para escala e operacao.',
@@ -282,7 +282,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Vendas e faturamento',
         categoriaIcone: Icons.point_of_sale_outlined,
         icon: Icons.flag_outlined,
-        cor: corRelMetasVendedor,
+        relatorioCor: AppRelatorioId.metasVendedor,
         titulo: 'Metas de vendedores — hoje',
         subtitulo:
             'Acompanhamento diario da meta mensal: realizado, percentual e falta.',
@@ -310,7 +310,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Vendas e faturamento',
         categoriaIcone: Icons.point_of_sale_outlined,
         icon: Icons.description_outlined,
-        cor: corRelOrcamentos,
+        relatorioCor: AppRelatorioId.orcamentos,
         titulo: 'Orcamentos em aberto',
         subtitulo:
             'Orcamentos ainda nao finalizados no caixa — valor em pipeline.',
@@ -336,7 +336,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Vendas e faturamento',
         categoriaIcone: Icons.point_of_sale_outlined,
         icon: Icons.person_search_outlined,
-        cor: corRelVendasVendedor,
+        relatorioCor: AppRelatorioId.vendasVendedor,
         titulo: 'Vendas por vendedor',
         subtitulo:
             'Total por representante no periodo, com ajuste de devolucoes/trocas.',
@@ -361,7 +361,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Vendas e faturamento',
         categoriaIcone: Icons.point_of_sale_outlined,
         icon: Icons.payments_outlined,
-        cor: corRelComissao,
+        relatorioCor: AppRelatorioId.comissao,
         titulo: 'Comissao de vendedores',
         subtitulo:
             'Percentual do cadastro; base em venda ou lucro (ajustado por devolucoes).',
@@ -386,7 +386,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Clientes',
         categoriaIcone: Icons.groups_outlined,
         icon: Icons.leaderboard_outlined,
-        cor: corRelTopClientes,
+        relatorioCor: AppRelatorioId.topClientes,
         titulo: 'Clientes que mais compraram',
         subtitulo:
             'Ranking por valor no periodo (vendas menos devolucoes/trocas).',
@@ -412,7 +412,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Produtos e estoque',
         categoriaIcone: Icons.inventory_2_outlined,
         icon: Icons.trending_up_outlined,
-        cor: corRelProdutosRanking,
+        relatorioCor: AppRelatorioId.produtosRanking,
         titulo: 'Produtos mais vendidos',
         subtitulo:
             'Quantidade e valor no periodo, ajustado por devolucoes/trocas.',
@@ -438,7 +438,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Produtos e estoque',
         categoriaIcone: Icons.inventory_2_outlined,
         icon: Icons.warning_amber_outlined,
-        cor: corRelEstoqueMin,
+        relatorioCor: AppRelatorioId.estoqueMin,
         titulo: 'Estoque abaixo do minimo',
         subtitulo:
             'Produtos com saldo menor que a quantidade minima cadastrada.',
@@ -463,7 +463,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Produtos e estoque',
         categoriaIcone: Icons.inventory_2_outlined,
         icon: Icons.unarchive_outlined,
-        cor: corRelSaidasProduto,
+        relatorioCor: AppRelatorioId.saidasProduto,
         titulo: 'Saidas por produto',
         subtitulo:
             'Vendas finalizadas do item no periodo: quantidade, lucro e cliente.',
@@ -488,7 +488,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Produtos e estoque',
         categoriaIcone: Icons.inventory_2_outlined,
         icon: Icons.local_offer_outlined,
-        cor: corRelVendasPromocao,
+        relatorioCor: AppRelatorioId.vendasPromocao,
         titulo: 'Vendas em promocao',
         subtitulo:
             'Itens vendidos com campanha promocional no periodo: campanha, lucro e cliente.',
@@ -517,7 +517,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Produtos e estoque',
         categoriaIcone: Icons.inventory_2_outlined,
         icon: Icons.table_chart_outlined,
-        cor: corRelTabelaPrecos,
+        relatorioCor: AppRelatorioId.tabelaPrecos,
         titulo: 'Tabela de precos',
         subtitulo:
             'PDF alfabetico com estoque; precos de venda ou com custo; somente ativos.',
@@ -542,7 +542,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Operacional',
         categoriaIcone: Icons.settings_suggest_outlined,
         icon: Icons.fact_check_outlined,
-        cor: corRelLogSistema,
+        relatorioCor: AppRelatorioId.logSistema,
         titulo: 'Log do sistema',
         subtitulo:
             'Auditoria central, mensagens WhatsApp e historico de entregas.',
@@ -575,7 +575,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Operacional',
         categoriaIcone: Icons.settings_suggest_outlined,
         icon: Icons.lock_clock_outlined,
-        cor: corRelFechamentoHist,
+        relatorioCor: AppRelatorioId.fechamentoHist,
         titulo: 'Historico de fechamento',
         subtitulo:
             'Fechamentos de caixa gravados na auditoria local; detalhe e exportacao.',
@@ -598,7 +598,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaTitulo: 'Operacional',
         categoriaIcone: Icons.settings_suggest_outlined,
         icon: Icons.local_shipping_outlined,
-        cor: corRelEntregasResumo,
+        relatorioCor: AppRelatorioId.entregasResumo,
         titulo: 'Entregas — resumo',
         subtitulo:
             'Status, atrasadas e agenda de hoje; atalho para romaneios no modulo Entregas.',
@@ -674,7 +674,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
   Widget _buildCard(_RelatorioHubItem item) {
     return HubNavButton(
       icon: item.icon,
-      corDestaque: item.cor,
+      corDestaque: AppRelatorioCores.cor(context, item.relatorioCor),
       titulo: item.titulo,
       subtitulo: item.subtitulo,
       onTap: item.onTap,

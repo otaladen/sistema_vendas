@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/quantidade_venda_util.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/pagamento_orcamento.dart';
@@ -202,7 +203,7 @@ class CupomNaoFiscalVendaPdf {
 
   static String _numeroNfceExibicao(Venda venda) {
     if (venda.nfceNumero.trim().isNotEmpty) return venda.nfceNumero.trim();
-    return '${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}';
+    return '${VendaDocumentoRotuloHelper.numeroControleInterno(venda)}';
   }
 
   static String _serieNfceExibicao(Venda venda) {
@@ -271,7 +272,7 @@ class CupomNaoFiscalVendaPdf {
   }
 
   static String _numeroCupomInterno(Venda venda) =>
-      '${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}';
+      '${VendaDocumentoRotuloHelper.numeroControleInterno(venda)}';
 
   static String _emissaoLegadoComSegundos(String dataHora) {
     final t = dataHora.trim();
@@ -390,9 +391,15 @@ class CupomNaoFiscalVendaPdf {
                 .format(venda.nfceEmitidaEm!.toLocal())
             : _emissaoLegadoComSegundos(dataLinhaPrincipal),
         via: segundaVia ? 'SEGUNDA VIA' : 'VIA CONSUMIDOR',
-        linhaExtra: segundaVia && dataReimpressao != null
-            ? 'Reimpressao: $dataReimpressao'
-            : null,
+        linhaExtra: () {
+          final extras = <String>[
+            VendaDocumentoRotuloHelper.rotuloControleInterno(venda),
+          ];
+          if (segundaVia && dataReimpressao != null) {
+            extras.add('Reimpressao: $dataReimpressao');
+          }
+          return extras.join('\n');
+        }(),
       ),
       CupomPdfLayout.blocoConsultaChaveAcessoLegadoLdv(
         layout: layout,
@@ -440,8 +447,11 @@ class CupomNaoFiscalVendaPdf {
         subtitulo: segundaVia ? 'SEGUNDA VIA' : null,
       ),
       CupomPdfLayout.tituloSecao(
-        'VENDA ${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}',
+        VendaDocumentoRotuloHelper.rotuloControleInterno(venda).toUpperCase(),
         layout,
+      ),
+      ...VendaDocumentoRotuloHelper.linhasReferenciasFiscaisNoCupom(venda).map(
+        (linha) => CupomPdfLayout.textoCorpo(linha, layout),
       ),
       CupomPdfLayout.textoCorpo(
         segundaVia
@@ -621,7 +631,6 @@ class CupomNaoFiscalVendaPdf {
             config.logoPath,
           ).readAsBytes().catchError((_) => Uint8List(0))
         : Uint8List(0);
-    final doc = pw.Document();
     final agora = DateTime.now();
     final dataLinhaPrincipal = DateFormat('dd/MM/yyyy HH:mm').format(
       (dataCabecalhoVenda ?? agora).toLocal(),
@@ -632,6 +641,7 @@ class CupomNaoFiscalVendaPdf {
     final modelo = empresaModeloPdfDeString(config.modeloPdf);
     final comLogo = logoBytes.isNotEmpty;
     final layout = config.layoutImpressao.cupom;
+    final doc = CupomPdfLayout.criarDocumento(layout);
 
     late final int linhasTexto;
     late final int qtdItens;

@@ -5,7 +5,8 @@ import '../../data/objectbox.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/financeiro_resumo.dart';
 import '../../domain/tesouraria_semanal.dart';
-import '../../main.dart';
+import '../theme/app_modulo_cores.dart';
+import '../theme/app_semantic_helper.dart';
 import '../../model/caixa_sessao.dart';
 import '../../data/caixa_sessao_repository.dart';
 
@@ -67,7 +68,8 @@ class _TesourariaSemanalPageState extends State<TesourariaSemanalPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
+    final scheme = theme.colorScheme;
     final snap = _snapshot;
     final resumo = _resumo;
 
@@ -96,9 +98,8 @@ class _TesourariaSemanalPageState extends State<TesourariaSemanalPage> {
                       titulo: 'Realizado (ultimos 7 dias)',
                       entradas: snap.totalEntradasRealizadas,
                       saidas: snap.totalSaidasRealizadas,
-                      corEntrada:
-                          semantic?.successFg ?? const Color(0xFF166534),
-                      corSaida: semantic?.errorFg ?? const Color(0xFF9B1C1C),
+                      corEntrada: semantic.successFg,
+                      corSaida: semantic.errorFg,
                     ),
                     const SizedBox(height: 12),
                     _buildBlocoResumo(
@@ -106,8 +107,8 @@ class _TesourariaSemanalPageState extends State<TesourariaSemanalPage> {
                       titulo: 'Previsto (proximos 7 dias)',
                       entradas: snap.totalEntradasPrevistas,
                       saidas: snap.totalSaidasPrevistas,
-                      corEntrada: theme.colorScheme.primary,
-                      corSaida: const Color(0xFFAD1457),
+                      corEntrada: scheme.primary,
+                      corSaida: AppModuloCores.harmonizar(scheme, 320),
                     ),
                     const SizedBox(height: 20),
                     Text(

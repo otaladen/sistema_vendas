@@ -4,6 +4,7 @@ import '../../domain/dashboard_alertas.dart';
 import '../../domain/filtro_contas_pagar.dart';
 import '../../domain/filtro_contas_receber.dart';
 import '../../domain/main_menu_destino.dart';
+import '../theme/app_modulo_cores.dart';
 
 /// Faixa de alertas acionaveis no dashboard.
 class DashboardAlertasStrip extends StatelessWidget {
@@ -43,22 +44,23 @@ class _AlertaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cor = alerta.corTema(context);
     return Material(
-      color: alerta.cor.withValues(alpha: 0.1),
+      color: cor.withValues(alpha: 0.1),
       borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            border: Border.all(color: alerta.cor.withValues(alpha: 0.35)),
+            border: Border.all(color: cor.withValues(alpha: 0.35)),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               children: [
-                Icon(alerta.icone, color: alerta.cor, size: 24),
+                Icon(alerta.icone, color: cor, size: 24),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -68,7 +70,7 @@ class _AlertaCard extends StatelessWidget {
                         alerta.titulo,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.w700,
-                              color: alerta.cor,
+                              color: cor,
                             ),
                       ),
                       const SizedBox(height: 2),
@@ -81,7 +83,7 @@ class _AlertaCard extends StatelessWidget {
                 ),
                 Icon(
                   Icons.chevron_right_rounded,
-                  color: alerta.cor.withValues(alpha: 0.7),
+                  color: cor.withValues(alpha: 0.7),
                 ),
               ],
             ),

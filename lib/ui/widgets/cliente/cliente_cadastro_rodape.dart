@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../theme/app_semantic_helper.dart';
+
 /// Rodape fixo de acoes do cadastro de clientes.
 class ClienteCadastroRodape extends StatelessWidget {
   const ClienteCadastroRodape({
@@ -19,11 +21,10 @@ class ClienteCadastroRodape extends StatelessWidget {
   final VoidCallback? onExcluir;
   final bool podeExcluir;
 
-  static const Color _corSalvar = Color(0xFF2E7D32);
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final corSalvar = context.semanticColors.successFg;
     return Material(
       elevation: 4,
       color: theme.colorScheme.surface,
@@ -37,7 +38,7 @@ class ClienteCadastroRodape extends StatelessWidget {
             FilledButton.icon(
               onPressed: onSalvar,
               style: FilledButton.styleFrom(
-                backgroundColor: _corSalvar,
+                backgroundColor: corSalvar,
                 foregroundColor: Colors.white,
               ),
               icon: const Icon(Icons.save_outlined, size: 20),

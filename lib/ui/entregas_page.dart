@@ -359,21 +359,8 @@ class _EntregasPageState extends State<EntregasPage>
         _vendaCarretoReservaNativaSemMigracao(v);
   }
 
-  int _quantidadeExibicaoEntrega(Venda v, ItemVenda item) {
-    if (!EntregaVendaHelper.itemEntraNaCargaEntrega(v, item)) {
-      return 0;
-    }
-    if (_vendaUsaItensCarretoMigrado(v)) {
-      return item.quantidadeParaExibicaoEntrega(true);
-    }
-    if (_vendaCarretoReservaNativaSemMigracao(v)) {
-      return item.quantidadeParaExibicaoEntrega(
-        false,
-        carretoReservaNativoAntesSaida: true,
-      );
-    }
-    return item.quantidadeParaExibicaoEntrega(false);
-  }
+  int _quantidadeExibicaoEntrega(Venda v, ItemVenda item) =>
+      EntregaVendaHelper.quantidadeRomaneioCarga(v, item);
 
   double _subtotalExibicaoEntrega(Venda v, ItemVenda item) {
     return _quantidadeExibicaoEntrega(v, item) * item.precoUnitario;

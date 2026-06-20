@@ -7,8 +7,7 @@ import '../../data/venda_repository.dart';
 import 'relatorio_comparativo.dart';
 import 'relatorio_entregas_helper.dart';
 import 'relatorio_periodo.dart';
-
-const Color _corPromoDashboard = Color(0xFFC62828);
+import '../theme/app_relatorio_cores.dart';
 
 class RelatorioDashboardExecutivoPage extends StatefulWidget {
   const RelatorioDashboardExecutivoPage({
@@ -95,7 +94,13 @@ class _RelatorioDashboardExecutivoPageState
           const SizedBox(height: 16),
           Card(
             child: ListTile(
-              leading: Icon(Icons.local_offer, color: _corPromoDashboard),
+              leading: Icon(
+                Icons.local_offer,
+                color: AppRelatorioCores.cor(
+                  context,
+                  AppRelatorioId.vendasPromocao,
+                ),
+              ),
               title: const Text(
                 'Vendas em promocao (mes)',
                 style: TextStyle(fontWeight: FontWeight.w600),

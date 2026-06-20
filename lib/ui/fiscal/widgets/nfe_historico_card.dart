@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../domain/venda_documento_rotulo_helper.dart';
 import '../../../data/nfe_saida_fiscal_store.dart';
 import '../../../domain/fiscal/nfe_carta_correcao_registro.dart';
 import '../../../domain/fiscal/nfe_historico_timeline.dart';
@@ -75,7 +76,11 @@ class NfeHistoricoCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
-            Text('Venda ${r.numeroOrcamento} · ${r.clienteNome}'),
+            Text(
+              '${VendaDocumentoRotuloHelper.rotuloControlePorNumero(r.numeroOrcamento)}'
+              '${r.numero.isNotEmpty ? ' · NF-e ${r.numero}' : ''} · '
+              '${r.clienteNome}',
+            ),
             if (r.numero.isNotEmpty)
               Text(
                 'NF-e nº ${r.numero}${r.serie.isNotEmpty ? ' · serie ${r.serie}' : ''}',

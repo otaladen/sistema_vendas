@@ -1,8 +1,5 @@
-import 'dart:async';
-
 import '../data/venda_repository.dart';
 import '../model/venda.dart';
-import '../domain/fiscal/nfce_xml_local_service.dart';
 import 'focus_nfe_service.dart';
 
 /// Reconsulta NFC-e pendente na Focus (processando / timeout no caixa).
@@ -11,12 +8,10 @@ class NfceReconciliacaoService {
     required VendaRepository vendaRepository,
     required FocusNfeService focusNfe,
   })  : _vendaRepository = vendaRepository,
-        _focusNfe = focusNfe,
-        _storePath = vendaRepository.objectBox.storeDirectoryPath;
+        _focusNfe = focusNfe;
 
   final VendaRepository _vendaRepository;
   final FocusNfeService _focusNfe;
-  final String _storePath;
 
   List<Venda> listarPendentes({int limite = 80}) =>
       _vendaRepository.listarComNfcePendenteFocus(limite: limite);
@@ -63,35 +58,36 @@ class NfceReconciliacaoService {
     FocusNfeEmissaoResultado resultado,
   ) {
     if (resultado.autorizada) {
-      _vendaRepository.registrarNfceEmitida(
-        vendaId: venda.id,
-        chaveAcesso: resultado.chaveNfe,
-        numero: resultado.numero,
-        serie: resultado.serie,
-        protocolo: resultado.protocolo,
-        urlDanfe: resultado.urlDanfe,
-        urlXml: resultado.urlXml,
-        statusFocus: resultado.cancelada
-            ? 'cancelado'
-            : (resultado.statusFocus.isNotEmpty
-                ? resultado.statusFocus
-                : 'autorizado'),
-        urlXmlCancelamento: resultado.urlXmlCancelamento,
-      );
-      if (resultado.urlXml.trim().isNotEmpty &&
-          resultado.chaveNfe.trim().length >= 40) {
-        unawaited(
-          NfceXmlLocalService.arquivarOuEnfileirar(
-            storeDirectoryPath: _storePath,
-            chaveAcesso: resultado.chaveNfe,
-            urlXml: resultado.urlXml,
-          ),
+      try {
+        _vendaRepository.registrarNfceEmitidaComBaixaEstoque(
+          vendaId: venda.id,
+          chaveAcesso: resultado.chaveNfe,
+          numero: resultado.numero,
+          serie: resultado.serie,
+          protocolo: resultado.protocolo,
+          urlDanfe: resultado.urlDanfe,
+          urlXml: resultado.urlXml,
+          statusFocus: resultado.cancelada
+              ? 'cancelado'
+              : (resultado.statusFocus.isNotEmpty
+                  ? resultado.statusFocus
+                  : 'autorizado'),
+          urlXmlCancelamento: resultado.urlXmlCancelamento,
+        );
+      } catch (e) {
+        return NfceReconciliacaoResultado(
+          tipo: NfceReconciliacaoTipo.erro,
+          mensagem:
+              'NFC-e autorizada na Focus, mas falhou ao salvar venda/estoque: $e',
+          vendaId: venda.id,
+          cupomInternoRegistrado: false,
         );
       }
       return NfceReconciliacaoResultado(
         tipo: NfceReconciliacaoTipo.autorizada,
         mensagem: resultado.mensagem,
         vendaId: venda.id,
+        cupomInternoRegistrado: true,
       );
     }
     if (resultado.processando) {
@@ -138,11 +134,13 @@ class NfceReconciliacaoResultado {
     required this.tipo,
     this.mensagem = '',
     this.vendaId = 0,
+    this.cupomInternoRegistrado = true,
   });
 
   final NfceReconciliacaoTipo tipo;
   final String mensagem;
   final int vendaId;
+  final bool cupomInternoRegistrado;
 }
 
 class NfceReconciliacaoLote {

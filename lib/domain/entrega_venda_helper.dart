@@ -68,6 +68,16 @@ class EntregaVendaHelper {
     );
   }
 
+  /// Itens "leva agora" com quantidade ainda nao baixada no cupom interno.
+  static bool vendaTemItensRetiradaImediataPendenteCupom(Venda venda) {
+    return venda.itens.any(
+      (i) =>
+          tipoEfetivoItem(i) == tipoRetirada &&
+          i.quantidade > 0 &&
+          i.quantidadeJaRetirada < i.quantidade,
+    );
+  }
+
   /// Orcamentos antigos (tipo so no cabecalho): replica no item antes de finalizar.
   static void aplicarLegadoTipoUnicoNosItensSeNecessario(Venda venda) {
     if (venda.tipoEntrega == tipoMisto || venda.tipoEntrega == tipoRetirada) {
@@ -164,6 +174,36 @@ class EntregaVendaHelper {
     if (venda.cancelada || venda.status != 'finalizada') return false;
     if (!venda.carretoReservaAteSaida || venda.cargaSaiu) return false;
     return venda.itens.any((i) => i.quantidadeAindaNoCarretoAntesSaida > 0);
+  }
+
+  static bool vendaCarretoReservaNativaSemMigracao(Venda venda) {
+    return venda.carretoReservaAteSaida &&
+        vendaTemItensCarreto(venda) &&
+        !vendaTemItensMigradosRetiradaParaCarreto(venda);
+  }
+
+  /// Mesma regra da tela Entregas / romaneio consolidado.
+  static int quantidadeRomaneioCarga(Venda venda, ItemVenda item) {
+    if (!itemEntraNaCargaEntrega(venda, item)) return 0;
+    if (vendaTemItensMigradosRetiradaParaCarreto(venda)) {
+      return item.quantidadeParaExibicaoEntrega(true);
+    }
+    if (vendaCarretoReservaNativaSemMigracao(venda)) {
+      return item.quantidadeParaExibicaoEntrega(
+        false,
+        carretoReservaNativoAntesSaida: true,
+      );
+    }
+    return item.quantidadeParaExibicaoEntrega(false);
+  }
+
+  /// Escopo persistido da conferencia (`g:grupo` ou `s:vendaId`).
+  static String escopoConferenciaCargaRomaneio(List<Venda> vendas) {
+    if (vendas.isEmpty) return '';
+    if (vendas.length >= 2 && vendas.first.grupoEntregaFreteId > 0) {
+      return 'g:${vendas.first.grupoEntregaFreteId}';
+    }
+    return 's:${vendas.first.id}';
   }
 
   /// Itens que entram na carga / tela Entregas (carreto ou migrado retirada futura).

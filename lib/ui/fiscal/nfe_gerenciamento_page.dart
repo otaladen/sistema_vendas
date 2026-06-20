@@ -35,6 +35,7 @@ import '../../domain/fiscal/nfe_pre_emissao_service.dart';
 import '../../domain/fiscal/nfe_referencia_resolver.dart';
 import '../../domain/fiscal/nfe_registro_focus_merge.dart';
 import '../../domain/fiscal/nfe_venda_sync.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/fiscal/nfe_whatsapp_helper.dart';
 import '../../model/usuario_sistema.dart';
 import '../../services/auditoria_registrar.dart';
@@ -663,7 +664,6 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     );
 
     if (resultado.autorizada) {
-      _registrarCupomInternoVenda(venda.id);
       await _dialogoSucessoNfe(registro);
     } else if (resultado.processando) {
       await _dialogoProcessandoNfe(registro);
@@ -693,13 +693,10 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       detalhes: {'vendaId': reg.vendaId},
     );
     if (atualizado.autorizada) {
-      _registrarCupomInternoVenda(reg.vendaId);
+      _snack('NF-e autorizada na reconsulta. Estoque atualizado.');
+    } else {
+      _snack('Status atualizado: ${atualizado.rotuloStatus}');
     }
-    _snack(
-      atualizado.autorizada
-          ? 'NF-e autorizada na reconsulta. Cupom interno vinculado.'
-          : 'Status atualizado: ${atualizado.rotuloStatus}',
-    );
   }
 
   Future<void> _reconsultarTodasProcessando() async {
@@ -719,7 +716,6 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       _persistirRegistro(atualizado);
       if (atualizado.autorizada) {
         ok++;
-        _registrarCupomInternoVenda(reg.vendaId);
       }
     }
     if (!mounted) return;
@@ -854,7 +850,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   Future<void> _emitirVendaPendencia(Venda venda) async {
     _tabs.animateTo(0);
     _buscaVendaController.text =
-        '${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}';
+        '${VendaDocumentoRotuloHelper.numeroControleInterno(venda)}';
     await _buscarVendaPorNumero();
   }
 
@@ -1040,17 +1036,6 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         dataFim: range.end,
       );
     });
-  }
-
-  void _registrarCupomInternoVenda(int vendaId) {
-    try {
-      widget.vendaRepository.registrarCupomInternoPosAutorizacaoFiscal(vendaId);
-    } catch (e) {
-      _snack(
-        'Nota autorizada, mas falhou ao registrar cupom interno (estoque): $e',
-        erro: true,
-      );
-    }
   }
 
   Future<void> _abrirUrl(String url) async {
@@ -1247,16 +1232,18 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
                           itemCount: _vendasElegiveis.length,
                           itemBuilder: (ctx, i) {
                             final v = _vendasElegiveis[i];
-                            final num = v.numeroOrcamento > 0
-                                ? v.numeroOrcamento
-                                : v.id;
                             final sel = _vendaSelecionada?.id == v.id;
                             final temNfe = _vendaComNfeAutorizada[v.id] == true;
                             return ListTile(
                               selected: sel,
                               title: Row(
                                 children: [
-                                  Expanded(child: Text('Venda $num')),
+                                  Expanded(
+                                    child: Text(
+                                      VendaDocumentoRotuloHelper
+                                          .rotuloTituloLista(v),
+                                    ),
+                                  ),
                                   if (temNfe)
                                     Tooltip(
                                       message: 'NF-e autorizada',
@@ -1310,13 +1297,14 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Conferencia pre-emissao — Venda '
-          '${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
+          'Conferencia pre-emissao — '
+          '${VendaDocumentoRotuloHelper.rotuloControleInterno(v)}',
           style: theme.textTheme.headlineSmall,
         ),
         const SizedBox(height: 8),
         Text(
-          'Painel apenas fiscal: nenhuma alteracao de estoque sera feita.',
+          'Emissao NF-e 55; ao autorizar, estoque e controle interno sao '
+          'registrados automaticamente.',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.primary,
           ),

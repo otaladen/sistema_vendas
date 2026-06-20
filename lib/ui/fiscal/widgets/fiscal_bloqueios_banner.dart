@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../domain/fiscal/fiscal_bloqueios_fechamento.dart';
+import '../../../domain/venda_documento_rotulo_helper.dart';
 import '../../../model/venda.dart';
 /// Alerta de pendencias fiscais antes do fechamento contabil.
 class FiscalBloqueiosBanner extends StatelessWidget {
@@ -114,9 +115,9 @@ class FiscalBloqueiosBanner extends StatelessWidget {
   }
 
   Widget _linhaNfce(Venda v) {
-    final cupom = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
     return Text(
-      'Venda $cupom · ${_data.format(v.data.toLocal())} · '
+      '${VendaDocumentoRotuloHelper.rotuloIdentificacaoLista(v)} · '
+      '${_data.format(v.data.toLocal())} · '
       'R\$ ${_moeda.format(v.total)}',
       style: TextStyle(
         fontSize: 12,

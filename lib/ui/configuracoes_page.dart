@@ -96,7 +96,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   String _backupAutomaticoPasta = '';
   int _backupAutomaticoIntervaloMinutos = 1440;
   int _ultimoBackupAutomaticoMs = 0;
-  bool _permitirVendaSemEstoque = false;
+  bool _permitirVendaSemEstoque = true;
   bool _mostrarCampoDescontoCaixa = true;
   bool _exigirAutorizacaoSegundaViaCupom = true;
   bool _umCaixaAbertoPorLoja = true;
@@ -2009,8 +2009,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         },
                         title: const Text('Permitir venda sem estoque'),
                         subtitle: const Text(
-                          'Desativado por padrao (recomendado). Quando ativo, permite '
-                          'orcamento e finalizacao sem saldo; o estoque pode ficar negativo.',
+                          'Ativo por padrao. Vendas e finalizacao no caixa nunca '
+                          'bloqueiam por falta de estoque (fisico pode ficar negativo). '
+                          'Desative apenas para avisar no PDV ao adicionar produto.',
                         ),
                       ),
                       const SizedBox(height: 12),

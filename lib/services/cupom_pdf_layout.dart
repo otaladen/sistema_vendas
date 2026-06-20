@@ -63,8 +63,30 @@ class CupomPdfLayout {
       case LayoutFamiliaFonte.times:
         return pw.Font.times();
       case LayoutFamiliaFonte.helvetica:
-        return pw.Font.helvetica();
+        // Helvetica embutida no dart_pdf nao renderiza acentos PT-BR.
+        return pw.Font.courier();
     }
+  }
+
+  static pw.Font _fontePdfBold(ConfigLayoutImpressao layout) {
+    switch (layout.familiaFonte) {
+      case LayoutFamiliaFonte.courier:
+        return pw.Font.courierBold();
+      case LayoutFamiliaFonte.times:
+        return pw.Font.timesBold();
+      case LayoutFamiliaFonte.helvetica:
+        return pw.Font.courierBold();
+    }
+  }
+
+  /// Documento PDF com tema alinhado ao layout (evita Helvetica padrao sem Unicode).
+  static pw.Document criarDocumento(ConfigLayoutImpressao layout) {
+    return pw.Document(
+      theme: pw.ThemeData.withFont(
+        base: _fontePdf(layout),
+        bold: _fontePdfBold(layout),
+      ),
+    );
   }
 
   static pw.TextStyle estilo(

@@ -182,10 +182,8 @@ class Produto {
   bool get estoqueCritico => estoqueAtual <= pontoPedido;
 
   /// Fisico menos comprometido em [estoqueReservado] (retirada futura, carreto ate sair).
-  int get estoqueLivreParaVenda {
-    final livre = estoqueReal - estoqueReservado;
-    return livre < 0 ? 0 : livre;
-  }
+  /// Pode ser negativo quando a loja vende com estoque negativo.
+  int get estoqueLivreParaVenda => estoqueReal - estoqueReservado;
 
   String get unidadeCompraEfetiva {
     final u = unidadeCompra.trim();

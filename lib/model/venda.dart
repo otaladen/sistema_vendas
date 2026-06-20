@@ -37,6 +37,7 @@ class Venda {
     this.motivoCancelamento = '',
     this.canceladaPor = '',
     this.canceladaEm,
+    this.finalizadaEm,
     this.vendaOrigemFreteRetiradaId = 0,
     this.idOrcamentoFreteRetiradaAberto = 0,
     this.grupoEntregaFreteId = 0,
@@ -113,6 +114,9 @@ class Venda {
   String canceladaPor;
   @Property(type: PropertyType.dateUtc)
   DateTime? canceladaEm;
+
+  @Property(type: PropertyType.dateUtc)
+  DateTime? finalizadaEm;
 
   /// Orcamento filho (somente frete) pendente no caixa; zerado apos pagamento.
   int idOrcamentoFreteRetiradaAberto;

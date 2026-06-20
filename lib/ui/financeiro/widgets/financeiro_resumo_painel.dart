@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../domain/financeiro_resumo.dart';
-import '../../../main.dart';
+import '../../theme/app_modulo_cores.dart';
+import '../../theme/app_semantic_colors.dart';
+import '../../theme/app_semantic_helper.dart';
 
 final NumberFormat _moedaHub = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
 
@@ -28,7 +30,7 @@ class FinanceiroResumoPainel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
     final scheme = theme.colorScheme;
     final saldo = resumo.saldoLiquidoProjetado;
     final saldoPositivo = saldo >= 0;
@@ -46,8 +48,8 @@ class FinanceiroResumoPainel extends StatelessWidget {
             valor: _moedaHub.format(resumo.totalAReceber),
             detalhe:
                 '${resumo.qtdTitulosReceberAbertos} titulo(s) · vencido ${_moedaHub.format(resumo.aReceberVencido)}',
-            cor: const Color(0xFF1565C0),
-            bg: semantic?.infoBg ?? const Color(0xFFEAF2FF),
+            cor: AppModuloCores.modulo(context, AppModuloId.contasReceber),
+            bg: semantic.infoBg,
             onTap: onTapAReceber,
           ),
           _KpiFinanceiro(
@@ -57,8 +59,8 @@ class FinanceiroResumoPainel extends StatelessWidget {
             detalhe: resumo.aReceberVenceHoje > 0
                 ? 'Hoje: ${_moedaHub.format(resumo.aReceberVenceHoje)}'
                 : 'Prox. 7d: ${_moedaHub.format(resumo.aReceberProximos7)}',
-            cor: semantic?.errorFg ?? const Color(0xFF9B1C1C),
-            bg: semantic?.errorBg ?? const Color(0xFFFDECEC),
+            cor: semantic.errorFg,
+            bg: semantic.errorBg,
             onTap: onTapAReceberVencido,
             destaque: resumo.aReceberVencido > 0.01,
           ),
@@ -68,7 +70,7 @@ class FinanceiroResumoPainel extends StatelessWidget {
             valor: _moedaHub.format(resumo.totalAPagarPendente),
             detalhe:
                 '${resumo.qtdContasPagarAbertas} parcela(s) · atraso ${_moedaHub.format(resumo.aPagarAtrasado)}',
-            cor: const Color(0xFF455A64),
+            cor: scheme.secondary,
             bg: scheme.surfaceContainerHighest,
             onTap: onTapAPagar,
           ),
@@ -79,8 +81,8 @@ class FinanceiroResumoPainel extends StatelessWidget {
             detalhe: resumo.aPagarProximos7 > 0
                 ? '7 dias: ${_moedaHub.format(resumo.aPagarProximos7)}'
                 : '${resumo.qtdContasPagarAtrasadas} parcela(s)',
-            cor: const Color(0xFFAD1457),
-            bg: const Color(0xFFFCE4EC),
+            cor: AppModuloCores.harmonizar(scheme, 320),
+            bg: semantic.errorBg.withValues(alpha: 0.55),
             onTap: onTapAPagarAtrasado,
             destaque: resumo.aPagarAtrasado > 0.01,
           ),
@@ -206,7 +208,7 @@ class _FaixaSaldoProjetado extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final cor = positivo ? const Color(0xFF0D9488) : const Color(0xFFB91C1C);
+    final cor = positivo ? scheme.tertiary : scheme.error;
     final bgInicio = positivo
         ? scheme.primaryContainer.withValues(alpha: 0.85)
         : scheme.errorContainer.withValues(alpha: 0.55);

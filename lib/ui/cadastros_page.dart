@@ -22,17 +22,9 @@ import 'produtos_page.dart';
 import 'usuarios_page.dart';
 import 'vendedores_page.dart';
 import 'layout/app_layout.dart';
+import 'theme/app_modulo_cores.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
-
-const Color _corProdutos = Color(0xFFE65100);
-const Color _corMotoristas = Color(0xFF0277BD);
-const Color _corFuncionarios = Color(0xFF455A64);
-const Color _corClientes = Color(0xFF1565C0);
-const Color _corVendedores = Color(0xFF2E7D32);
-const Color _corUsuarios = Color(0xFF6A1B9A);
-const Color _corKitsOrcamento = Color(0xFF5D4037);
-const Color _corPromocoes = Color(0xFFC62828);
 
 class CadastrosPage extends StatelessWidget {
   const CadastrosPage({
@@ -83,7 +75,7 @@ class CadastrosPage extends StatelessWidget {
         children: [
             HubNavButton(
               icon: Icons.inventory_2_outlined,
-              corDestaque: _corProdutos,
+              corDestaque: AppModuloCores.modulo(context, AppModuloId.produtos),
               titulo: 'Produtos',
               habilitado: _podeCadastros,
               onTap: () {
@@ -101,7 +93,7 @@ class CadastrosPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.widgets_outlined,
-              corDestaque: _corKitsOrcamento,
+              corDestaque: AppModuloCores.modulo(context, AppModuloId.kitsOrcamento),
               titulo: 'Kits de orcamento',
               habilitado: _podeCadastros,
               onTap: () {
@@ -120,7 +112,7 @@ class CadastrosPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.local_offer_outlined,
-              corDestaque: _corPromocoes,
+              corDestaque: AppModuloCores.modulo(context, AppModuloId.promocoes),
               titulo: 'Promocoes',
               habilitado: _podeCadastros,
               onTap: () {
@@ -139,7 +131,8 @@ class CadastrosPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.local_shipping_outlined,
-              corDestaque: _corMotoristas,
+              corDestaque:
+                  AppModuloCores.modulo(context, AppModuloId.motoristasCadastro),
               titulo: 'Motoristas',
               habilitado: _podeCadastros,
               onTap: () {
@@ -155,7 +148,8 @@ class CadastrosPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.badge_outlined,
-              corDestaque: _corFuncionarios,
+              corDestaque:
+                  AppModuloCores.modulo(context, AppModuloId.funcionariosCadastro),
               titulo: 'Funcionarios',
               habilitado: _podeCadastros,
               onTap: () {
@@ -177,7 +171,7 @@ class CadastrosPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.people_outline,
-              corDestaque: _corClientes,
+              corDestaque: AppModuloCores.modulo(context, AppModuloId.clientesCadastro),
               titulo: 'Clientes',
               habilitado: _podeCadastros,
               onTap: () {
@@ -195,7 +189,8 @@ class CadastrosPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.storefront_outlined,
-              corDestaque: _corVendedores,
+              corDestaque:
+                  AppModuloCores.modulo(context, AppModuloId.vendedoresCadastro),
               titulo: 'Vendedores',
               habilitado: _podeCadastros,
               onTap: () {
@@ -211,7 +206,7 @@ class CadastrosPage extends StatelessWidget {
             ),
             HubNavButton(
               icon: Icons.manage_accounts_outlined,
-              corDestaque: _corUsuarios,
+              corDestaque: AppModuloCores.modulo(context, AppModuloId.usuariosCadastro),
               titulo: 'Usuarios',
               habilitado: _podeGerenciarUsuarios,
               onTap: () {

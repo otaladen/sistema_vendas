@@ -87,7 +87,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                 precoFormatado,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: emPromocao ? PromocaoBadge.corFundo : null,
+                      color: emPromocao ? PromocaoBadge.corDe(context) : null,
                     ),
               ),
             ],

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../config/focus_nfe_runtime.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../data/app_config_repository.dart';
 import '../../data/cliente_repository.dart';
 import '../../data/venda_repository.dart';
@@ -105,7 +106,12 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
       if (!mounted) return;
       _recarregar();
       final msg = switch (r.tipo) {
-        NfceReconciliacaoTipo.autorizada => 'NFC-e autorizada na reconsulta.',
+        NfceReconciliacaoTipo.autorizada =>
+          r.cupomInternoRegistrado
+              ? 'NFC-e autorizada e estoque atualizado.'
+              : (r.mensagem.isEmpty
+                  ? 'NFC-e autorizada, mas falhou ao salvar venda/estoque.'
+                  : r.mensagem),
         NfceReconciliacaoTipo.processando => 'Ainda aguardando a SEFAZ.',
         NfceReconciliacaoTipo.erro =>
           r.mensagem.isEmpty ? 'NFC-e rejeitada ou erro.' : r.mensagem,
@@ -199,14 +205,15 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
             )
           else
             ..._pendentes.map((v) {
-              final cupom = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
               return Card(
                 child: ListTile(
                   leading: Icon(
                     Icons.hourglass_top_outlined,
                     color: theme.colorScheme.primary,
                   ),
-                  title: Text('Venda $cupom'),
+                  title: Text(
+                    VendaDocumentoRotuloHelper.rotuloControleInterno(v),
+                  ),
                   subtitle: Text(
                     '${_data.format(v.data.toLocal())} · '
                     'R\$ ${_moeda.format(v.total)}',

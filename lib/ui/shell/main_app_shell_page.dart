@@ -20,6 +20,8 @@ import '../../services/lan_sync_server_manager.dart';
 import '../../services/print_service.dart';
 import '../layout/app_layout.dart';
 import '../main_menu_dashboard.dart';
+import '../theme/app_modulo_cores.dart';
+import '../widgets/app_rodape_status_bar.dart';
 import 'app_shell_scope.dart';
 import 'main_menu_deps.dart';
 import 'main_menu_router.dart';
@@ -208,21 +210,31 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
           irPara: _irPara,
           alternarFavorito: _alternarFavorito,
           child: Scaffold(
-            body: Row(
+            body: Column(
               children: [
-                _rail(context),
-                const VerticalDivider(width: 1, thickness: 1),
                 Expanded(
-                  child: Navigator(
-                    key: _navKey,
-                    onGenerateRoute: (settings) {
-                      return MaterialPageRoute<void>(
-                        builder: (_) => _conteudoDestino(
-                          MainMenuDestino.inicio,
+                  child: Row(
+                    children: [
+                      _rail(context),
+                      const VerticalDivider(width: 1, thickness: 1),
+                      Expanded(
+                        child: Navigator(
+                          key: _navKey,
+                          onGenerateRoute: (settings) {
+                            return MaterialPageRoute<void>(
+                              builder: (_) => _conteudoDestino(
+                                MainMenuDestino.inicio,
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
+                      ),
+                    ],
                   ),
+                ),
+                AppRodapeStatusBar(
+                  usuarioLogin: widget.usuarioLogado.login,
+                  usuarioNome: widget.usuarioLogado.nome,
                 ),
               ],
             ),
@@ -277,7 +289,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
             label: Text(
               d.titulo,
               style: TextStyle(
-                color: d == _destino ? d.cor : null,
+                color: d == _destino ? d.cor(context) : null,
                 fontWeight: d == _destino ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
@@ -317,7 +329,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   }) {
     final icone = Icon(
       d.icone,
-      color: selecionado ? d.cor : null,
+      color: selecionado ? d.cor(context) : null,
     );
     if (badge <= 0) return icone;
     return Badge(

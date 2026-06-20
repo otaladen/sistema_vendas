@@ -1,13 +1,27 @@
 import 'package:flutter/material.dart';
 
-/// Cores de destaque do hub (menu principal e telas filhas no mesmo padrao).
+import '../../domain/main_menu_destino.dart';
+import '../theme/app_modulo_cores.dart';
+
+/// Cores de destaque do hub derivadas do tema ativo.
 abstract final class HubNavColors {
-  static const menuCadastros = Color(0xFF1565C0);
-  static const menuEstoque = Color(0xFFE65100);
-  static const menuNotasFiscais = Color(0xFF00838F);
-  static const menuVendas = Color(0xFF2E7D32);
-  static const menuFinanceiro = Color(0xFF455A64);
-  static const menuConfig = Color(0xFF6A1B9A);
+  static Color menuCadastros(BuildContext context) =>
+      AppModuloCores.destino(context, MainMenuDestino.cadastros);
+
+  static Color menuEstoque(BuildContext context) =>
+      AppModuloCores.destino(context, MainMenuDestino.estoque);
+
+  static Color menuNotasFiscais(BuildContext context) =>
+      AppModuloCores.destino(context, MainMenuDestino.notasFiscais);
+
+  static Color menuVendas(BuildContext context) =>
+      AppModuloCores.destino(context, MainMenuDestino.vendas);
+
+  static Color menuFinanceiro(BuildContext context) =>
+      AppModuloCores.destino(context, MainMenuDestino.financeiro);
+
+  static Color menuConfig(BuildContext context) =>
+      AppModuloCores.destino(context, MainMenuDestino.configuracoes);
 }
 
 /// Botao de navegacao usado no menu principal e nas telas Cadastros / Vendas.
@@ -33,41 +47,42 @@ class HubNavButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tema = Theme.of(context);
-    final corLetrasTelas =
-        tema.textTheme.bodyLarge?.color ?? const Color(0xFF1F2937);
+    final scheme = tema.colorScheme;
+    final corLetrasTelas = tema.colorScheme.onSurface;
     final estiloTitulo = (tema.textTheme.bodyLarge ?? const TextStyle()).copyWith(
       fontSize: 18,
       fontWeight: FontWeight.w600,
       color: habilitado
           ? corLetrasTelas
-          : tema.colorScheme.onSurface.withValues(alpha: 0.38),
+          : scheme.onSurface.withValues(alpha: 0.38),
     );
     final estiloSub = tema.textTheme.bodySmall?.copyWith(
           height: 1.3,
           color: habilitado
               ? corLetrasTelas.withValues(alpha: 0.72)
-              : tema.colorScheme.onSurface.withValues(alpha: 0.28),
+              : scheme.onSurface.withValues(alpha: 0.28),
         ) ??
         TextStyle(
           fontSize: 13,
           height: 1.3,
           color: habilitado
               ? corLetrasTelas.withValues(alpha: 0.72)
-              : tema.colorScheme.onSurface.withValues(alpha: 0.28),
+              : scheme.onSurface.withValues(alpha: 0.28),
         );
 
+    final corIconeDesabilitado = scheme.onSurface.withValues(alpha: 0.38);
     final iconeBadge = Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: habilitado
             ? corDestaque.withValues(alpha: 0.22)
-            : Colors.grey.withValues(alpha: 0.22),
+            : scheme.surfaceContainerHighest,
         shape: BoxShape.circle,
       ),
       child: Icon(
         icon,
         size: 26,
-        color: habilitado ? corDestaque : Colors.grey.shade600,
+        color: habilitado ? corDestaque : corIconeDesabilitado,
       ),
     );
 

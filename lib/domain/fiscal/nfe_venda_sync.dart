@@ -11,6 +11,22 @@ abstract final class NfeVendaSync {
     required NfeSaidaFiscalRegistro registro,
   }) {
     if (registro.vendaId <= 0) return;
+    if (registro.autorizada) {
+      vendaRepository.registrarNfe55SituacaoComBaixaEstoque(
+        vendaId: registro.vendaId,
+        referenciaFocus: registro.referenciaFocus,
+        chaveAcesso: registro.chaveNfe,
+        numero: registro.numero,
+        serie: registro.serie,
+        protocolo: registro.protocolo,
+        urlDanfe: registro.urlDanfe,
+        urlXml: registro.urlXml,
+        statusFocus: registro.statusFocus,
+        urlXmlCancelamento: registro.urlXmlEventoCancelamento,
+        emitidaEm: registro.emitidaEm,
+      );
+      return;
+    }
     vendaRepository.registrarNfe55Situacao(
       vendaId: registro.vendaId,
       referenciaFocus: registro.referenciaFocus,

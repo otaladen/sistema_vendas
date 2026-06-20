@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../domain/funcionario_folha_resumo.dart';
-import '../../../main.dart';
+import '../../theme/app_semantic_helper.dart';
 
 final NumberFormat _moedaPainel =
     NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
@@ -42,7 +42,7 @@ class FuncionarioFolhaPainel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
     final mesLabel = DateFormat('MMMM/yyyy', 'pt_BR').format(mesReferencia);
 
     return Column(
@@ -52,10 +52,10 @@ class FuncionarioFolhaPainel extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: semantic?.warningBg ?? const Color(0xFFFFF8E1),
+              color: semantic.warningBg,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: semantic?.warningBorder ?? const Color(0xFFFFE082),
+                color: semantic.warningBorder,
               ),
             ),
             child: Column(
@@ -66,7 +66,7 @@ class FuncionarioFolhaPainel extends StatelessWidget {
                     Icon(
                       Icons.warning_amber_rounded,
                       size: 20,
-                      color: semantic?.warningFg ?? const Color(0xFFE65100),
+                      color: semantic.warningFg,
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -102,7 +102,7 @@ class FuncionarioFolhaPainel extends StatelessWidget {
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: mesFechado
-                ? (semantic?.successBg ?? const Color(0xFFEAF8EF))
+                ? semantic.successBg
                 : theme.colorScheme.surfaceContainerHighest
                     .withValues(alpha: 0.45),
             borderRadius: BorderRadius.circular(10),
@@ -119,7 +119,7 @@ class FuncionarioFolhaPainel extends StatelessWidget {
                         : Icons.lock_open_outlined,
                     size: 20,
                     color: mesFechado
-                        ? (semantic?.successFg ?? const Color(0xFF2E7D32))
+                        ? semantic.successFg
                         : theme.colorScheme.primary,
                   ),
                   const SizedBox(width: 8),
@@ -236,7 +236,7 @@ class FuncionarioFolhaPainel extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   decoration: BoxDecoration(
                     color: h.fechado
-                        ? (semantic?.successBg ?? const Color(0xFFEAF8EF))
+                        ? semantic.successBg
                             .withValues(alpha: 0.65)
                         : theme.colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(8),
@@ -268,7 +268,7 @@ class FuncionarioFolhaPainel extends StatelessWidget {
                         Icon(
                           Icons.check_circle,
                           size: 12,
-                          color: semantic?.successFg ?? const Color(0xFF2E7D32),
+                          color: semantic.successFg,
                         ),
                     ],
                   ),

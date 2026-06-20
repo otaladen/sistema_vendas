@@ -20,9 +20,11 @@ import '../../services/lan_sync_server_manager.dart';
 import 'loja_ao_vivo_page.dart';
 import 'layout/app_layout.dart';
 import 'relatorios/relatorio_entregas_helper.dart';
+import 'theme/app_modulo_cores.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
 import 'widgets/dashboard_alertas_strip.dart';
+import 'widgets/app_rodape_status_bar.dart';
 import 'widgets/main_menu_widgets.dart';
 import 'shell/app_shell_scope.dart';
 import 'shell/main_menu_deps.dart';
@@ -401,7 +403,10 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                   const SizedBox(height: 12),
                   HubNavButton(
                     icon: Icons.monitor_heart_outlined,
-                    corDestaque: const Color(0xFF00695C),
+                    corDestaque: AppModuloCores.modulo(
+                      context,
+                      AppModuloId.lojaAoVivo,
+                    ),
                     titulo: 'Loja ao vivo',
                     subtitulo:
                         'Painel fullscreen: vendas/hora, caixa, entregas, estoque e metas.',
@@ -456,6 +461,8 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
 
     if (!widget.mostrarAppBar) return corpo;
 
+    final noShellDesktop = AppShellScope.maybeOf(context) != null;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(tituloAppBar),
@@ -472,6 +479,12 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         ],
       ),
       body: corpo,
+      bottomNavigationBar: noShellDesktop
+          ? null
+          : AppRodapeStatusBar(
+              usuarioLogin: u.login,
+              usuarioNome: u.nome,
+            ),
     );
   }
 
@@ -483,7 +496,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         : null;
     return MainMenuModuleTile(
       icon: d.icone,
-      corDestaque: d.cor,
+      corDestaque: d.cor(context),
       titulo: d.titulo,
       subtitulo: d.subtitulo,
       habilitado: habilitado,
@@ -516,7 +529,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
               rotulo: 'Vendas hoje',
               valor: 'R\$ $fmt',
               detalhe: vendasDet,
-              cor: HubNavColors.menuVendas,
+              cor: HubNavColors.menuVendas(context),
               carregando: _carregandoResumo,
               onTap: () => _ir(MainMenuDestino.vendas),
             ),
@@ -528,7 +541,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
               detalhe: (resumo?.totalFiadoVencido ?? 0) > 0
                   ? 'Vencido: R\$ ${_moeda.format(resumo!.totalFiadoVencido!)}'
                   : 'Fiado em aberto',
-              cor: const Color(0xFF1565C0),
+              cor: AppModuloCores.modulo(context, AppModuloId.contasReceber),
               carregando: _carregandoResumo,
               onTap: () => MainMenuRouter.abrirContasReceber(context),
             ),
@@ -541,8 +554,8 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                   ? 'Operacao em andamento'
                   : 'Toque para abrir o caixa',
               cor: resumo?.caixaAberto == true
-                  ? const Color(0xFF00897B)
-                  : const Color(0xFF78909C),
+                  ? MainMenuDestino.caixa.cor(context)
+                  : AppModuloCores.modulo(context, AppModuloId.inativo),
               carregando: _carregandoResumo,
               onTap: () => _ir(MainMenuDestino.caixa),
             ),
@@ -554,7 +567,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
               detalhe: (resumo?.entregasAtrasadas ?? 0) > 0
                   ? '${resumo!.entregasAtrasadas} atrasada(s)'
                   : 'Agenda e expedicao',
-              cor: const Color(0xFF0277BD),
+              cor: MainMenuDestino.entregas.cor(context),
               carregando: _carregandoResumo,
               onTap: () => _ir(MainMenuDestino.entregas),
             ),

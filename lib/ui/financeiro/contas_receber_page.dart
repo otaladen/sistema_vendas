@@ -8,7 +8,7 @@ import '../../domain/dashboard_alertas.dart';
 import '../../domain/filtro_contas_receber.dart';
 import '../../model/cliente.dart';
 import '../../model/usuario_sistema.dart';
-import '../../main.dart';
+import '../theme/app_semantic_helper.dart';
 import '../relatorios/relatorio_export_util.dart';
 import '../relatorios/widgets/relatorio_exportacoes_menu.dart';
 import '../widgets/receber_fiado_panel.dart';
@@ -247,16 +247,16 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
 
   @override
   Widget build(BuildContext context) {
-    final semantic = Theme.of(context).extension<AppSemanticColors>();
-    final infoBg = semantic?.infoBg ?? const Color(0xFFEAF2FF);
-    final infoBorder = semantic?.infoBorder ?? const Color(0xFF9EC0FF);
-    final infoFg = semantic?.infoFg ?? const Color(0xFF1E3A8A);
-    final errBg = semantic?.errorBg ?? const Color(0xFFFDECEC);
-    final errBorder = semantic?.errorBorder ?? const Color(0xFFF1A3A3);
-    final errFg = semantic?.errorFg ?? const Color(0xFF9B1C1C);
-    final warnBg = semantic?.warningBg ?? const Color(0xFFFFF8E6);
-    final warnBorder = semantic?.warningBorder ?? const Color(0xFFF2CC7A);
-    final warnFg = semantic?.warningFg ?? const Color(0xFF8A5B00);
+    final semantic = context.semanticColors;
+    final infoBg = semantic.infoBg;
+    final infoBorder = semantic.infoBorder;
+    final infoFg = semantic.infoFg;
+    final errBg = semantic.errorBg;
+    final errBorder = semantic.errorBorder;
+    final errFg = semantic.errorFg;
+    final warnBg = semantic.warningBg;
+    final warnBorder = semantic.warningBorder;
+    final warnFg = semantic.warningFg;
 
     return Scaffold(
       appBar: AppBar(

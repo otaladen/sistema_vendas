@@ -8,6 +8,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'domain/auditoria_catalogo.dart';
 
 import 'data/app_config_repository.dart';
+import 'data/app_tema_repository.dart';
 import 'data/auditoria_repository.dart';
 import 'data/auto_backup_service.dart';
 import 'data/cliente_repository.dart';
@@ -24,6 +25,7 @@ import 'model/usuario_sistema.dart';
 import 'services/auditoria_registrar.dart';
 import 'services/auditoria_retencao_service.dart';
 import 'services/print_service.dart';
+import 'services/estoque_diagnostico_startup.dart';
 import 'services/fiscal_config_store.dart';
 import 'services/fiscal_reconciliacao_startup.dart';
 import 'services/trusted_http_client.dart';
@@ -31,6 +33,11 @@ import 'ui/app_startup_error_page.dart';
 import 'ui/layout/app_layout.dart';
 import 'ui/login_page.dart';
 import 'ui/main_menu_page.dart';
+import 'ui/theme/app_tema_id.dart';
+import 'ui/theme/app_tema_scope.dart';
+import 'ui/theme/app_theme_builder.dart';
+
+export 'ui/theme/app_semantic_colors.dart';
 
 Future<void> main() async {
   runZonedGuarded(
@@ -61,6 +68,9 @@ Future<void> main() async {
         empresaCfg.regimeTributarioEmitente,
       );
       await FiscalReconciliacaoStartup.executarSeConfigurado(
+        objectBox: objectBox,
+      );
+      await EstoqueDiagnosticoStartup.executarSePossivel(
         objectBox: objectBox,
       );
       await AuditoriaRetencaoService.aplicarSeConfigurado(
@@ -134,6 +144,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   UsuarioSistema? _usuarioLogado;
+  AppTemaId _temaAtual = AppTemaId.verde;
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
   Timer? _timerBackupAutomatico;
   late final PrintService _printService;
@@ -141,6 +152,7 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
+    unawaited(_carregarTemaInicial());
     _printService = PrintService(widget.appConfigRepository);
     _timerBackupAutomatico = Timer.periodic(
       const Duration(minutes: 5),
@@ -165,7 +177,22 @@ class _MyAppState extends State<MyApp> {
     super.dispose();
   }
 
-  void _entrar(UsuarioSistema usuario) {
+  Future<void> _carregarTemaInicial() async {
+    final tema = await AppTemaRepository.carregar();
+    if (!mounted) return;
+    setState(() => _temaAtual = tema);
+  }
+
+  Future<void> _definirTema(AppTemaId tema) async {
+    await AppTemaRepository.salvar(
+      tema,
+      login: _usuarioLogado?.login,
+    );
+    if (!mounted) return;
+    setState(() => _temaAtual = tema);
+  }
+
+  Future<void> _entrar(UsuarioSistema usuario) async {
     AuditoriaRegistrar.definirUsuarioSessao(usuario.login);
     AuditoriaRegistrar.registrar(
       modulo: AuditoriaModulo.autenticacao,
@@ -173,12 +200,16 @@ class _MyAppState extends State<MyApp> {
       usuarioLogin: usuario.login,
       resumo: 'Login: ${usuario.nome} (${usuario.login})',
     );
+    final temaUsuario =
+        await AppTemaRepository.carregar(login: usuario.login);
+    if (!mounted) return;
     setState(() {
       _usuarioLogado = usuario;
+      _temaAtual = temaUsuario;
     });
   }
 
-  void _sair() {
+  Future<void> _sair() async {
     final login = _usuarioLogado?.login ?? AuditoriaRegistrar.usuarioSessao;
     if (login.isNotEmpty) {
       AuditoriaRegistrar.registrar(
@@ -190,130 +221,24 @@ class _MyAppState extends State<MyApp> {
     }
     AuditoriaRegistrar.limparUsuarioSessao();
     widget.lanSyncScheduler.parar();
+    final temaMaquina = await AppTemaRepository.carregar();
+    if (!mounted) return;
     setState(() {
       _usuarioLogado = null;
+      _temaAtual = temaMaquina;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final baseTheme = ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-      visualDensity: VisualDensity.standard,
-    );
-    const globalRadius = 12.0;
-    final globalShape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(globalRadius),
-    );
-
-    return MaterialApp(
-      title: 'Sistema de Vendas',
-      builder: buildAdaptiveAppShell,
-      theme: baseTheme.copyWith(
-        scaffoldBackgroundColor: baseTheme.colorScheme.surface,
-        textTheme: baseTheme.textTheme.copyWith(
-          bodyLarge: baseTheme.textTheme.bodyLarge?.copyWith(
-            fontSize: (baseTheme.textTheme.bodyLarge?.fontSize ?? 16) * 1.05,
-            height: 1.35,
-            color: const Color(0xFF1F2937),
-          ),
-          bodyMedium: baseTheme.textTheme.bodyMedium?.copyWith(
-            fontSize: (baseTheme.textTheme.bodyMedium?.fontSize ?? 14) * 1.05,
-            height: 1.35,
-            color: const Color(0xFF1F2937),
-          ),
-          bodySmall: baseTheme.textTheme.bodySmall?.copyWith(
-            fontSize: (baseTheme.textTheme.bodySmall?.fontSize ?? 12) * 1.05,
-            height: 1.35,
-            color: const Color(0xFF1F2937),
-          ),
-          titleMedium: baseTheme.textTheme.titleMedium?.copyWith(
-            color: const Color(0xFF1F2937),
-          ),
-          titleLarge: baseTheme.textTheme.titleLarge?.copyWith(
-            color: const Color(0xFF1F2937),
-          ),
-        ),
-        inputDecorationTheme: baseTheme.inputDecorationTheme.copyWith(
-          floatingLabelBehavior: FloatingLabelBehavior.auto,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 14,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(globalRadius),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(globalRadius),
-            borderSide: BorderSide(color: baseTheme.colorScheme.outlineVariant),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(globalRadius),
-            borderSide: BorderSide(
-              color: baseTheme.colorScheme.primary,
-              width: 1.4,
-            ),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(globalRadius),
-            borderSide: BorderSide(color: baseTheme.colorScheme.error),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(globalRadius),
-            borderSide: BorderSide(
-              color: baseTheme.colorScheme.error,
-              width: 1.4,
-            ),
-          ),
-        ),
-        cardTheme: CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(globalRadius),
-            side: BorderSide(color: baseTheme.colorScheme.outlineVariant),
-          ),
-          clipBehavior: Clip.antiAlias,
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            shape: globalShape,
-            minimumSize: const Size(88, 44),
-            textStyle: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            shape: globalShape,
-            minimumSize: const Size(88, 44),
-            side: BorderSide(color: baseTheme.colorScheme.outline),
-          ),
-        ),
-        dialogTheme: DialogThemeData(shape: globalShape),
-        snackBarTheme: SnackBarThemeData(
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(globalRadius),
-          ),
-        ),
-        extensions: const [
-          AppSemanticColors(
-            successBg: Color(0xFFEAF8EF),
-            successBorder: Color(0xFF8FD1A8),
-            successFg: Color(0xFF166534),
-            warningBg: Color(0xFFFFF8E6),
-            warningBorder: Color(0xFFF2CC7A),
-            warningFg: Color(0xFF8A5B00),
-            errorBg: Color(0xFFFDECEC),
-            errorBorder: Color(0xFFF1A3A3),
-            errorFg: Color(0xFF9B1C1C),
-            infoBg: Color(0xFFEAF2FF),
-            infoBorder: Color(0xFF9EC0FF),
-            infoFg: Color(0xFF1E3A8A),
-          ),
-        ],
-      ),
-      home: _usuarioLogado == null
+    return AppTemaScope(
+      temaAtual: _temaAtual,
+      definirTema: _definirTema,
+      child: MaterialApp(
+        title: 'Sistema de Vendas',
+        builder: buildAdaptiveAppShell,
+        theme: AppThemeBuilder.build(_temaAtual),
+        home: _usuarioLogado == null
           ? LoginPage(
               usuarioRepository: _usuarioRepository,
               onLoginSuccess: _entrar,
@@ -335,99 +260,14 @@ class _MyAppState extends State<MyApp> {
                   funcionarioRepository: FuncionarioRepository(widget.objectBox),
                   motoristaRepository: MotoristaRepository(widget.objectBox),
                   usuarioLogado: _usuarioLogado!,
-                  onLogout: _sair,
+                  onLogout: () => unawaited(_sair()),
                   lanSyncScheduler: widget.lanSyncScheduler,
                   appConfigRepository: widget.appConfigRepository,
                   printService: _printService,
                 );
               },
             ),
-    );
-  }
-}
-
-@immutable
-class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
-  const AppSemanticColors({
-    required this.successBg,
-    required this.successBorder,
-    required this.successFg,
-    required this.warningBg,
-    required this.warningBorder,
-    required this.warningFg,
-    required this.errorBg,
-    required this.errorBorder,
-    required this.errorFg,
-    required this.infoBg,
-    required this.infoBorder,
-    required this.infoFg,
-  });
-
-  final Color successBg;
-  final Color successBorder;
-  final Color successFg;
-  final Color warningBg;
-  final Color warningBorder;
-  final Color warningFg;
-  final Color errorBg;
-  final Color errorBorder;
-  final Color errorFg;
-  final Color infoBg;
-  final Color infoBorder;
-  final Color infoFg;
-
-  @override
-  ThemeExtension<AppSemanticColors> copyWith({
-    Color? successBg,
-    Color? successBorder,
-    Color? successFg,
-    Color? warningBg,
-    Color? warningBorder,
-    Color? warningFg,
-    Color? errorBg,
-    Color? errorBorder,
-    Color? errorFg,
-    Color? infoBg,
-    Color? infoBorder,
-    Color? infoFg,
-  }) {
-    return AppSemanticColors(
-      successBg: successBg ?? this.successBg,
-      successBorder: successBorder ?? this.successBorder,
-      successFg: successFg ?? this.successFg,
-      warningBg: warningBg ?? this.warningBg,
-      warningBorder: warningBorder ?? this.warningBorder,
-      warningFg: warningFg ?? this.warningFg,
-      errorBg: errorBg ?? this.errorBg,
-      errorBorder: errorBorder ?? this.errorBorder,
-      errorFg: errorFg ?? this.errorFg,
-      infoBg: infoBg ?? this.infoBg,
-      infoBorder: infoBorder ?? this.infoBorder,
-      infoFg: infoFg ?? this.infoFg,
-    );
-  }
-
-  @override
-  ThemeExtension<AppSemanticColors> lerp(
-    covariant ThemeExtension<AppSemanticColors>? other,
-    double t,
-  ) {
-    if (other is! AppSemanticColors) return this;
-    return AppSemanticColors(
-      successBg: Color.lerp(successBg, other.successBg, t) ?? successBg,
-      successBorder:
-          Color.lerp(successBorder, other.successBorder, t) ?? successBorder,
-      successFg: Color.lerp(successFg, other.successFg, t) ?? successFg,
-      warningBg: Color.lerp(warningBg, other.warningBg, t) ?? warningBg,
-      warningBorder:
-          Color.lerp(warningBorder, other.warningBorder, t) ?? warningBorder,
-      warningFg: Color.lerp(warningFg, other.warningFg, t) ?? warningFg,
-      errorBg: Color.lerp(errorBg, other.errorBg, t) ?? errorBg,
-      errorBorder: Color.lerp(errorBorder, other.errorBorder, t) ?? errorBorder,
-      errorFg: Color.lerp(errorFg, other.errorFg, t) ?? errorFg,
-      infoBg: Color.lerp(infoBg, other.infoBg, t) ?? infoBg,
-      infoBorder: Color.lerp(infoBorder, other.infoBorder, t) ?? infoBorder,
-      infoFg: Color.lerp(infoFg, other.infoFg, t) ?? infoFg,
+      ),
     );
   }
 }

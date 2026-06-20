@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../model/venda.dart';
+import 'venda_documento_rotulo_helper.dart';
 
 enum CaixaFiscalStatusTipo {
   pendenteOrcamento,
@@ -12,13 +13,14 @@ class CaixaFiscalStatusInfo {
   const CaixaFiscalStatusInfo({
     required this.tipo,
     required this.rotulo,
-    required this.cor,
+    this.destaqueAlerta = false,
     this.icone,
   });
 
   final CaixaFiscalStatusTipo tipo;
   final String rotulo;
-  final Color cor;
+  /// Em [emitida] ou [aguardandoEmissao]: false = ok, true = pendencia fiscal/estoque.
+  final bool destaqueAlerta;
   final IconData? icone;
 }
 
@@ -27,28 +29,40 @@ class CaixaFiscalStatusHelper {
 
   static CaixaFiscalStatusInfo deVenda(Venda v, {required bool orcamentoPendente}) {
     if (v.nfceEmitida) {
-      final num = v.nfceNumero.trim();
-      final rotulo = num.isNotEmpty ? 'NFC-e $num' : 'NFC-e emitida';
+      final partes = <String>[];
+      final nfce = VendaDocumentoRotuloHelper.rotuloNfce(v);
+      if (nfce != null) partes.add(nfce);
+      if (v.estoqueBaixadoCupom) {
+        partes.add('Estoque OK');
+      }
+      final rotulo = partes.isEmpty
+          ? 'NFC-e emitida'
+          : partes.join(' · ');
       return CaixaFiscalStatusInfo(
         tipo: CaixaFiscalStatusTipo.emitida,
         rotulo: rotulo,
-        cor: Colors.green.shade700,
-        icone: Icons.verified_outlined,
+        destaqueAlerta: !v.estoqueBaixadoCupom,
+        icone: v.estoqueBaixadoCupom
+            ? Icons.verified_outlined
+            : Icons.warning_amber_outlined,
       );
     }
     if (orcamentoPendente) {
       return const CaixaFiscalStatusInfo(
         tipo: CaixaFiscalStatusTipo.pendenteOrcamento,
         rotulo: 'Fiscal na finalizacao',
-        cor: Color(0xFF546E7A),
         icone: Icons.receipt_outlined,
       );
     }
     return CaixaFiscalStatusInfo(
       tipo: CaixaFiscalStatusTipo.aguardandoEmissao,
-      rotulo: 'Sem NFC-e',
-      cor: Colors.orange.shade800,
-      icone: Icons.warning_amber_outlined,
+      rotulo: v.estoqueBaixadoCupom
+          ? 'Estoque OK · aguardando NFC-e'
+          : 'Sem NFC-e',
+      destaqueAlerta: !v.estoqueBaixadoCupom,
+      icone: v.estoqueBaixadoCupom
+          ? Icons.inventory_2_outlined
+          : Icons.warning_amber_outlined,
     );
   }
 }

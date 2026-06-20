@@ -283,6 +283,7 @@ class SyncEntityCodec {
       'motivoCancelamento': v.motivoCancelamento,
       'canceladaPor': v.canceladaPor,
       'canceladaEm': v.canceladaEm?.toUtc().toIso8601String(),
+      'finalizadaEm': v.finalizadaEm?.toUtc().toIso8601String(),
       'idOrcamentoFreteRetiradaAberto': v.idOrcamentoFreteRetiradaAberto,
       'vendaOrigemFreteRetiradaId': v.vendaOrigemFreteRetiradaId,
       'grupoEntregaFreteId': v.grupoEntregaFreteId,
@@ -356,6 +357,9 @@ class SyncEntityCodec {
       canceladaPor: (m['canceladaPor'] ?? '').toString(),
       canceladaEm: DateTime.tryParse(
         (m['canceladaEm'] ?? '').toString(),
+      )?.toUtc(),
+      finalizadaEm: DateTime.tryParse(
+        (m['finalizadaEm'] ?? '').toString(),
       )?.toUtc(),
       idOrcamentoFreteRetiradaAberto:
           (m['idOrcamentoFreteRetiradaAberto'] as num?)?.toInt() ?? 0,

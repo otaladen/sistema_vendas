@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/main_menu_destino.dart';
+import '../theme/app_modulo_cores.dart';
+import '../theme/app_semantic_colors.dart';
 
 /// Faixa horizontal de atalhos favoritos no dashboard.
 class MainMenuFavoritosStrip extends StatelessWidget {
@@ -21,7 +23,7 @@ class MainMenuFavoritosStrip extends StatelessWidget {
       children: [
         for (final d in favoritos)
           ActionChip(
-            avatar: Icon(d.icone, size: 18, color: d.cor),
+            avatar: Icon(d.icone, size: 18, color: d.cor(context)),
             label: Text(d.titulo),
             onPressed: () => onTap(d),
           ),
@@ -178,7 +180,7 @@ class MainMenuModuleTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final tema = Theme.of(context);
     final corTexto = habilitado
-        ? (tema.textTheme.bodyLarge?.color ?? const Color(0xFF1F2937))
+        ? tema.colorScheme.onSurface
         : tema.colorScheme.onSurface.withValues(alpha: 0.38);
 
     return SizedBox(
@@ -209,7 +211,7 @@ class MainMenuModuleTile extends StatelessWidget {
                     children: [
                       _iconeComBadge(
                         icone: icon,
-                        cor: habilitado ? corDestaque : Colors.grey.shade600,
+                        cor: habilitado ? corDestaque : tema.colorScheme.onSurface.withValues(alpha: 0.38),
                         badge: badgeContagem,
                       ),
                       const Spacer(),
@@ -251,7 +253,7 @@ class MainMenuModuleTile extends StatelessWidget {
                       icon: Icon(
                         favorito ? Icons.star_rounded : Icons.star_outline_rounded,
                         color: favorito
-                            ? const Color(0xFFF9A825)
+                            ? tema.colorScheme.tertiary
                             : tema.colorScheme.onSurface.withValues(alpha: 0.45),
                       ),
                     ),
@@ -305,24 +307,23 @@ class MainMenuFeaturedVendasTile extends StatelessWidget {
   final bool podePdv;
   final bool podeCaixa;
 
-  static const _cor = Color(0xFF2E7D32);
-
   @override
   Widget build(BuildContext context) {
     final tema = Theme.of(context);
+    final corVendas = MainMenuDestino.vendas.cor(context);
     final corTexto = habilitado
-        ? (tema.textTheme.bodyLarge?.color ?? const Color(0xFF1F2937))
+        ? tema.colorScheme.onSurface
         : tema.colorScheme.onSurface.withValues(alpha: 0.38);
 
     return Material(
-      color: _cor.withValues(alpha: 0.08),
+      color: corVendas.withValues(alpha: 0.08),
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: habilitado ? onAbrirVendas : null,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            border: Border.all(color: _cor.withValues(alpha: 0.35)),
+            border: Border.all(color: corVendas.withValues(alpha: 0.35)),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Padding(
@@ -335,12 +336,14 @@ class MainMenuFeaturedVendasTile extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: _cor.withValues(alpha: 0.2),
+                        color: corVendas.withValues(alpha: 0.2),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
                         Icons.point_of_sale_outlined,
-                        color: habilitado ? _cor : Colors.grey.shade600,
+                        color: habilitado
+                            ? corVendas
+                            : tema.colorScheme.onSurface.withValues(alpha: 0.38),
                         size: 28,
                       ),
                     ),
@@ -385,8 +388,8 @@ class MainMenuFeaturedVendasTile extends StatelessWidget {
                           icon: const Icon(Icons.add_shopping_cart_outlined, size: 18),
                           label: const Text('Nova venda'),
                           style: FilledButton.styleFrom(
-                            backgroundColor: _cor,
-                            foregroundColor: Colors.white,
+                            backgroundColor: corVendas,
+                            foregroundColor: tema.colorScheme.onPrimary,
                             visualDensity: VisualDensity.compact,
                           ),
                         ),
@@ -396,8 +399,8 @@ class MainMenuFeaturedVendasTile extends StatelessWidget {
                           icon: const Icon(Icons.receipt_long_outlined, size: 18),
                           label: const Text('Caixa'),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: _cor,
-                            side: BorderSide(color: _cor.withValues(alpha: 0.55)),
+                            foregroundColor: corVendas,
+                            side: BorderSide(color: corVendas.withValues(alpha: 0.55)),
                             visualDensity: VisualDensity.compact,
                           ),
                         ),
@@ -476,13 +479,15 @@ class _SyncBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tema = Theme.of(context);
+    final semantic = tema.extension<AppSemanticColors>();
     final ok = sucesso == true;
     final falha = sucesso == false;
     final cor = ok
-        ? const Color(0xFF2E7D32)
+        ? (semantic?.successFg ?? tema.colorScheme.primary)
         : falha
-            ? const Color(0xFFC62828)
-            : Colors.blueGrey;
+            ? (semantic?.errorFg ?? tema.colorScheme.error)
+            : tema.colorScheme.onSurfaceVariant;
     final rotulo = ok
         ? 'Sync OK'
         : falha

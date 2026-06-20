@@ -14,6 +14,7 @@ import '../../domain/usuario_permissao_helper.dart';
 import '../../model/usuario_sistema.dart';
 import '../relatorio_fiados_page.dart';
 import '../shell/main_menu_router.dart';
+import '../theme/app_modulo_cores.dart';
 import '../widgets/conta_sessao_app_bar_actions.dart';
 import '../widgets/dashboard_alertas_strip.dart';
 import '../widgets/hub_nav_button.dart';
@@ -22,12 +23,6 @@ import 'contas_receber_page.dart';
 import 'relatorio_contas_pagar_page.dart';
 import 'tesouraria_semanal_page.dart';
 import 'widgets/financeiro_resumo_painel.dart';
-
-const Color _corReceber = Color(0xFF1565C0);
-const Color _corPagar = Color(0xFF455A64);
-const Color _corRelatorio = Color(0xFF6A1B9A);
-const Color _corTesouraria = Color(0xFF0D9488);
-const Color _corCaixa = Color(0xFF00897B);
 
 /// Hub do modulo Financeiro com painel executivo de tesouraria.
 class FinanceiroHubPage extends StatefulWidget {
@@ -98,7 +93,6 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
             titulo: 'Fiado vencido',
             detalhe:
                 '${resumo.qtdTitulosReceberAbertos} titulo(s) · R\$ ${_fmt(resumo.aReceberVencido)}',
-            cor: const Color(0xFFC62828),
             icone: Icons.warning_amber_rounded,
             filtroContasReceber: FiltroContasReceber.vencidos,
             prioridade: 10,
@@ -111,7 +105,6 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
             tipo: DashboardAlertaTipo.fiadoVenceHoje,
             titulo: 'Fiado vence hoje',
             detalhe: 'R\$ ${_fmt(resumo.aReceberVenceHoje)}',
-            cor: const Color(0xFFE65100),
             icone: Icons.schedule_outlined,
             filtroContasReceber: FiltroContasReceber.venceHoje,
             prioridade: 20,
@@ -125,7 +118,6 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
             titulo: 'Contas a pagar vencidas',
             detalhe:
                 '${resumo.qtdContasPagarAtrasadas} parcela(s) · R\$ ${_fmt(resumo.aPagarAtrasado)}',
-            cor: const Color(0xFFAD1457),
             icone: Icons.account_balance_outlined,
             filtroContasPagar: FiltroContasPagar.atrasados,
             prioridade: 25,
@@ -487,6 +479,7 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
   }
 
   Widget _buildAtalhosRapidos(FinanceiroResumoSnapshot? resumo) {
+    final corCaixa = MainMenuDestino.caixa.cor(context);
     final chips = <Widget>[];
 
     if (_podeCaixa) {
@@ -498,8 +491,8 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
             resumo?.caixaAberto == true ? 'Caixa aberto' : 'Ir ao Caixa',
           ),
           style: FilledButton.styleFrom(
-            backgroundColor: _corCaixa.withValues(alpha: 0.12),
-            foregroundColor: _corCaixa,
+            backgroundColor: corCaixa.withValues(alpha: 0.12),
+            foregroundColor: corCaixa,
           ),
         ),
       );
@@ -519,7 +512,10 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
             icon: const Icon(Icons.warning_amber_rounded, size: 18),
             label: Text('Fiado vencido · R\$ ${_fmt(resumo.aReceberVencido)}'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFC62828),
+              foregroundColor: AppModuloCores.alerta(
+                context,
+                DashboardAlertaTipo.fiadoVencido,
+              ),
             ),
           ),
         );
@@ -557,7 +553,7 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
     final botoes = <Widget>[
       HubNavButton(
         icon: Icons.calendar_view_week_outlined,
-        corDestaque: _corTesouraria,
+        corDestaque: AppModuloCores.modulo(context, AppModuloId.tesouraria),
         titulo: 'Tesouraria semanal',
         subtitulo: resumo != null
             ? 'Previsto 7d: R\$ ${_fmt(resumo.aReceberProximos7)} receber · R\$ ${_fmt(resumo.aPagarProximos7)} pagar'
@@ -567,7 +563,7 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
       ),
       HubNavButton(
         icon: Icons.call_received_outlined,
-        corDestaque: _corReceber,
+        corDestaque: AppModuloCores.modulo(context, AppModuloId.contasReceber),
         titulo: 'Contas a receber',
         subtitulo: resumo != null
             ? '${resumo.qtdTitulosReceberAbertos} titulo(s) · R\$ ${_fmt(resumo.totalAReceber)}'
@@ -577,7 +573,7 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
       ),
       HubNavButton(
         icon: Icons.call_made_outlined,
-        corDestaque: _corPagar,
+        corDestaque: AppModuloCores.modulo(context, AppModuloId.contasPagar),
         titulo: 'Contas a pagar',
         subtitulo: resumo != null
             ? '${resumo.qtdContasPagarAbertas} parcela(s) · R\$ ${_fmt(resumo.totalAPagarPendente)}'
@@ -594,7 +590,7 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
     final botoes = <Widget>[
       HubNavButton(
         icon: Icons.receipt_long_outlined,
-        corDestaque: const Color(0xFF5D4037),
+        corDestaque: AppModuloCores.modulo(context, AppModuloId.relatorioContasPagar),
         titulo: 'Relatorio contas a pagar',
         subtitulo: 'PDF, CSV e agrupamento por fornecedor',
         habilitado: _podeFinanceiro,
@@ -602,7 +598,7 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
       ),
       HubNavButton(
         icon: Icons.assessment_outlined,
-        corDestaque: _corRelatorio,
+        corDestaque: AppModuloCores.modulo(context, AppModuloId.relatorioFiados),
         titulo: 'Relatorio de fiados',
         subtitulo: 'Exportar CSV/PDF, agrupar por cliente',
         habilitado: _podeRelatorioFiado,

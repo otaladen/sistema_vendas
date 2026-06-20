@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 import '../../../config/fiscal_config.dart';
 import '../../../domain/fiscal/nfe_pre_emissao_service.dart';
 import '../../../domain/fiscal/nfe_previa_resumo.dart';
+import '../../../domain/venda_documento_rotulo_helper.dart';
 import '../../../model/venda.dart';
 import '../../../services/focus_nfe_service.dart';
 
@@ -100,8 +101,8 @@ class _NfePreviaEmissaoDialogState extends State<NfePreviaEmissaoDialog>
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Confirmar emissao NF-e — Venda '
-              '${widget.venda.numeroOrcamento > 0 ? widget.venda.numeroOrcamento : widget.venda.id}',
+              'Confirmar emissao NF-e — '
+              '${VendaDocumentoRotuloHelper.rotuloControleInterno(widget.venda)}',
             ),
           ),
           if (homolog)

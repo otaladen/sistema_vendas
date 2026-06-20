@@ -6,11 +6,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
+import '../data/app_config_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/reajuste_preco_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../data/usuario_repository.dart';
-import '../main.dart';
+import '../data/venda_repository.dart';
+import 'theme/app_semantic_helper.dart';
+import '../domain/estoque/estoque_diagnostico_models.dart';
 import '../domain/estoque/filtro_estoque_operacional.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/produto_unidade_exibicao.dart';
@@ -18,11 +21,14 @@ import '../domain/usuario_permissao_helper.dart';
 import '../model/produto.dart';
 import '../model/usuario_sistema.dart';
 import '../services/compras_preditivas_service.dart';
+import '../services/estoque_diagnostico_service.dart';
+import '../services/estoque_diagnostico_startup.dart';
 import '../services/pdf_tabela_produtos_texto.dart';
 import 'reajuste_preco_autorizacao.dart';
 import 'reajuste_preco_historico_page.dart';
 import 'reajuste_preco_lote_page.dart';
 import 'estoque/ajuste_estoque_dialog.dart';
+import 'estoque/estoque_diagnostico_sheet.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'sugestao_compra_page.dart';
 import 'widgets/produto_busca_input.dart';
@@ -45,6 +51,15 @@ class EstoquePage extends StatefulWidget {
 
 class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   final _usuarioRepository = UsuarioRepository();
+  final _appConfigRepository = AppConfigRepository();
+  late final VendaRepository _vendaRepository = VendaRepository(
+    widget.produtoRepository.objectBox,
+  );
+  late final EstoqueDiagnosticoService _diagnosticoService =
+      EstoqueDiagnosticoService(widget.produtoRepository.objectBox);
+
+  bool _permitirVendaSemEstoque = true;
+  EstoqueDiagnosticoResultado? _diagnosticoResultado;
 
   ReajustePrecoRepository get _reajusteRepo => ReajustePrecoRepository(
         widget.produtoRepository.objectBox,
@@ -68,10 +83,51 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   void initState() {
     super.initState();
     _recarregarProdutos();
+    _carregarDiagnosticoInicial();
     initSafeSyncRefresh(
-      onReload: _recarregarProdutos,
+      onReload: () {
+        _recarregarProdutos();
+        _atualizarDiagnostico();
+      },
       aoConcluir: _snackbarDadosAtualizados,
     );
+  }
+
+  Future<void> _carregarConfigEstoque() async {
+    final config = await _appConfigRepository.carregarEmpresaConfig();
+    if (!mounted) return;
+    _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
+  }
+
+  void _carregarDiagnosticoInicial() {
+    _diagnosticoResultado =
+        EstoqueDiagnosticoStartup.ultimoResultado ??
+        _diagnosticoService.executar();
+    EstoqueDiagnosticoStartup.ultimoResultado = _diagnosticoResultado;
+    _carregarConfigEstoque();
+  }
+
+  void _atualizarDiagnostico() {
+    final novo = _diagnosticoService.executar();
+    EstoqueDiagnosticoStartup.ultimoResultado = novo;
+    if (!mounted) return;
+    setState(() => _diagnosticoResultado = novo);
+  }
+
+  Future<void> _abrirDiagnosticoEstoque() async {
+    await mostrarEstoqueDiagnosticoSheet(
+      context: context,
+      diagnosticoService: _diagnosticoService,
+      vendaRepository: _vendaRepository,
+      usuarioLogado: widget.usuarioLogado,
+      permitirVendaSemEstoque: _permitirVendaSemEstoque,
+      resultadoInicial: _diagnosticoResultado,
+      aoAtualizarExterno: _atualizarDiagnostico,
+    );
+    if (!mounted) return;
+    setState(() {
+      _diagnosticoResultado = EstoqueDiagnosticoStartup.ultimoResultado;
+    });
   }
 
   @override
@@ -518,12 +574,24 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     final categorias = _categoriasDisponiveis();
     final fornecedores = _fornecedoresDisponiveis();
     final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
+    final semantic = context.semanticColors;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Estoque'),
         actions: [
+          IconButton(
+            tooltip: 'Diagnostico de estoque',
+            icon: Badge(
+              isLabelVisible:
+                  (_diagnosticoResultado?.temProblema ?? false),
+              label: Text(
+                '${(_diagnosticoResultado?.quantidadeCriticos ?? 0) + (_diagnosticoResultado?.quantidadeAlertas ?? 0)}',
+              ),
+              child: const Icon(Icons.health_and_safety_outlined),
+            ),
+            onPressed: _abrirDiagnosticoEstoque,
+          ),
           if (usuarioPodeReajustePrecoLote(widget.usuarioLogado)) ...[
             IconButton(
               tooltip: 'Historico de reajustes',
@@ -607,12 +675,33 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       ),
       body: Column(
         children: [
+          if (_diagnosticoResultado?.temProblema == true)
+            MaterialBanner(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              leading: Icon(
+                Icons.health_and_safety_outlined,
+                color: (_diagnosticoResultado!.quantidadeCriticos > 0)
+                    ? semantic.errorFg
+                    : semantic.warningFg,
+              ),
+              content: Text(
+                '${_diagnosticoResultado!.quantidadeCriticos} critico(s) e '
+                '${_diagnosticoResultado!.quantidadeAlertas} alerta(s) '
+                'no estoque. Revise vendas pendentes e saldos divergentes.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: _abrirDiagnosticoEstoque,
+                  child: const Text('Ver diagnostico'),
+                ),
+              ],
+            ),
           if (_qtdCriticosPp > 0)
             MaterialBanner(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               leading: Icon(
                 Icons.shopping_bag_outlined,
-                color: semantic?.warningFg ?? theme.colorScheme.error,
+                color: semantic.warningFg,
               ),
               content: Text(
                 '$_qtdCriticosPp produto(s) no ou abaixo do ponto de pedido. '
@@ -638,15 +727,16 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             child: LayoutBuilder(
               builder: (context, c) {
                 final estreito = c.maxWidth < 900;
-                final infoBg = semantic?.infoBg ?? const Color(0xFFEAF2FF);
-                final infoBorder = semantic?.infoBorder ?? const Color(0xFF9EC0FF);
-                final infoFg = semantic?.infoFg ?? const Color(0xFF1E3A8A);
-                final errBg = semantic?.errorBg ?? const Color(0xFFFDECEC);
-                final errBorder = semantic?.errorBorder ?? const Color(0xFFF1A3A3);
-                final errFg = semantic?.errorFg ?? const Color(0xFF9B1C1C);
-                final warnBg = semantic?.warningBg ?? const Color(0xFFFFF8E6);
-                final warnBorder = semantic?.warningBorder ?? const Color(0xFFF2CC7A);
-                final warnFg = semantic?.warningFg ?? const Color(0xFF8A5B00);
+                final kpiSemantic = context.semanticColors;
+                final infoBg = kpiSemantic.infoBg;
+                final infoBorder = kpiSemantic.infoBorder;
+                final infoFg = kpiSemantic.infoFg;
+                final errBg = kpiSemantic.errorBg;
+                final errBorder = kpiSemantic.errorBorder;
+                final errFg = kpiSemantic.errorFg;
+                final warnBg = kpiSemantic.warningBg;
+                final warnBorder = kpiSemantic.warningBorder;
+                final warnFg = kpiSemantic.warningFg;
                 final kpis = [
                   _kpiCard(
                     titulo: 'SKUs ativos',
@@ -848,10 +938,10 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                 final ppExibicao =
                     _comprasSvc.calcularPontoPedidoExibicao(produto);
                 final statusCor = criticoPp
-                    ? (semantic?.errorFg ?? theme.colorScheme.error)
+                    ? semantic.errorFg
                     : abaixoMinimo
-                        ? Colors.orange
-                        : Colors.green;
+                        ? semantic.warningFg
+                        : semantic.successFg;
                 final statusTexto = criticoPp
                     ? 'PP'
                     : abaixoMinimo
@@ -864,13 +954,11 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                       color: criticoPp
-                          ? (semantic?.errorFg ?? theme.colorScheme.error)
-                              .withValues(alpha: 0.45)
+                          ? semantic.errorFg.withValues(alpha: 0.45)
                           : theme.colorScheme.outlineVariant,
                     ),
                     color: criticoPp
-                        ? (semantic?.errorBg ?? theme.colorScheme.errorContainer)
-                            .withValues(alpha: 0.2)
+                        ? semantic.errorBg.withValues(alpha: 0.2)
                         : null,
                   ),
                   child: Row(

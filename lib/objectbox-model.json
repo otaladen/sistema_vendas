@@ -327,7 +327,7 @@
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "64:3930676945577310312",
+      "lastPropertyId": "65:7538825013182930492",
       "name": "Venda",
       "properties": [
         {
@@ -650,6 +650,11 @@
         {
           "id": "64:3930676945577310312",
           "name": "podRegistradoEm",
+          "type": 10
+        },
+        {
+          "id": "65:7538825013182930492",
+          "name": "finalizadaEm",
           "type": 10
         }
       ],

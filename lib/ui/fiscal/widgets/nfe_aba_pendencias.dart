@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../../data/nfe_saida_fiscal_store.dart';
 import '../../../domain/fiscal/nfe_pendencias_filtro.dart';
 import '../../../domain/fiscal/nfe_pendencias_service.dart';
+import '../../../domain/venda_documento_rotulo_helper.dart';
 import '../../../model/venda.dart';
 
 /// Aba Pendencias — fila operacional NF-e (Fase 4).
@@ -95,7 +96,7 @@ class NfeAbaPendencias extends StatelessWidget {
                         child: ListTile(
                           leading: const Icon(Icons.receipt_long_outlined),
                           title: Text(
-                            'Orc. ${p.venda.numeroOrcamento > 0 ? p.venda.numeroOrcamento : p.venda.id} · ${p.clienteNome}',
+                            '${VendaDocumentoRotuloHelper.rotuloControleInterno(p.venda)} · ${p.clienteNome}',
                           ),
                           subtitle: Text(
                             '${_data.format(p.venda.data.toLocal())} · '
@@ -212,7 +213,9 @@ class NfeAbaPendencias extends StatelessWidget {
     return Card(
       child: ListTile(
         onTap: () => onVerDetalheRegistro(r),
-        title: Text('Venda ${r.numeroOrcamento} · ${r.clienteNome}'),
+        title: Text(
+          '${VendaDocumentoRotuloHelper.rotuloControlePorNumero(r.numeroOrcamento)} · ${r.clienteNome}',
+        ),
         subtitle: Text(
           '${r.referenciaFocus}\n${r.mensagemSefaz.isNotEmpty ? r.mensagemSefaz : r.rotuloStatus}',
           maxLines: 3,

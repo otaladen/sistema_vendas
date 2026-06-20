@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../domain/caixa_fiscal_status.dart';
+import '../../../domain/venda_documento_rotulo_helper.dart';
 import '../../../domain/fiscal/venda_documento_fiscal_mutex.dart';
 import '../../../model/cliente.dart';
 import '../../../model/venda.dart';
@@ -20,9 +21,9 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
     required this.jaTemNfe55,
     required this.podeConcluir,
     required this.processando,
+    this.acaoFiscalSugerida,
     required this.onCupomNaoFiscal,
     required this.onEmitirNfce,
-    required this.onEmitirNfe55,
     required this.onConcluir,
     required this.onCancelarVenda,
   });
@@ -36,14 +37,12 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
   final bool jaTemNfe55;
   final bool podeConcluir;
   final bool processando;
+  /// 'cupom' ou 'nfce' conforme forma de pagamento (disparo automatico).
+  final String? acaoFiscalSugerida;
   final VoidCallback onCupomNaoFiscal;
   final VoidCallback onEmitirNfce;
-  final VoidCallback onEmitirNfe55;
   final VoidCallback onConcluir;
   final VoidCallback onCancelarVenda;
-
-  int get _numCupom =>
-      venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id;
 
   @override
   Widget build(BuildContext context) {
@@ -55,8 +54,6 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
     final atalhos = <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.digit2): onCupomNaoFiscal,
       const SingleActivator(LogicalKeyboardKey.numpad2): onCupomNaoFiscal,
-      const SingleActivator(LogicalKeyboardKey.digit4): onEmitirNfe55,
-      const SingleActivator(LogicalKeyboardKey.numpad4): onEmitirNfe55,
     };
     if (!bloqueiaNovaNfce) {
       atalhos[const SingleActivator(LogicalKeyboardKey.digit3)] = onEmitirNfce;
@@ -100,7 +97,8 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Pagamento confirmado — Venda $_numCupom',
+                          'Pagamento confirmado — '
+                          '${VendaDocumentoRotuloHelper.rotuloControleInterno(venda)}',
                           style: theme.textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
@@ -133,9 +131,9 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
                     jaTemNfe55: jaTemNfe55,
                     nfceEmitida: venda.nfceEmitida,
                     bloqueiaNovaNfce: bloqueiaNovaNfce,
+                    acaoFiscalSugerida: acaoFiscalSugerida,
                     onCupom: onCupomNaoFiscal,
                     onNfce: onEmitirNfce,
-                    onNfe55: onEmitirNfe55,
                   );
                   if (empilhar) {
                     return SingleChildScrollView(
@@ -174,10 +172,36 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Obrigatorio registrar documento: use tecla 2, 3 ou 4. '
-                          'So depois disso e possivel concluir (1 / Esc).',
+                          'Falha na baixa de estoque na finalizacao. Verifique produtos '
+                          'desvinculados ou estoque insuficiente antes de seguir.',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: scheme.onErrorContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ] else ...[
+              Material(
+                color: scheme.primaryContainer.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.check_circle_outline, color: scheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          VendaDocumentoRotuloHelper.resumoPosAutorizacaoFiscal(
+                            venda,
+                          ),
+                          style: theme.textTheme.bodySmall?.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -190,8 +214,8 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
             ],
             Text(
               podeConcluir
-                  ? 'Atalhos: Enter/3 = NFC-e · 2 = cupom · 4 = NF-e 55 · 1/Esc = concluir'
-                  : 'Atalhos: Enter/3 = NFC-e · 2 = cupom · 4 = NF-e 55',
+                  ? 'Atalhos: Enter/3 = NFC-e · 2 = cupom · 1/Esc = concluir'
+                  : 'Atalhos: Enter/3 = NFC-e · 2 = cupom',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -218,7 +242,7 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
                 label: Text(
                   podeConcluir
                       ? 'Concluir e voltar ao inicio (Esc · 1)'
-                      : 'Concluir (registre 2, 3 ou 4 antes)',
+                      : 'Concluir (estoque pendente)',
                 ),
               ),
             ),
@@ -268,8 +292,9 @@ class _ResumoPosVenda extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Baixa de estoque (itens leva agora) ao autorizar NFC-e/NF-e ou '
-              'ao cupom interno (2). Carreto e retirada futura: reserva.',
+              'Baixa de estoque dos itens "leva agora" ocorre ao confirmar o '
+              'pagamento (finalizacao). NFC-e e cupom sao documentos fiscais/internos. '
+              'Carreto e retirada futura: reserva.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -314,9 +339,9 @@ class _AcoesFiscais extends StatelessWidget {
     required this.jaTemNfe55,
     required this.nfceEmitida,
     required this.bloqueiaNovaNfce,
+    this.acaoFiscalSugerida,
     required this.onCupom,
     required this.onNfce,
-    required this.onNfe55,
   });
 
   final bool processando;
@@ -324,9 +349,9 @@ class _AcoesFiscais extends StatelessWidget {
   final bool jaTemNfe55;
   final bool nfceEmitida;
   final bool bloqueiaNovaNfce;
+  final String? acaoFiscalSugerida;
   final VoidCallback onCupom;
   final VoidCallback onNfce;
-  final VoidCallback onNfe55;
 
   @override
   Widget build(BuildContext context) {
@@ -343,6 +368,39 @@ class _AcoesFiscais extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (acaoFiscalSugerida != null) ...[
+              const SizedBox(height: 10),
+              Material(
+                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.bolt_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          acaoFiscalSugerida == 'cupom'
+                              ? 'Dinheiro ou fiado: cupom nao fiscal sera '
+                                  'emitido automaticamente (controle interno; '
+                                  'estoque ja baixado na finalizacao).'
+                              : 'PIX ou cartao: NFC-e sera emitida '
+                                  'automaticamente (estoque ja baixado na finalizacao).',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             if (exigeNfe55 && !jaTemNfe55) ...[
               const SizedBox(height: 10),
               Material(
@@ -357,8 +415,8 @@ class _AcoesFiscais extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Cliente CNPJ — emita NF-e modelo 55 (tecla 4) '
-                          'para faturamento correto.',
+                          'Cliente CNPJ — emita NF-e modelo 55 pelo menu '
+                          'Notas fiscais quando necessario.',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: Colors.amber.shade900,
                             fontWeight: FontWeight.w600,
@@ -375,8 +433,9 @@ class _AcoesFiscais extends StatelessWidget {
               context,
               icone: Icons.receipt_outlined,
               titulo: 'Cupom nao fiscal',
-              subtitulo: 'Cupom interno + baixa de estoque (leva agora)',
+              subtitulo: 'Dinheiro/fiado — controle interno (estoque na finalizacao)',
               atalho: '2',
+              destaque: acaoFiscalSugerida == 'cupom' && !processando,
               onPressed: processando ? null : onCupom,
             ),
             const SizedBox(height: 8),
@@ -390,21 +449,11 @@ class _AcoesFiscais extends StatelessWidget {
                   : 'Emitir NFC-e',
               subtitulo: bloqueiaNovaNfce && jaTemNfe55
                   ? 'Uma venda nao pode ter NFC-e e NF-e juntas'
-                  : 'Cupom fiscal eletronico (consumidor final)',
+                  : 'Nota fiscal (estoque ja baixado na finalizacao)',
               atalho: bloqueiaNovaNfce ? '—' : '3 · Enter',
-              destaque: !bloqueiaNovaNfce,
+              destaque:
+                  acaoFiscalSugerida == 'nfce' && !bloqueiaNovaNfce && !processando,
               onPressed: processando || bloqueiaNovaNfce ? null : onNfce,
-            ),
-            const SizedBox(height: 8),
-            _botaoAcao(
-              context,
-              icone: Icons.description_outlined,
-              titulo: jaTemNfe55 ? 'NF-e 55 autorizada — abrir' : 'Emitir NF-e modelo 55',
-              subtitulo: exigeNfe55
-                  ? 'Nota completa para CNPJ / construcao'
-                  : 'Nota completa quando exigida pelo cliente',
-              atalho: '4',
-              onPressed: processando ? null : onNfe55,
             ),
           ],
         ),

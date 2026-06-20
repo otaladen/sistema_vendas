@@ -11,12 +11,12 @@ TextSpan pdvTextoDestaqueBusca({
   if (termo.isEmpty) {
     return TextSpan(text: texto, style: estiloBase);
   }
+  final scheme = Theme.of(context).colorScheme;
   final textoLower = texto.toLowerCase();
-  // Verde forte + fundo claro no trecho buscado; resto do nome usa [estiloBase] sem negrito.
   final destaque = estiloBase.copyWith(
-    color: const Color(0xFF0A6B1F),
+    color: scheme.onPrimaryContainer,
     fontWeight: FontWeight.normal,
-    backgroundColor: const Color(0xFFB8F5C3),
+    backgroundColor: scheme.primaryContainer,
   );
   final spans = <TextSpan>[];
   var cursor = 0;
