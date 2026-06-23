@@ -34,6 +34,7 @@ import '../config/focus_nfe_runtime.dart';
 import '../domain/fiscal/abrir_danfe_focus.dart';
 import '../services/focus_nfe_service.dart';
 import 'fiscal/abrir_documento_fiscal.dart';
+import 'fiscal/emitir_nfce_venda_flow.dart';
 import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
 import 'registrar_devolucao_troca_page.dart';
 
@@ -74,6 +75,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   final DateFormat _dataDia = DateFormat('dd/MM/yyyy');
   final _buscaController = TextEditingController();
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
+  late final FocusNfeService _focusNfeService =
+      FocusNfeService(config: criarFocusNfeConfigPadrao());
 
   String _periodoPreset = 'ultimos_30';
   DateTime? _dataPersonalizadaInicio;
@@ -81,6 +84,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   String _formaPagamento = 'todos';
   String _tipoEntrega = 'todos';
   String _entregaPendente = 'todos';
+  String _filtroFiscal = 'todos';
   String _filtroCancelamento = 'ativas';
   String _canceladaPorFiltro = 'todos';
   int? _clienteIdFiltro;
@@ -142,9 +146,31 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   Future<void> _verDanfeNfce(Venda v) async {
     await abrirDanfeFocus(
       context,
-      focusNfe: FocusNfeService(config: criarFocusNfeConfigPadrao()),
+      focusNfe: _focusNfeService,
       urlSalva: v.nfceUrlDanfe,
       venda: v,
+    );
+  }
+
+  EmitirNfceVendaDeps get _emitirNfceDeps => EmitirNfceVendaDeps(
+        vendaRepository: widget.vendaRepository,
+        clienteRepository: widget.clienteRepository,
+        vendedorRepository: widget.vendedorRepository,
+        appConfigRepository: widget.appConfigRepository,
+        printService: widget.printService,
+        focusNfeService: _focusNfeService,
+      );
+
+  Future<void> _emitirNfce(Venda v) async {
+    await EmitirNfceVendaFlow.executar(
+      context,
+      deps: _emitirNfceDeps,
+      venda: v,
+      onConcluidoComSucesso: () {
+        if (mounted) {
+          setState(_pesquisar);
+        }
+      },
     );
   }
 
@@ -767,6 +793,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       formaPagamento: _formaPagamento,
       tipoEntrega: _tipoEntrega,
       entregaPendente: _entregaPendente,
+      filtroFiscal: _filtroFiscal,
       clienteId: _clienteIdFiltro,
       vendedorId: _vendedorIdFiltro,
     );
@@ -780,6 +807,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       _formaPagamento = 'todos';
       _tipoEntrega = 'todos';
       _entregaPendente = 'todos';
+      _filtroFiscal = 'todos';
       _filtroCancelamento = 'ativas';
       _canceladaPorFiltro = 'todos';
       _clienteIdFiltro = null;
@@ -1175,6 +1203,29 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                             ],
                             onChanged: (v) {
                               if (v != null) setState(() => _tipoEntrega = v);
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          width: 220,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _filtroFiscal,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Documento fiscal',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'todos',
+                                child: Text('Todos'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'sem_nfce_eletronico',
+                                child: Text('Sem NFC-e (PIX/cartao)'),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) setState(() => _filtroFiscal = v);
                             },
                           ),
                         ),
@@ -1588,6 +1639,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                         _abrirRegistrarDevolucaoTroca(v);
                                       } else if (value == 'devolucao_fiscal') {
                                         _abrirDevolucoesFiscais(v);
+                                      } else if (value == 'emitir_nfce') {
+                                        _emitirNfce(v);
                                       } else if (value == 'danfe_nfce') {
                                         _verDanfeNfce(v);
                                       } else if (value == 'danfe_nfe55') {
@@ -1600,12 +1653,19 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                     },
                                     itemBuilder: (context) {
                                       final temNfce = v.nfceEmitida;
+                                      final podeEmitirNfce =
+                                          EmitirNfceVendaFlow.podeEmitir(v);
                                       final temNfe55 = widget.vendaRepository
                                               .obterNfe55AutorizadaPorVenda(
                                             v.id,
                                           ) !=
                                           null;
                                       return [
+                                      if (podeEmitirNfce)
+                                        const PopupMenuItem<String>(
+                                          value: 'emitir_nfce',
+                                          child: Text('Emitir NFC-e'),
+                                        ),
                                       if (temNfce)
                                         const PopupMenuItem<String>(
                                           value: 'danfe_nfce',

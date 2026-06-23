@@ -125,6 +125,8 @@ abstract final class AppModuloCores {
         return destino(context, MainMenuDestino.estoque);
       case DashboardAlertaTipo.orcamentoAntigo:
         return harmonizar(scheme, 275);
+      case DashboardAlertaTipo.backupAtrasado:
+        return semantic?.warningFg ?? destino(context, MainMenuDestino.configuracoes);
     }
   }
 }

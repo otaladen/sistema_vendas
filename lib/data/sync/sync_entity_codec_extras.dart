@@ -19,6 +19,7 @@ import '../../model/registro_devolucao.dart';
 import '../../model/usuario_sistema.dart';
 import '../../model/vinculo_fornecedor_produto.dart';
 import '../../domain/auditoria_retencao.dart';
+import '../../domain/backup_retencao.dart';
 import '../app_config_repository.dart';
 
 /// Codecs adicionais para sync LAN (entidades alem de produto/cliente/venda/vendedor).
@@ -529,6 +530,9 @@ class SyncEntityCodecExtras {
         'mensageriaBackendUrl': c.mensageriaBackendUrl,
         'backupAutomaticoAtivo': c.backupAutomaticoAtivo,
         'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
+        'backupRetencaoMaxCopias': c.backupRetencaoMaxCopias,
+        'backupSegundoDestinoAtivo': c.backupSegundoDestinoAtivo,
+        'backupSegundoDestinoPasta': c.backupSegundoDestinoPasta,
         'layoutImpressaoJson': c.layoutImpressaoJson,
         'auditoriaRetencaoDias': c.auditoriaRetencaoDias,
         'margemMinimaPercentualPadrao': c.margemMinimaPercentualPadrao,
@@ -576,6 +580,16 @@ class SyncEntityCodecExtras {
       backupAutomaticoIntervaloMinutos:
           (m['backupAutomaticoIntervaloMinutos'] as num?)?.toInt() ??
               base.backupAutomaticoIntervaloMinutos,
+      backupRetencaoMaxCopias: BackupRetencaoOpcoes.normalizar(
+        (m['backupRetencaoMaxCopias'] as num?)?.toInt() ??
+            base.backupRetencaoMaxCopias,
+      ),
+      backupSegundoDestinoAtivo:
+          m['backupSegundoDestinoAtivo'] as bool? ??
+              base.backupSegundoDestinoAtivo,
+      backupSegundoDestinoPasta:
+          (m['backupSegundoDestinoPasta'] ?? base.backupSegundoDestinoPasta)
+              .toString(),
       layoutImpressaoJson:
           (m['layoutImpressaoJson'] ?? base.layoutImpressaoJson).toString(),
       auditoriaRetencaoDias: AuditoriaRetencaoOpcoes.normalizar(

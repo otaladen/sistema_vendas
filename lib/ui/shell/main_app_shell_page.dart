@@ -13,8 +13,11 @@ import '../../data/produto_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
+import '../../domain/backup_status_helper.dart';
 import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
 import '../../domain/main_menu_destino.dart';
+import '../../domain/permissao_usuario.dart';
+import '../../domain/usuario_permissao_helper.dart';
 import '../../model/usuario_sistema.dart';
 import '../../services/lan_sync_server_manager.dart';
 import '../../services/print_service.dart';
@@ -68,16 +71,17 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   bool _railEstendido = true;
   bool _syncIniciado = false;
   int _fiscalPendencias = 0;
+  bool _backupAlerta = false;
   Timer? _fiscalPendenciasTimer;
 
   @override
   void initState() {
     super.initState();
     _carregarFavoritos();
-    _atualizarPendenciasFiscais();
+    unawaited(_atualizarBadgesMenu());
     _fiscalPendenciasTimer = Timer.periodic(
       const Duration(seconds: 60),
-      (_) => _atualizarPendenciasFiscais(),
+      (_) => unawaited(_atualizarBadgesMenu()),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _iniciarSyncSeNecessario();
@@ -90,12 +94,29 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     super.dispose();
   }
 
-  void _atualizarPendenciasFiscais() {
-    final total = FiscalPendenciasResumoService.contar(
+  Future<void> _atualizarBadgesMenu() async {
+    final fiscal = FiscalPendenciasResumoService.contar(
       vendaRepository: widget.vendaRepository,
     ).total;
-    if (!mounted || total == _fiscalPendencias) return;
-    setState(() => _fiscalPendencias = total);
+    var backupAlerta = false;
+    if (UsuarioPermissaoHelper.tem(
+      widget.usuarioLogado,
+      PermissaoUsuario.configuracoes,
+    )) {
+      final config = await widget.appConfigRepository.carregarEmpresaConfig();
+      final manual =
+          await widget.appConfigRepository.carregarRegistroBackupManual();
+      backupAlerta = BackupStatusHelper.avaliar(
+        config: config,
+        manual: manual,
+      ).exibirAlerta;
+    }
+    if (!mounted) return;
+    if (fiscal == _fiscalPendencias && backupAlerta == _backupAlerta) return;
+    setState(() {
+      _fiscalPendencias = fiscal;
+      _backupAlerta = backupAlerta;
+    });
   }
 
   Future<void> _iniciarSyncSeNecessario() async {
@@ -138,7 +159,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   void _irPara(MainMenuDestino destino) {
     if (!destino.podeAcessar(widget.usuarioLogado)) return;
     setState(() => _destino = destino);
-    _atualizarPendenciasFiscais();
+    unawaited(_atualizarBadgesMenu());
     _navKey.currentState?.pushAndRemoveUntil<void>(
       MaterialPageRoute<void>(
         settings: RouteSettings(name: destino.name),
@@ -244,6 +265,12 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     );
   }
 
+  int _badgeRail(MainMenuDestino d) {
+    if (d == MainMenuDestino.notasFiscais) return _fiscalPendencias;
+    if (d == MainMenuDestino.configuracoes && _backupAlerta) return 1;
+    return 0;
+  }
+
   Widget _rail(BuildContext context) {
     final tema = Theme.of(context);
     final itens = _itensRail;
@@ -275,16 +302,12 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
             icon: _iconeRail(
               d,
               selecionado: false,
-              badge: d == MainMenuDestino.notasFiscais
-                  ? _fiscalPendencias
-                  : 0,
+              badge: _badgeRail(d),
             ),
             selectedIcon: _iconeRail(
               d,
               selecionado: true,
-              badge: d == MainMenuDestino.notasFiscais
-                  ? _fiscalPendencias
-                  : 0,
+              badge: _badgeRail(d),
             ),
             label: Text(
               d.titulo,
@@ -295,30 +318,18 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
             ),
           ),
       ],
-      trailing: Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_favoritos.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  '${_favoritos.length} fav.',
-                  style: tema.textTheme.labelSmall?.copyWith(
-                    color: tema.colorScheme.onSurface.withValues(alpha: 0.55),
-                  ),
-                  textAlign: TextAlign.center,
+      trailing: _favoritos.isNotEmpty
+          ? Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                '${_favoritos.length} fav.',
+                style: tema.textTheme.labelSmall?.copyWith(
+                  color: tema.colorScheme.onSurface.withValues(alpha: 0.55),
                 ),
+                textAlign: TextAlign.center,
               ),
-            IconButton(
-              tooltip: 'Inicio',
-              onPressed: () => _irPara(MainMenuDestino.inicio),
-              icon: const Icon(Icons.dashboard_outlined),
-            ),
-          ],
-        ),
-      ),
+            )
+          : null,
     );
   }
 

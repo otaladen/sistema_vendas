@@ -27,7 +27,7 @@ import '../../domain/entrega_venda_helper.dart';
 import '../../domain/promocao_cadastro.dart';
 import '../../domain/promocao_preco_result.dart';
 import '../../domain/promocao_preco_service.dart';
-import '../../config/fiscal_config.dart';
+import '../../domain/produto_limite_desconto_pdv.dart';
 import '../../domain/fiscal/cliente_fiscal_helper.dart';
 import '../../domain/venda_documento_pos_caixa.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
@@ -44,13 +44,11 @@ import '../../model/venda.dart';
 import '../../model/vendedor.dart';
 import '../../services/auditoria_registrar.dart';
 import '../../services/cupom_nao_fiscal_venda_pdf.dart';
-import '../../data/sync/sync_cursor_storage.dart';
 import '../../domain/fiscal/abrir_danfe_focus.dart';
-import '../../domain/fiscal/fiscal_emissao_lock.dart';
+import '../../domain/fiscal/venda_nfce_obrigatoria_helper.dart';
 import '../../domain/fiscal/venda_documento_fiscal_mutex.dart';
 import '../fiscal/abrir_documento_fiscal.dart';
 import '../../services/focus_nfe_service.dart';
-import '../../services/focus_nfe_reconsulta_helper.dart';
 import '../../services/nfce_reconciliacao_service.dart';
 import '../../services/gaveta_esc_pos_service.dart';
 import '../../services/print_service.dart';
@@ -61,7 +59,9 @@ import '../widgets/conta_sessao_app_bar_actions.dart';
 import '../widgets/receber_fiado_panel.dart';
 import '../../services/recibo_movimento_caixa_pdf.dart';
 import '../../services/recibo_recebimento_fiado_pdf.dart';
+import '../fiscal/emitir_nfce_venda_flow.dart';
 import '../fiscal/nfe_gerenciamento_page.dart';
+import '../fiscal/pendencias_fiscais_page.dart';
 import '../pdv_consulta_produtos_page.dart';
 import '../pdv_pesquisa_comando.dart';
 import '../pdv_desconto_autorizacao.dart';
@@ -75,7 +75,6 @@ import 'caixa_feedback.dart';
 import 'caixa_pos_venda_sessao.dart';
 import 'caixa_ultimas_vendas_list.dart';
 import 'widgets/caixa_cobranca_painel.dart';
-import 'widgets/caixa_etapas_bar.dart';
 import 'widgets/caixa_pos_venda_fiscal_painel.dart';
 import '../vendas/cancelar_venda_ui.dart';
 
@@ -147,6 +146,8 @@ class _CaixaPageState extends State<CaixaPage> {
   double? _valorRecebido;
   bool _posVendaProcessando = false;
   CaixaPosVendaSessao? _posVenda;
+  int _nfcePendenteEmissaoQtd = 0;
+  double _nfcePendenteEmissaoTotal = 0;
   bool _caixaAberto = false;
   String _operadorCaixa = '';
   DateTime? _aberturaCaixaEm;
@@ -168,13 +169,13 @@ class _CaixaPageState extends State<CaixaPage> {
   bool _pesquisaOrcamentoDialogAberta = false;
   bool _documentoFiscalAutomaticoDisparado = false;
   bool _gestaoCaixaExpandida = false;
+  bool _painelCobrancaAberto = false;
   int? _ultimoTrocoVendaId;
   int _ultimoTrocoNumeroOrcamento = 0;
   double _ultimoTrocoValor = 0;
   late final FocusNfeService _focusNfeService;
   late final NfceReconciliacaoService _nfceReconciliacao;
   Timer? _timerReconciliacaoNfce;
-  String? _deviceIdSync;
   UltimasVendasFinalizadasOrdenacao _ordenacaoUltimasVendas =
       UltimasVendasFinalizadasOrdenacao.padrao;
   bool _correcaoFinalizadaEmDisparada = false;
@@ -196,23 +197,14 @@ class _CaixaPageState extends State<CaixaPage> {
     _carregarSessaoCaixa();
     _carregarOrcamentos();
     unawaited(_carregarOrdenacaoUltimasVendas());
-    unawaited(_carregarDeviceIdSync());
     unawaited(_reconciliarNfcePendentes(mostrarFeedback: false));
+    _atualizarResumoNfcePendenteEmissao();
     _iniciarPollReconciliacaoNfce();
     HardwareKeyboard.instance.addHandler(_handlerTeclasHardwareCaixa);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focusAtalhosCaixa.requestFocus();
     });
-  }
-
-  Future<String> _obterDeviceIdSync() async {
-    _deviceIdSync ??= await SyncCursorStorage().obterOuCriarDeviceId();
-    return _deviceIdSync!;
-  }
-
-  Future<void> _carregarDeviceIdSync() async {
-    _deviceIdSync = await SyncCursorStorage().obterOuCriarDeviceId();
   }
 
   void _iniciarPollReconciliacaoNfce() {
@@ -233,6 +225,7 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
     final lote = await _nfceReconciliacao.reconsultarTodasPendentes();
+    if (mounted) _atualizarResumoNfcePendenteEmissao();
     if (!mounted || !mostrarFeedback || lote.autorizadas <= 0) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -241,6 +234,271 @@ class _CaixaPageState extends State<CaixaPage> {
               ? 'NFC-e pendente autorizada na reconsulta.'
               : '${lote.autorizadas} NFC-e(s) autorizada(s) na reconsulta.',
         ),
+      ),
+    );
+  }
+
+  void _atualizarResumoNfcePendenteEmissao() {
+    final lista = widget.vendaRepository.listarComNfcePendenteEmissao();
+    if (!mounted) return;
+    setState(() {
+      _nfcePendenteEmissaoQtd = lista.length;
+      _nfcePendenteEmissaoTotal = VendaNfceObrigatoriaHelper.somaTotal(lista);
+    });
+  }
+
+  Future<void> _abrirPendenciasFiscaisCaixa() async {
+    final usuario = await _usuarioLogadoCaixa();
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => PendenciasFiscaisPage(
+          vendaRepository: widget.vendaRepository,
+          clienteRepository: widget.clienteRepository,
+          appConfigRepository: widget.appConfigRepository,
+          usuarioLogado: usuario,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    _atualizarResumoNfcePendenteEmissao();
+  }
+
+  Widget _buildChipNfcePendenteEmissao(BuildContext context) {
+    if (!_caixaAberto || _nfcePendenteEmissaoQtd <= 0) {
+      return const SizedBox.shrink();
+    }
+    final scheme = Theme.of(context).colorScheme;
+    return ActionChip(
+      avatar: Icon(Icons.warning_amber_rounded, size: 18, color: scheme.error),
+      label: Text(
+        '$_nfcePendenteEmissaoQtd NFC-e · ${_formatarMoeda(_nfcePendenteEmissaoTotal)}',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+      backgroundColor: scheme.errorContainer.withValues(alpha: 0.85),
+      side: BorderSide(color: scheme.error.withValues(alpha: 0.35)),
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      onPressed: () => unawaited(_abrirPendenciasFiscaisCaixa()),
+    );
+  }
+
+  Widget _acaoIconeCaixa(
+    BuildContext context, {
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    bool destacar = false,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.all(6),
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        style: destacar
+            ? IconButton.styleFrom(
+                backgroundColor: scheme.tertiaryContainer,
+                foregroundColor: scheme.onTertiaryContainer,
+              )
+            : null,
+        onPressed: onPressed,
+        icon: Icon(icon, size: 20),
+      ),
+    );
+  }
+
+  Widget _buildToolbarOrcamentoAtivo(
+    BuildContext context, {
+    required Venda selecionado,
+    required Cliente? clienteSelecionado,
+    bool incluirBuscaProduto = false,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semCliente = clienteSelecionado == null;
+    final semVendedor = _vendedorDaVenda(selecionado) == null;
+    final numLabel = selecionado.numeroOrcamento > 0
+        ? selecionado.numeroOrcamento
+        : selecionado.id;
+
+    return Material(
+      elevation: 0,
+      color: scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.7)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Orc. $numLabel',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (selecionado.entregaPendente) ...[
+                  const SizedBox(width: 6),
+                  Chip(
+                    label: Text(
+                      'Ret. futura',
+                      style: theme.textTheme.labelSmall,
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ],
+                const Spacer(),
+                _acaoIconeCaixa(
+                  context,
+                  icon: Icons.search,
+                  tooltip: 'Importar orcamento (F1)',
+                  onPressed: _abrirPesquisaOrcamento,
+                ),
+                _acaoIconeCaixa(
+                  context,
+                  icon: Icons.arrow_back,
+                  tooltip: 'Voltar a fila (Esc)',
+                  onPressed: _voltarParaFila,
+                ),
+              ],
+            ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Text(
+                    [
+                      'Entrega: ${_textoEntregaCaixa(selecionado)}',
+                      if (_vendaExigeDadosCarreto(selecionado))
+                        'Frete: ${_formatarMoeda(selecionado.valorFrete)}',
+                      'Cliente: ${clienteSelecionado?.nomeRazao ?? 'Sem cliente'}',
+                      'Vendedor: ${_rotuloVendedorUmLinha(selecionado)}',
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                _acaoIconeCaixa(
+                  context,
+                  icon: Icons.person_add_alt_1_outlined,
+                  tooltip: 'Vincular cliente (F4)',
+                  onPressed: _vincularClienteAgora,
+                  destacar: semCliente,
+                ),
+                if (semVendedor)
+                  _acaoIconeCaixa(
+                    context,
+                    icon: Icons.badge_outlined,
+                    tooltip: 'Vincular vendedor (F7)',
+                    onPressed: () => unawaited(_vincularVendedorAgora()),
+                    destacar: true,
+                  ),
+              ],
+            ),
+            if (incluirBuscaProduto) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _pesquisaProdutoConferenciaController,
+                      focusNode: _pesquisaProdutoConferenciaFocus,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        hintText: 'Adicionar produto — Enter ou F5',
+                        prefixIcon: Icon(Icons.search, size: 18),
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                      ),
+                      onSubmitted: (v) => unawaited(
+                        _abrirConsultaProdutoConferencia(termo: v),
+                      ),
+                    ),
+                  ),
+                  _acaoIconeCaixa(
+                    context,
+                    icon: Icons.add_shopping_cart_outlined,
+                    tooltip: 'Buscar produto (F5)',
+                    onPressed: () =>
+                        unawaited(_abrirConsultaProdutoConferencia()),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRodapeConferenciaAcao(
+    BuildContext context, {
+    required Venda selecionado,
+    required double totalComDesconto,
+    required double descontoPdvOrcamento,
+    required double descontoCaixa,
+  }) {
+    final total = _buildRodapeConferenciaPagamentoTotal(
+      context,
+      selecionado: selecionado,
+      totalComDesconto: totalComDesconto,
+      descontoPdvOrcamento: descontoPdvOrcamento,
+      descontoCaixa: descontoCaixa,
+    );
+    final botao = SizedBox(
+      width: double.infinity,
+      height: 44,
+      child: FilledButton.icon(
+        onPressed: _acaoPrincipalConferencia,
+        icon: Icon(
+          _podeFinalizarDiretoNaConferencia(selecionado)
+              ? Icons.check_circle_outline
+              : Icons.payments_outlined,
+          size: 20,
+        ),
+        label: Text(_rotuloBotaoPrincipalConferencia(selecionado)),
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 520) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                total,
+                const SizedBox(height: 8),
+                botao,
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(child: total),
+              const SizedBox(width: 12),
+              SizedBox(width: 168, child: botao),
+            ],
+          );
+        },
       ),
     );
   }
@@ -261,9 +519,6 @@ class _CaixaPageState extends State<CaixaPage> {
   bool _descontoCaixaDisponivel() =>
       _mostrarDescontoCaixa && _maxDescontoPercentualPdv > 0.004;
 
-  String _textoAtalhoDescontoCaixa() =>
-      _descontoCaixaDisponivel() ? 'F6 = desconto | ' : '';
-
   void _garantirBaseDescontoPdv(Venda v) {
     _descontoPdvBasePorVendaId.putIfAbsent(
       v.id,
@@ -282,13 +537,41 @@ class _CaixaPageState extends State<CaixaPage> {
     return (v.descontoImplicitoTotal - base).clamp(0, double.infinity);
   }
 
-  double _subtotalBrutoOrcamento(Venda v) =>
-      v.somaSubtotalItens + (v.valorFrete > 0 ? v.valorFrete : 0);
+  List<LinhaCalculoLimiteDescontoPdv> _linhasLimiteDescontoCaixa(Venda v) {
+    final out = <LinhaCalculoLimiteDescontoPdv>[];
+    for (final item in v.itens) {
+      final produto = item.produto.target ??
+          widget.produtoRepository.obterPorId(item.produto.targetId);
+      if (produto == null) continue;
+      out.add(
+        LinhaCalculoLimiteDescontoPdv(
+          produto: produto,
+          precoTipo: item.precoTipo,
+          subtotal: item.subtotal,
+          promocaoId: item.promocaoId,
+        ),
+      );
+    }
+    return out;
+  }
+
+  double _valorMaximoDescontoTotalCaixa(Venda v) {
+    if (_maxDescontoPercentualPdv <= 0) return 0;
+    return ProdutoLimiteDescontoPdv.valorMaximoDescontoReais(
+      linhas: _linhasLimiteDescontoCaixa(v),
+      tetoEmpresaOuUsuario: _maxDescontoPercentualPdv,
+    );
+  }
+
+  double _percentualMaximoEfetivoDescontoCaixa(Venda v) =>
+      ProdutoLimiteDescontoPdv.percentualEquivalenteSobreSubtotal(
+        linhas: _linhasLimiteDescontoCaixa(v),
+        tetoEmpresaOuUsuario: _maxDescontoPercentualPdv,
+      );
 
   double _valorMaximoDescontoAdicionalCaixa(Venda v) {
     if (_maxDescontoPercentualPdv <= 0) return 0;
-    final tetoTotal =
-        _subtotalBrutoOrcamento(v) * _maxDescontoPercentualPdv / 100;
+    final tetoTotal = _valorMaximoDescontoTotalCaixa(v);
     final ja = v.descontoImplicitoTotal;
     return (tetoTotal - ja).clamp(0, v.total).toDouble();
   }
@@ -319,8 +602,7 @@ class _CaixaPageState extends State<CaixaPage> {
     }
     final v = _selecionado;
     if (v == null) return;
-    if (_etapaCaixa != CaixaEtapa.conferencia &&
-        _etapaCaixa != CaixaEtapa.cobranca) {
+    if (_etapaCaixa != CaixaEtapa.conferencia) {
       return;
     }
 
@@ -332,7 +614,7 @@ class _CaixaPageState extends State<CaixaPage> {
       descontoPdv: _descontoPdvOrcamentoExibicao(v),
       descontoCaixaAtual: _descontoCaixaAplicado(v),
       maximoAdicionalReais: maxAdicional,
-      maximoPercentual: _maxDescontoPercentualPdv,
+      maximoPercentual: _percentualMaximoEfetivoDescontoCaixa(v),
       formatarMoeda: _formatarMoeda,
     );
     if (pedido == null || !mounted) return;
@@ -369,8 +651,11 @@ class _CaixaPageState extends State<CaixaPage> {
       );
       if (!mounted) return;
       _carregarOrcamentos();
-      if (_etapaCaixa == CaixaEtapa.cobranca) {
-        _sincronizarRecebidoPdVComOrcamento();
+      if (_painelCobrancaAberto &&
+          _caixaPrecisaValorRecebidoDinheiro(_selecionado!)) {
+        _prepararRecebidoDinheiro(_totalComDesconto(_selecionado!));
+      }
+      if (_painelCobrancaAberto) {
         _focarEntradaPrincipalCaixa();
       }
       CaixaFeedback.sucesso(
@@ -392,18 +677,21 @@ class _CaixaPageState extends State<CaixaPage> {
       _posVenda = null;
       _posVendaProcessando = false;
       _documentoFiscalAutomaticoDisparado = false;
+      _painelCobrancaAberto = false;
       _etapaCaixa = CaixaEtapa.fila;
       _valorRecebidoController.clear();
       _valorRecebido = null;
       _valorRecebidoFocusNode.unfocus();
     });
     _focarAtalhosCaixaSeFila();
+    _atualizarResumoNfcePendenteEmissao();
   }
 
   void _selecionarOrcamentoParaConferencia(Venda venda) {
     _garantirBaseDescontoPdv(venda);
     setState(() {
       _selecionado = venda;
+      _painelCobrancaAberto = false;
       _etapaCaixa = CaixaEtapa.conferencia;
       _prepararEdicaoMisto(venda);
       _sincronizarRecebidoPdVComOrcamento();
@@ -414,6 +702,7 @@ class _CaixaPageState extends State<CaixaPage> {
     _disposeMistoEdicao();
     setState(() {
       _selecionado = null;
+      _painelCobrancaAberto = false;
       _etapaCaixa = CaixaEtapa.fila;
       _valorRecebidoController.clear();
       _valorRecebido = null;
@@ -422,18 +711,80 @@ class _CaixaPageState extends State<CaixaPage> {
     _focarAtalhosCaixaSeFila();
   }
 
-  void _irParaCobranca() {
-    if (_selecionado == null) return;
-    if (_caixaPrecisaValorRecebidoDinheiro(_selecionado!)) {
-      _valorRecebidoController.clear();
-      _valorRecebido = null;
+  bool _conferenciaAtivaComOrcamento() =>
+      _selecionado != null && _etapaCaixa == CaixaEtapa.conferencia;
+
+  bool _podeFinalizarDiretoNaConferencia(Venda v) {
+    const diretas = {
+      'pix',
+      'cartao_credito',
+      'cartao_debito',
+      'transferencia',
+    };
+    return diretas.contains(v.formaPagamento);
+  }
+
+  bool _exigePainelCobranca(Venda v) =>
+      v.formaPagamento == 'dinheiro' ||
+      v.formaPagamento == 'misto' ||
+      v.formaPagamento == 'fiado';
+
+  String _rotuloBotaoPrincipalConferencia(Venda v) {
+    if (_podeFinalizarDiretoNaConferencia(v)) {
+      return 'Finalizar (Enter)';
     }
-    setState(() => _etapaCaixa = CaixaEtapa.cobranca);
+    return 'Receber (Enter)';
+  }
+
+  void _prepararRecebidoDinheiro(double total) {
+    final texto = total.toStringAsFixed(2).replaceAll('.', ',');
+    _valorRecebidoController.value = TextEditingValue(
+      text: texto,
+      selection: TextSelection(baseOffset: 0, extentOffset: texto.length),
+    );
+    _valorRecebido = total;
+  }
+
+  void _abrirPainelCobranca() {
+    if (_selecionado == null) return;
+    final v = _selecionado!;
+    if (_caixaPrecisaValorRecebidoDinheiro(v)) {
+      _prepararRecebidoDinheiro(_totalComDesconto(v));
+    } else {
+      _sincronizarRecebidoPdVComOrcamento();
+    }
+    setState(() => _painelCobrancaAberto = true);
     _focarEntradaPrincipalCaixa();
   }
 
-  void _voltarParaConferencia() {
-    setState(() => _etapaCaixa = CaixaEtapa.conferencia);
+  void _fecharPainelCobranca() {
+    if (!_painelCobrancaAberto) return;
+    setState(() => _painelCobrancaAberto = false);
+    _focusAtalhosCaixa.requestFocus();
+  }
+
+  void _acaoPrincipalConferencia() {
+    final v = _selecionado;
+    if (v == null) return;
+    if (_painelCobrancaAberto) {
+      unawaited(_finalizarOrcamento(v));
+      return;
+    }
+    if (_podeFinalizarDiretoNaConferencia(v)) {
+      unawaited(_finalizarOrcamento(v));
+      return;
+    }
+    if (_exigePainelCobranca(v)) {
+      _abrirPainelCobranca();
+      return;
+    }
+    unawaited(_finalizarOrcamento(v));
+  }
+
+  bool _deveExibirDialogResumoFinalizacao(Venda venda, double valorFiado) {
+    if (venda.formaPagamento == 'misto') return true;
+    if (valorFiado > 0.001) return true;
+    return false;
   }
 
   bool _campoTextoComFoco() {
@@ -451,8 +802,8 @@ class _CaixaPageState extends State<CaixaPage> {
         unawaited(_encerrarPosVendaFiscal());
         return KeyEventResult.handled;
       }
-      if (_etapaCaixa == CaixaEtapa.cobranca) {
-        _voltarParaConferencia();
+      if (_painelCobrancaAberto) {
+        _fecharPainelCobranca();
         return KeyEventResult.handled;
       }
       if (_etapaCaixa != CaixaEtapa.fila) {
@@ -464,15 +815,21 @@ class _CaixaPageState extends State<CaixaPage> {
 
     if (event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
-      if (_campoTextoComFoco() && _etapaCaixa == CaixaEtapa.conferencia) {
-        return KeyEventResult.ignored;
+      if (_campoTextoComFoco()) {
+        if (_painelCobrancaAberto && _selecionado != null) {
+          final focus = FocusManager.instance.primaryFocus;
+          if (focus == _pesquisaProdutoConferenciaFocus) {
+            return KeyEventResult.ignored;
+          }
+          unawaited(_finalizarOrcamento(_selecionado!));
+          return KeyEventResult.handled;
+        }
+        if (_etapaCaixa == CaixaEtapa.conferencia) {
+          return KeyEventResult.ignored;
+        }
       }
-      if (_etapaCaixa == CaixaEtapa.conferencia && _selecionado != null) {
-        _irParaCobranca();
-        return KeyEventResult.handled;
-      }
-      if (_etapaCaixa == CaixaEtapa.cobranca && _selecionado != null) {
-        unawaited(_finalizarOrcamento(_selecionado!));
+      if (_conferenciaAtivaComOrcamento()) {
+        _acaoPrincipalConferencia();
         return KeyEventResult.handled;
       }
     }
@@ -529,9 +886,7 @@ class _CaixaPageState extends State<CaixaPage> {
       return true;
     }
     if (key == LogicalKeyboardKey.f4) {
-      if (_selecionado != null &&
-          (_etapaCaixa == CaixaEtapa.conferencia ||
-              _etapaCaixa == CaixaEtapa.cobranca)) {
+      if (_conferenciaAtivaComOrcamento()) {
         _vincularClienteAgora();
       }
       return true;
@@ -543,10 +898,15 @@ class _CaixaPageState extends State<CaixaPage> {
       return true;
     }
     if (key == LogicalKeyboardKey.f6) {
-      if (_selecionado != null &&
-          (_etapaCaixa == CaixaEtapa.conferencia ||
-              _etapaCaixa == CaixaEtapa.cobranca)) {
+      if (_conferenciaAtivaComOrcamento()) {
         unawaited(_abrirDescontoCaixa());
+      }
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f7) {
+      if (_conferenciaAtivaComOrcamento() &&
+          _vendedorDaVenda(_selecionado!) == null) {
+        unawaited(_vincularVendedorAgora());
       }
       return true;
     }
@@ -2749,34 +3109,6 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
-  Widget _buildBarraBuscaProdutoConferencia(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: TextField(
-            controller: _pesquisaProdutoConferenciaController,
-            focusNode: _pesquisaProdutoConferenciaFocus,
-            decoration: const InputDecoration(
-              isDense: true,
-              labelText: 'Adicionar produto',
-              hintText: 'Nome, codigo, barras — Enter ou F5',
-              prefixIcon: Icon(Icons.search, size: 20),
-              border: OutlineInputBorder(),
-            ),
-            onSubmitted: (v) => unawaited(_abrirConsultaProdutoConferencia(termo: v)),
-          ),
-        ),
-        const SizedBox(width: 8),
-        FilledButton.tonalIcon(
-          onPressed: () => unawaited(_abrirConsultaProdutoConferencia()),
-          icon: const Icon(Icons.add_shopping_cart_outlined),
-          label: const Text('Buscar (F5)'),
-        ),
-      ],
-    );
-  }
-
   Future<void> _alterarFormaPagamentoCaixa(Venda venda) async {
     final autorizado = await solicitarAutorizacaoGerenteCaixa(
       context,
@@ -3301,18 +3633,23 @@ class _CaixaPageState extends State<CaixaPage> {
     final planoFiado = valorFiado > 0.001
         ? PlanoFiadoCodec.decode(venda.planoFiadoJson)
         : const <PlanoFiadoParcela>[];
-    final confirmarFinalizacao = await _mostrarResumoFechamentoVenda(
-      numeroOrcamento: venda.numeroOrcamento,
-      textoPagamento: _rotuloPagamentoResumoNaFinalizacao(venda),
-      textoPlanoFiado: planoFiado.isEmpty
-          ? null
-          : PlanoFiadoCodec.formatarResumoLinhas(planoFiado),
-      totalVenda: totalVenda,
-      descontoAplicado: descontoAplicado,
-      totalRecebido: totalRecebido,
-      troco: trocoFinal,
-      quantidadeItens: itensCount,
-    );
+    var confirmarFinalizacao = true;
+    if (_deveExibirDialogResumoFinalizacao(venda, valorFiado)) {
+      confirmarFinalizacao =
+          await _mostrarResumoFechamentoVenda(
+                numeroOrcamento: venda.numeroOrcamento,
+                textoPagamento: _rotuloPagamentoResumoNaFinalizacao(venda),
+                textoPlanoFiado: planoFiado.isEmpty
+                    ? null
+                    : PlanoFiadoCodec.formatarResumoLinhas(planoFiado),
+                totalVenda: totalVenda,
+                descontoAplicado: descontoAplicado,
+                totalRecebido: totalRecebido,
+                troco: trocoFinal,
+                quantidadeItens: itensCount,
+              ) ??
+              false;
+    }
     if (confirmarFinalizacao != true) {
       return;
     }
@@ -3366,6 +3703,7 @@ class _CaixaPageState extends State<CaixaPage> {
           totalRecebido: totalRecebido,
           troco: trocoFinal,
         );
+        _painelCobrancaAberto = false;
         _etapaCaixa = CaixaEtapa.fiscal;
         _selecionado = null;
         _valorRecebidoController.clear();
@@ -3373,6 +3711,7 @@ class _CaixaPageState extends State<CaixaPage> {
         _disposeMistoEdicao();
       });
       _agendarDocumentoFiscalAutomatico();
+      _atualizarResumoNfcePendenteEmissao();
     } catch (e) {
       if (!mounted) return;
       CaixaFeedback.erro(context, 'Nao foi possivel finalizar: $e');
@@ -3772,48 +4111,6 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
-  Future<void> _imprimirCupomNfceAutorizada(
-    Venda venda, {
-    double? totalRecebido,
-    double? troco,
-  }) async {
-    final vendaAtualizada =
-        widget.vendaRepository.obterPorId(venda.id) ?? venda;
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
-    if (!mounted) return;
-
-    final infer =
-        CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(vendaAtualizada);
-    final recebido = (totalRecebido ?? _posVenda?.totalRecebido ?? 0) > 0
-        ? (totalRecebido ?? _posVenda!.totalRecebido)
-        : infer.recebido;
-    final trocoVal = totalRecebido != null || _posVenda != null
-        ? (troco ?? _posVenda?.troco ?? 0)
-        : infer.troco;
-
-    final nomeArquivo =
-        'nfce_venda_${vendaAtualizada.numeroOrcamento > 0 ? vendaAtualizada.numeroOrcamento : vendaAtualizada.id}.pdf';
-    await mostrarFluxoImpressaoCupomVenda(
-      context,
-      printService: widget.printService,
-      config: config,
-      title: 'Cupom NFC-e',
-      content:
-          'Deseja imprimir o cupom fiscal desta venda? (Uma via — sem duplicar.)',
-      gerarPdf: () => CupomNaoFiscalVendaPdf.gerar(
-        venda: vendaAtualizada,
-        config: config,
-        cliente: _clienteDaVenda(vendaAtualizada),
-        vendedor: _vendedorDaVenda(vendaAtualizada),
-        totalRecebido: recebido,
-        troco: trocoVal,
-        segundaVia: false,
-        dataCabecalhoVenda: vendaAtualizada.nfceEmitidaEm ?? vendaAtualizada.data,
-      ),
-      suggestedFileName: nomeArquivo,
-    );
-  }
-
   Future<void> _imprimirCupomNaoFiscalPosVenda({
     required Venda venda,
     required double totalRecebido,
@@ -3858,480 +4155,23 @@ class _CaixaPageState extends State<CaixaPage> {
     await Future<void>.delayed(const Duration(milliseconds: 80));
   }
 
-  String? _dicaCorrecaoFalhaNfce(String mensagem) {
-    final m = mensagem.toLowerCase();
-    if (m.contains('habilitad') && m.contains('nfce')) {
-      return 'No painel Focus (ambiente de homologacao):\n\n'
-          '1. Menu Empresas — cadastre o CNPJ de ${FiscalConfig.cnpjEmitente} '
-          '(se ainda nao existir).\n'
-          '2. Na empresa, marque/habilite NFC-e (modelo 65) para a Bahia.\n'
-          '3. Envie o certificado digital A1 (.pfx) e a senha.\n'
-          '4. Confira CSC e ID CSC da SEFAZ-BA (se a Focus nao preencher sozinha).\n'
-          '5. Cole o token de homologacao em Configuracoes → Fiscal — Focus NFe.\n'
-          '6. Aguarde alguns minutos apos salvar e tente de novo.\n\n'
-          'Guia: focusnfe.com.br/guides/configurando-empresa/';
-    }
-    return null;
-  }
-
-  Future<bool?> _mostrarDialogoFalhaNfce({required String mensagem}) {
-    if (!mounted) return Future.value(false);
-    final dica = _dicaCorrecaoFalhaNfce(mensagem);
-    return showDialog<bool>(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        return AlertDialog(
-          icon: Icon(Icons.error_outline, color: theme.colorScheme.error, size: 32),
-          title: const Text('NFC-e rejeitada'),
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.errorContainer
-                          .withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: theme.colorScheme.error.withValues(alpha: 0.35),
-                      ),
-                    ),
-                    child: Text(
-                      mensagem,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onErrorContainer,
-                      ),
-                    ),
-                  ),
-                  if (dica != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      dica,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          actionsAlignment: MainAxisAlignment.center,
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Fechar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Tentar reemitir'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<_EmissaoNfceDialogResult> _executarChamadaFiscalNfce(Venda venda) async {
-    final vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? venda;
-    if (vendaAtual.itens.isEmpty) {
-      return _EmissaoNfceDialogResult.erroValidacao(
-        'A venda nao possui itens para emitir NFC-e.',
+  EmitirNfceVendaDeps get _emitirNfceDeps => EmitirNfceVendaDeps(
+        vendaRepository: widget.vendaRepository,
+        clienteRepository: widget.clienteRepository,
+        vendedorRepository: widget.vendedorRepository,
+        appConfigRepository: widget.appConfigRepository,
+        printService: widget.printService,
+        focusNfeService: _focusNfeService,
       );
-    }
-
-    try {
-      _focusNfeService.validarConfiguracao();
-    } on FocusNfeConfigIncompletaException catch (e) {
-      return _EmissaoNfceDialogResult.erroConfig(e.message);
-    }
-
-    try {
-      var resultado = await _focusNfeService.emitirNfce(
-        vendaAtual,
-        cliente: _clienteDaVenda(vendaAtual),
-        entregaDomicilio: vendaAtual.tipoEntrega == 'entrega_loja' ||
-            vendaAtual.enderecoEntrega.trim().isNotEmpty,
-      );
-
-      final ref = FocusNfeService.referenciaVendaNfce(vendaAtual);
-      if (!resultado.autorizada && !resultado.processando) {
-        resultado = await FocusNfeReconsultaHelper.recuperarSePossivel(
-          original: resultado,
-          reconsultar: () => _focusNfeService.consultarNfce(ref),
-        );
-        if (FocusNfeService.pareceFalhaComunicacao(resultado) &&
-            !resultado.autorizada &&
-            !resultado.processando) {
-          resultado = FocusNfeReconsultaHelper.comoProcessandoAposFalhaComunicacao(
-            referencia: ref,
-          );
-        }
-      }
-
-      if (resultado.autorizada) {
-        return _EmissaoNfceDialogResult.sucesso(
-          resultado: resultado,
-          vendaAtual: vendaAtual,
-        );
-      }
-      if (resultado.processando) {
-        return _EmissaoNfceDialogResult.processando(
-          resultado: resultado,
-          vendaAtual: vendaAtual,
-        );
-      }
-
-      final msg = resultado.mensagem.isEmpty
-          ? 'A SEFAZ rejeitou a NFC-e sem mensagem detalhada.'
-          : resultado.mensagem;
-      return _EmissaoNfceDialogResult.erroApi(msg, vendaAtual);
-    } on FocusNfeValidacaoException catch (e) {
-      return _EmissaoNfceDialogResult.erroValidacao(e.message);
-    } catch (e) {
-      final ref = FocusNfeService.referenciaVendaNfce(vendaAtual);
-      try {
-        final consulta = await _focusNfeService.consultarNfce(ref);
-        if (consulta.autorizada) {
-          return _EmissaoNfceDialogResult.sucesso(
-            resultado: consulta,
-            vendaAtual: vendaAtual,
-          );
-        }
-        if (consulta.processando) {
-          return _EmissaoNfceDialogResult.processando(
-            resultado: consulta,
-            vendaAtual: vendaAtual,
-          );
-        }
-      } catch (_) {}
-      return _EmissaoNfceDialogResult.erroGenerico('Erro ao emitir NFC-e: $e');
-    }
-  }
 
   Future<void> _emitirNfceParaVenda(Venda venda) async {
-    if (!mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    var vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? venda;
-
-    while (mounted) {
-      vendaAtual = widget.vendaRepository.obterPorId(venda.id) ?? vendaAtual;
-      final bloqueioNfce =
-          VendaDocumentoFiscalMutex.mensagemBloqueioNovaNfce(vendaAtual);
-      if (bloqueioNfce != null) {
-        final jaEmitida = vendaAtual.nfceEmitida;
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              jaEmitida
-                  ? '$bloqueioNfce Use Visualizar/Reimprimir DANFE.'
-                  : bloqueioNfce,
-            ),
-            duration: const Duration(seconds: 8),
-          ),
-        );
-        return;
-      }
-
-      final deviceId = await _obterDeviceIdSync();
-      if (FiscalEmissaoLock.nfceBloqueadaPorOutroDispositivo(vendaAtual, deviceId)) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Outro PC esta emitindo NFC-e desta venda. '
-              'Aguarde alguns minutos e tente novamente.',
-            ),
-            duration: Duration(seconds: 8),
-          ),
-        );
-        return;
-      }
-
-      final refNfce = FocusNfeService.referenciaVendaNfce(vendaAtual);
-      widget.vendaRepository.registrarNfceEmissaoEmAndamento(
-        vendaId: vendaAtual.id,
-        deviceId: deviceId,
-        referencia: refNfce,
-      );
-
-      final rootNav = Navigator.of(context, rootNavigator: true);
-      if (!mounted) return;
-
-      showDialog<void>(
-        context: context,
-        useRootNavigator: true,
-        barrierDismissible: false,
-        builder: (ctx) {
-          final theme = Theme.of(ctx);
-          return PopScope(
-            canPop: false,
-            child: AlertDialog(
-              title: const Text('Emissao NFC-e'),
-              content: SizedBox(
-                width: 360,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(),
-                    const SizedBox(height: 20),
-                    Text(
-                      'Comunicando com a SEFAZ através da Focus NFe...',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      );
-      await _aguardarEntreDialogos();
-
-      _EmissaoNfceDialogResult dialogResult;
-      try {
-        dialogResult = await _executarChamadaFiscalNfce(vendaAtual);
-      } finally {
-        if (rootNav.mounted && rootNav.canPop()) {
-          rootNav.pop();
-        }
-      }
-
-      await _aguardarEntreDialogos();
-      if (!mounted) return;
-
-      switch (dialogResult.kind) {
-        case _EmissaoNfceDialogKind.erroConfig:
-          widget.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(dialogResult.mensagem),
-              duration: const Duration(seconds: 8),
-            ),
-          );
-          return;
-        case _EmissaoNfceDialogKind.erroValidacao:
-          widget.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(dialogResult.mensagem),
-              backgroundColor: Colors.orange.shade800,
-              duration: const Duration(seconds: 8),
-            ),
-          );
-          return;
-        case _EmissaoNfceDialogKind.erroApi:
-        case _EmissaoNfceDialogKind.erroGenerico:
-          widget.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
-          final tentar = await _mostrarDialogoFalhaNfce(
-            mensagem: dialogResult.mensagem,
-          );
-          await _aguardarEntreDialogos();
-          if (!mounted) return;
-          if (tentar == true) {
-            vendaAtual =
-                dialogResult.vendaAtual ??
-                widget.vendaRepository.obterPorId(vendaAtual.id) ??
-                vendaAtual;
-            continue;
-          }
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text('NFC-e nao emitida: ${dialogResult.mensagem}'),
-              backgroundColor: Colors.red.shade700,
-              duration: const Duration(seconds: 8),
-            ),
-          );
-          return;
-        case _EmissaoNfceDialogKind.processando:
-          final r = dialogResult.resultado!;
-          final vSalvar = dialogResult.vendaAtual ?? vendaAtual;
-          try {
-            widget.vendaRepository.registrarNfcePendenteFocus(
-              vendaId: vSalvar.id,
-              referencia: r.referencia,
-              protocolo: r.protocolo,
-              statusFocus: r.statusFocus,
-            );
-          } catch (e) {
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text(
-                  'NFC-e em processamento, mas falhou ao salvar pendencia: $e',
-                ),
-                backgroundColor: Colors.orange.shade800,
-                duration: const Duration(seconds: 10),
-              ),
-            );
-          }
-          await showDialog<void>(
-            context: context,
-            useRootNavigator: true,
-            builder: (ctx) {
-              final theme = Theme.of(ctx);
-              return AlertDialog(
-                icon: Icon(
-                  Icons.hourglass_top_outlined,
-                  color: theme.colorScheme.primary,
-                  size: 32,
-                ),
-                title: const Text('NFC-e em processamento'),
-                content: Text(
-                  r.mensagem.isEmpty
-                      ? 'A nota foi enviada a Focus NFe e aguarda retorno da '
-                          'SEFAZ. O estoque ja foi baixado na finalizacao da venda.\n\n'
-                          'A reconciliacao automatica tenta autorizar ao reabrir o caixa.\n\n'
-                          'Referencia: ${r.referencia}'
-                      : '${r.mensagem}\n\n'
-                          'Estoque ja baixado na finalizacao.\n\n'
-                          'Referencia: ${r.referencia}',
-                  textAlign: TextAlign.center,
-                ),
-                actionsAlignment: MainAxisAlignment.center,
-                actions: [
-                  FilledButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Entendi'),
-                  ),
-                ],
-              );
-            },
-          );
-          return;
-        case _EmissaoNfceDialogKind.sucesso:
-          final r = dialogResult.resultado!;
-          final vSalvar = dialogResult.vendaAtual ?? vendaAtual;
-          try {
-            widget.vendaRepository.registrarNfceEmitidaComBaixaEstoque(
-              vendaId: vSalvar.id,
-              chaveAcesso: r.chaveNfe,
-              numero: r.numero,
-              serie: r.serie,
-              protocolo: r.protocolo,
-              urlDanfe: r.urlDanfe,
-              urlXml: r.urlXml,
-              statusFocus:
-                  r.cancelada ? 'cancelado' : (r.statusFocus.isNotEmpty
-                      ? r.statusFocus
-                      : 'autorizado'),
-              urlXmlCancelamento: r.urlXmlCancelamento,
-              permitirVendaSemEstoque: _permitirVendaSemEstoque,
-            );
-          } catch (e) {
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text(
-                  'NFC-e autorizada, mas falhou ao gravar os dados fiscais: $e\n\n'
-                  'O estoque ja foi baixado na finalizacao. Tente reconsultar ou '
-                  'registre a nota pelo painel fiscal.',
-                ),
-                backgroundColor: Colors.orange.shade800,
-                duration: const Duration(seconds: 10),
-              ),
-            );
-            return;
-          }
-
-          final vendaComNfce =
-              widget.vendaRepository.obterPorId(vSalvar.id) ?? vSalvar;
-          _atualizarListaUltimasVendasFinalizadasCaixa();
-          final resumoPos = VendaDocumentoRotuloHelper.resumoPosAutorizacaoFiscal(
-            vendaComNfce,
-          );
-          final fluxoAutomatico = _documentoFiscalAutomaticoDisparado;
-          final estoqueOk = vendaComNfce.estoqueBaixadoCupom;
-
-          if (fluxoAutomatico && estoqueOk) {
-            if (!mounted) return;
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text('$resumoPos — proxima venda.'),
-                backgroundColor: Colors.green.shade700,
-                duration: const Duration(seconds: 5),
-              ),
-            );
-            return;
-          }
-
-          final detalhe = <String>[
-            resumoPos,
-            if (r.numero.isNotEmpty) 'Numero NFC-e: ${r.numero}',
-            if (r.serie.isNotEmpty) 'Serie: ${r.serie}',
-            if (r.chaveNfe.isNotEmpty) 'Chave: ${r.chaveNfe}',
-            if (r.protocolo.isNotEmpty) 'Protocolo: ${r.protocolo}',
-            if (r.mensagem.isNotEmpty) r.mensagem,
-          ].join('\n');
-          final temDanfe = r.urlDanfe.trim().isNotEmpty;
-
-          await showDialog<void>(
-            context: context,
-            useRootNavigator: true,
-            builder: (ctx) {
-              final theme = Theme.of(ctx);
-              return AlertDialog(
-                icon: Icon(
-                  Icons.check_circle_outline,
-                  color: theme.colorScheme.primary,
-                  size: 36,
-                ),
-                title: const Text('NFC-e autorizada'),
-                content: SizedBox(
-                  width: 420,
-                  child: Text(
-                    detalhe.isEmpty ? 'Nota autorizada pela SEFAZ.' : detalhe,
-                  ),
-                ),
-                actionsAlignment: MainAxisAlignment.center,
-                actions: [
-                  FilledButton.icon(
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      await _imprimirCupomNfceAutorizada(vendaComNfce);
-                    },
-                    icon: const Icon(Icons.print_outlined),
-                    label: const Text('Imprimir cupom NFC-e'),
-                  ),
-                  if (temDanfe)
-                    TextButton.icon(
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        await _abrirDanfeNfceVenda(vendaComNfce);
-                      },
-                      icon: const Icon(Icons.picture_as_pdf_outlined),
-                      label: const Text('DANFE Focus (pode ter 2 vias)'),
-                    ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Fechar'),
-                  ),
-                ],
-              );
-            },
-          );
-          if (!mounted) return;
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(
-                estoqueOk
-                    ? '$resumoPos. Imprima o cupom NFC-e se desejar.'
-                    : '$resumoPos — verifique a baixa de estoque.',
-              ),
-              backgroundColor: estoqueOk
-                  ? Colors.green.shade700
-                  : Colors.orange.shade800,
-              duration: const Duration(seconds: 8),
-            ),
-          );
-          return;
-      }
-    }
+    await EmitirNfceVendaFlow.executar(
+      context,
+      deps: _emitirNfceDeps,
+      venda: venda,
+      fluxoAutomaticoPosVenda: _documentoFiscalAutomaticoDisparado,
+      onConcluidoComSucesso: _atualizarListaUltimasVendasFinalizadasCaixa,
+    );
   }
 
   Venda? _buscarVendaFinalizadaParaSegundaVia(int numeroOuId) {
@@ -4915,6 +4755,145 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
+  Future<void> _vincularVendedorAgora() async {
+    final venda = _selecionado;
+    if (venda == null) return;
+    if (_vendedorDaVenda(venda) != null) return;
+
+    final vendedoresAtivos = widget.vendedorRepository.listarAtivos();
+    if (vendedoresAtivos.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Nenhum vendedor ativo cadastrado. Cadastre em Cadastros → Vendedores.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    int? vendedorSelecionadoId = vendedoresAtivos.length == 1
+        ? vendedoresAtivos.first.id
+        : null;
+    final pesquisaController = TextEditingController();
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        var vendedoresExibidos = vendedoresAtivos.take(60).toList();
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            void atualizarBusca(String termo) {
+              final t = termo.trim();
+              setDialogState(() {
+                vendedoresExibidos = t.isEmpty
+                    ? vendedoresAtivos.take(60).toList()
+                    : widget.vendedorRepository
+                        .pesquisar(t)
+                        .where((v) => v.ativo)
+                        .take(60)
+                        .toList();
+              });
+            }
+
+            return AlertDialog(
+              title: const Text('Vincular vendedor ao orcamento'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Orcamento ${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id} '
+                      'sem vendedor no PDV.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: pesquisaController,
+                      decoration: const InputDecoration(
+                        labelText: 'Buscar vendedor',
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                      onChanged: atualizarBusca,
+                    ),
+                    const SizedBox(height: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 280),
+                      child: vendedoresExibidos.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: Text('Nenhum vendedor encontrado.'),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: vendedoresExibidos.length,
+                              itemBuilder: (context, index) {
+                                final v = vendedoresExibidos[index];
+                                final nome = v.apelido.trim().isNotEmpty
+                                    ? v.apelido.trim()
+                                    : v.nomeCompleto.trim();
+                                final codigo = v.codigoInterno.trim();
+                                return ListTile(
+                                  dense: true,
+                                  selected: vendedorSelecionadoId == v.id,
+                                  title: Text(nome),
+                                  subtitle: codigo.isEmpty ? null : Text(codigo),
+                                  onTap: () => setDialogState(
+                                    () => vendedorSelecionadoId = v.id,
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton(
+                  onPressed: vendedorSelecionadoId == null
+                      ? null
+                      : () => Navigator.pop(context, true),
+                  child: const Text('Salvar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    pesquisaController.dispose();
+    if (confirmar != true || vendedorSelecionadoId == null) return;
+    final vendedorId = vendedorSelecionadoId!;
+    try {
+      widget.vendaRepository.vincularVendedorNoOrcamento(
+        venda.id,
+        vendedorId,
+      );
+      _carregarOrcamentos();
+      if (!mounted) return;
+      final v = widget.vendedorRepository.obterPorId(vendedorId);
+      final nome = v == null
+          ? 'Vendedor $vendedorId'
+          : _rotuloVendedorUmLinha(
+              widget.vendaRepository.obterPorId(venda.id) ?? venda,
+            );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Vendedor vinculado: $nome')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel vincular vendedor: $e')),
+      );
+    }
+  }
+
   /// Barra compacta de acoes quando nenhum orcamento esta selecionado.
   Widget _buildBarraAcoesIniciaisCaixa(BuildContext context) {
     final outlinedCompact = OutlinedButton.styleFrom(
@@ -5019,74 +4998,6 @@ class _CaixaPageState extends State<CaixaPage> {
         const SizedBox(height: 10),
         Expanded(child: _buildPainelStatusCaixa(context)),
       ],
-    );
-  }
-
-  Widget _buildCabecalhoOrcamentoAtivo(
-    BuildContext context,
-    Venda selecionado,
-  ) {
-    final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.primaryContainer,
-            theme.colorScheme.surfaceContainerHighest,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.point_of_sale_outlined, color: theme.colorScheme.primary),
-          const SizedBox(width: 8),
-          Text(
-            _caixaAberto ? 'CAIXA ABERTO' : 'CAIXA FECHADO',
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          if (_caixaAberto) ...[
-            const SizedBox(width: 10),
-            Text(
-              _operadorCaixa.trim().isEmpty ? '' : 'Operador: $_operadorCaixa',
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
-          const Spacer(),
-          OutlinedButton.icon(
-            onPressed: _abrirPesquisaOrcamento,
-            icon: const Icon(Icons.search),
-            label: const Text('Pesquisar (F1)'),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: _voltarParaFila,
-            icon: const Icon(Icons.arrow_back),
-            label: const Text('Fila (Esc)'),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            'Orcamento ${selecionado.numeroOrcamento}',
-            style: theme.textTheme.titleMedium,
-          ),
-          if (selecionado.entregaPendente) ...[
-            const SizedBox(width: 8),
-            Chip(
-              label: const Text('Retirada futura'),
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              labelStyle: theme.textTheme.labelSmall,
-            ),
-          ],
-        ],
-      ),
     );
   }
 
@@ -5300,87 +5211,131 @@ class _CaixaPageState extends State<CaixaPage> {
     required double totalComDesconto,
     required double descontoPdvOrcamento,
     required double descontoCaixa,
+    required List<PagamentoOrcamentoLinha> linhasMistoCaixa,
+    required double valorTotalRecebidoCard,
+    required double troco,
   }) {
+    final painel = _painelCobrancaAberto
+        ? _buildPainelCobrancaLateral(
+            context,
+            selecionado: selecionado,
+            totalComDesconto: totalComDesconto,
+            descontoPdvOrcamento: descontoPdvOrcamento,
+            descontoCaixa: descontoCaixa,
+            linhasMistoCaixa: linhasMistoCaixa,
+            valorTotalRecebidoCard: valorTotalRecebidoCard,
+            troco: troco,
+          )
+        : null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildCabecalhoOrcamentoAtivo(context, selecionado),
-        const SizedBox(height: 10),
-        CaixaEtapasBar(etapaAtual: _etapaCaixa),
-        const SizedBox(height: 10),
+        _buildToolbarOrcamentoAtivo(
+          context,
+          selecionado: selecionado,
+          clienteSelecionado: clienteSelecionado,
+          incluirBuscaProduto: !_painelCobrancaAberto,
+        ),
+        const SizedBox(height: 6),
         Expanded(
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final empilhar = constraints.maxWidth < 780;
+              if (empilhar) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      flex: _painelCobrancaAberto ? 3 : 1,
+                      child: _buildTabelaItensConferencia(context, selecionado),
+                    ),
+                    if (painel != null) ...[
+                      const SizedBox(height: 8),
+                      Expanded(flex: 2, child: painel),
+                    ],
+                  ],
+                );
+              }
+              return Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    [
-                      'Entrega: ${_textoEntregaCaixa(selecionado)}',
-                      if (_vendaExigeDadosCarreto(selecionado))
-                        'Frete: ${_formatarMoeda(selecionado.valorFrete)}',
-                    ].join(' | '),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Cliente: ${clienteSelecionado?.nomeRazao ?? 'Sem cliente'}',
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: _buildTabelaItensConferencia(
+                            context,
+                            selecionado,
+                          ),
                         ),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _vincularClienteAgora,
-                        icon: const Icon(Icons.person_add_alt_1_outlined),
-                        label: const Text('Vincular (F4)'),
-                      ),
-                    ],
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6, bottom: 6),
-                    child: Text(
-                      'Vendedor: ${_rotuloVendedorUmLinha(selecionado)} (PDV)',
+                        if (!_painelCobrancaAberto)
+                          _buildRodapeConferenciaAcao(
+                            context,
+                            selecionado: selecionado,
+                            totalComDesconto: totalComDesconto,
+                            descontoPdvOrcamento: descontoPdvOrcamento,
+                            descontoCaixa: descontoCaixa,
+                          ),
+                      ],
                     ),
                   ),
-                  _buildBarraBuscaProdutoConferencia(context),
-                  const SizedBox(height: 8),
-                  Expanded(child: _buildTabelaItensConferencia(context, selecionado)),
-                  _buildRodapeConferenciaPagamentoTotal(
-                    context,
-                    selecionado: selecionado,
-                    totalComDesconto: totalComDesconto,
-                    descontoPdvOrcamento: descontoPdvOrcamento,
-                    descontoCaixa: descontoCaixa,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Atalhos: ${_textoAtalhoDescontoCaixa()}Enter = cobranca | '
-                        'F5 = buscar produto | Esc = inicio | F4 = cliente | +/- = qtd',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: FilledButton.icon(
-                      onPressed: _irParaCobranca,
-                      icon: const Icon(Icons.arrow_forward),
-                      label: const Text('Ir para cobranca (Enter)'),
-                    ),
-                  ),
+                  if (painel != null) ...[
+                    const SizedBox(width: 8),
+                    SizedBox(width: 380, child: painel),
+                  ],
                 ],
-              ),
-            ),
+              );
+            },
           ),
         ),
+        if (_painelCobrancaAberto && MediaQuery.sizeOf(context).width < 780)
+          const SizedBox(height: 8),
+        if (!_painelCobrancaAberto && MediaQuery.sizeOf(context).width < 780)
+          _buildRodapeConferenciaAcao(
+            context,
+            selecionado: selecionado,
+            totalComDesconto: totalComDesconto,
+            descontoPdvOrcamento: descontoPdvOrcamento,
+            descontoCaixa: descontoCaixa,
+          ),
       ],
+    );
+  }
+
+  Widget _buildPainelCobrancaLateral(
+    BuildContext context, {
+    required Venda selecionado,
+    required double totalComDesconto,
+    required double descontoPdvOrcamento,
+    required double descontoCaixa,
+    required List<PagamentoOrcamentoLinha> linhasMistoCaixa,
+    required double valorTotalRecebidoCard,
+    required double troco,
+  }) {
+    return CaixaPainelCobrancaLateral(
+      rotuloPagamento: _rotuloPagamentoCabecalho(selecionado),
+      totalComDesconto: totalComDesconto,
+      descontoPdvOrcamento: descontoPdvOrcamento,
+      descontoCaixa: descontoCaixa,
+      formatarMoeda: _formatarMoeda,
+      recebimento: _buildCorpoRecebimentoCobranca(
+        context,
+        selecionado: selecionado,
+        totalComDesconto: totalComDesconto,
+        troco: troco,
+        linhasMistoCaixa: linhasMistoCaixa,
+      ),
+      valorRecebidoExibicao: valorTotalRecebidoCard,
+      troco: troco,
+      onAlterarForma: () => _alterarFormaPagamentoCaixa(selecionado),
+      onDesconto: _descontoCaixaDisponivel()
+          ? () => unawaited(_abrirDescontoCaixa())
+          : null,
+      onFechar: _fecharPainelCobranca,
+      onFinalizar: () => unawaited(_finalizarOrcamento(selecionado)),
     );
   }
 
@@ -5411,6 +5366,7 @@ class _CaixaPageState extends State<CaixaPage> {
         onChanged: (value) {
           setState(() => _valorRecebido = _parseValor(value));
         },
+        onSubmitted: (_) => unawaited(_finalizarOrcamento(selecionado)),
       );
     }
 
@@ -5440,75 +5396,6 @@ class _CaixaPageState extends State<CaixaPage> {
         _ => Icons.point_of_sale_outlined,
       };
 
-  Widget _buildEtapaCobranca(
-    BuildContext context, {
-    required Venda selecionado,
-    required Cliente? clienteSelecionado,
-    required double totalComDesconto,
-    required double descontoPdvOrcamento,
-    required double descontoCaixa,
-    required List<PagamentoOrcamentoLinha> linhasMistoCaixa,
-    required double valorTotalRecebidoCard,
-    required double troco,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildCabecalhoOrcamentoAtivo(context, selecionado),
-        const SizedBox(height: 10),
-        CaixaEtapasBar(etapaAtual: _etapaCaixa),
-        const SizedBox(height: 10),
-        Expanded(
-          child: CaixaCobrancaPainel(
-            numeroOrcamento: selecionado.numeroOrcamento > 0
-                ? selecionado.numeroOrcamento
-                : selecionado.id,
-            clienteNome: clienteSelecionado?.nomeRazao ?? 'Sem cliente',
-            qtdItens: selecionado.itens.length,
-            rotuloPagamento: _rotuloPagamentoCabecalho(selecionado),
-            totalComDesconto: totalComDesconto,
-            descontoPdvOrcamento: descontoPdvOrcamento,
-            descontoCaixa: descontoCaixa,
-            formatarMoeda: _formatarMoeda,
-            onAlterarForma: () => _alterarFormaPagamentoCaixa(selecionado),
-            onDesconto: _descontoCaixaDisponivel()
-                ? () => unawaited(_abrirDescontoCaixa())
-                : null,
-            recebimento: _buildCorpoRecebimentoCobranca(
-              context,
-              selecionado: selecionado,
-              totalComDesconto: totalComDesconto,
-              troco: troco,
-              linhasMistoCaixa: linhasMistoCaixa,
-            ),
-            valorRecebidoExibicao: valorTotalRecebidoCard,
-            troco: troco,
-            acaoConfirmar: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Atalhos: ${_textoAtalhoDescontoCaixa()}Enter = confirmar | Esc = conferencia',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: FilledButton.icon(
-                    onPressed: () =>
-                        unawaited(_finalizarOrcamento(selecionado)),
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Confirmar pagamento (Enter)'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildEtapaFiscal(BuildContext context) {
     final sessao = _posVenda;
     if (sessao == null) {
@@ -5525,8 +5412,6 @@ class _CaixaPageState extends State<CaixaPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        CaixaEtapasBar(etapaAtual: _etapaCaixa),
-        const SizedBox(height: 10),
         Expanded(
           child: CaixaPosVendaFiscalPainel(
             venda: vendaAtual,
@@ -5599,17 +5484,6 @@ class _CaixaPageState extends State<CaixaPage> {
       case CaixaEtapa.fiscal:
         return _buildEtapaFiscal(context);
       case CaixaEtapa.cobranca:
-        return _buildEtapaCobranca(
-          context,
-          selecionado: selecionado,
-          clienteSelecionado: clienteSelecionado,
-          totalComDesconto: totalComDesconto,
-          descontoPdvOrcamento: descontoPdvOrcamento,
-          descontoCaixa: descontoCaixa,
-          linhasMistoCaixa: linhasMistoCaixa,
-          valorTotalRecebidoCard: valorTotalRecebidoCard,
-          troco: troco,
-        );
       case CaixaEtapa.fila:
       case CaixaEtapa.conferencia:
         return _buildEtapaConferencia(
@@ -5619,6 +5493,9 @@ class _CaixaPageState extends State<CaixaPage> {
           totalComDesconto: totalComDesconto,
           descontoPdvOrcamento: descontoPdvOrcamento,
           descontoCaixa: descontoCaixa,
+          linhasMistoCaixa: linhasMistoCaixa,
+          valorTotalRecebidoCard: valorTotalRecebidoCard,
+          troco: troco,
         );
     }
   }
@@ -5678,9 +5555,7 @@ class _CaixaPageState extends State<CaixaPage> {
               if (ModalRoute.of(context)?.isCurrent != true) {
                 return null;
               }
-              if (_selecionado != null &&
-                  (_etapaCaixa == CaixaEtapa.conferencia ||
-                      _etapaCaixa == CaixaEtapa.cobranca)) {
+              if (_conferenciaAtivaComOrcamento()) {
                 _vincularClienteAgora();
               }
               return null;
@@ -5707,6 +5582,10 @@ class _CaixaPageState extends State<CaixaPage> {
             appBar: AppBar(
               title: _buildTituloAppBarCaixa(context),
               actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Center(child: _buildChipNfcePendenteEmissao(context)),
+                ),
                 ContaSessaoAppBarActions(
                   login: widget.usuarioAtual,
                   onLogout: widget.onLogout,
@@ -5716,7 +5595,7 @@ class _CaixaPageState extends State<CaixaPage> {
             body: Container(
               color: theme.colorScheme.surfaceContainerLowest,
               child: Padding(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(8),
                 child: _buildCorpoCaixa(context),
               ),
             ),
@@ -5761,49 +5640,41 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Widget _buildTituloAppBarCaixa(BuildContext context) {
-    final theme = Theme.of(context);
-    final trocoCentro = _ultimoTrocoVendaId == null
-        ? null
-        : Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.payments_outlined,
-                size: 17,
-                color: theme.colorScheme.primary,
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  'Troco da ultima venda '
-                  '(${_ultimoTrocoNumeroOrcamento > 0 ? _ultimoTrocoNumeroOrcamento : _ultimoTrocoVendaId})',
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+    final selecionado = _selecionado;
+    if (selecionado != null && _etapaCaixa != CaixaEtapa.fila) {
+      final num = selecionado.numeroOrcamento > 0
+          ? selecionado.numeroOrcamento
+          : selecionado.id;
+      final etapa = switch (_etapaCaixa) {
+        CaixaEtapa.conferencia =>
+          _painelCobrancaAberto ? 'Conferencia · Cobranca' : 'Conferencia',
+        CaixaEtapa.cobranca => 'Conferencia · Cobranca',
+        CaixaEtapa.fiscal => 'Fiscal',
+        CaixaEtapa.fila => '',
+      };
+      return Text('Caixa · $etapa · Orc. $num');
+    }
+    final titulo = _caixaAberto ? 'Caixa' : 'Caixa · Fechado';
+    if (_ultimoTrocoValor > 0.001 && _ultimoTrocoVendaId != null) {
+      final num = _ultimoTrocoNumeroOrcamento > 0
+          ? _ultimoTrocoNumeroOrcamento
+          : _ultimoTrocoVendaId;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(titulo),
+          Text(
+            'Troco venda $num: ${_formatarMoeda(_ultimoTrocoValor)}',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w600,
                 ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _formatarMoeda(_ultimoTrocoValor),
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.primary,
-                ),
-              ),
-            ],
-          );
-
-    return Row(
-      children: [
-        Text(_etapaCaixa == CaixaEtapa.fiscal ? 'Caixa — Fiscal' : 'Caixa'),
-        Expanded(
-          child: Center(
-            child: trocoCentro ?? const SizedBox.shrink(),
           ),
-        ),
-      ],
-    );
+        ],
+      );
+    }
+    return Text(titulo);
   }
 
   Widget _buildBotoesGestaoCaixa() {
@@ -6538,74 +6409,6 @@ class _CaixaPageState extends State<CaixaPage> {
       ),
     );
   }
-}
-
-enum _EmissaoNfceDialogKind {
-  sucesso,
-  processando,
-  erroApi,
-  erroConfig,
-  erroValidacao,
-  erroGenerico,
-}
-
-class _EmissaoNfceDialogResult {
-  const _EmissaoNfceDialogResult._({
-    required this.kind,
-    this.resultado,
-    this.mensagem = '',
-    this.vendaAtual,
-  });
-
-  final _EmissaoNfceDialogKind kind;
-  final FocusNfeEmissaoResultado? resultado;
-  final String mensagem;
-  final Venda? vendaAtual;
-
-  factory _EmissaoNfceDialogResult.sucesso({
-    required FocusNfeEmissaoResultado resultado,
-    required Venda vendaAtual,
-  }) =>
-      _EmissaoNfceDialogResult._(
-        kind: _EmissaoNfceDialogKind.sucesso,
-        resultado: resultado,
-        vendaAtual: vendaAtual,
-      );
-
-  factory _EmissaoNfceDialogResult.processando({
-    required FocusNfeEmissaoResultado resultado,
-    required Venda vendaAtual,
-  }) =>
-      _EmissaoNfceDialogResult._(
-        kind: _EmissaoNfceDialogKind.processando,
-        resultado: resultado,
-        vendaAtual: vendaAtual,
-      );
-
-  factory _EmissaoNfceDialogResult.erroApi(String mensagem, Venda vendaAtual) =>
-      _EmissaoNfceDialogResult._(
-        kind: _EmissaoNfceDialogKind.erroApi,
-        mensagem: mensagem,
-        vendaAtual: vendaAtual,
-      );
-
-  factory _EmissaoNfceDialogResult.erroConfig(String mensagem) =>
-      _EmissaoNfceDialogResult._(
-        kind: _EmissaoNfceDialogKind.erroConfig,
-        mensagem: mensagem,
-      );
-
-  factory _EmissaoNfceDialogResult.erroValidacao(String mensagem) =>
-      _EmissaoNfceDialogResult._(
-        kind: _EmissaoNfceDialogKind.erroValidacao,
-        mensagem: mensagem,
-      );
-
-  factory _EmissaoNfceDialogResult.erroGenerico(String mensagem) =>
-      _EmissaoNfceDialogResult._(
-        kind: _EmissaoNfceDialogKind.erroGenerico,
-        mensagem: mensagem,
-      );
 }
 
 /// Resumo de troco apos cobranca — foco no botao Concluir venda.

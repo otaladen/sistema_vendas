@@ -35,6 +35,11 @@ class AuditoriaAcao {
   static const backupCriar = 'backup_criar';
   static const backupRestaurar = 'backup_restaurar';
   static const backupAutomatico = 'backup_automatico';
+  static const backupRetencao = 'backup_retencao';
+  static const backupFalha = 'backup_falha';
+  static const backupSegundoDestino = 'backup_segundo_destino';
+  static const backupZipExport = 'backup_zip_export';
+  static const backupTarefaWindows = 'backup_tarefa_windows';
   static const fechamentoCaixa = 'fechamento_caixa';
   static const fechamentoNegado = 'fechamento_negado';
   static const limparManual = 'limpar_manual';
@@ -104,6 +109,16 @@ String auditoriaRotuloAcao(String acao) {
       return 'Backup restaurado';
     case AuditoriaAcao.backupAutomatico:
       return 'Backup automatico';
+    case AuditoriaAcao.backupRetencao:
+      return 'Retencao de backups';
+    case AuditoriaAcao.backupFalha:
+      return 'Falha no backup automatico';
+    case AuditoriaAcao.backupSegundoDestino:
+      return 'Espelho segundo destino';
+    case AuditoriaAcao.backupZipExport:
+      return 'Exportacao ZIP';
+    case AuditoriaAcao.backupTarefaWindows:
+      return 'Tarefa Windows backup';
     case AuditoriaAcao.fechamentoCaixa:
       return 'Fechamento de caixa';
     case AuditoriaAcao.fechamentoNegado:

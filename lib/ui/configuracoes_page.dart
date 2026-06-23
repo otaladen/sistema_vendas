@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
@@ -11,13 +11,7 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_config_repository.dart';
-import '../data/auto_backup_service.dart';
-import '../domain/auditoria_catalogo.dart';
-import '../services/auditoria_registrar.dart';
-import '../data/local_app_data_paths.dart';
-import '../data/local_backup_copy.dart';
-import '../data/local_backup_restore.dart';
-import '../data/local_backup_validation.dart';
+import 'configuracoes/backup_configuracao_section.dart';
 import '../data/mensageria_repository.dart';
 import '../data/objectbox.dart';
 import '../data/sync/lan_sync_scheduler.dart';
@@ -89,13 +83,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   DateTime? _ultimaVendaFinalizada;
   bool _horarioInconsistente = false;
   String _diagnosticoHorario = '';
-  bool _backupEmAndamento = false;
-  bool _restauracaoEmAndamento = false;
-  String _ultimoBackupPath = '';
-  bool _backupAutomaticoAtivo = false;
-  String _backupAutomaticoPasta = '';
-  int _backupAutomaticoIntervaloMinutos = 1440;
-  int _ultimoBackupAutomaticoMs = 0;
   bool _permitirVendaSemEstoque = true;
   bool _mostrarCampoDescontoCaixa = true;
   bool _exigirAutorizacaoSegundaViaCupom = true;
@@ -306,14 +293,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _whatsPhoneIdController.text = config.whatsappPhoneNumberId;
       _whatsTokenController.text = config.whatsappAccessToken;
       _mensageriaBackendUrlController.text = config.mensageriaBackendUrl;
-      _backupAutomaticoAtivo = config.backupAutomaticoAtivo;
-      _backupAutomaticoPasta = config.backupAutomaticoPasta;
-      _backupAutomaticoIntervaloMinutos = () {
-        const opcoes = [60, 360, 720, 1440];
-        final raw = config.backupAutomaticoIntervaloMinutos.clamp(15, 10080);
-        return opcoes.contains(raw) ? raw : 1440;
-      }();
-      _ultimoBackupAutomaticoMs = config.ultimoBackupAutomaticoMs;
       _prefsEmpresaAplicadas = true;
     });
   }
@@ -533,16 +512,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           whatsappPhoneNumberId: _whatsPhoneIdController.text,
           whatsappAccessToken: _whatsTokenController.text,
           mensageriaBackendUrl: _mensageriaBackendUrlController.text,
-          backupAutomaticoAtivo: _backupAutomaticoAtivo,
-          backupAutomaticoPasta: _backupAutomaticoPasta,
-          backupAutomaticoIntervaloMinutos: _backupAutomaticoIntervaloMinutos,
-          ultimoBackupAutomaticoMs: disco.ultimoBackupAutomaticoMs,
         ),
       );
-      if (!mounted) return;
-      setState(() {
-        _ultimoBackupAutomaticoMs = disco.ultimoBackupAutomaticoMs;
-      });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Configuracoes da empresa salvas.')),
@@ -991,410 +962,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     }
   }
 
-  Future<void> _criarBackupDados() async {
-    if (_backupEmAndamento) return;
-    final destinoRaiz = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Escolha a pasta para salvar o backup',
-    );
-    if (destinoRaiz == null || destinoRaiz.trim().isEmpty || !mounted) {
-      return;
-    }
-
-    setState(() => _backupEmAndamento = true);
-    try {
-      final baseDadosDir = await obterDiretorioBaseDadosApp();
-      if (!baseDadosDir.existsSync()) {
-        throw Exception('Pasta de dados local nao encontrada.');
-      }
-      LocalBackupValidation.validarDadosAplicacao(baseDadosDir);
-
-      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final pastaBackup = Directory(
-        p.join(destinoRaiz, 'backup_sistema_vendas_$timestamp'),
-      );
-      pastaBackup.createSync(recursive: true);
-      final destinoDados = Directory(
-        p.join(pastaBackup.path, 'dados_aplicacao'),
-      );
-
-      await widget.lanSyncScheduler?.parar();
-      await widget.objectBox.fecharParaCopiaDeArquivos();
-      try {
-        await copiarDiretorioRecursivo(
-          origem: baseDadosDir,
-          destino: destinoDados,
-        );
-        LocalBackupValidation.validarDadosAplicacao(destinoDados);
-      } finally {
-        await widget.objectBox.reabrirAposCopiaDeArquivos();
-      }
-
-      if (!mounted) return;
-      final tamanhoBanco =
-          LocalBackupValidation.descreverTamanhoBanco(destinoDados);
-      setState(() {
-        _ultimoBackupPath = pastaBackup.path;
-      });
-      AuditoriaRegistrar.registrar(
-        modulo: AuditoriaModulo.backup,
-        acao: AuditoriaAcao.backupCriar,
-        resumo: 'Backup manual criado',
-        detalhes: {'caminho': pastaBackup.path},
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 10),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Backup concluido com sucesso.'),
-              const SizedBox(height: 6),
-              Text(
-                'Banco: $tamanhoBanco (objectbox/data.mdb)',
-                style: const TextStyle(fontSize: 13),
-              ),
-              const SizedBox(height: 6),
-              Text(pastaBackup.path, style: const TextStyle(fontSize: 13)),
-            ],
-          ),
-        ),
-      );
-    } on LocalBackupInvalidoException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          duration: const Duration(seconds: 10),
-          backgroundColor: Colors.red.shade700,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Falha ao criar backup: $e')));
-    } finally {
-      if (mounted) {
-        setState(() => _backupEmAndamento = false);
-      }
-    }
-  }
-
-  Future<void> _persistirPreferenciasBackupAutomatico() async {
-    final atual = await widget.appConfigRepository.carregarEmpresaConfig();
-    await widget.appConfigRepository.salvarEmpresaConfig(
-      atual.copyWith(
-        backupAutomaticoAtivo: _backupAutomaticoAtivo,
-        backupAutomaticoPasta: _backupAutomaticoPasta,
-        backupAutomaticoIntervaloMinutos: _backupAutomaticoIntervaloMinutos
-            .clamp(15, 10080),
-      ),
-    );
-  }
-
-  Future<void> _alternarBackupAutomatico(bool value) async {
-    if (value) {
-      var pasta = _backupAutomaticoPasta.trim();
-      if (pasta.isEmpty) {
-        final escolhida = await FilePicker.platform.getDirectoryPath(
-          dialogTitle:
-              'Pasta para backups automaticos (serao criadas subpastas com data e hora)',
-        );
-        if (escolhida == null || escolhida.trim().isEmpty || !mounted) {
-          return;
-        }
-        pasta = escolhida.trim();
-      }
-      if (!mounted) return;
-      setState(() {
-        _backupAutomaticoAtivo = true;
-        _backupAutomaticoPasta = pasta;
-      });
-      await _persistirPreferenciasBackupAutomatico();
-      await AutoBackupService.tentarExecutarSeDevido(
-        widget.appConfigRepository,
-        objectBox: widget.objectBox,
-        lanSyncScheduler: widget.lanSyncScheduler,
-      );
-      if (!mounted) return;
-      final up = await widget.appConfigRepository.carregarEmpresaConfig();
-      setState(() => _ultimoBackupAutomaticoMs = up.ultimoBackupAutomaticoMs);
-    } else {
-      setState(() => _backupAutomaticoAtivo = false);
-      await _persistirPreferenciasBackupAutomatico();
-    }
-  }
-
-  Future<void> _escolherPastaBackupAutomatico() async {
-    final escolhida = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Pasta para backups automaticos',
-    );
-    if (escolhida == null || escolhida.trim().isEmpty || !mounted) return;
-    setState(() => _backupAutomaticoPasta = escolhida.trim());
-    await _persistirPreferenciasBackupAutomatico();
-  }
-
-  Future<void> _definirIntervaloBackupAutomatico(int? minutos) async {
-    if (minutos == null) return;
-    setState(() => _backupAutomaticoIntervaloMinutos = minutos);
-    await _persistirPreferenciasBackupAutomatico();
-  }
-
-  String _rotuloIntervaloBackupAutomatico(int minutos) {
-    final m = minutos.clamp(15, 10080);
-    if (m == 60) return 'A cada 1 hora';
-    if (m == 360) return 'A cada 6 horas';
-    if (m == 720) return 'A cada 12 horas';
-    if (m == 1440) return 'Diariamente (24 horas)';
-    return 'A cada $m minutos';
-  }
-
-  Future<void> _abrirPastaDados() async {
-    try {
-      final baseDir = await obterDiretorioBaseDadosApp();
-      if (!baseDir.existsSync()) {
-        throw Exception('Pasta de dados local nao encontrada.');
-      }
-      if (Platform.isWindows) {
-        await Process.start('explorer', [baseDir.path]);
-      } else if (Platform.isMacOS) {
-        await Process.start('open', [baseDir.path]);
-      } else if (Platform.isLinux) {
-        await Process.start('xdg-open', [baseDir.path]);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel abrir a pasta de dados: $e')),
-      );
-    }
-  }
-
   double? _parseMoeda(String texto) {
     final normalizado = texto.trim().replaceAll('.', '').replaceAll(',', '.');
     if (normalizado.isEmpty) return null;
     return double.tryParse(normalizado);
-  }
-
-  Future<void> _restaurarBackupDados() async {
-    if (_restauracaoEmAndamento || _backupEmAndamento) return;
-    final confirmaController = TextEditingController();
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final textoValido =
-                confirmaController.text.trim().toUpperCase() == 'RESTAURAR';
-            return AlertDialog(
-              title: const Text('Restaurar backup'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Essa acao vai sobrescrever os dados locais atuais.\n\n'
-                    'Recomendado: criar um backup antes de restaurar.\n\n'
-                    'O banco de dados fica bloqueado enquanto o app esta aberto. '
-                    'Ao continuar, o programa fechara sozinho apos copiar o backup; '
-                    'abra-o novamente para carregar os dados restaurados.',
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Digite RESTAURAR para confirmar:',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: confirmaController,
-                    autofocus: true,
-                    decoration: const InputDecoration(hintText: 'RESTAURAR'),
-                    onChanged: (_) => setDialogState(() {}),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancelar'),
-                ),
-                FilledButton(
-                  onPressed: textoValido
-                      ? () => Navigator.pop(context, true)
-                      : null,
-                  child: const Text('Continuar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    confirmaController.dispose();
-    if (confirmar != true || !mounted) return;
-
-    setState(() => _restauracaoEmAndamento = true);
-    try {
-      final pastaSelecionada = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'Escolha a pasta do backup',
-      );
-      if (pastaSelecionada == null ||
-          pastaSelecionada.trim().isEmpty ||
-          !mounted) {
-        return;
-      }
-
-      final origemSelecionada = Directory(pastaSelecionada);
-      final origemDados = LocalBackupValidation.resolverPastaDadosBackup(
-        origemSelecionada,
-      );
-      LocalBackupValidation.validarDadosAplicacao(origemDados);
-      final baseDir = await obterDiretorioBaseDadosApp();
-
-      if (p.normalize(origemDados.path) == p.normalize(baseDir.path)) {
-        throw Exception(
-          'A pasta de origem nao pode ser a mesma pasta de dados atual.',
-        );
-      }
-
-      if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) {
-          return PopScope(
-            canPop: false,
-            child: AlertDialog(
-              content: Row(
-                children: [
-                  const SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Text(
-                      Platform.isWindows
-                          ? 'Restaurando backup… O aplicativo sera fechado ao terminar.'
-                          : 'Restaurando backup… Aguarde.',
-                      style: Theme.of(dialogContext).textTheme.bodyMedium,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-
-      await widget.lanSyncScheduler?.parar();
-      await widget.objectBox.fecharParaCopiaDeArquivos();
-      await restaurarDadosLocais(
-        pastaBackupSelecionada: origemSelecionada,
-        destinoBase: baseDir,
-        limparDestino: _limparDiretorio,
-      );
-      AuditoriaRegistrar.registrar(
-        modulo: AuditoriaModulo.backup,
-        acao: AuditoriaAcao.backupRestaurar,
-        resumo: 'Backup restaurado (app sera fechado)',
-        detalhes: {
-          'origem': origemDados.path,
-          'banco': LocalBackupValidation.descreverTamanhoBanco(baseDir),
-        },
-      );
-
-      if (!mounted) {
-        exit(0);
-      }
-
-      Navigator.of(context, rootNavigator: true).pop();
-
-      final cores = Theme.of(context).colorScheme;
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) {
-          return PopScope(
-            canPop: false,
-            child: AlertDialog(
-              icon: Icon(
-                Icons.check_circle_outline,
-                size: 48,
-                color: cores.primary,
-              ),
-              title: const Text('Backup restaurado'),
-              content: const Text(
-                'Os dados foram copiados com sucesso.\n\n'
-                'Toque em OK para fechar o aplicativo. '
-                'Abra-o novamente para usar os dados restaurados.',
-              ),
-              actions: [
-                FilledButton(
-                  onPressed: () {
-                    Navigator.of(ctx, rootNavigator: true).pop();
-                    exit(0);
-                  },
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    } on LocalBackupInvalidoException catch (e) {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).maybePop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.message),
-            duration: const Duration(seconds: 12),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
-      }
-      if (widget.objectBox.store.isClosed()) {
-        try {
-          await widget.objectBox.reabrirAposCopiaDeArquivos();
-        } catch (_) {
-          exit(1);
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).maybePop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Falha ao restaurar backup: $e')),
-        );
-      }
-      if (widget.objectBox.store.isClosed()) {
-        try {
-          await widget.objectBox.reabrirAposCopiaDeArquivos();
-        } catch (_) {
-          exit(1);
-        }
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _restauracaoEmAndamento = false);
-      }
-    }
-  }
-
-  Future<void> _limparDiretorio(Directory diretorio) async {
-    if (!diretorio.existsSync()) {
-      diretorio.createSync(recursive: true);
-      return;
-    }
-    await for (final entidade in diretorio.list(recursive: false)) {
-      if (entidade is Directory) {
-        await entidade.delete(recursive: true);
-      } else if (entidade is File) {
-        await entidade.delete();
-      }
-    }
   }
 
   Widget _configTab(List<Widget> children) {
@@ -1497,7 +1068,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'IA — padronizar produtos (Gemini)',
+                        'IA â€” padronizar produtos (Gemini)',
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.bold),
                       ),
@@ -1557,13 +1128,13 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Fiscal — Focus NFe (NFC-e / NF-e)',
+                        'Fiscal â€” Focus NFe (NFC-e / NF-e)',
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Token obrigatorio nesta tela (salvo só neste PC, '
+                        'Token obrigatorio nesta tela (salvo sÃ³ neste PC, '
                         'fora do Git). Ambiente padrao do codigo: '
                         '${FiscalConfig.ambiente}. CNPJ/IE padrao: '
                         '${FiscalConfig.cnpjEmitente}.',
@@ -1732,7 +1303,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Layout do cupom e orcamento'),
                         subtitle: const Text(
-                          'Divisorias, colunas, fontes e campos — com pre-visualizacao',
+                          'Divisorias, colunas, fontes e campos â€” com pre-visualizacao',
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () async {
@@ -1753,7 +1324,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         title: const Text('Impressora padrao'),
                         subtitle: Text(
                           _impressoraPadrao.trim().isEmpty
-                              ? 'Nao configurada — toque para abrir a tela dedicada'
+                              ? 'Nao configurada â€” toque para abrir a tela dedicada'
                               : _impressoraPadrao,
                         ),
                         trailing: const Icon(Icons.chevron_right),
@@ -1994,7 +1565,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         'Limite percentual sobre o subtotal dos produtos (nao inclui frete). '
                         'No PDV o vendedor pode informar % ou valor em reais, desde que o '
                         'desconto em reais nao ultrapasse esse percentual do subtotal. '
-                        'Use 0 para nao permitir desconto no PDV — so no Caixa, se estiver '
+                        'Use 0 para nao permitir desconto no PDV â€” so no Caixa, se estiver '
                         'habilitado acima.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
@@ -2040,146 +1611,13 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               ),
             ]),
             _configTab([
-              const SizedBox(height: 10),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Backup e Dados',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Crie backup completo dos dados locais da aplicacao e acesse a pasta do banco.',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      const SizedBox(height: 10),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Backup automatico'),
-                        subtitle: Text(
-                          'Copia periodica enquanto o app estiver aberto. Escolha uma pasta segura '
-                          '(outro disco, rede ou nuvem sincronizada) para nao perder dados se este PC falhar.',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        value: _backupAutomaticoAtivo,
-                        onChanged: _backupEmAndamento
-                            ? null
-                            : _alternarBackupAutomatico,
-                      ),
-                      if (_backupAutomaticoAtivo) ...[
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: _escolherPastaBackupAutomatico,
-                            icon: const Icon(Icons.folder_outlined, size: 20),
-                            label: const Text('Escolher pasta de destino'),
-                          ),
-                        ),
-                        if (_backupAutomaticoPasta.trim().isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: SelectableText(
-                              _backupAutomaticoPasta,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                        DropdownButtonFormField<int>(
-                          key: ValueKey(_backupAutomaticoIntervaloMinutos),
-                          decoration: const InputDecoration(
-                            labelText: 'Frequencia',
-                          ),
-                          initialValue: _backupAutomaticoIntervaloMinutos,
-                          items: [
-                            DropdownMenuItem(
-                              value: 60,
-                              child: Text(_rotuloIntervaloBackupAutomatico(60)),
-                            ),
-                            DropdownMenuItem(
-                              value: 360,
-                              child: Text(
-                                _rotuloIntervaloBackupAutomatico(360),
-                              ),
-                            ),
-                            DropdownMenuItem(
-                              value: 720,
-                              child: Text(
-                                _rotuloIntervaloBackupAutomatico(720),
-                              ),
-                            ),
-                            DropdownMenuItem(
-                              value: 1440,
-                              child: Text(
-                                _rotuloIntervaloBackupAutomatico(1440),
-                              ),
-                            ),
-                          ],
-                          onChanged: _backupEmAndamento
-                              ? null
-                              : _definirIntervaloBackupAutomatico,
-                        ),
-                        if (_ultimoBackupAutomaticoMs > 0) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            'Ultimo backup automatico: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.fromMillisecondsSinceEpoch(_ultimoBackupAutomaticoMs))}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ],
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _backupEmAndamento
-                              ? null
-                              : _criarBackupDados,
-                          icon: const Icon(Icons.backup_outlined),
-                          label: Text(
-                            _backupEmAndamento
-                                ? 'Criando backup...'
-                                : 'Criar backup agora',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _abrirPastaDados,
-                          icon: const Icon(Icons.folder_open_outlined),
-                          label: const Text('Abrir pasta de dados'),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed:
-                              _restauracaoEmAndamento || _backupEmAndamento
-                              ? null
-                              : _restaurarBackupDados,
-                          icon: const Icon(Icons.restore_outlined),
-                          label: Text(
-                            _restauracaoEmAndamento
-                                ? 'Restaurando backup...'
-                                : 'Restaurar backup',
-                          ),
-                        ),
-                      ),
-                      if (_ultimoBackupPath.trim().isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Ultimo backup: $_ultimoBackupPath',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
+              BackupConfiguracaoSection(
+                appConfigRepository: widget.appConfigRepository,
+                objectBox: widget.objectBox,
+                lanSyncScheduler: widget.lanSyncScheduler,
+                nomeLoja: _nomeLojaController.text.trim().isEmpty
+                    ? 'LOJA DE MATERIAIS'
+                    : _nomeLojaController.text.trim(),
               ),
             ]),
             _configTab([

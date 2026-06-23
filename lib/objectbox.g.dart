@@ -150,7 +150,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(2, 12069401530715107),
     name: 'Produto',
-    lastPropertyId: const obx_int.IdUid(45, 3223106704485660019),
+    lastPropertyId: const obx_int.IdUid(48, 6397976891055979669),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -419,6 +419,24 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(45, 3223106704485660019),
         name: 'nomeImpressao',
         type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(46, 1320991480122834578),
+        name: 'limiteDescontoPreco1',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(47, 4236834855594413236),
+        name: 'limiteDescontoPreco2',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(48, 6397976891055979669),
+        name: 'limiteDescontoPreco3',
+        type: 8,
         flags: 0,
       ),
     ],
@@ -3348,7 +3366,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           object.pisCofinsSituacaoTributaria,
         );
         final nomeImpressaoOffset = fbb.writeString(object.nomeImpressao);
-        fbb.startTable(46);
+        fbb.startTable(49);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, nomeOffset);
         fbb.addInt64(2, object.estoque);
@@ -3393,6 +3411,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(42, icmsSituacaoTributariaOffset);
         fbb.addOffset(43, pisCofinsSituacaoTributariaOffset);
         fbb.addOffset(44, nomeImpressaoOffset);
+        fbb.addFloat64(45, object.limiteDescontoPreco1);
+        fbb.addFloat64(46, object.limiteDescontoPreco2);
+        fbb.addFloat64(47, object.limiteDescontoPreco3);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -3563,6 +3584,24 @@ obx_int.ModelDefinition getObjectBoxModel() {
           12,
           0,
         );
+        final limiteDescontoPreco1Param = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          94,
+          0,
+        );
+        final limiteDescontoPreco2Param = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          96,
+          0,
+        );
+        final limiteDescontoPreco3Param = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          98,
+          0,
+        );
         final unidadeCompraParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 72, '');
@@ -3634,6 +3673,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           preco2: preco2Param,
           preco3: preco3Param,
           precoVenda: precoVendaParam,
+          limiteDescontoPreco1: limiteDescontoPreco1Param,
+          limiteDescontoPreco2: limiteDescontoPreco2Param,
+          limiteDescontoPreco3: limiteDescontoPreco3Param,
           unidadeCompra: unidadeCompraParam,
           quantidadePorEmbalagem: quantidadePorEmbalagemParam,
           embalagemMultiplica: embalagemMultiplicaParam,
@@ -7430,6 +7472,21 @@ class Produto_ {
   /// See [Produto.nomeImpressao].
   static final nomeImpressao = obx.QueryStringProperty<Produto>(
     _entities[1].properties[43],
+  );
+
+  /// See [Produto.limiteDescontoPreco1].
+  static final limiteDescontoPreco1 = obx.QueryDoubleProperty<Produto>(
+    _entities[1].properties[44],
+  );
+
+  /// See [Produto.limiteDescontoPreco2].
+  static final limiteDescontoPreco2 = obx.QueryDoubleProperty<Produto>(
+    _entities[1].properties[45],
+  );
+
+  /// See [Produto.limiteDescontoPreco3].
+  static final limiteDescontoPreco3 = obx.QueryDoubleProperty<Produto>(
+    _entities[1].properties[46],
   );
 
   /// see [Produto.historicoEntradas]

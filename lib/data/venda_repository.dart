@@ -13,6 +13,7 @@ import '../domain/fiscal/fiscal_emissao_lock.dart';
 import '../domain/fiscal/focus_documento_fiscal_url.dart';
 import '../domain/fiscal/nfce_xml_local_service.dart';
 import '../domain/fiscal/nfe_xml_local_service.dart';
+import '../domain/fiscal/venda_nfce_obrigatoria_helper.dart';
 import '../domain/estoque/tipo_movimento_estoque.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
@@ -383,6 +384,7 @@ class FiltroListagemVendas {
     required this.formaPagamento,
     required this.tipoEntrega,
     required this.entregaPendente,
+    this.filtroFiscal = 'todos',
     this.clienteId,
     this.vendedorId,
   });
@@ -401,6 +403,9 @@ class FiltroListagemVendas {
 
   /// `todos` | `sim` | `nao`
   final String entregaPendente;
+
+  /// `todos` | `sem_nfce_eletronico`
+  final String filtroFiscal;
   final int? clienteId;
   final int? vendedorId;
 }
@@ -912,8 +917,56 @@ class VendaRepository {
     return c & textoCond;
   }
 
+  List<Venda> _listarCandidatasListagemFiscal(FiltroListagemVendas f) {
+    final base = FiltroListagemVendas(
+      textoBusca: f.textoBusca,
+      dataInicioUtc: f.dataInicioUtc,
+      dataFimUtc: f.dataFimUtc,
+      filtroCancelamento: f.filtroCancelamento,
+      canceladaPorFiltro: f.canceladaPorFiltro,
+      formaPagamento: f.formaPagamento,
+      tipoEntrega: f.tipoEntrega,
+      entregaPendente: f.entregaPendente,
+      filtroFiscal: 'todos',
+      clienteId: f.clienteId,
+      vendedorId: f.vendedorId,
+    );
+    var cond = _condicaoListagemVendas(base);
+    cond = cond &
+        Venda_.nfceChaveAcesso.equals('') &
+        Venda_.nfceUrlDanfe.equals('');
+    cond = cond &
+        Venda_.formaPagamento.oneOf([
+          'pix',
+          'cartao_credito',
+          'cartao_debito',
+          'transferencia',
+          'misto',
+        ]);
+    final query = _queryListagemVendasOrdenada(cond, base);
+    try {
+      return query.find();
+    } finally {
+      query.close();
+    }
+  }
+
+  List<Venda> _filtrarListagemFiscal(
+    List<Venda> vendas,
+    FiltroListagemVendas f,
+  ) {
+    if (f.filtroFiscal != 'sem_nfce_eletronico') return vendas;
+    return vendas.where(VendaNfceObrigatoriaHelper.ehPendenteEmissao).toList();
+  }
+
   /// Total de vendas finalizadas que obedecem ao filtro (sem paginacao).
   int contarListagemVendas(FiltroListagemVendas f) {
+    if (f.filtroFiscal == 'sem_nfce_eletronico') {
+      return _filtrarListagemFiscal(
+        _listarCandidatasListagemFiscal(f),
+        f,
+      ).length;
+    }
     final cond = _condicaoListagemVendas(f);
     final query = _db.vendaBox.query(cond).build();
     try {
@@ -929,6 +982,15 @@ class VendaRepository {
     required int offset,
     required int limite,
   }) {
+    if (f.filtroFiscal == 'sem_nfce_eletronico') {
+      final filtradas = _filtrarListagemFiscal(
+        _listarCandidatasListagemFiscal(f),
+        f,
+      );
+      final total = filtradas.length;
+      final vendas = filtradas.skip(offset).take(limite).toList();
+      return ListagemVendasPagina(vendas: vendas, total: total);
+    }
     final cond = _condicaoListagemVendas(f);
     final qCount = _db.vendaBox.query(cond).build();
     final total = qCount.count();
@@ -947,6 +1009,12 @@ class VendaRepository {
 
   /// Todas as vendas do filtro (sem limite). Use com cuidado em exportacoes.
   List<Venda> listarListagemVendasCompleto(FiltroListagemVendas f) {
+    if (f.filtroFiscal == 'sem_nfce_eletronico') {
+      return _filtrarListagemFiscal(
+        _listarCandidatasListagemFiscal(f),
+        f,
+      );
+    }
     final cond = _condicaoListagemVendas(f);
     final query = _queryListagemVendasOrdenada(cond, f);
     try {
@@ -2534,6 +2602,28 @@ class VendaRepository {
     _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
+  void vincularVendedorNoOrcamento(int vendaId, int vendedorId) {
+    if (vendedorId <= 0) {
+      throw ArgumentError('Informe um vendedor valido.');
+    }
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Orcamento $vendaId nao encontrado.');
+      }
+      if (venda.status != 'orcamento') {
+        throw StateError('Somente orcamentos podem ser alterados.');
+      }
+      final vendedor = _db.vendedorBox.get(vendedorId);
+      if (vendedor == null) {
+        throw StateError('Vendedor $vendedorId nao encontrado.');
+      }
+      venda.vendedor.target = vendedor;
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
   void registrarNfceEmitida({
     required int vendaId,
     required String chaveAcesso,
@@ -2848,6 +2938,50 @@ class VendaRepository {
       query.close();
     }
   }
+
+  /// Vendas PIX/cartao finalizadas sem NFC-e (falha ou emissao pulada no caixa).
+  List<Venda> listarComNfcePendenteEmissao({
+    int limite = 200,
+    DateTime? desde,
+  }) {
+    final cond = Venda_.status
+        .equals('finalizada')
+        .and(Venda_.cancelada.equals(false))
+        .and(Venda_.nfceChaveAcesso.equals(''))
+        .and(Venda_.nfceUrlDanfe.equals(''))
+        .and(
+          Venda_.formaPagamento.oneOf([
+            'pix',
+            'cartao_credito',
+            'cartao_debito',
+            'transferencia',
+            'misto',
+          ]),
+        );
+    final query = _db.vendaBox
+        .query(cond)
+        .order(Venda_.id, flags: Order.descending)
+        .build();
+    try {
+      final desdeUtc = desde?.toUtc();
+      return query
+          .find()
+          .where((v) {
+            if (desdeUtc != null) {
+              final ref = VendaFinalizacaoCaixaHelper.momentoFinalizacao(v);
+              if (ref.toUtc().isBefore(desdeUtc)) return false;
+            }
+            return VendaNfceObrigatoriaHelper.ehPendenteEmissao(v);
+          })
+          .take(limite)
+          .toList();
+    } finally {
+      query.close();
+    }
+  }
+
+  int contarComNfcePendenteEmissao() =>
+      listarComNfcePendenteEmissao(limite: 10000).length;
 
   /// NFC-e aguardando SEFAZ no periodo da venda (nao entra no ZIP do fechamento).
   List<Venda> listarNfcePendenteFocusNoPeriodo({

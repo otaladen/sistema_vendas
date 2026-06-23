@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/app_config_repository.dart';
 import '../data/models/conta_pagar.dart';
 import '../data/objectbox.dart';
 import '../data/produto_repository.dart';
@@ -8,6 +9,7 @@ import '../data/venda_repository.dart';
 import 'entrega_filtro_util.dart';
 import 'filtro_contas_pagar.dart';
 import 'filtro_contas_receber.dart';
+import 'backup_status_helper.dart';
 import 'main_menu_destino.dart';
 
 /// Tipo de alerta exibido no dashboard.
@@ -18,6 +20,7 @@ enum DashboardAlertaTipo {
   estoqueCritico,
   orcamentoAntigo,
   contaPagarVencida,
+  backupAtrasado,
 }
 
 /// Alerta acionavel no painel inicial.
@@ -54,6 +57,9 @@ class DashboardAlertasService {
     required bool podeFinanceiro,
     required bool podeEstoque,
     required bool podeEntregas,
+    EmpresaConfig? empresaConfig,
+    BackupRegistroManual? backupManual,
+    bool podeConfiguracoes = false,
   }) {
     vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
     final alertas = <DashboardAlerta>[];
@@ -171,6 +177,32 @@ class DashboardAlertasService {
           prioridade: 40,
         ),
       );
+    }
+
+    if (podeConfiguracoes &&
+        empresaConfig != null &&
+        backupManual != null) {
+      final backup = BackupStatusHelper.avaliar(
+        config: empresaConfig,
+        manual: backupManual,
+      );
+      if (backup.exibirAlerta) {
+        final horas = backup.horasDesdeUltimo;
+        alertas.add(
+          DashboardAlerta(
+            tipo: DashboardAlertaTipo.backupAtrasado,
+            titulo: backup.saude == BackupSaude.critico
+                ? 'Backup urgente'
+                : 'Backup recomendado',
+            detalhe: horas == null || horas <= 0
+                ? 'Nenhum backup recente neste PC'
+                : 'Ultimo backup ha $horas hora(s)',
+            icone: Icons.backup_outlined,
+            destino: MainMenuDestino.configuracoes,
+            prioridade: backup.saude == BackupSaude.critico ? 12 : 35,
+          ),
+        );
+      }
     }
 
     alertas.sort((a, b) => a.prioridade.compareTo(b.prioridade));

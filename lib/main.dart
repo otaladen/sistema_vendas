@@ -11,6 +11,8 @@ import 'data/app_config_repository.dart';
 import 'data/app_tema_repository.dart';
 import 'data/auditoria_repository.dart';
 import 'data/auto_backup_service.dart';
+import 'data/backup_agendado_headless_service.dart';
+import 'data/backup_ao_fechar_service.dart';
 import 'data/cliente_repository.dart';
 import 'data/funcionario_repository.dart';
 import 'data/motorista_repository.dart';
@@ -39,7 +41,12 @@ import 'ui/theme/app_theme_builder.dart';
 
 export 'ui/theme/app_semantic_colors.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
+  if (BackupAgendadoHeadlessService.deveExecutar(args)) {
+    final code = await BackupAgendadoHeadlessService.executar();
+    exit(code);
+  }
+
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
@@ -142,7 +149,7 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   UsuarioSistema? _usuarioLogado;
   AppTemaId _temaAtual = AppTemaId.verde;
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
@@ -152,6 +159,7 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_carregarTemaInicial());
     _printService = PrintService(widget.appConfigRepository);
     _timerBackupAutomatico = Timer.periodic(
@@ -173,8 +181,31 @@ class _MyAppState extends State<MyApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timerBackupAutomatico?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      unawaited(_executarBackupAoFechar());
+    }
+  }
+
+  Future<void> _executarBackupAoFechar() async {
+    final nomeLoja = await _nomeLojaAtual();
+    await BackupAoFecharService.tentarSeAtivo(
+      repository: widget.appConfigRepository,
+      objectBox: widget.objectBox,
+      lanSyncScheduler: widget.lanSyncScheduler,
+      nomeLoja: nomeLoja,
+    );
+  }
+
+  Future<String> _nomeLojaAtual() async {
+    final c = await widget.appConfigRepository.carregarEmpresaConfig();
+    return c.nomeLoja;
   }
 
   Future<void> _carregarTemaInicial() async {
@@ -221,6 +252,7 @@ class _MyAppState extends State<MyApp> {
     }
     AuditoriaRegistrar.limparUsuarioSessao();
     widget.lanSyncScheduler.parar();
+    await _executarBackupAoFechar();
     final temaMaquina = await AppTemaRepository.carregar();
     if (!mounted) return;
     setState(() {

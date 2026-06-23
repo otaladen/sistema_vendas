@@ -10,16 +10,14 @@ import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../services/print_service.dart';
-import 'caixa_page.dart';
+import 'caixa/caixa_page.dart';
 import 'entregas_page.dart';
 import 'listagem_vendas_page.dart';
 import 'orcamentos_page.dart';
-import 'ponto_de_venda_page.dart';
 import 'relatorios_page.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
 import 'layout/app_layout.dart';
-import '../domain/main_menu_destino.dart';
 import 'theme/app_modulo_cores.dart';
 
 class VendasPage extends StatelessWidget {
@@ -49,12 +47,6 @@ class VendasPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final u = usuarioLogado;
-    final podePdv = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarPdv);
-    final podeCaixa = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarCaixa);
-    final podeEntregas =
-        UsuarioPermissaoHelper.podeVisualizarEntregas(u);
-    final podeGerenciarEntregas =
-        UsuarioPermissaoHelper.podeGerenciarEntregas(u);
     final podeCancelar = UsuarioPermissaoHelper.podeCancelarVendas(u);
     final podeRelatorios =
         UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarRelatorios);
@@ -62,11 +54,15 @@ class VendasPage extends StatelessWidget {
       u,
       PermissaoUsuario.acessarListagemVendas,
     );
+    final podePdv = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarPdv);
+    final podeCaixa = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarCaixa);
+    final podeGerenciarEntregas =
+        UsuarioPermissaoHelper.podeGerenciarEntregas(u);
     final podeOrcamentos = podePdv || podeCaixa || podeListagem;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Vendas'),
+        title: const Text('Gestao de vendas'),
         actions: [
           ContaSessaoAppBarActions(
             login: u.login,
@@ -76,91 +72,6 @@ class VendasPage extends StatelessWidget {
       ),
       body: AdaptiveHubBody(
         children: [
-            HubNavButton(
-              icon: Icons.point_of_sale_outlined,
-              corDestaque: MainMenuDestino.pdv.cor(context),
-              titulo: 'Ponto de Venda',
-              habilitado: podePdv,
-              onTap: () {
-                if (!podePdv) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PontoDeVendaPage(
-                      produtoRepository: produtoRepository,
-                      clienteRepository: clienteRepository,
-                      vendaRepository: vendaRepository,
-                      vendedorRepository: vendedorRepository,
-                      appConfigRepository: appConfigRepository,
-                      printService: printService,
-                      usuarioLogado: u,
-                    ),
-                  ),
-                );
-              },
-            ),
-            HubNavButton(
-              icon: Icons.receipt_long_outlined,
-              corDestaque: MainMenuDestino.caixa.cor(context),
-              titulo: 'Caixa',
-              habilitado: podeCaixa,
-              onTap: () {
-                if (!podeCaixa) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => CaixaPage(
-                      clienteRepository: clienteRepository,
-                      produtoRepository: produtoRepository,
-                      vendaRepository: vendaRepository,
-                      vendedorRepository: vendedorRepository,
-                      appConfigRepository: appConfigRepository,
-                      printService: printService,
-                      usuarioAtual: u.login,
-                      podeCancelarVendas: podeCancelar,
-                      podeLeituraParcialCaixa: UsuarioPermissaoHelper.tem(
-                        u,
-                        PermissaoUsuario.leituraParcialCaixa,
-                      ),
-                      podeVisualizarAuditoriaCaixa: UsuarioPermissaoHelper.tem(
-                        u,
-                        PermissaoUsuario.visualizarAuditoriaCaixa,
-                      ),
-                      podeManutencaoAuditoriaCaixa: UsuarioPermissaoHelper.tem(
-                        u,
-                        PermissaoUsuario.manutencaoAuditoriaCaixa,
-                      ),
-                      onLogout: onLogout,
-                    ),
-                  ),
-                );
-              },
-            ),
-            HubNavButton(
-              icon: Icons.local_shipping_outlined,
-              corDestaque: MainMenuDestino.entregas.cor(context),
-              titulo: 'Entregas',
-              habilitado: podeEntregas,
-              onTap: () {
-                if (!podeEntregas) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => EntregasPage(
-                      vendaRepository: vendaRepository,
-                      produtoRepository: produtoRepository,
-                      motoristaRepository: motoristaRepository,
-                      appConfigRepository: appConfigRepository,
-                      usuarioAtual: u.login,
-                      podeGerenciarStatusEntrega: podeGerenciarEntregas,
-                      podeRegistrarPodEntrega:
-                          UsuarioPermissaoHelper.podeRegistrarPodEntrega(u),
-                      podeRegistrarDevolucaoTrocaSemSenha: podeCancelar,
-                    ),
-                  ),
-                );
-              },
-            ),
             HubNavButton(
               icon: Icons.request_quote_outlined,
               corDestaque: AppModuloCores.modulo(context, AppModuloId.orcamentos),

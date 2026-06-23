@@ -38,7 +38,9 @@ class _RelatorioOrcamentosAbertosPageState
     extends State<RelatorioOrcamentosAbertosPage> {
   List<Venda> _todos = [];
   final _buscaController = TextEditingController();
-  DateTime? _dataFiltro;
+  DateTime? _dataInicioFiltro;
+  DateTime? _dataFimFiltro;
+  final DateFormat _dataDia = DateFormat('dd/MM/yyyy');
 
   @override
   void initState() {
@@ -64,16 +66,31 @@ class _RelatorioOrcamentosAbertosPageState
 
   List<Venda> get _filtrados {
     var lista = List<Venda>.from(_todos);
-    if (_dataFiltro != null) {
-      final d = _dataFiltro!;
-      final inicio = DateTime(d.year, d.month, d.day);
-      final fim = DateTime(d.year, d.month, d.day, 23, 59, 59, 999);
-      lista = lista
-          .where((v) {
-            final loc = v.data.toLocal();
-            return !loc.isBefore(inicio) && !loc.isAfter(fim);
-          })
-          .toList();
+    if (_dataInicioFiltro != null || _dataFimFiltro != null) {
+      var inicio = _dataInicioFiltro;
+      var fim = _dataFimFiltro;
+      if (inicio == null && fim != null) {
+        inicio = DateTime(fim.year, fim.month, fim.day);
+      }
+      if (fim == null && inicio != null) {
+        fim = DateTime(inicio.year, inicio.month, inicio.day, 23, 59, 59, 999);
+      }
+      if (inicio != null && fim != null) {
+        if (inicio.isAfter(fim)) {
+          final t = inicio;
+          inicio = DateTime(fim.year, fim.month, fim.day);
+          fim = DateTime(t.year, t.month, t.day, 23, 59, 59, 999);
+        } else {
+          inicio = DateTime(inicio.year, inicio.month, inicio.day);
+          fim = DateTime(fim.year, fim.month, fim.day, 23, 59, 59, 999);
+        }
+        lista = lista
+            .where((v) {
+              final loc = v.data.toLocal();
+              return !loc.isBefore(inicio!) && !loc.isAfter(fim!);
+            })
+            .toList();
+      }
     }
     final termo = _buscaController.text.trim().toLowerCase();
     if (termo.isNotEmpty) {
@@ -97,20 +114,70 @@ class _RelatorioOrcamentosAbertosPageState
     return false;
   }
 
-  Future<void> _escolherDataFiltro() async {
-    final escolhida = await showDatePicker(
+  Future<void> _escolherPeriodoFiltro() async {
+    final hoje = DateTime.now();
+    final range = await showDateRangePicker(
       context: context,
-      initialDate: _dataFiltro ?? DateTime.now(),
+      helpText: 'Periodo do orcamento',
+      cancelText: 'Cancelar',
+      confirmText: 'Aplicar',
+      saveText: 'Aplicar',
       firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      lastDate: DateTime(hoje.year + 1, 12, 31),
+      initialDateRange: _dataInicioFiltro != null && _dataFimFiltro != null
+          ? DateTimeRange(
+              start: DateTime(
+                _dataInicioFiltro!.year,
+                _dataInicioFiltro!.month,
+                _dataInicioFiltro!.day,
+              ),
+              end: DateTime(
+                _dataFimFiltro!.year,
+                _dataFimFiltro!.month,
+                _dataFimFiltro!.day,
+              ),
+            )
+          : null,
     );
-    if (escolhida == null || !mounted) return;
-    setState(() => _dataFiltro = escolhida);
+    if (range == null || !mounted) return;
+    setState(() {
+      _dataInicioFiltro = DateTime(
+        range.start.year,
+        range.start.month,
+        range.start.day,
+      );
+      _dataFimFiltro = DateTime(
+        range.end.year,
+        range.end.month,
+        range.end.day,
+        23,
+        59,
+        59,
+        999,
+      );
+    });
   }
 
   void _limparFiltroData() {
-    if (_dataFiltro == null) return;
-    setState(() => _dataFiltro = null);
+    if (_dataInicioFiltro == null && _dataFimFiltro == null) return;
+    setState(() {
+      _dataInicioFiltro = null;
+      _dataFimFiltro = null;
+    });
+  }
+
+  String _rotuloFiltroPeriodo() {
+    if (_dataInicioFiltro == null && _dataFimFiltro == null) {
+      return 'Filtrar por periodo';
+    }
+    final inicio = _dataInicioFiltro ?? _dataFimFiltro!;
+    final fim = _dataFimFiltro ?? _dataInicioFiltro!;
+    final iniDia = DateTime(inicio.year, inicio.month, inicio.day);
+    final fimDia = DateTime(fim.year, fim.month, fim.day);
+    if (iniDia == fimDia) {
+      return 'Data: ${_dataDia.format(inicio)}';
+    }
+    return '${_dataDia.format(inicio)} — ${_dataDia.format(fim)}';
   }
 
   Cliente? _cliente(Venda v) {
@@ -134,7 +201,9 @@ class _RelatorioOrcamentosAbertosPageState
   }
 
   bool get _filtrosAtivos =>
-      _dataFiltro != null || _buscaController.text.trim().isNotEmpty;
+      _dataInicioFiltro != null ||
+      _dataFimFiltro != null ||
+      _buscaController.text.trim().isNotEmpty;
 
   Future<void> _confirmarApagarOrcamento(Venda venda) async {
     final confirmar = await showDialog<bool>(
@@ -340,10 +409,6 @@ class _RelatorioOrcamentosAbertosPageState
   }
 
   Widget _buildBarraFiltros() {
-    final dataFmt = _dataFiltro == null
-        ? null
-        : DateFormat('dd/MM/yyyy').format(_dataFiltro!);
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Column(
@@ -371,26 +436,34 @@ class _RelatorioOrcamentosAbertosPageState
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _escolherDataFiltro,
-                  icon: const Icon(Icons.calendar_today_outlined, size: 18),
+                  onPressed: _escolherPeriodoFiltro,
+                  icon: const Icon(Icons.date_range_outlined, size: 18),
                   label: Text(
-                    dataFmt == null
-                        ? 'Filtrar por data'
-                        : 'Data: $dataFmt',
+                    _rotuloFiltroPeriodo(),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ),
-              if (_dataFiltro != null) ...[
+              if (_dataInicioFiltro != null || _dataFimFiltro != null) ...[
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: 'Limpar filtro de data',
+                  tooltip: 'Limpar filtro de periodo',
                   onPressed: _limparFiltroData,
                   icon: const Icon(Icons.filter_alt_off_outlined),
                 ),
               ],
             ],
           ),
+          if (_dataInicioFiltro != null || _dataFimFiltro != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Inclui o dia inteiro da data inicial e da final.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
         ],
       ),
     );

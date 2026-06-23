@@ -18,6 +18,7 @@ import '../domain/usuario_permissao_helper.dart';
 import '../domain/permissao_usuario.dart';
 import '../model/usuario_sistema.dart';
 import '../domain/produto_embalagem.dart';
+import '../domain/produto_limite_desconto_pdv.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../data/app_config_repository.dart';
@@ -370,6 +371,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   int? _orcamentoEmEdicaoNumero;
   /// Ultimo orcamento enviado ao caixa (exibido no painel apos salvar).
   int? _ultimoOrcamentoSalvoNumero;
+  double? _ultimoOrcamentoSalvoTotal;
   bool _mostrarAjudaAtalhos = false;
   bool _trocaComNotaBannerVisivel = true;
   bool _trocaComNotaIntentAplicado = false;
@@ -2652,6 +2654,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       orcamentoEmEdicao: _orcamentoEmEdicaoId != null,
       orcamentoEmEdicaoNumero: _orcamentoEmEdicaoNumero?.toString(),
       ultimoOrcamentoSalvoNumero: _ultimoOrcamentoSalvoNumero,
+      ultimoOrcamentoSalvoTotal: _ultimoOrcamentoSalvoTotal,
       onCancelarEdicaoOrcamento: () {
         setState(() {
           _orcamentoEmEdicaoId = null;
@@ -4261,7 +4264,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                       ? 'Autorizado por $_descontoAutorizadoPorPdV'
                       : (_descontoPdVUltrapassaTetoSemAutorizacao()
                           ? 'Autorize um gerente para concluir'
-                          : 'F3 · Max. ${_maxDescontoPercentualPdv.toStringAsFixed(1)}% '
+                          : 'F3 · Max. ${_percentualMaximoEfetivoDescontoPdV().toStringAsFixed(1)}% '
                                 '(${_formatarMoeda(_valorMaximoDescontoReaisPdV())})'),
                   errorText: _descontoPdVUltrapassaTetoSemAutorizacao()
                       ? _mensagemErroDescontoPdVUltrapassaTeto()
@@ -4459,10 +4462,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   /// Limpa a tela para a proxima venda (vendedor, cliente, carrinho, busca).
-  void _prepararNovaVendaAposEnvioCaixa({int? numeroOrcamentoSalvo}) {
+  void _prepararNovaVendaAposEnvioCaixa({
+    int? numeroOrcamentoSalvo,
+    double? totalOrcamentoSalvo,
+  }) {
     setState(() {
       if (numeroOrcamentoSalvo != null && numeroOrcamentoSalvo > 0) {
         _ultimoOrcamentoSalvoNumero = numeroOrcamentoSalvo;
+        _ultimoOrcamentoSalvoTotal = totalOrcamentoSalvo;
       }
       _carrinho.clear();
       _indiceLinhaCarrinho = null;
@@ -4710,6 +4717,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       if (mounted) {
         _prepararNovaVendaAposEnvioCaixa(
           numeroOrcamentoSalvo: numeroOrcamentoSalvo,
+          totalOrcamentoSalvo: vendaSalva?.total,
         );
       }
     } catch (e) {
@@ -5593,18 +5601,38 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       .where((i) => i.promocaoId <= 0)
       .fold(0.0, (s, i) => s + i.subtotal);
 
-  /// Valor maximo de desconto em reais permitido neste pedido (config % x subtotal).
+  List<LinhaCalculoLimiteDescontoPdv> get _linhasLimiteDescontoPdV =>
+      _carrinho
+          .map(
+            (i) => LinhaCalculoLimiteDescontoPdv(
+              produto: i.produto,
+              precoTipo: i.precoTipo,
+              subtotal: i.subtotal,
+              promocaoId: i.promocaoId,
+            ),
+          )
+          .toList();
+
+  double _percentualMaximoEfetivoDescontoPdV() =>
+      ProdutoLimiteDescontoPdv.percentualEquivalenteSobreSubtotal(
+        linhas: _linhasLimiteDescontoPdV,
+        tetoEmpresaOuUsuario: _maxDescontoPercentualPdv,
+      );
+
+  /// Valor maximo de desconto em reais (teto por produto/tabela + config).
   double _valorMaximoDescontoReaisPdV() {
     if (_maxDescontoPercentualPdv <= 0) return 0;
-    final sub = _subtotalElegivelDescontoPdV;
-    return (sub * _maxDescontoPercentualPdv / 100).clamp(0.0, sub);
+    return ProdutoLimiteDescontoPdv.valorMaximoDescontoReais(
+      linhas: _linhasLimiteDescontoPdV,
+      tetoEmpresaOuUsuario: _maxDescontoPercentualPdv,
+    );
   }
 
   double _percentualDigitadoPdV() {
     if (_tipoDescontoPdV != 'percentual') return 0;
     final bruto = _percentualDigitadoBrutoSemLimitePdV();
     if (bruto == null) return 0;
-    return bruto.clamp(0.0, _maxDescontoPercentualPdv);
+    return bruto.clamp(0.0, _percentualMaximoEfetivoDescontoPdV());
   }
 
   /// Percentual digitado sem aplicar o teto (para aviso quando ultrapassa).
@@ -5619,7 +5647,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   bool _descontoPdVDigitadoUltrapassaTeto() {
     if (_maxDescontoPercentualPdv <= 0) return false;
-    final maxPct = _maxDescontoPercentualPdv;
+    final maxPct = _percentualMaximoEfetivoDescontoPdV();
     final maxReais = _valorMaximoDescontoReaisPdV();
     const eps = 1e-6;
     if (_tipoDescontoPdV == 'percentual') {
@@ -5676,7 +5704,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   String _mensagemErroDescontoPdVUltrapassaTeto() {
-    final maxPct = _maxDescontoPercentualPdv;
+    final maxPct = _percentualMaximoEfetivoDescontoPdV();
     final maxReais = _valorMaximoDescontoReaisPdV();
     return 'Acima do permitido. Maximo: ${maxPct.toStringAsFixed(1)}% '
         'do subtotal = ${_formatarMoeda(maxReais)}.';
@@ -5693,7 +5721,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       final bruto = _percentualDigitadoBrutoSemLimitePdV() ?? 0;
       final pct = acimaAutorizado
           ? bruto.clamp(0.0, 100.0)
-          : bruto.clamp(0.0, _maxDescontoPercentualPdv);
+          : bruto.clamp(0.0, _percentualMaximoEfetivoDescontoPdV());
       final valor = sub * pct / 100;
       return acimaAutorizado
           ? valor.clamp(0.0, sub)
@@ -6269,6 +6297,7 @@ class _PdvPainelCheckout extends StatelessWidget {
     required this.orcamentoEmEdicao,
     required this.orcamentoEmEdicaoNumero,
     this.ultimoOrcamentoSalvoNumero,
+    this.ultimoOrcamentoSalvoTotal,
     required this.onCancelarEdicaoOrcamento,
     required this.mostrarDicaAtalhosCarrinho,
     required this.resumoEntregaItens,
@@ -6296,6 +6325,7 @@ class _PdvPainelCheckout extends StatelessWidget {
   final bool orcamentoEmEdicao;
   final String? orcamentoEmEdicaoNumero;
   final int? ultimoOrcamentoSalvoNumero;
+  final double? ultimoOrcamentoSalvoTotal;
   final VoidCallback onCancelarEdicaoOrcamento;
   final bool mostrarDicaAtalhosCarrinho;
   final String resumoEntregaItens;
@@ -6434,7 +6464,8 @@ class _PdvPainelCheckout extends StatelessWidget {
                                       ultimoOrcamentoSalvoNumero != null)
                                     TextSpan(
                                       text:
-                                          ' · Ultimo orcamento: $ultimoOrcamentoSalvoNumero',
+                                          ' · Ultimo orcamento: $ultimoOrcamentoSalvoNumero'
+                                          '${ultimoOrcamentoSalvoTotal != null && ultimoOrcamentoSalvoTotal! > 0.009 ? ' · ${formatarMoeda(ultimoOrcamentoSalvoTotal!)}' : ''}',
                                       style: Theme.of(context)
                                           .textTheme
                                           .labelSmall

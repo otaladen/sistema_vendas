@@ -121,7 +121,7 @@ class NotasFiscaisPage extends StatelessWidget {
               corDestaque: HubNavColors.menuNotasFiscais(context),
               titulo: 'Pendencias fiscais',
               subtitulo:
-                  'NFC-e aguardando SEFAZ (reconsulta manual) e atalho para NF-e 55.',
+                  'NFC-e a emitir (PIX/cartao), aguardando SEFAZ e NF-e 55.',
               onTap: () {
                 Navigator.of(context).push<void>(
                   MaterialPageRoute<void>(

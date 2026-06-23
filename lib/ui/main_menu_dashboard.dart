@@ -10,6 +10,7 @@ import '../../data/menu_favoritos_repository.dart';
 import '../../data/sync/sync_log.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/filtro_listagem_entregas.dart';
+import '../../domain/backup_status_helper.dart';
 import '../../domain/dashboard_alertas.dart';
 import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
 import '../../domain/main_menu_destino.dart';
@@ -41,6 +42,7 @@ class _MainMenuResumo {
     this.totalAReceber,
     this.totalFiadoVencido,
     this.fiscalPendencias = 0,
+    this.backupAlerta = false,
   });
 
   final int vendasHoje;
@@ -52,6 +54,7 @@ class _MainMenuResumo {
   final double? totalAReceber;
   final double? totalFiadoVencido;
   final int fiscalPendencias;
+  final bool backupAlerta;
 }
 
 /// Painel inicial (KPIs + modulos). Usado no mobile e no shell desktop.
@@ -162,6 +165,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         totalAReceber: r.totalAReceber,
         totalFiadoVencido: r.totalFiadoVencido,
         fiscalPendencias: total,
+        backupAlerta: r.backupAlerta,
       );
     });
   }
@@ -223,6 +227,12 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         .fold<double>(0, (s, l) => s + l.titulo.saldo);
 
     final u = deps.usuarioLogado;
+    final backupManual =
+        await deps.appConfigRepository.carregarRegistroBackupManual();
+    final backupStatus = BackupStatusHelper.avaliar(
+      config: config,
+      manual: backupManual,
+    );
     final alertas = DashboardAlertasService.montar(
       vendaRepository: deps.vendaRepository,
       produtoRepository: deps.produtoRepository,
@@ -230,6 +240,12 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       podeFinanceiro: UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro),
       podeEstoque: UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque),
       podeEntregas: UsuarioPermissaoHelper.podeVisualizarEntregas(u),
+      empresaConfig: config,
+      backupManual: backupManual,
+      podeConfiguracoes: UsuarioPermissaoHelper.tem(
+        u,
+        PermissaoUsuario.configuracoes,
+      ),
     );
 
     final fiscalPendencias = FiscalPendenciasResumoService.contar(
@@ -249,6 +265,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         totalAReceber: totalAReceber,
         totalFiadoVencido: totalFiadoVencido,
         fiscalPendencias: fiscalPendencias,
+        backupAlerta: backupStatus.exibirAlerta,
       );
       _carregandoResumo = false;
     });
@@ -493,7 +510,9 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     final habilitado = d.podeAcessar(u);
     final badge = d == MainMenuDestino.notasFiscais
         ? (_resumo?.fiscalPendencias ?? 0)
-        : null;
+        : d == MainMenuDestino.configuracoes && (_resumo?.backupAlerta ?? false)
+            ? 1
+            : null;
     return MainMenuModuleTile(
       icon: d.icone,
       corDestaque: d.cor(context),

@@ -43,6 +43,9 @@ class Produto {
     this.preco2 = 0,
     this.preco3 = 0,
     required this.precoVenda,
+    this.limiteDescontoPreco1 = 0,
+    this.limiteDescontoPreco2 = 0,
+    this.limiteDescontoPreco3 = 0,
     this.unidadeCompra = '',
     this.quantidadePorEmbalagem = 1,
     this.embalagemMultiplica = true,
@@ -127,6 +130,11 @@ class Produto {
   double preco2;
   double preco3;
   double precoVenda;
+
+  /// Teto de desconto no PDV por tabela (%). Zero = usa teto geral da loja.
+  double limiteDescontoPreco1;
+  double limiteDescontoPreco2;
+  double limiteDescontoPreco3;
 
   /// Unidade de compra/estoque (vazio = igual a [unidade] de venda).
   String unidadeCompra;

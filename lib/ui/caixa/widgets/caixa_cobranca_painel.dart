@@ -338,7 +338,7 @@ class CaixaCobrancaPainel extends StatelessWidget {
 }
 
 /// Campo padrao de valor recebido (dinheiro).
-class CaixaCobrancaCampoDinheiro extends StatelessWidget {
+class CaixaCobrancaCampoDinheiro extends StatefulWidget {
   const CaixaCobrancaCampoDinheiro({
     super.key,
     required this.controller,
@@ -347,6 +347,7 @@ class CaixaCobrancaCampoDinheiro extends StatelessWidget {
     required this.troco,
     required this.formatarMoeda,
     required this.onChanged,
+    this.onSubmitted,
   });
 
   final TextEditingController controller;
@@ -355,6 +356,45 @@ class CaixaCobrancaCampoDinheiro extends StatelessWidget {
   final double troco;
   final String Function(double) formatarMoeda;
   final ValueChanged<String> onChanged;
+  final ValueChanged<String>? onSubmitted;
+
+  @override
+  State<CaixaCobrancaCampoDinheiro> createState() =>
+      _CaixaCobrancaCampoDinheiroState();
+}
+
+class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro> {
+  @override
+  void initState() {
+    super.initState();
+    widget.focusNode.addListener(_selecionarTudoAoFocar);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.focusNode.hasFocus) {
+        _selecionarTodoTexto();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(_selecionarTudoAoFocar);
+    super.dispose();
+  }
+
+  void _selecionarTudoAoFocar() {
+    if (widget.focusNode.hasFocus) {
+      _selecionarTodoTexto();
+    }
+  }
+
+  void _selecionarTodoTexto() {
+    final texto = widget.controller.text;
+    if (texto.isEmpty) return;
+    widget.controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: texto.length,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -380,8 +420,8 @@ class CaixaCobrancaCampoDinheiro extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           TextField(
-            controller: controller,
-            focusNode: focusNode,
+            controller: widget.controller,
+            focusNode: widget.focusNode,
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [
@@ -393,7 +433,7 @@ class CaixaCobrancaCampoDinheiro extends StatelessWidget {
             textAlign: TextAlign.center,
             decoration: InputDecoration(
               labelText: 'Valor recebido',
-              hintText: formatarMoeda(totalAPagar),
+              hintText: widget.formatarMoeda(widget.totalAPagar),
               border: const OutlineInputBorder(),
               isDense: false,
               contentPadding: const EdgeInsets.symmetric(
@@ -401,9 +441,141 @@ class CaixaCobrancaCampoDinheiro extends StatelessWidget {
                 vertical: 18,
               ),
             ),
-            onChanged: onChanged,
+            onTap: () {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _selecionarTodoTexto();
+              });
+            },
+            onChanged: widget.onChanged,
+            onSubmitted: widget.onSubmitted,
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Painel lateral de cobranca na etapa de conferencia (checkout em uma tela).
+class CaixaPainelCobrancaLateral extends StatelessWidget {
+  const CaixaPainelCobrancaLateral({
+    super.key,
+    required this.rotuloPagamento,
+    required this.totalComDesconto,
+    required this.descontoPdvOrcamento,
+    this.descontoCaixa = 0,
+    required this.formatarMoeda,
+    required this.recebimento,
+    required this.valorRecebidoExibicao,
+    required this.troco,
+    required this.onFinalizar,
+    this.onAlterarForma,
+    this.onDesconto,
+    this.onFechar,
+  });
+
+  final String rotuloPagamento;
+  final double totalComDesconto;
+  final double descontoPdvOrcamento;
+  final double descontoCaixa;
+  final String Function(double) formatarMoeda;
+  final Widget recebimento;
+  final double valorRecebidoExibicao;
+  final double troco;
+  final VoidCallback onFinalizar;
+  final VoidCallback? onAlterarForma;
+  final VoidCallback? onDesconto;
+  final VoidCallback? onFechar;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Material(
+      elevation: 0,
+      color: scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.8)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Cobranca',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const Spacer(),
+                if (onAlterarForma != null)
+                  TextButton(
+                    onPressed: onAlterarForma,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Alterar'),
+                  ),
+                if (onFechar != null)
+                  IconButton(
+                    tooltip: 'Fechar painel (Esc)',
+                    onPressed: onFechar,
+                    icon: const Icon(Icons.close, size: 20),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+              ],
+            ),
+            Text(
+              rotuloPagamento,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: SingleChildScrollView(
+                child: recebimento,
+              ),
+            ),
+            CaixaRodapeTotalDestaque(
+              rotuloPagamento: rotuloPagamento,
+              totalFormatado: formatarMoeda(totalComDesconto),
+              formatarMoeda: formatarMoeda,
+              descontoPdvOrcamento: descontoPdvOrcamento,
+              descontoCaixa: descontoCaixa,
+              valorRecebido: valorRecebidoExibicao,
+              troco: troco,
+              onDesconto: onDesconto,
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 46,
+              child: FilledButton.icon(
+                onPressed: onFinalizar,
+                icon: const Icon(Icons.check_circle_outline),
+                label: const Text('Finalizar venda (Enter)'),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Esc fecha o painel sem finalizar.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

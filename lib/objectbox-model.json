@@ -90,7 +90,7 @@
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "45:3223106704485660019",
+      "lastPropertyId": "48:6397976891055979669",
       "name": "Produto",
       "properties": [
         {
@@ -321,6 +321,21 @@
           "id": "45:3223106704485660019",
           "name": "nomeImpressao",
           "type": 9
+        },
+        {
+          "id": "46:1320991480122834578",
+          "name": "limiteDescontoPreco1",
+          "type": 8
+        },
+        {
+          "id": "47:4236834855594413236",
+          "name": "limiteDescontoPreco2",
+          "type": 8
+        },
+        {
+          "id": "48:6397976891055979669",
+          "name": "limiteDescontoPreco3",
+          "type": 8
         }
       ],
       "relations": []

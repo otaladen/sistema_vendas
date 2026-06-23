@@ -44,6 +44,9 @@ class SyncEntityCodec {
       'preco2': p.preco2,
       'preco3': p.preco3,
       'precoVenda': p.precoVenda,
+      'limiteDescontoPreco1': p.limiteDescontoPreco1,
+      'limiteDescontoPreco2': p.limiteDescontoPreco2,
+      'limiteDescontoPreco3': p.limiteDescontoPreco3,
       'unidadeCompra': p.unidadeCompra,
       'quantidadePorEmbalagem': p.quantidadePorEmbalagem,
       'embalagemMultiplica': p.embalagemMultiplica,
@@ -95,6 +98,12 @@ class SyncEntityCodec {
       preco2: (m['preco2'] as num?)?.toDouble() ?? 0,
       preco3: (m['preco3'] as num?)?.toDouble() ?? 0,
       precoVenda: (m['precoVenda'] as num?)?.toDouble() ?? 0,
+      limiteDescontoPreco1:
+          (m['limiteDescontoPreco1'] as num?)?.toDouble() ?? 0,
+      limiteDescontoPreco2:
+          (m['limiteDescontoPreco2'] as num?)?.toDouble() ?? 0,
+      limiteDescontoPreco3:
+          (m['limiteDescontoPreco3'] as num?)?.toDouble() ?? 0,
       unidadeCompra: (m['unidadeCompra'] ?? '').toString(),
       quantidadePorEmbalagem:
           (m['quantidadePorEmbalagem'] as num?)?.toDouble() ?? 1,

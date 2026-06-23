@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../config/focus_nfe_runtime.dart';
+import '../../domain/fiscal/venda_nfce_obrigatoria_helper.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
+import '../../domain/venda_finalizacao_caixa_helper.dart';
 import '../../data/app_config_repository.dart';
 import '../../data/cliente_repository.dart';
 import '../../data/venda_repository.dart';
@@ -10,6 +12,7 @@ import '../../model/usuario_sistema.dart';
 import '../../model/venda.dart';
 import '../../services/focus_nfe_service.dart';
 import '../../services/nfce_reconciliacao_service.dart';
+import 'nfce_emissao_pendente_flow.dart';
 import 'nfe_gerenciamento_page.dart';
 
 /// Central de pendencias NFC-e (reconsulta manual) e atalho para NF-e 55.
@@ -34,9 +37,12 @@ class PendenciasFiscaisPage extends StatefulWidget {
 class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
   late final FocusNfeService _focusNfe;
   late final NfceReconciliacaoService _reconciliacao;
-  List<Venda> _pendentes = const [];
+  List<Venda> _pendentesSefaz = const [];
+  List<Venda> _pendentesEmissao = const [];
   bool _carregando = true;
   bool _reconsultando = false;
+  bool _emitindo = false;
+  bool _permitirVendaSemEstoque = true;
 
   static final _data = DateFormat('dd/MM/yyyy HH:mm');
   static final _moeda = NumberFormat('#,##0.00', 'pt_BR');
@@ -49,12 +55,20 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
       vendaRepository: widget.vendaRepository,
       focusNfe: _focusNfe,
     );
+    _carregarConfig();
     _recarregar();
+  }
+
+  Future<void> _carregarConfig() async {
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!mounted) return;
+    setState(() => _permitirVendaSemEstoque = config.permitirVendaSemEstoque);
   }
 
   void _recarregar() {
     setState(() {
-      _pendentes = _reconciliacao.listarPendentes();
+      _pendentesSefaz = _reconciliacao.listarPendentes();
+      _pendentesEmissao = widget.vendaRepository.listarComNfcePendenteEmissao();
       _carregando = false;
     });
   }
@@ -78,7 +92,7 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
       if (!mounted) return;
       _recarregar();
       final msg = lote.total == 0
-          ? 'Nenhuma NFC-e pendente.'
+          ? 'Nenhuma NFC-e pendente na SEFAZ.'
           : lote.autorizadas > 0
               ? '${lote.autorizadas} autorizada(s); '
                   '${lote.aindaProcessando} ainda aguardando.'
@@ -130,6 +144,24 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
     }
   }
 
+  Future<void> _emitirNfce(Venda venda) async {
+    if (_emitindo) return;
+    setState(() => _emitindo = true);
+    try {
+      final ok = await NfceEmissaoPendenteFlow.emitir(
+        context,
+        venda: venda,
+        vendaRepository: widget.vendaRepository,
+        clienteRepository: widget.clienteRepository,
+        appConfigRepository: widget.appConfigRepository,
+        permitirVendaSemEstoque: _permitirVendaSemEstoque,
+      );
+      if (ok && mounted) _recarregar();
+    } finally {
+      if (mounted) setState(() => _emitindo = false);
+    }
+  }
+
   void _abrirNfePendencias() {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -144,16 +176,24 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
     );
   }
 
+  String _dataExibicao(Venda v) {
+    final ref = VendaFinalizacaoCaixaHelper.momentoFinalizacao(v);
+    return _data.format(ref.toLocal());
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final totalEmissao = VendaNfceObrigatoriaHelper.somaTotal(_pendentesEmissao);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pendencias fiscais'),
         actions: [
           IconButton(
-            tooltip: 'Reconsultar todas NFC-e',
-            onPressed: _reconsultando || _pendentes.isEmpty
+            tooltip: 'Reconsultar NFC-e na SEFAZ',
+            onPressed: _reconsultando || _pendentesSefaz.isEmpty
                 ? null
                 : _reconsultarTodas,
             icon: _reconsultando
@@ -170,6 +210,89 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
         padding: const EdgeInsets.all(16),
         children: [
           Card(
+            color: _pendentesEmissao.isNotEmpty
+                ? scheme.errorContainer.withValues(alpha: 0.35)
+                : null,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        color: _pendentesEmissao.isNotEmpty
+                            ? scheme.error
+                            : scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'NFC-e a emitir (PIX / cartao)',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (_pendentesEmissao.isNotEmpty)
+                        Chip(
+                          label: Text('${_pendentesEmissao.length}'),
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: scheme.errorContainer,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _pendentesEmissao.isEmpty
+                        ? 'Nenhuma venda paga no cartao ou PIX sem NFC-e autorizada.'
+                        : '${_pendentesEmissao.length} venda(s) · '
+                            'R\$ ${_moeda.format(totalEmissao)} sem documento fiscal.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (_carregando)
+            const Center(child: CircularProgressIndicator())
+          else if (_pendentesEmissao.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Nenhuma NFC-e pendente de emissao.'),
+              ),
+            )
+          else
+            ..._pendentesEmissao.map((v) {
+              final motivo = VendaNfceObrigatoriaHelper.motivoPendenciaEmissao(v);
+              return Card(
+                child: ListTile(
+                  leading: Icon(Icons.receipt_long_outlined, color: scheme.error),
+                  title: Text(
+                    VendaDocumentoRotuloHelper.rotuloControleInterno(v),
+                  ),
+                  subtitle: Text(
+                    '${_dataExibicao(v)} · '
+                    'R\$ ${_moeda.format(v.total)} · '
+                    '${VendaNfceObrigatoriaHelper.rotuloFormaPagamento(v)}\n'
+                    '$motivo',
+                  ),
+                  isThreeLine: true,
+                  trailing: FilledButton(
+                    onPressed: _emitindo ? null : () => _emitirNfce(v),
+                    child: const Text('Emitir'),
+                  ),
+                ),
+              );
+            }),
+          const SizedBox(height: 20),
+          Card(
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
@@ -181,11 +304,10 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'O caixa reconsulta automaticamente a cada 45 s. '
-                    'Use este painel para forcar a reconsulta ou conferir '
-                    'antes do fechamento do mes.',
+                    'Notas ja enviadas que aguardam retorno. O caixa reconsulta '
+                    'automaticamente a cada 45 s.',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: scheme.onSurfaceVariant,
                       height: 1.35,
                     ),
                   ),
@@ -194,29 +316,26 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
             ),
           ),
           const SizedBox(height: 12),
-          if (_carregando)
-            const Center(child: CircularProgressIndicator())
-          else if (_pendentes.isEmpty)
+          if (!_carregando && _pendentesSefaz.isEmpty)
             const Card(
               child: Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('Nenhuma NFC-e pendente. Tudo certo por aqui.'),
+                child: Text('Nenhuma NFC-e aguardando a SEFAZ.'),
               ),
             )
-          else
-            ..._pendentes.map((v) {
+          else if (!_carregando)
+            ..._pendentesSefaz.map((v) {
               return Card(
                 child: ListTile(
                   leading: Icon(
                     Icons.hourglass_top_outlined,
-                    color: theme.colorScheme.primary,
+                    color: scheme.primary,
                   ),
                   title: Text(
                     VendaDocumentoRotuloHelper.rotuloControleInterno(v),
                   ),
                   subtitle: Text(
-                    '${_data.format(v.data.toLocal())} · '
-                    'R\$ ${_moeda.format(v.total)}',
+                    '${_dataExibicao(v)} · R\$ ${_moeda.format(v.total)}',
                   ),
                   trailing: OutlinedButton(
                     onPressed: _reconsultando ? null : () => _reconsultarUma(v),

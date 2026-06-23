@@ -2,10 +2,39 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/fiscal_config.dart';
 import '../domain/auditoria_retencao.dart';
+import '../domain/backup_retencao.dart';
 import '../services/fiscal_config_store.dart';
 import '../model/config_layout_impressao.dart';
 import 'sync/sync_local_config.dart';
 import 'sync/sync_write_trigger.dart';
+
+/// Registro local do ultimo backup manual neste PC.
+class BackupRegistroManual {
+  const BackupRegistroManual({
+    this.ultimoMs = 0,
+    this.ultimoPath = '',
+    this.ultimoTamanhoKb = 0,
+    this.pastaPadrao = '',
+  });
+
+  final int ultimoMs;
+  final String ultimoPath;
+  final double ultimoTamanhoKb;
+  final String pastaPadrao;
+}
+
+/// Ultima falha registrada do backup automatico neste PC.
+class BackupFalhaRegistro {
+  const BackupFalhaRegistro({
+    this.ultimaMs = 0,
+    this.mensagem = '',
+  });
+
+  final int ultimaMs;
+  final String mensagem;
+
+  bool get temFalha => ultimaMs > 0 && mensagem.trim().isNotEmpty;
+}
 
 class EmpresaConfig {
   const EmpresaConfig({
@@ -38,6 +67,9 @@ class EmpresaConfig {
     this.backupAutomaticoPasta = '',
     this.backupAutomaticoIntervaloMinutos = 1440,
     this.ultimoBackupAutomaticoMs = 0,
+    this.backupRetencaoMaxCopias = 15,
+    this.backupSegundoDestinoAtivo = false,
+    this.backupSegundoDestinoPasta = '',
     this.layoutImpressaoJson = '',
     this.auditoriaRetencaoDias = 90,
     this.margemMinimaPercentualPadrao = 20,
@@ -108,6 +140,15 @@ class EmpresaConfig {
   /// `DateTime.now().millisecondsSinceEpoch` do ultimo backup automatico bem-sucedido.
   final int ultimoBackupAutomaticoMs;
 
+  /// Quantidade maxima de pastas backup_sistema_vendas_* por pasta de destino (0 = ilimitado).
+  final int backupRetencaoMaxCopias;
+
+  /// Espelha cada backup na pasta [backupSegundoDestinoPasta] (rede/nuvem/servidor).
+  final bool backupSegundoDestinoAtivo;
+
+  /// Pasta pai do segundo destino (copia espelhada apos cada backup).
+  final String backupSegundoDestinoPasta;
+
   /// JSON com layout de cupom e orcamento ([LayoutImpressaoEmpresa]).
   final String layoutImpressaoJson;
 
@@ -164,6 +205,9 @@ class EmpresaConfig {
     String? backupAutomaticoPasta,
     int? backupAutomaticoIntervaloMinutos,
     int? ultimoBackupAutomaticoMs,
+    int? backupRetencaoMaxCopias,
+    bool? backupSegundoDestinoAtivo,
+    String? backupSegundoDestinoPasta,
     String? layoutImpressaoJson,
     LayoutImpressaoEmpresa? layoutImpressao,
     int? auditoriaRetencaoDias,
@@ -216,6 +260,13 @@ class EmpresaConfig {
               this.backupAutomaticoIntervaloMinutos,
       ultimoBackupAutomaticoMs:
           ultimoBackupAutomaticoMs ?? this.ultimoBackupAutomaticoMs,
+      backupRetencaoMaxCopias: backupRetencaoMaxCopias != null
+          ? BackupRetencaoOpcoes.normalizar(backupRetencaoMaxCopias)
+          : this.backupRetencaoMaxCopias,
+      backupSegundoDestinoAtivo:
+          backupSegundoDestinoAtivo ?? this.backupSegundoDestinoAtivo,
+      backupSegundoDestinoPasta:
+          backupSegundoDestinoPasta ?? this.backupSegundoDestinoPasta,
       layoutImpressaoJson: layoutImpressao != null
           ? layoutImpressao.toJsonString()
           : (layoutImpressaoJson ?? this.layoutImpressaoJson),
@@ -274,6 +325,18 @@ class AppConfigRepository {
       'config_backup_automatico_intervalo_minutos';
   static const _kBackupAutomaticoUltimoMs =
       'config_backup_automatico_ultimo_ms';
+  static const _kUltimoBackupManualMs = 'config_ultimo_backup_manual_ms_v1';
+  static const _kUltimoBackupManualPath = 'config_ultimo_backup_manual_path_v1';
+  static const _kUltimoBackupManualTamanhoKb =
+      'config_ultimo_backup_manual_tamanho_kb_v1';
+  static const _kBackupManualPastaPadrao = 'config_backup_manual_pasta_padrao_v1';
+  static const _kBackupRetencaoMaxCopias = 'config_backup_retencao_max_copias_v1';
+  static const _kBackupSegundoDestinoAtivo = 'config_backup_segundo_destino_ativo_v1';
+  static const _kBackupSegundoDestinoPasta = 'config_backup_segundo_destino_pasta_v1';
+  static const _kBackupAoFecharAtivo = 'config_backup_ao_fechar_ativo_v1';
+  static const _kBackupTarefaWindowsHorario = 'config_backup_tarefa_windows_horario_v1';
+  static const _kBackupAutomaticoFalhaMs = 'config_backup_automatico_falha_ms_v1';
+  static const _kBackupAutomaticoFalhaMsg = 'config_backup_automatico_falha_msg_v1';
   static const _kMigracaoMotoristaEntregaConcluida =
       'config_migracao_motorista_entrega_concluida';
   static const _kLayoutImpressaoJson = 'config_layout_impressao_json';
@@ -338,6 +401,13 @@ class AppConfigRepository {
         return m.clamp(15, 10080);
       }(),
       ultimoBackupAutomaticoMs: prefs.getInt(_kBackupAutomaticoUltimoMs) ?? 0,
+      backupRetencaoMaxCopias: BackupRetencaoOpcoes.normalizar(
+        prefs.getInt(_kBackupRetencaoMaxCopias),
+      ),
+      backupSegundoDestinoAtivo:
+          prefs.getBool(_kBackupSegundoDestinoAtivo) ?? false,
+      backupSegundoDestinoPasta:
+          prefs.getString(_kBackupSegundoDestinoPasta) ?? '',
       layoutImpressaoJson: prefs.getString(_kLayoutImpressaoJson) ?? '',
       auditoriaRetencaoDias: () {
         final d = prefs.getInt(_kAuditoriaRetencaoDias);
@@ -465,6 +535,18 @@ class AppConfigRepository {
       _kBackupAutomaticoUltimoMs,
       config.ultimoBackupAutomaticoMs < 0 ? 0 : config.ultimoBackupAutomaticoMs,
     );
+    await prefs.setInt(
+      _kBackupRetencaoMaxCopias,
+      BackupRetencaoOpcoes.normalizar(config.backupRetencaoMaxCopias),
+    );
+    await prefs.setBool(
+      _kBackupSegundoDestinoAtivo,
+      config.backupSegundoDestinoAtivo,
+    );
+    await prefs.setString(
+      _kBackupSegundoDestinoPasta,
+      config.backupSegundoDestinoPasta.trim(),
+    );
     await prefs.setString(_kLayoutImpressaoJson, config.layoutImpressaoJson);
     await prefs.setInt(
       _kAuditoriaRetencaoDias,
@@ -509,6 +591,31 @@ class AppConfigRepository {
     );
   }
 
+  Future<BackupRegistroManual> carregarRegistroBackupManual() async {
+    final prefs = await SharedPreferences.getInstance();
+    return BackupRegistroManual(
+      ultimoMs: prefs.getInt(_kUltimoBackupManualMs) ?? 0,
+      ultimoPath: prefs.getString(_kUltimoBackupManualPath) ?? '',
+      ultimoTamanhoKb: prefs.getDouble(_kUltimoBackupManualTamanhoKb) ?? 0,
+      pastaPadrao: prefs.getString(_kBackupManualPastaPadrao) ?? '',
+    );
+  }
+
+  Future<void> salvarRegistroBackupManual({
+    required int ultimoMs,
+    required String ultimoPath,
+    required double ultimoTamanhoKb,
+    required String pastaPadrao,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kUltimoBackupManualMs, ultimoMs < 0 ? 0 : ultimoMs);
+    await prefs.setString(_kUltimoBackupManualPath, ultimoPath.trim());
+    await prefs.setDouble(_kUltimoBackupManualTamanhoKb, ultimoTamanhoKb);
+    if (pastaPadrao.trim().isNotEmpty) {
+      await prefs.setString(_kBackupManualPastaPadrao, pastaPadrao.trim());
+    }
+  }
+
   Future<bool> migracaoMotoristaEntregaConcluida() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_kMigracaoMotoristaEntregaConcluida) ?? false;
@@ -528,5 +635,49 @@ class AppConfigRepository {
   Future<void> salvarModoImplantacaoLocal(bool ativo) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kModoImplantacaoLocal, ativo);
+  }
+
+  /// Preferencia local deste PC — nao entra em sync LAN.
+  Future<bool> carregarBackupAoFecharAtivo() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kBackupAoFecharAtivo) ?? false;
+  }
+
+  Future<void> salvarBackupAoFecharAtivo(bool ativo) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kBackupAoFecharAtivo, ativo);
+  }
+
+  Future<BackupFalhaRegistro> carregarFalhaBackupAutomatico() async {
+    final prefs = await SharedPreferences.getInstance();
+    return BackupFalhaRegistro(
+      ultimaMs: prefs.getInt(_kBackupAutomaticoFalhaMs) ?? 0,
+      mensagem: prefs.getString(_kBackupAutomaticoFalhaMsg) ?? '',
+    );
+  }
+
+  Future<void> registrarFalhaBackupAutomatico(String mensagem) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      _kBackupAutomaticoFalhaMs,
+      DateTime.now().millisecondsSinceEpoch,
+    );
+    await prefs.setString(_kBackupAutomaticoFalhaMsg, mensagem.trim());
+  }
+
+  Future<void> limparFalhaBackupAutomatico() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kBackupAutomaticoFalhaMs, 0);
+    await prefs.setString(_kBackupAutomaticoFalhaMsg, '');
+  }
+
+  Future<String> carregarHorarioTarefaBackupWindows() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_kBackupTarefaWindowsHorario) ?? '22:00';
+  }
+
+  Future<void> salvarHorarioTarefaBackupWindows(String horario) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kBackupTarefaWindowsHorario, horario.trim());
   }
 }

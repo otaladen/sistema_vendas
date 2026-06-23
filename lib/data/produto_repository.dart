@@ -971,6 +971,9 @@ class ProdutoRepository extends ChangeNotifier {
     destino.preco2 = origem.preco2;
     destino.preco3 = origem.preco3;
     destino.precoVenda = origem.precoVenda;
+    destino.limiteDescontoPreco1 = origem.limiteDescontoPreco1;
+    destino.limiteDescontoPreco2 = origem.limiteDescontoPreco2;
+    destino.limiteDescontoPreco3 = origem.limiteDescontoPreco3;
     destino.unidadeCompra = origem.unidadeCompra;
     destino.quantidadePorEmbalagem = origem.quantidadePorEmbalagem;
     destino.embalagemMultiplica = origem.embalagemMultiplica;
@@ -1002,6 +1005,13 @@ class ProdutoRepository extends ChangeNotifier {
     } finally {
       q.close();
     }
+  }
+
+  /// Data da NF-e de entrada mais recente, se houver.
+  DateTime? obterDataUltimaCompraProduto(int produtoId) {
+    final entradas = listarHistoricoEntradaPorProduto(produtoId);
+    if (entradas.isEmpty) return null;
+    return entradas.first.dataEmissao;
   }
 
   /// Kardex de movimentacoes de estoque, mais recentes primeiro.

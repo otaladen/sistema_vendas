@@ -6,16 +6,22 @@ import 'nfe_pendencias_service.dart';
 class FiscalPendenciasResumo {
   const FiscalPendenciasResumo({
     required this.nfceAguardandoSefaz,
+    required this.nfcePendenteEmissao,
     required this.nfeProcessando,
     required this.nfeRejeitadas,
   });
 
   final int nfceAguardandoSefaz;
+  /// PIX/cartao finalizados sem NFC-e (falha ou operador pulou emissao).
+  final int nfcePendenteEmissao;
   final int nfeProcessando;
   final int nfeRejeitadas;
 
   int get total =>
-      nfceAguardandoSefaz + nfeProcessando + nfeRejeitadas;
+      nfceAguardandoSefaz +
+      nfcePendenteEmissao +
+      nfeProcessando +
+      nfeRejeitadas;
 
   bool get temPendencias => total > 0;
 }
@@ -26,7 +32,9 @@ abstract final class FiscalPendenciasResumoService {
   static FiscalPendenciasResumo contar({
     required VendaRepository vendaRepository,
   }) {
-    final nfce = vendaRepository.listarComNfcePendenteFocus().length;
+    final nfceSefaz = vendaRepository.listarComNfcePendenteFocus().length;
+    final nfceEmissao =
+        vendaRepository.listarComNfcePendenteEmissao().length;
     final storePath = vendaRepository.objectBox.storeDirectoryPath;
     final nfeStore = NfeSaidaFiscalStore(storePath);
     final nfeProc = NfePendenciasService.listarProcessando(
@@ -38,7 +46,8 @@ abstract final class FiscalPendenciasResumoService {
       vendaRepository: vendaRepository,
     ).length;
     return FiscalPendenciasResumo(
-      nfceAguardandoSefaz: nfce,
+      nfceAguardandoSefaz: nfceSefaz,
+      nfcePendenteEmissao: nfceEmissao,
       nfeProcessando: nfeProc,
       nfeRejeitadas: nfeRej,
     );

@@ -22,8 +22,8 @@ enum MainMenuDestino {
   static const modulosRail = [
     MainMenuDestino.vendas,
     MainMenuDestino.estoque,
-    MainMenuDestino.notasFiscais,
     MainMenuDestino.entregas,
+    MainMenuDestino.notasFiscais,
     MainMenuDestino.financeiro,
     MainMenuDestino.cadastros,
     MainMenuDestino.configuracoes,
@@ -49,7 +49,7 @@ enum MainMenuDestino {
       case MainMenuDestino.inicio:
         return 'Inicio';
       case MainMenuDestino.vendas:
-        return 'Vendas';
+        return 'Gestao de vendas';
       case MainMenuDestino.pdv:
         return 'Nova venda';
       case MainMenuDestino.caixa:
@@ -74,7 +74,7 @@ enum MainMenuDestino {
   String? get subtitulo {
     switch (this) {
       case MainMenuDestino.vendas:
-        return 'PDV, caixa e relatorios';
+        return 'Orcamentos, listagem e relatorios';
       case MainMenuDestino.pdv:
         return 'Ponto de venda';
       case MainMenuDestino.caixa:
@@ -103,7 +103,7 @@ enum MainMenuDestino {
       case MainMenuDestino.inicio:
         return Icons.home_outlined;
       case MainMenuDestino.vendas:
-        return Icons.point_of_sale_outlined;
+        return Icons.folder_open_outlined;
       case MainMenuDestino.pdv:
         return Icons.add_shopping_cart_outlined;
       case MainMenuDestino.caixa:
@@ -111,7 +111,7 @@ enum MainMenuDestino {
       case MainMenuDestino.estoque:
         return Icons.inventory_2_outlined;
       case MainMenuDestino.notasFiscais:
-        return Icons.receipt_long_outlined;
+        return Icons.description_outlined;
       case MainMenuDestino.entregas:
         return Icons.local_shipping_outlined;
       case MainMenuDestino.financeiro:

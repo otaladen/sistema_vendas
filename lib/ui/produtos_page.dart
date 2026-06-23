@@ -45,6 +45,8 @@ class _CadastroProdutoCancelarIntent extends Intent {
 
 enum _BaseCalculoPrecoProduto { custoDigitado, custoMedio }
 
+enum _ModoAlvoPrecificacao { markup, margem }
+
 class ProdutosPage extends StatefulWidget {
   const ProdutosPage({
     super.key,
@@ -90,11 +92,11 @@ class _ProdutosPageState extends State<ProdutosPage>
   /// Área fixa quadrada da pré-visualização da foto no cadastro de produto.
   static const double _erpFotoPreviewSide = 176;
 
+  /// Foto compacta na faixa de resumo do produto.
+  static const double _erpResumoFotoSide = 64;
+
   /// Largura mínima para alinhar a foto à direita do formulário (senão empilha).
   static const double _erpFotoPreviewSideBySideBreakpoint = 680;
-
-  /// Layout inputs à esquerda + painel KPI à direita no card de preços.
-  static const double _erpPrecosKpiBreakpoint = 960;
 
   /// Rodapé fixo: empilha botões abaixo desta largura.
   static const double _erpRodapeAcaoBreakpoint = 520;
@@ -103,6 +105,9 @@ class _ProdutosPageState extends State<ProdutosPage>
   static const double _erpGap8 = 8;
   static const double _erpGap16 = 16;
   static const double _erpGap24 = 24;
+
+  /// Folga a direita para a barra de rolagem nao cobrir bordas dos cards.
+  static const double _erpScrollbarGutter = 18;
 
   static const List<String> _unidades = [
     'UN',
@@ -255,6 +260,12 @@ class _ProdutosPageState extends State<ProdutosPage>
   final _margemAlvoPreco1Controller = TextEditingController();
   final _margemAlvoPreco2Controller = TextEditingController();
   final _margemAlvoPreco3Controller = TextEditingController();
+  final _markupAlvoPreco1Controller = TextEditingController();
+  final _markupAlvoPreco2Controller = TextEditingController();
+  final _markupAlvoPreco3Controller = TextEditingController();
+  final _limiteDescontoPreco1Controller = TextEditingController();
+  final _limiteDescontoPreco2Controller = TextEditingController();
+  final _limiteDescontoPreco3Controller = TextEditingController();
   final _quantidadeEmbalagemController = TextEditingController(text: '1');
   final _unidadeCompraController = TextEditingController();
   final _brasilApiService = BrasilApiService();
@@ -271,15 +282,20 @@ class _ProdutosPageState extends State<ProdutosPage>
   String _icmsCstSelecionado = kFiscalValorAutomatico;
   String _pisCofinsCstSelecionado = kFiscalValorAutomatico;
   _BaseCalculoPrecoProduto _baseCalculoPreco = _BaseCalculoPrecoProduto.custoDigitado;
+  _ModoAlvoPrecificacao _modoAlvoPrecificacao = _ModoAlvoPrecificacao.markup;
   bool _embalagemMultiplica = true;
   bool _permiteQuantidadeFracionada = false;
   DateTime? _ultimaVendaEmCadastro;
+  DateTime? _criadoEmCadastro;
+  DateTime? _ultimaCompraEmCadastro;
   String? _categoriaSelecionada;
   String? _subcategoriaSelecionada;
   int? _produtoEmEdicaoId;
   bool _produtoAtivo = true;
   bool _gerarSkuAutomatico = true;
   bool _nomeImpressaoVinculadoAoNome = true;
+  bool _mostrarNomeImpressao = false;
+  bool _mostrarApelidos = false;
   final _formKey = GlobalKey<FormState>();
   bool _tentouSalvar = false;
   late final ProdutoImagemService _produtoImagemService;
@@ -331,6 +347,12 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
   }
 
+  void _irParaSubAbaCadastro(int index) {
+    if (index < 0 || index >= _subAbasCadastro.length) return;
+    if (_subAbaCadastroController.index == index) return;
+    _subAbaCadastroController.index = index;
+  }
+
   void _sincronizarNomeImpressaoSeVinculado() {
     if (!_nomeImpressaoVinculadoAoNome) return;
     final nome = _nomeController.text;
@@ -342,8 +364,14 @@ class _ProdutosPageState extends State<ProdutosPage>
     final nome = _nomeController.text.trim();
     final imp = _nomeImpressaoController.text.trim();
     final vinculado = imp.isEmpty || imp == nome;
-    if (vinculado != _nomeImpressaoVinculadoAoNome) {
-      setState(() => _nomeImpressaoVinculadoAoNome = vinculado);
+    if (vinculado != _nomeImpressaoVinculadoAoNome ||
+        (!vinculado && !_mostrarNomeImpressao)) {
+      setState(() {
+        _nomeImpressaoVinculadoAoNome = vinculado;
+        if (!vinculado) {
+          _mostrarNomeImpressao = true;
+        }
+      });
     }
   }
 
@@ -413,6 +441,12 @@ class _ProdutosPageState extends State<ProdutosPage>
     _margemAlvoPreco1Controller.dispose();
     _margemAlvoPreco2Controller.dispose();
     _margemAlvoPreco3Controller.dispose();
+    _markupAlvoPreco1Controller.dispose();
+    _markupAlvoPreco2Controller.dispose();
+    _markupAlvoPreco3Controller.dispose();
+    _limiteDescontoPreco1Controller.dispose();
+    _limiteDescontoPreco2Controller.dispose();
+    _limiteDescontoPreco3Controller.dispose();
     _quantidadeEmbalagemController.dispose();
     _unidadeCompraController.dispose();
     _scrollController.dispose();
@@ -752,294 +786,464 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
-  Widget _erpKpiLinhaTabelaPreco(
-    BuildContext context, {
+  Widget _erpSecaoColapsavel({
     required String titulo,
-    required double margem,
-    required double markup,
-    bool isLast = false,
+    required bool expandido,
+    required ValueChanged<bool> onToggle,
+    required Widget child,
+    String? subtitulo,
   }) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Padding(
-      padding: EdgeInsets.only(bottom: isLast ? 0 : _erpGap8),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(_erpGap16),
-        decoration: BoxDecoration(
-          color: cs.surface.withValues(alpha: 0.92),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.65)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              titulo,
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: _erpGap8),
-            Wrap(
-              spacing: _erpGap8,
-              runSpacing: _erpGap8,
+          onTap: () => onToggle(!expandido),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
               children: [
-                _erpFinancialMetricChip(context, 'Margem', margem),
-                _erpFinancialMetricChip(context, 'Markup', markup),
+                Icon(
+                  expandido ? Icons.expand_less : Icons.expand_more,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        titulo,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (subtitulo != null && !expandido)
+                        Text(
+                          subtitulo,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface.withValues(
+                              alpha: 0.62,
+                            ),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ),
-          ],
+          ),
         ),
-      ),
+        if (expandido) child,
+      ],
     );
   }
 
-  Widget _erpPainelResumoFinanceiroKpis(
-    BuildContext context, {
-    required double margem1,
-    required double markup1,
-    required double margem2,
-    required double markup2,
-    required double margem3,
-    required double markup3,
-  }) {
+  static const _metaAbasCadastro = <(IconData, String, Color)>[
+    (Icons.inventory_2_outlined, 'Principal', Color(0xFF0D9488)),
+    (Icons.payments_outlined, 'Precos', Color(0xFF059669)),
+    (Icons.warehouse_outlined, 'Estoque', Color(0xFFD97706)),
+    (Icons.receipt_long_outlined, 'Fiscal', Color(0xFF7C3AED)),
+  ];
+
+  Widget _buildNavegacaoAbasCadastro(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(_erpGap16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            cs.surfaceContainerHighest.withValues(alpha: 0.5),
-            cs.surfaceContainerHighest.withValues(alpha: 0.22),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+    final indice = _subAbaCadastroController.index;
+
+    Widget pill(int index) {
+      final meta = _metaAbasCadastro[index];
+      final icone = meta.$1;
+      final rotulo = meta.$2;
+      final cor = meta.$3;
+      final selecionada = indice == index;
+
+      return InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => _irParaSubAbaCadastro(index),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            color: selecionada ? cor : cs.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selecionada
+                  ? cor.withValues(alpha: 0.95)
+                  : cor.withValues(alpha: 0.42),
+              width: selecionada ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.insights_outlined, size: 22, color: cs.primary),
-              const SizedBox(width: _erpGap8),
-              Expanded(
+              Icon(
+                icone,
+                size: 19,
+                color: selecionada ? Colors.white : cor,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
                 child: Text(
-                  'Indicadores de rentabilidade',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
+                  rotulo,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight:
+                        selecionada ? FontWeight.w800 : FontWeight.w600,
+                    color: selecionada ? Colors.white : cs.onSurface,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: _erpGap16),
-          _erpKpiLinhaTabelaPreco(
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: _erpGap8, bottom: _erpGap16),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.5),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 560) {
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < _metaAbasCadastro.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 6),
+                    pill(i),
+                  ],
+                ],
+              ),
+            );
+          }
+          return Row(
+            children: [
+              for (var i = 0; i < _metaAbasCadastro.length; i++) ...[
+                if (i > 0) const SizedBox(width: 6),
+                Expanded(child: pill(i)),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  String _formatarDataResumo(DateTime? dt) {
+    if (dt == null) return '—';
+    return DateFormat('dd/MM/yy').format(dt.toLocal());
+  }
+
+  double? _parsePercentualLimiteDesconto(String? value) {
+    final texto = (value ?? '').trim().replaceAll(',', '.');
+    if (texto.isEmpty) return null;
+    final v = double.tryParse(texto);
+    if (v == null || v < 0) return null;
+    return v.clamp(0, 100);
+  }
+
+  String? _validarLimiteDescontoPreco(String? value) {
+    final texto = (value ?? '').trim();
+    if (texto.isEmpty) return null;
+    final v = _parsePercentualLimiteDesconto(texto);
+    if (v == null) return 'Informe um percentual entre 0 e 100.';
+    return null;
+  }
+
+  Widget _buildResumoProdutoCadastro(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final semantic = context.semanticColors;
+    final nome = _nomeController.text.trim();
+    final nomeExibir = nome.isEmpty ? 'Novo produto' : nome;
+    final sku = _codigoInternoController.text.trim();
+    final skuRotulo = _gerarSkuAutomatico
+        ? 'SKU auto'
+        : (sku.isEmpty ? 'Sem SKU' : sku);
+    final ean = _codigoBarrasController.text.trim();
+    final preco1 = _parseValorMonetario(_preco1Controller.text);
+    final estoque = int.tryParse(_estoqueController.text.trim()) ?? 0;
+    final minimo = int.tryParse(_quantidadeMinimaController.text.trim()) ?? 0;
+    final unidade = _normalizarUnidade(_unidadeSelecionada);
+    final ncmDigits = _ncmController.text.replaceAll(RegExp(r'\D'), '');
+    final semNcm = ncmDigits.length != 8;
+    final estoqueBaixo =
+        minimo > 0 ? estoque <= minimo : estoque <= 0 && _produtoEmEdicaoId != null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: _erpGap8),
+      padding: const EdgeInsets.all(_erpGap16),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final empilhar = constraints.maxWidth < 640;
+          final foto = _erpProdutoFotoPreviewSquare(
             context,
-            titulo: 'A prazo (Preco 1)',
-            margem: margem1,
-            markup: markup1,
-          ),
-          _erpKpiLinhaTabelaPreco(
-            context,
-            titulo: 'A vista (Preco 2)',
-            margem: margem2,
-            markup: markup2,
-          ),
-          _erpKpiLinhaTabelaPreco(
-            context,
-            titulo: 'Atacado (Preco 3)',
-            margem: margem3,
-            markup: markup3,
-            isLast: true,
-          ),
-        ],
+            side: _erpResumoFotoSide,
+          );
+          final identidade = Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  nomeExibir,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    Chip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text(skuRotulo),
+                    ),
+                    if (ean.isNotEmpty)
+                      Chip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text('EAN $ean'),
+                      ),
+                    Chip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text(
+                        _produtoAtivo ? 'Ativo no PDV' : 'Inativo no PDV',
+                      ),
+                      backgroundColor: _produtoAtivo
+                          ? cs.primaryContainer.withValues(alpha: 0.55)
+                          : cs.errorContainer.withValues(alpha: 0.4),
+                    ),
+                    if (_produtoEmEdicaoId != null)
+                      Chip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text('#${_produtoEmEdicaoId!}'),
+                      ),
+                    if (semNcm)
+                      Chip(
+                        visualDensity: VisualDensity.compact,
+                        label: const Text('Sem NCM'),
+                        backgroundColor: semantic.warningBg.withValues(
+                          alpha: 0.55,
+                        ),
+                      ),
+                    if (estoqueBaixo)
+                      Chip(
+                        visualDensity: VisualDensity.compact,
+                        label: const Text('Estoque baixo'),
+                        backgroundColor: semantic.errorBg.withValues(
+                          alpha: 0.45,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Cadastro: ${_produtoEmEdicaoId == null ? 'novo' : _formatarDataResumo(_criadoEmCadastro)}'
+                  ' · Ult. compra: ${_formatarDataResumo(_ultimaCompraEmCadastro)}'
+                  ' · Ult. venda: ${_formatarDataResumo(_ultimaVendaEmCadastro)}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          );
+          final metricas = Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'A prazo (Preco 1)',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              Text(
+                preco1 != null && preco1 > 0
+                    ? 'R\$ ${_formatarValorMonetario(preco1)}'
+                    : '—',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: cs.primary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Estoque: $estoque $unidade',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          );
+
+          if (empilhar) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    foto,
+                    const SizedBox(width: _erpGap16),
+                    identidade,
+                  ],
+                ),
+                const SizedBox(height: _erpGap8),
+                Align(alignment: Alignment.centerLeft, child: metricas),
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              foto,
+              const SizedBox(width: _erpGap16),
+              identidade,
+              const SizedBox(width: _erpGap16),
+              metricas,
+            ],
+          );
+        },
       ),
     );
   }
 
   Widget _buildCabecalhoFixoCadastro(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final sku = _codigoInternoController.text.trim();
-    final skuRotulo = _gerarSkuAutomatico
-        ? 'SKU automatico ao salvar'
-        : (sku.isEmpty ? 'SKU manual pendente' : 'SKU $sku');
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-        border: Border(
-          bottom: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.45),
-          ),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          _erpGap16,
-          _erpGap8,
-          _erpGap16,
-          _erpGap8,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final empilhar = constraints.maxWidth < 720;
-                final campoBarras = Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _erpFieldLabel('Codigo de barras (EAN)', context),
-                    TextField(
-                      focusNode: _codigoBarrasFocus,
-                      controller: _codigoBarrasController,
-                      textInputAction: TextInputAction.next,
-                      decoration: _erpInputDecoration(
-                        context,
-                        hint: 'Leia ou digite o GTIN',
-                        suffixIcon: _suffixConsultaBrasilApi(
-                          carregando: _consultandoGtin,
-                          tooltip: 'Buscar produto na Brasil API',
-                          onPressed: _consultandoGtin
-                              ? null
-                              : _consultarGtinBrasilApi,
-                        ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: _erpGap8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final empilhar = constraints.maxWidth < 720;
+              final campoBarras = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _erpFieldLabel('Codigo de barras (EAN)', context),
+                  TextField(
+                    focusNode: _codigoBarrasFocus,
+                    controller: _codigoBarrasController,
+                    textInputAction: TextInputAction.next,
+                    decoration: _erpInputDecoration(
+                      context,
+                      hint: 'Leia ou digite o GTIN',
+                      suffixIcon: _suffixConsultaBrasilApi(
+                        carregando: _consultandoGtin,
+                        tooltip: 'Buscar produto na Brasil API',
+                        onPressed:
+                            _consultandoGtin ? null : _consultarGtinBrasilApi,
                       ),
                     ),
-                  ],
-                );
-                final campoNome = Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _erpFieldLabel('Nome do produto', context),
-                    TextFormField(
-                      controller: _nomeController,
-                      validator: _validarNome,
-                      textInputAction: TextInputAction.next,
-                      decoration: _erpInputDecoration(
-                        context,
-                        helper: 'Nome + Marca + Volume (ex.: Tinta Coral 18L)',
-                        suffixIcon: _suffixAcaoCampo(
-                          carregando: _consultandoGemini,
-                          tooltip:
-                              'Padronizar nome, categoria e unidade com IA',
-                          icon: Icons.auto_awesome_outlined,
-                          onPressed: _consultandoGemini
-                              ? null
-                              : _padronizarProdutoComGemini,
-                        ),
+                  ),
+                ],
+              );
+              final campoNome = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _erpFieldLabel('Nome do produto', context),
+                  TextFormField(
+                    controller: _nomeController,
+                    validator: _validarNome,
+                    textInputAction: TextInputAction.next,
+                    onChanged: (_) => setState(() {}),
+                    decoration: _erpInputDecoration(
+                      context,
+                      hint: 'Nome + Marca + Volume',
+                      suffixIcon: _suffixAcaoCampo(
+                        carregando: _consultandoGemini,
+                        tooltip: 'Padronizar nome, categoria e unidade com IA',
+                        icon: Icons.auto_awesome_outlined,
+                        onPressed: _consultandoGemini
+                            ? null
+                            : _padronizarProdutoComGemini,
                       ),
                     ),
-                  ],
-                );
-                final campoNomeImpressao = Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _erpFieldLabel('Nome impressao', context),
-                    TextFormField(
-                      controller: _nomeImpressaoController,
-                      textInputAction: TextInputAction.next,
-                      decoration: _erpInputDecoration(
-                        context,
-                        helper:
-                            'Cupom, orcamento e NF-e. Inicia igual ao nome; '
-                            'edite aqui para texto diferente na impressao.',
-                      ),
-                    ),
-                  ],
-                );
-                if (empilhar) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      campoBarras,
-                      const SizedBox(height: _erpGap8),
-                      campoNome,
-                      const SizedBox(height: _erpGap8),
-                      campoNomeImpressao,
-                    ],
-                  );
-                }
+                  ),
+                ],
+              );
+              if (empilhar) {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 2, child: campoBarras),
-                        const SizedBox(width: _erpGap16),
-                        Expanded(flex: 3, child: campoNome),
-                      ],
-                    ),
+                    campoBarras,
                     const SizedBox(height: _erpGap8),
-                    campoNomeImpressao,
+                    campoNome,
                   ],
                 );
-              },
-            ),
-            const SizedBox(height: _erpGap8),
-            Wrap(
-              spacing: _erpGap8,
-              runSpacing: _erpGap8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text(skuRotulo),
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 2, child: campoBarras),
+                  const SizedBox(width: _erpGap16),
+                  Expanded(flex: 3, child: campoNome),
+                ],
+              );
+            },
+          ),
+          _erpSecaoColapsavel(
+            titulo: 'Nome impressao (cupom e NF-e)',
+            subtitulo: _nomeImpressaoVinculadoAoNome
+                ? 'Igual ao nome do produto'
+                : _nomeImpressaoController.text.trim(),
+            expandido: _mostrarNomeImpressao,
+            onToggle: (v) => setState(() => _mostrarNomeImpressao = v),
+            child: Padding(
+              padding: const EdgeInsets.only(top: _erpGap8),
+              child: TextFormField(
+                controller: _nomeImpressaoController,
+                textInputAction: TextInputAction.next,
+                decoration: _erpInputDecoration(
+                  context,
+                  hint: 'Texto diferente do nome na impressao',
                 ),
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text(
-                    _produtoAtivo ? 'Ativo no PDV' : 'Inativo no PDV',
-                  ),
-                  backgroundColor: _produtoAtivo
-                      ? scheme.primaryContainer.withValues(alpha: 0.55)
-                      : scheme.errorContainer.withValues(alpha: 0.4),
-                ),
-                if (_produtoEmEdicaoId != null)
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text('Edicao #${_produtoEmEdicaoId!}'),
-                  ),
-                if (_ultimaVendaEmCadastro != null)
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text(
-                      'Ultima venda: ${DateFormat('dd/MM/yy HH:mm').format(_ultimaVendaEmCadastro!.toLocal())}',
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: _erpGap8),
-            _erpFieldLabel('Apelidos e codigos de busca', context),
-            TextField(
-              controller: _apelidosBuscaController,
-              minLines: 1,
-              maxLines: 3,
-              textInputAction: TextInputAction.next,
-              decoration: _erpInputDecoration(
-                context,
-                hint: 'Ex.: bacia sabara; cod fornecedor 8821; 7891234567890',
-                helper:
-                    'Nomes de balcao, SKU fornecedor ou EAN alternativo. Separe com ; ou quebra de linha.',
               ),
             ),
-          ],
-        ),
+          ),
+          _erpSecaoColapsavel(
+            titulo: 'Apelidos e codigos de busca',
+            subtitulo: _apelidosBuscaController.text.trim().isEmpty
+                ? 'Opcional — nomes de balcao, SKU fornecedor, EAN alternativo'
+                : _apelidosBuscaController.text.trim(),
+            expandido: _mostrarApelidos,
+            onToggle: (v) => setState(() => _mostrarApelidos = v),
+            child: Padding(
+              padding: const EdgeInsets.only(top: _erpGap8),
+              child: TextField(
+                controller: _apelidosBuscaController,
+                minLines: 1,
+                maxLines: 3,
+                textInputAction: TextInputAction.next,
+                decoration: _erpInputDecoration(
+                  context,
+                  hint: 'Ex.: bacia sabara; cod fornecedor 8821',
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1152,11 +1356,37 @@ class _ProdutosPageState extends State<ProdutosPage>
           ),
         );
 
+        Widget espelhar = Tooltip(
+          message:
+              'Copia classificacao, precos e fiscal para um novo cadastro',
+          child: OutlinedButton.icon(
+            style: etiquetaStyle,
+            onPressed: _espelharProdutoComoNovo,
+            icon: const Icon(Icons.copy_all_outlined),
+            label: const Text('Espelhar como novo'),
+          ),
+        );
+
         if (narrow) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (_produtoEmEdicaoId != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: _erpGap8),
+                  child: Text(
+                    'Edicao #${_produtoEmEdicaoId!} · F5 ou F10 salva',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.65),
+                        ),
+                  ),
+                ),
               SizedBox(width: double.infinity, child: cancelar),
+              const SizedBox(height: _erpGap8),
+              SizedBox(width: double.infinity, child: espelhar),
               const SizedBox(height: _erpGap8),
               SizedBox(width: double.infinity, child: etiqueta),
               const SizedBox(height: _erpGap8),
@@ -1166,9 +1396,22 @@ class _ProdutosPageState extends State<ProdutosPage>
         }
 
         return Row(
-          mainAxisAlignment: MainAxisAlignment.end,
           children: [
+            if (_produtoEmEdicaoId != null)
+              Expanded(
+                child: Text(
+                  'Edicao #${_produtoEmEdicaoId!} · F5 ou F10 salva',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.65),
+                      ),
+                ),
+              ),
             cancelar,
+            const SizedBox(width: _erpGap16),
+            espelhar,
             const SizedBox(width: _erpGap16),
             etiqueta,
             const SizedBox(width: _erpGap16),
@@ -1180,10 +1423,12 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   /// Quadrado dedicado à pré-visualização (sempre visível; estado vazio elegante).
-  Widget _erpProdutoFotoPreviewSquare(BuildContext context) {
+  Widget _erpProdutoFotoPreviewSquare(
+    BuildContext context, {
+    double side = _erpFotoPreviewSide,
+  }) {
     final cs = Theme.of(context).colorScheme;
     final path = _fotoPreviewPath();
-    final side = _erpFotoPreviewSide;
 
     Widget child;
     if (path != null) {
@@ -1195,6 +1440,15 @@ class _ProdutosPageState extends State<ProdutosPage>
           width: side,
           height: side,
           errorBuilder: (context, error, stackTrace) {
+            if (side <= 72) {
+              return Center(
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  size: side * 0.4,
+                  color: cs.onSurface.withValues(alpha: 0.45),
+                ),
+              );
+            }
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(_erpGap16),
@@ -1212,31 +1466,41 @@ class _ProdutosPageState extends State<ProdutosPage>
         ),
       );
     } else {
+      final compacto = side <= 72;
       child = DecoratedBox(
         decoration: BoxDecoration(
           color: cs.surfaceContainerHighest.withValues(alpha: 0.42),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.85)),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.photo_library_outlined,
-              size: 42,
-              color: cs.outline.withValues(alpha: 0.9),
-            ),
-            const SizedBox(height: _erpGap8),
-            Text(
-              'Sem imagem',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: cs.onSurface.withValues(alpha: 0.5),
+        child: compacto
+            ? Center(
+                child: Icon(
+                  Icons.photo_library_outlined,
+                  size: side * 0.44,
+                  color: cs.outline.withValues(alpha: 0.9),
+                ),
+              )
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.photo_library_outlined,
+                    size: 42,
+                    color: cs.outline.withValues(alpha: 0.9),
+                  ),
+                  const SizedBox(height: _erpGap8),
+                  Text(
+                    'Sem imagem',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: cs.onSurface.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
       );
     }
 
@@ -1345,6 +1609,9 @@ class _ProdutosPageState extends State<ProdutosPage>
       _nomeController.clear();
       _nomeImpressaoController.clear();
       _nomeImpressaoVinculadoAoNome = true;
+      _mostrarNomeImpressao = false;
+      _mostrarApelidos = false;
+      _modoAlvoPrecificacao = _ModoAlvoPrecificacao.markup;
       _descricaoController.clear();
       _marcaController.clear();
       _fornecedorController.clear();
@@ -1388,9 +1655,17 @@ class _ProdutosPageState extends State<ProdutosPage>
       _embalagemMultiplica = true;
       _permiteQuantidadeFracionada = false;
       _ultimaVendaEmCadastro = null;
+      _criadoEmCadastro = null;
+      _ultimaCompraEmCadastro = null;
       _margemAlvoPreco1Controller.clear();
       _margemAlvoPreco2Controller.clear();
       _margemAlvoPreco3Controller.clear();
+      _markupAlvoPreco1Controller.clear();
+      _markupAlvoPreco2Controller.clear();
+      _markupAlvoPreco3Controller.clear();
+      _limiteDescontoPreco1Controller.clear();
+      _limiteDescontoPreco2Controller.clear();
+      _limiteDescontoPreco3Controller.clear();
       _quantidadeEmbalagemController.text = '1';
       _unidadeCompraController.clear();
     });
@@ -1665,6 +1940,59 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
   }
 
+  /// Copia o cadastro atual para um novo produto (sem alterar o original).
+  Future<void> _espelharProdutoComoNovo() async {
+    final nome = _nomeController.text.trim();
+    if (nome.isEmpty) {
+      _definirStatus(
+        'Informe o nome do produto antes de espelhar.',
+        erro: true,
+      );
+      return;
+    }
+
+    setState(() {
+      final nomeBase = nome;
+      const sufixo = ' (copia)';
+      if (!nomeBase.toLowerCase().endsWith('(copia)')) {
+        _nomeController.text = '$nomeBase$sufixo';
+      }
+      if (_nomeImpressaoVinculadoAoNome) {
+        _nomeImpressaoController.text = _nomeController.text;
+      }
+
+      _produtoEmEdicaoId = null;
+      _codigoInternoController.clear();
+      _codigoBarrasController.clear();
+      _estoqueController.text = '0';
+      _gerarSkuAutomatico = true;
+      _criadoEmCadastro = null;
+      _ultimaVendaEmCadastro = null;
+      _ultimaCompraEmCadastro = null;
+      _tentouSalvar = false;
+
+      final pathFoto = (_fotoOrigemLocalPath?.trim().isNotEmpty ?? false)
+          ? _fotoOrigemLocalPath!.trim()
+          : _fotoPathAtual.trim();
+      if (pathFoto.isNotEmpty && File(pathFoto).existsSync()) {
+        _fotoOrigemLocalPath = pathFoto;
+        _fotoPathAtual = '';
+        _fotoFoiRemovida = false;
+      }
+
+      _historicoVersao++;
+    });
+
+    _definirStatus(
+      'Produto espelhado como novo — ajuste nome, codigo de barras e salve (F5).',
+      erro: false,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _codigoBarrasFocus.requestFocus();
+    });
+  }
+
   Future<void> _limparFormularioComConfirmacao() async {
     if (!_temDadosNoFormulario()) {
       _resetarFormulario();
@@ -1789,16 +2117,74 @@ class _ProdutosPageState extends State<ProdutosPage>
   double _markupCalculadoPorController(TextEditingController precoController) {
     final custo = _custoBaseParaCalculoPrecos();
     final venda = _parseValorMonetario(precoController.text) ?? 0;
-    if (custo <= 0) {
-      return 0;
-    }
-    return ((venda - custo) / custo) * 100;
+    return ProdutoPrecificacao.markupSobreCusto(custo: custo, precoVenda: venda);
   }
 
-  double _margemAlvoOuAtual(
-    TextEditingController alvo,
-    TextEditingController preco,
-  ) {
+  TextEditingController _markupAlvoControllerPreco(int indice) {
+    switch (indice) {
+      case 2:
+        return _markupAlvoPreco2Controller;
+      case 3:
+        return _markupAlvoPreco3Controller;
+      case 1:
+      default:
+        return _markupAlvoPreco1Controller;
+    }
+  }
+
+  TextEditingController _margemAlvoControllerPreco(int indice) {
+    switch (indice) {
+      case 2:
+        return _margemAlvoPreco2Controller;
+      case 3:
+        return _margemAlvoPreco3Controller;
+      case 1:
+      default:
+        return _margemAlvoPreco1Controller;
+    }
+  }
+
+  TextEditingController _precoControllerIndice(int indice) {
+    switch (indice) {
+      case 2:
+        return _preco2Controller;
+      case 3:
+        return _preco3Controller;
+      case 1:
+      default:
+        return _preco1Controller;
+    }
+  }
+
+  void _sincronizarAlvosPrecificacaoComPrecosAtuais() {
+    _markupAlvoPreco1Controller.text =
+        _markupCalculadoPorController(_preco1Controller).toStringAsFixed(1);
+    _markupAlvoPreco2Controller.text =
+        _markupCalculadoPorController(_preco2Controller).toStringAsFixed(1);
+    _markupAlvoPreco3Controller.text =
+        _markupCalculadoPorController(_preco3Controller).toStringAsFixed(1);
+    _margemAlvoPreco1Controller.text =
+        _margemCalculadaPorController(_preco1Controller).toStringAsFixed(1);
+    _margemAlvoPreco2Controller.text =
+        _margemCalculadaPorController(_preco2Controller).toStringAsFixed(1);
+    _margemAlvoPreco3Controller.text =
+        _margemCalculadaPorController(_preco3Controller).toStringAsFixed(1);
+  }
+
+  double _markupAlvoOuAtual(int indicePreco) {
+    final alvo = _markupAlvoControllerPreco(indicePreco);
+    final preco = _precoControllerIndice(indicePreco);
+    final texto = alvo.text.trim().replaceAll(',', '.');
+    if (texto.isNotEmpty) {
+      final v = double.tryParse(texto);
+      if (v != null) return v.clamp(0, 1000);
+    }
+    return _markupCalculadoPorController(preco);
+  }
+
+  double _margemAlvoOuAtual(int indicePreco) {
+    final alvo = _margemAlvoControllerPreco(indicePreco);
+    final preco = _precoControllerIndice(indicePreco);
     final texto = alvo.text.trim().replaceAll(',', '.');
     if (texto.isNotEmpty) {
       final v = double.tryParse(texto);
@@ -1807,7 +2193,20 @@ class _ProdutosPageState extends State<ProdutosPage>
     return _margemCalculadaPorController(preco);
   }
 
-  void _aplicarMargemNosTresPrecos() {
+  double _precoCalculadoParaIndice(int indicePreco, double custo) {
+    if (_modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup) {
+      return ProdutoPrecificacao.precoComMarkupSobreCusto(
+        custo: custo,
+        markupPercentual: _markupAlvoOuAtual(indicePreco),
+      );
+    }
+    return ProdutoPrecificacao.precoComMargemSobreVenda(
+      custo: custo,
+      margemPercentual: _margemAlvoOuAtual(indicePreco),
+    );
+  }
+
+  void _aplicarPrecosPelaBase({int? somentePreco}) {
     final custo = _custoBaseParaCalculoPrecos();
     if (custo <= 0) {
       _definirStatus(
@@ -1816,37 +2215,32 @@ class _ProdutosPageState extends State<ProdutosPage>
       );
       return;
     }
-    final m1 = _margemAlvoOuAtual(_margemAlvoPreco1Controller, _preco1Controller);
-    final m2 = _margemAlvoOuAtual(_margemAlvoPreco2Controller, _preco2Controller);
-    final m3 = _margemAlvoOuAtual(_margemAlvoPreco3Controller, _preco3Controller);
+    final indices = somentePreco != null ? [somentePreco] : [1, 2, 3];
     setState(() {
-      _preco1Controller.text = _formatarValorMonetario(
-        ProdutoPrecificacao.precoComMargemSobreVenda(
-          custo: custo,
-          margemPercentual: m1,
-        ),
-      );
-      _preco2Controller.text = _formatarValorMonetario(
-        ProdutoPrecificacao.precoComMargemSobreVenda(
-          custo: custo,
-          margemPercentual: m2,
-        ),
-      );
-      _preco3Controller.text = _formatarValorMonetario(
-        ProdutoPrecificacao.precoComMargemSobreVenda(
-          custo: custo,
-          margemPercentual: m3,
-        ),
-      );
-      _margemAlvoPreco1Controller.text = m1.toStringAsFixed(1);
-      _margemAlvoPreco2Controller.text = m2.toStringAsFixed(1);
-      _margemAlvoPreco3Controller.text = m3.toStringAsFixed(1);
+      for (final i in indices) {
+        final valor = _precoCalculadoParaIndice(i, custo);
+        _precoControllerIndice(i).text = _formatarValorMonetario(valor);
+        if (_modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup) {
+          _markupAlvoControllerPreco(i).text =
+              _markupAlvoOuAtual(i).toStringAsFixed(1);
+        } else {
+          _margemAlvoControllerPreco(i).text =
+              _margemAlvoOuAtual(i).toStringAsFixed(1);
+        }
+      }
+      _sincronizarAlvosPrecificacaoComPrecosAtuais();
     });
     final base = _baseCalculoPreco == _BaseCalculoPrecoProduto.custoMedio
         ? 'custo medio'
         : 'custo digitado';
+    final modo = _modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup
+        ? 'markup'
+        : 'margem';
+    final escopo = somentePreco != null
+        ? 'Preco $somentePreco atualizado'
+        : 'Precos 1, 2 e 3 atualizados';
     _definirStatus(
-      'Precos calculados com margem sobre $base (${_formatarValorMonetario(custo)}).',
+      '$escopo com $modo sobre $base (${_formatarValorMonetario(custo)}).',
       erro: false,
     );
   }
@@ -1858,33 +2252,326 @@ class _ProdutosPageState extends State<ProdutosPage>
     return v;
   }
 
-  Widget _buildPainelCalcularMargemPrecos(BuildContext context) {
+  Widget _buildTabelaPrecosVendaCadastro(
+    BuildContext context, {
+    required double margem1,
+    required double margem2,
+    required double margem3,
+    required double markup1,
+    required double markup2,
+    required double markup3,
+  }) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    Widget colunaPreco({
+      required int precoIndice,
+      required String titulo,
+      required String subtitulo,
+      required TextEditingController controller,
+      required TextEditingController limiteDescontoController,
+      required double margem,
+      required double markup,
+      bool destaque = false,
+    }) {
+      final alvoController = _modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup
+          ? _markupAlvoControllerPreco(precoIndice)
+          : _margemAlvoControllerPreco(precoIndice);
+      final alvoLabel = _modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup
+          ? 'Markup alvo %'
+          : 'Margem alvo %';
+      return Container(
+        padding: const EdgeInsets.all(_erpGap16),
+        decoration: BoxDecoration(
+          color: destaque
+              ? cs.primaryContainer.withValues(alpha: 0.28)
+              : cs.surfaceContainerHighest.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: destaque
+                ? cs.primary.withValues(alpha: 0.35)
+                : cs.outlineVariant.withValues(alpha: 0.5),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              titulo,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            Text(
+              subtitulo,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: _erpGap8),
+            TextFormField(
+              controller: controller,
+              readOnly: !_podeEditarPrecoProduto,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: [RealInputFormatter()],
+              validator: _validarPrecoTabela,
+              decoration: _erpInputDecoration(context).copyWith(
+                helperText: !_podeEditarPrecoProduto
+                    ? 'Sem permissao para editar precos'
+                    : null,
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: _erpGap8),
+            Wrap(
+              spacing: _erpGap8,
+              runSpacing: _erpGap8,
+              children: [
+                _erpFinancialMetricChip(context, 'Margem', margem),
+                _erpFinancialMetricChip(context, 'Markup', markup),
+              ],
+            ),
+            const SizedBox(height: _erpGap8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: alvoController,
+                    enabled: _podeEditarPrecoProduto,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: _erpInputDecoration(
+                      context,
+                      hint: 'atual',
+                      helper: alvoLabel,
+                    ).copyWith(isDense: true),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: 'Aplicar $alvoLabel neste preco',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _podeEditarPrecoProduto
+                      ? () => _aplicarPrecosPelaBase(somentePreco: precoIndice)
+                      : null,
+                  icon: const Icon(Icons.arrow_upward_rounded, size: 22),
+                ),
+              ],
+            ),
+            const SizedBox(height: _erpGap8),
+            TextFormField(
+              controller: limiteDescontoController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              validator: _validarLimiteDescontoPreco,
+              decoration: _erpInputDecoration(
+                context,
+                hint: '0 = teto da loja',
+                helper: 'Lim. desconto %',
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final campoCustoMedio = Builder(
+      builder: (ctx) {
+        final valor = _custoMedioInteligenteParaExibicao();
+        final deNfe = _custoMedioDerivadoDeHistoricoNfe();
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: cs.outline.withValues(alpha: 0.45)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Custo medio',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _formatarValorMonetario(valor),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: _erpGap8),
+              Text(
+                deNfe
+                    ? 'Media ponderada das entradas de NF-e.'
+                    : 'Sem NF-e: acompanha o custo digitado.',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.35,
+                  color: cs.onSurface.withValues(alpha: 0.62),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
     return Container(
       padding: const EdgeInsets.all(_erpGap16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.22),
+        color: cs.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.28),
-        ),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Calcular precos pela margem',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final ladoALado = constraints.maxWidth >= 520;
+              final campoCusto = Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _erpFieldLabel('Preco de custo', context),
+                  TextFormField(
+                    controller: _precoCustoController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [RealInputFormatter()],
+                    validator: _validarPrecoCusto,
+                    decoration: _erpInputDecoration(context),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ],
+              );
+              if (ladoALado) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: campoCusto),
+                    const SizedBox(width: _erpGap16),
+                    Expanded(child: campoCustoMedio),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  campoCusto,
+                  const SizedBox(height: _erpGap16),
+                  campoCustoMedio,
+                ],
+              );
+            },
           ),
-          const SizedBox(height: _erpGap8),
-          Text(
-            'Base: ${_formatarValorMonetario(_custoBaseParaCalculoPrecos())} '
-            '(${_baseCalculoPreco == _BaseCalculoPrecoProduto.custoMedio ? 'custo medio' : 'custo digitado'})',
-            style: theme.textTheme.bodySmall,
+          const SizedBox(height: _erpGap16),
+          _buildBarraPrecificacaoIntegrada(context),
+          const SizedBox(height: _erpGap16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final tresColunas = constraints.maxWidth >= 720;
+              final colunas = [
+                colunaPreco(
+                  precoIndice: 1,
+                  titulo: 'Preco 1',
+                  subtitulo: 'A prazo',
+                  controller: _preco1Controller,
+                  limiteDescontoController: _limiteDescontoPreco1Controller,
+                  margem: margem1,
+                  markup: markup1,
+                  destaque: true,
+                ),
+                colunaPreco(
+                  precoIndice: 2,
+                  titulo: 'Preco 2',
+                  subtitulo: 'A vista',
+                  controller: _preco2Controller,
+                  limiteDescontoController: _limiteDescontoPreco2Controller,
+                  margem: margem2,
+                  markup: markup2,
+                ),
+                colunaPreco(
+                  precoIndice: 3,
+                  titulo: 'Preco 3',
+                  subtitulo: 'Atacado',
+                  controller: _preco3Controller,
+                  limiteDescontoController: _limiteDescontoPreco3Controller,
+                  margem: margem3,
+                  markup: markup3,
+                ),
+              ];
+              if (tresColunas) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: colunas[0]),
+                    const SizedBox(width: _erpGap8),
+                    Expanded(child: colunas[1]),
+                    const SizedBox(width: _erpGap8),
+                    Expanded(child: colunas[2]),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < colunas.length; i++) ...[
+                    if (i > 0) const SizedBox(height: _erpGap8),
+                    colunas[i],
+                  ],
+                ],
+              );
+            },
           ),
-          const SizedBox(height: _erpGap8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBarraPrecificacaoIntegrada(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final custo = _custoBaseParaCalculoPrecos();
+    final baseLabel = _baseCalculoPreco == _BaseCalculoPrecoProduto.custoMedio
+        ? 'custo medio'
+        : 'custo digitado';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(_erpGap16),
+      decoration: BoxDecoration(
+        color: cs.primaryContainer.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.28)),
+      ),
+      child: Wrap(
+        spacing: _erpGap16,
+        runSpacing: _erpGap8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.calculate_outlined, size: 20, color: cs.primary),
+              const SizedBox(width: _erpGap8),
+              Text(
+                'Base ${_formatarValorMonetario(custo)} ($baseLabel)',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
           SegmentedButton<_BaseCalculoPrecoProduto>(
             segments: const [
               ButtonSegment(
@@ -1899,62 +2586,82 @@ class _ProdutosPageState extends State<ProdutosPage>
             selected: {_baseCalculoPreco},
             onSelectionChanged: (s) {
               if (s.isEmpty) return;
-              setState(() => _baseCalculoPreco = s.first);
+              setState(() {
+                _baseCalculoPreco = s.first;
+                _sincronizarAlvosPrecificacaoComPrecosAtuais();
+              });
             },
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
           ),
-          const SizedBox(height: _erpGap8),
-          _erpResponsiveGrid(context, [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _erpFieldLabel('Margem alvo Preco 1 (%)', context),
-                TextField(
-                  controller: _margemAlvoPreco1Controller,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: _erpInputDecoration(
-                    context,
-                    hint: 'Ex.: 35 — vazio usa margem atual',
-                  ),
-                ),
-              ],
+          SegmentedButton<_ModoAlvoPrecificacao>(
+            segments: const [
+              ButtonSegment(
+                value: _ModoAlvoPrecificacao.markup,
+                label: Text('Markup'),
+              ),
+              ButtonSegment(
+                value: _ModoAlvoPrecificacao.margem,
+                label: Text('Margem'),
+              ),
+            ],
+            selected: {_modoAlvoPrecificacao},
+            onSelectionChanged: (s) {
+              if (s.isEmpty) return;
+              setState(() {
+                _modoAlvoPrecificacao = s.first;
+                _sincronizarAlvosPrecificacaoComPrecosAtuais();
+              });
+            },
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _erpFieldLabel('Margem alvo Preco 2 (%)', context),
-                TextField(
-                  controller: _margemAlvoPreco2Controller,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: _erpInputDecoration(context),
-                ),
-              ],
+          ),
+          FilledButton.tonalIcon(
+            onPressed: _podeEditarPrecoProduto ? _aplicarPrecosPelaBase : null,
+            icon: const Icon(Icons.done_all_outlined, size: 18),
+            label: Text(
+              _modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup
+                  ? 'Aplicar markup nos 3'
+                  : 'Aplicar margem nos 3',
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _erpFieldLabel('Margem alvo Preco 3 (%)', context),
-                TextField(
-                  controller: _margemAlvoPreco3Controller,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: _erpInputDecoration(context),
-                ),
-              ],
-            ),
-          ]),
-          const SizedBox(height: _erpGap8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: _aplicarMargemNosTresPrecos,
-              icon: const Icon(Icons.calculate_outlined),
-              label: const Text('Aplicar margem nos 3 precos'),
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildAbaPrecosCadastro(
+    BuildContext context, {
+    required double margem1,
+    required double margem2,
+    required double margem3,
+    required double markup1,
+    required double markup2,
+    required double markup3,
+  }) {
+    return _erpSurfaceCard(
+      context: context,
+      title: 'Precos, custos e margem de lucro',
+      icon: Icons.payments_outlined,
+      children: [
+        _buildTabelaPrecosVendaCadastro(
+          context,
+          margem1: margem1,
+          margem2: margem2,
+          margem3: margem3,
+          markup1: markup1,
+          markup2: markup2,
+          markup3: markup3,
+        ),
+      ],
     );
   }
 
@@ -3015,6 +3722,15 @@ class _ProdutosPageState extends State<ProdutosPage>
       preco2: preco2!,
       preco3: preco3!,
       precoVenda: preco1,
+      limiteDescontoPreco1:
+          _parsePercentualLimiteDesconto(_limiteDescontoPreco1Controller.text) ??
+              0,
+      limiteDescontoPreco2:
+          _parsePercentualLimiteDesconto(_limiteDescontoPreco2Controller.text) ??
+              0,
+      limiteDescontoPreco3:
+          _parsePercentualLimiteDesconto(_limiteDescontoPreco3Controller.text) ??
+              0,
       unidadeCompra: _unidadeCompraController.text.trim(),
       quantidadePorEmbalagem: _lerQuantidadeEmbalagem(),
       embalagemMultiplica: _embalagemMultiplica,
@@ -3119,20 +3835,26 @@ class _ProdutosPageState extends State<ProdutosPage>
       _embalagemMultiplica = produto.embalagemMultiplica;
       _permiteQuantidadeFracionada = produto.permiteQuantidadeFracionada;
       _ultimaVendaEmCadastro = produto.ultimaVendaEm;
-      _margemAlvoPreco1Controller.text = ProdutoPrecificacao.margemSobrePrecoVenda(
-        custo: produto.precoCusto,
-        precoVenda: produto.preco1 > 0 ? produto.preco1 : produto.precoVenda,
-      ).toStringAsFixed(1);
-      _margemAlvoPreco2Controller.text = ProdutoPrecificacao.margemSobrePrecoVenda(
-        custo: produto.precoCusto,
-        precoVenda: produto.preco2 > 0 ? produto.preco2 : produto.precoVenda,
-      ).toStringAsFixed(1);
-      _margemAlvoPreco3Controller.text = ProdutoPrecificacao.margemSobrePrecoVenda(
-        custo: produto.precoCusto,
-        precoVenda: produto.preco3 > 0 ? produto.preco3 : produto.precoVenda,
-      ).toStringAsFixed(1);
+      _criadoEmCadastro = produto.criadoEm;
+      _ultimaCompraEmCadastro =
+          widget.produtoRepository.obterDataUltimaCompraProduto(produto.id);
+      _limiteDescontoPreco1Controller.text =
+          produto.limiteDescontoPreco1 > 0
+              ? produto.limiteDescontoPreco1.toStringAsFixed(1)
+              : '';
+      _limiteDescontoPreco2Controller.text =
+          produto.limiteDescontoPreco2 > 0
+              ? produto.limiteDescontoPreco2.toStringAsFixed(1)
+              : '';
+      _limiteDescontoPreco3Controller.text =
+          produto.limiteDescontoPreco3 > 0
+              ? produto.limiteDescontoPreco3.toStringAsFixed(1)
+              : '';
+      _sincronizarAlvosPrecificacaoComPrecosAtuais();
       _produtoAtivo = produto.ativo;
-      _status = 'Editando produto: ${produto.nome}';
+      _mostrarNomeImpressao = !_nomeImpressaoVinculadoAoNome;
+      _mostrarApelidos = produto.apelidosBusca.trim().isNotEmpty;
+      _status = '';
       _statusEhErro = false;
       _gerarSkuAutomatico = false;
     });
@@ -4205,20 +4927,21 @@ class _ProdutosPageState extends State<ProdutosPage>
                                       padding: const EdgeInsets.fromLTRB(
                                         _erpGap24,
                                         _erpGap16,
-                                        _erpGap24,
+                                        _erpGap8,
                                         0,
                                       ),
                                       child: RawScrollbar(
                                         controller: _scrollController,
                                         thumbVisibility: true,
                                         trackVisibility: true,
-                                        thickness: 8,
-                                        radius: const Radius.circular(8),
-                                        crossAxisMargin: 2,
+                                        thickness: 10,
+                                        radius: const Radius.circular(6),
+                                        crossAxisMargin: 4,
                                         mainAxisMargin: 4,
                                         child: SingleChildScrollView(
                                           controller: _scrollController,
                                           padding: const EdgeInsets.only(
+                                            right: _erpScrollbarGutter,
                                             bottom: _erpGap24,
                                           ),
                                           child: Column(
@@ -4252,6 +4975,31 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                             ),
                                                             label: const Text(
                                                               'Pesquisar produto',
+                                                            ),
+                                                          ),
+                                                          const SizedBox(
+                                                            height: _erpGap8,
+                                                          ),
+                                                          OutlinedButton.icon(
+                                                            style: OutlinedButton
+                                                                .styleFrom(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .symmetric(
+                                                                horizontal:
+                                                                    _erpGap16,
+                                                                vertical: 12,
+                                                              ),
+                                                            ),
+                                                            onPressed:
+                                                                _espelharProdutoComoNovo,
+                                                            icon: const Icon(
+                                                              Icons
+                                                                  .copy_all_outlined,
+                                                              size: 20,
+                                                            ),
+                                                            label: const Text(
+                                                              'Espelhar como novo',
                                                             ),
                                                           ),
                                                           const SizedBox(
@@ -4311,6 +5059,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                 .center,
                                                         children: [
                                                           Expanded(
+                                                            flex: 2,
                                                             child: OutlinedButton
                                                                 .icon(
                                                               style: OutlinedButton
@@ -4331,6 +5080,34 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               ),
                                                               label: const Text(
                                                                 'Pesquisar produto',
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          const SizedBox(
+                                                            width: _erpGap8,
+                                                          ),
+                                                          Expanded(
+                                                            child: OutlinedButton
+                                                                .icon(
+                                                              style: OutlinedButton
+                                                                  .styleFrom(
+                                                                padding:
+                                                                    const EdgeInsets
+                                                                        .symmetric(
+                                                                  horizontal:
+                                                                      12,
+                                                                  vertical: 12,
+                                                                ),
+                                                              ),
+                                                              onPressed:
+                                                                  _espelharProdutoComoNovo,
+                                                              icon: const Icon(
+                                                                Icons
+                                                                    .copy_all_outlined,
+                                                                size: 20,
+                                                              ),
+                                                              label: const Text(
+                                                                'Espelhar',
                                                               ),
                                                             ),
                                                           ),
@@ -4374,39 +5151,14 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                       ),
                                               ),
                                               const SizedBox(height: _erpGap16),
-                                              Text(
-                                                _produtoEmEdicaoId == null
-                                                    ? 'Novo cadastro — use as abas abaixo (F5 salva · setas na busca do PDV).'
-                                                    : 'Edicao — revise as abas e salve (F5 ou F10).',
-                                                style: theme.textTheme.bodySmall
-                                                    ?.copyWith(
-                                                      color: theme
-                                                          .colorScheme
-                                                          .onSurface
-                                                          .withValues(
-                                                            alpha: 0.65,
-                                                          ),
-                                                    ),
+                                              _buildResumoProdutoCadastro(
+                                                context,
                                               ),
-                                              const SizedBox(height: _erpGap8),
                                               _buildCabecalhoFixoCadastro(
                                                 context,
                                               ),
-                                              Material(
-                                                color: theme
-                                                    .colorScheme.surface,
-                                                child: TabBar(
-                                                  controller:
-                                                      _subAbaCadastroController,
-                                                  isScrollable: true,
-                                                  tabAlignment:
-                                                      TabAlignment.start,
-                                                  tabs: [
-                                                    for (final t
-                                                        in _subAbasCadastro)
-                                                      Tab(text: t),
-                                                  ],
-                                                ),
+                                              _buildNavegacaoAbasCadastro(
+                                                context,
                                               ),
                                               if (_subAbaCadastroController
                                                       .index ==
@@ -4505,63 +5257,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                   controlAffinity:
                                                                       ListTileControlAffinity
                                                                           .leading,
-                                                                ),
-                                                              ],
-                                                            ),
-                                                            Column(
-                                                              crossAxisAlignment:
-                                                                  CrossAxisAlignment
-                                                                      .start,
-                                                              children: [
-                                                                _erpFieldLabel(
-                                                                  'Marca',
-                                                                  context,
-                                                                ),
-                                                                TextField(
-                                                                  controller:
-                                                                      _marcaController,
-                                                                  decoration:
-                                                                      _erpInputDecoration(
-                                                                        context,
-                                                                      ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                            Column(
-                                                              crossAxisAlignment:
-                                                                  CrossAxisAlignment
-                                                                      .start,
-                                                              children: [
-                                                                _erpFieldLabel(
-                                                                  'Fabricante',
-                                                                  context,
-                                                                ),
-                                                                TextField(
-                                                                  controller:
-                                                                      _fabricanteController,
-                                                                  decoration:
-                                                                      _erpInputDecoration(
-                                                                        context,
-                                                                      ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                            Column(
-                                                              crossAxisAlignment:
-                                                                  CrossAxisAlignment
-                                                                      .start,
-                                                              children: [
-                                                                _erpFieldLabel(
-                                                                  'Fornecedor',
-                                                                  context,
-                                                                ),
-                                                                TextField(
-                                                                  controller:
-                                                                      _fornecedorController,
-                                                                  decoration:
-                                                                      _erpInputDecoration(
-                                                                        context,
-                                                                      ),
                                                                 ),
                                                               ],
                                                             ),
@@ -4676,8 +5371,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                               ),
                                               _erpSurfaceCard(
                                                 context: context,
-                                                title:
-                                                    'Classificacao e codigos',
+                                                title: 'Classificacao',
                                                 icon: Icons.category_outlined,
                                                 children: [
                                                   _erpResponsiveGrid(context, [
@@ -4826,6 +5520,44 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               .start,
                                                       children: [
                                                         _erpFieldLabel(
+                                                          'Marca',
+                                                          context,
+                                                        ),
+                                                        TextField(
+                                                          controller:
+                                                              _marcaController,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Fornecedor',
+                                                          context,
+                                                        ),
+                                                        TextField(
+                                                          controller:
+                                                              _fornecedorController,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
                                                           'Unidade',
                                                           context,
                                                         ),
@@ -4909,6 +5641,25 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                         ),
                                                       ],
                                                     ),
+                                                    Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        _erpFieldLabel(
+                                                          'Fabricante',
+                                                          context,
+                                                        ),
+                                                        TextField(
+                                                          controller:
+                                                              _fabricanteController,
+                                                          decoration:
+                                                              _erpInputDecoration(
+                                                                context,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
                                                   ]),
                                                 ],
                                               ),
@@ -4922,397 +5673,15 @@ class _ProdutosPageState extends State<ProdutosPage>
                                               if (_subAbaCadastroController
                                                       .index ==
                                                   1)
-                                              _erpSurfaceCard(
-                                                context: context,
-                                                title:
-                                                    'Precos, custos e margem de lucro',
-                                                icon: Icons.payments_outlined,
-                                                children: [
-                                                  _buildPainelCalcularMargemPrecos(
-                                                    context,
-                                                  ),
-                                                  const SizedBox(
-                                                    height: _erpGap16,
-                                                  ),
-                                                  LayoutBuilder(
-                                                    builder: (context, constraints) {
-                                                      final wideKpi =
-                                                          constraints
-                                                              .maxWidth >=
-                                                          _erpPrecosKpiBreakpoint;
-
-                                                      final painelKpi =
-                                                          _erpPainelResumoFinanceiroKpis(
-                                                            context,
-                                                            margem1: margem1,
-                                                            markup1: markup1,
-                                                            margem2: margem2,
-                                                            markup2: markup2,
-                                                            margem3: margem3,
-                                                            markup3: markup3,
-                                                          );
-
-                                                      final colunaInputs = LayoutBuilder(
-                                                        builder: (context, cIn) {
-                                                          final wIn =
-                                                              cIn.maxWidth;
-                                                          final custosLadoALado =
-                                                              wIn >= 440;
-                                                          final precosLadoALado =
-                                                              wIn >= 600;
-
-                                                          final campoPrecoCusto = Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .stretch,
-                                                            children: [
-                                                              _erpFieldLabel(
-                                                                'Preco de custo',
-                                                                context,
-                                                              ),
-                                                              TextFormField(
-                                                                controller:
-                                                                    _precoCustoController,
-                                                                keyboardType:
-                                                                    const TextInputType.numberWithOptions(
-                                                                      decimal:
-                                                                          true,
-                                                                    ),
-                                                                inputFormatters: [
-                                                                  RealInputFormatter(),
-                                                                ],
-                                                                validator:
-                                                                    _validarPrecoCusto,
-                                                                decoration:
-                                                                    _erpInputDecoration(
-                                                                      context,
-                                                                      helper:
-                                                                          'Nao pode ser negativo',
-                                                                    ),
-                                                                onChanged: (_) =>
-                                                                    setState(
-                                                                      () {},
-                                                                    ),
-                                                              ),
-                                                            ],
-                                                          );
-
-                                                          final campoCustoMedio = Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .stretch,
-                                                            children: [
-                                                              _erpFieldLabel(
-                                                                'Custo medio',
-                                                                context,
-                                                              ),
-                                                              Builder(
-                                                                builder: (ctx) {
-                                                                  final cs =
-                                                                      Theme.of(
-                                                                        ctx,
-                                                                      ).colorScheme;
-                                                                  final valor =
-                                                                      _custoMedioInteligenteParaExibicao();
-                                                                  final deNfe =
-                                                                      _custoMedioDerivadoDeHistoricoNfe();
-                                                                  return Container(
-                                                                    width: double
-                                                                        .infinity,
-                                                                    padding: const EdgeInsets.symmetric(
-                                                                      horizontal:
-                                                                          14,
-                                                                      vertical:
-                                                                          14,
-                                                                    ),
-                                                                    decoration: BoxDecoration(
-                                                                      color: cs
-                                                                          .surfaceContainerHighest
-                                                                          .withValues(
-                                                                            alpha:
-                                                                                0.4,
-                                                                          ),
-                                                                      borderRadius:
-                                                                          BorderRadius.circular(
-                                                                            8,
-                                                                          ),
-                                                                      border: Border.all(
-                                                                        color: cs
-                                                                            .outline
-                                                                            .withValues(
-                                                                              alpha: 0.45,
-                                                                            ),
-                                                                      ),
-                                                                    ),
-                                                                    child: Column(
-                                                                      crossAxisAlignment:
-                                                                          CrossAxisAlignment
-                                                                              .start,
-                                                                      children: [
-                                                                        Text(
-                                                                          _formatarValorMonetario(
-                                                                            valor,
-                                                                          ),
-                                                                          style: Theme.of(ctx)
-                                                                              .textTheme
-                                                                              .titleMedium
-                                                                              ?.copyWith(
-                                                                                fontWeight: FontWeight.w700,
-                                                                              ),
-                                                                        ),
-                                                                        const SizedBox(
-                                                                          height:
-                                                                              _erpGap8,
-                                                                        ),
-                                                                        Text(
-                                                                          deNfe
-                                                                              ? 'Calculado automaticamente pela media ponderada das entradas de NF-e.'
-                                                                              : 'Sem entradas de NF-e: acompanha o preco de custo acima.',
-                                                                          style: TextStyle(
-                                                                            fontSize:
-                                                                                11.5,
-                                                                            height:
-                                                                                1.35,
-                                                                            color: cs.onSurface.withValues(
-                                                                              alpha: 0.62,
-                                                                            ),
-                                                                          ),
-                                                                        ),
-                                                                      ],
-                                                                    ),
-                                                                  );
-                                                                },
-                                                              ),
-                                                            ],
-                                                          );
-
-                                                          final blocoCustos =
-                                                              custosLadoALado
-                                                              ? Row(
-                                                                  crossAxisAlignment:
-                                                                      CrossAxisAlignment
-                                                                          .start,
-                                                                  children: [
-                                                                    Expanded(
-                                                                      child:
-                                                                          campoPrecoCusto,
-                                                                    ),
-                                                                    const SizedBox(
-                                                                      width:
-                                                                          _erpGap16,
-                                                                    ),
-                                                                    Expanded(
-                                                                      child:
-                                                                          campoCustoMedio,
-                                                                    ),
-                                                                  ],
-                                                                )
-                                                              : Column(
-                                                                  crossAxisAlignment:
-                                                                      CrossAxisAlignment
-                                                                          .stretch,
-                                                                  children: [
-                                                                    campoPrecoCusto,
-                                                                    const SizedBox(
-                                                                      height:
-                                                                          _erpGap16,
-                                                                    ),
-                                                                    campoCustoMedio,
-                                                                  ],
-                                                                );
-
-                                                          Widget colPrecoVenda(
-                                                            String label,
-                                                            TextEditingController
-                                                            ctrl,
-                                                          ) {
-                                                            return Column(
-                                                              crossAxisAlignment:
-                                                                  CrossAxisAlignment
-                                                                      .stretch,
-                                                              children: [
-                                                                _erpFieldLabel(
-                                                                  label,
-                                                                  context,
-                                                                ),
-                                                                TextFormField(
-                                                                  controller:
-                                                                      ctrl,
-                                                                  readOnly:
-                                                                      !_podeEditarPrecoProduto,
-                                                                  keyboardType:
-                                                                      const TextInputType.numberWithOptions(
-                                                                        decimal:
-                                                                            true,
-                                                                      ),
-                                                                  inputFormatters: [
-                                                                    RealInputFormatter(),
-                                                                  ],
-                                                                  validator:
-                                                                      _validarPrecoTabela,
-                                                                  decoration:
-                                                                      _erpInputDecoration(
-                                                                        context,
-                                                                      ).copyWith(
-                                                                        helperText: !_podeEditarPrecoProduto
-                                                                            ? 'Sem permissao para editar precos'
-                                                                            : null,
-                                                                      ),
-                                                                  onChanged: (_) =>
-                                                                      setState(
-                                                                        () {},
-                                                                      ),
-                                                                ),
-                                                              ],
-                                                            );
-                                                          }
-
-                                                          final blocoPrecosVenda =
-                                                              precosLadoALado
-                                                              ? Row(
-                                                                  crossAxisAlignment:
-                                                                      CrossAxisAlignment
-                                                                          .start,
-                                                                  children: [
-                                                                    Expanded(
-                                                                      child: colPrecoVenda(
-                                                                        'A prazo (Preco 1)',
-                                                                        _preco1Controller,
-                                                                      ),
-                                                                    ),
-                                                                    const SizedBox(
-                                                                      width:
-                                                                          _erpGap16,
-                                                                    ),
-                                                                    Expanded(
-                                                                      child: colPrecoVenda(
-                                                                        'A vista (Preco 2)',
-                                                                        _preco2Controller,
-                                                                      ),
-                                                                    ),
-                                                                    const SizedBox(
-                                                                      width:
-                                                                          _erpGap16,
-                                                                    ),
-                                                                    Expanded(
-                                                                      child: colPrecoVenda(
-                                                                        'Atacado (Preco 3)',
-                                                                        _preco3Controller,
-                                                                      ),
-                                                                    ),
-                                                                  ],
-                                                                )
-                                                              : Column(
-                                                                  crossAxisAlignment:
-                                                                      CrossAxisAlignment
-                                                                          .stretch,
-                                                                  children: [
-                                                                    colPrecoVenda(
-                                                                      'A prazo (Preco 1)',
-                                                                      _preco1Controller,
-                                                                    ),
-                                                                    const SizedBox(
-                                                                      height:
-                                                                          _erpGap16,
-                                                                    ),
-                                                                    colPrecoVenda(
-                                                                      'A vista (Preco 2)',
-                                                                      _preco2Controller,
-                                                                    ),
-                                                                    const SizedBox(
-                                                                      height:
-                                                                          _erpGap16,
-                                                                    ),
-                                                                    colPrecoVenda(
-                                                                      'Atacado (Preco 3)',
-                                                                      _preco3Controller,
-                                                                    ),
-                                                                  ],
-                                                                );
-
-                                                          return Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .stretch,
-                                                            children: [
-                                                              Container(
-                                                                padding:
-                                                                    const EdgeInsets.all(
-                                                                      _erpGap16,
-                                                                    ),
-                                                                decoration: BoxDecoration(
-                                                                  color: theme
-                                                                      .colorScheme
-                                                                      .surfaceContainerHighest
-                                                                      .withValues(
-                                                                        alpha:
-                                                                            0.38,
-                                                                      ),
-                                                                  borderRadius:
-                                                                      BorderRadius.circular(
-                                                                        8,
-                                                                      ),
-                                                                  border: Border.all(
-                                                                    color: theme
-                                                                        .colorScheme
-                                                                        .outlineVariant
-                                                                        .withValues(
-                                                                          alpha:
-                                                                              0.55,
-                                                                        ),
-                                                                  ),
-                                                                ),
-                                                                child:
-                                                                    blocoCustos,
-                                                              ),
-                                                              const SizedBox(
-                                                                height:
-                                                                    _erpGap16,
-                                                              ),
-                                                              blocoPrecosVenda,
-                                                            ],
-                                                          );
-                                                        },
-                                                      );
-
-                                                      if (wideKpi) {
-                                                        return Row(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Expanded(
-                                                              flex: 5,
-                                                              child:
-                                                                  colunaInputs,
-                                                            ),
-                                                            const SizedBox(
-                                                              width: _erpGap16,
-                                                            ),
-                                                            Expanded(
-                                                              flex: 3,
-                                                              child: painelKpi,
-                                                            ),
-                                                          ],
-                                                        );
-                                                      }
-
-                                                      return Column(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .stretch,
-                                                        children: [
-                                                          colunaInputs,
-                                                          const SizedBox(
-                                                            height: _erpGap16,
-                                                          ),
-                                                          painelKpi,
-                                                        ],
-                                                      );
-                                                    },
-                                                  ),
-                                                ],
-                                              ),
+                                                _buildAbaPrecosCadastro(
+                                                  context,
+                                                  margem1: margem1,
+                                                  margem2: margem2,
+                                                  margem3: margem3,
+                                                  markup1: markup1,
+                                                  markup2: markup2,
+                                                  markup3: markup3,
+                                                ),
                                               if (_subAbaCadastroController
                                                       .index ==
                                                   3) ...[

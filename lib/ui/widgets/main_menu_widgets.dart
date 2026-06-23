@@ -340,7 +340,7 @@ class MainMenuFeaturedVendasTile extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        Icons.point_of_sale_outlined,
+                        Icons.folder_open_outlined,
                         color: habilitado
                             ? corVendas
                             : tema.colorScheme.onSurface.withValues(alpha: 0.38),
@@ -353,14 +353,14 @@ class MainMenuFeaturedVendasTile extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Vendas',
+                            'Gestao de vendas',
                             style: tema.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w800,
                               color: corTexto,
                             ),
                           ),
                           Text(
-                            'PDV, caixa, listagem e relatorios',
+                            'Orcamentos, listagem e relatorios',
                             style: tema.textTheme.bodySmall?.copyWith(
                               color: corTexto.withValues(alpha: 0.75),
                             ),

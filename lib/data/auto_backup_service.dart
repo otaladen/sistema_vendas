@@ -1,14 +1,11 @@
 import 'dart:io';
 
-import 'package:intl/intl.dart';
-import 'package:path/path.dart' as p;
-
 import '../domain/auditoria_catalogo.dart';
+import 'app_config_repository.dart';
+import 'backup_pos_execucao_service.dart';
 import 'objectbox.dart';
 import '../services/auditoria_registrar.dart';
-import 'app_config_repository.dart';
-import 'local_app_data_paths.dart';
-import 'local_backup_copy.dart';
+import 'local_backup_service.dart';
 import 'sync/lan_sync_scheduler.dart';
 
 /// Executa backup em disco quando [EmpresaConfig.backupAutomaticoAtivo] e a
@@ -17,6 +14,8 @@ class AutoBackupService {
   AutoBackupService._();
 
   static bool _emExecucao = false;
+
+  static bool get emExecucao => _emExecucao;
 
   static Future<void> tentarExecutarSeDevido(
     AppConfigRepository repository, {
@@ -43,58 +42,51 @@ class AutoBackupService {
 
     final destinoRaiz = Directory(pasta);
     if (!destinoRaiz.existsSync()) {
+      await repository.registrarFalhaBackupAutomatico(
+        'Pasta de backup automatico inacessivel: $pasta',
+      );
       return;
     }
 
+    if (objectBox == null) return;
+
     _emExecucao = true;
-    var syncParada = false;
     try {
-      final baseDadosDir = await obterDiretorioBaseDadosApp();
-      if (!baseDadosDir.existsSync()) {
-        return;
-      }
-
-      if (lanSyncScheduler != null && lanSyncScheduler.estaAgendado) {
-        await lanSyncScheduler.parar();
-        syncParada = true;
-      }
-      if (objectBox != null) {
-        await objectBox.fecharParaCopiaDeArquivos();
-      }
-
-      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(agora);
-      final pastaBackup = Directory(
-        p.join(destinoRaiz.path, 'backup_sistema_vendas_$timestamp'),
+      final resultado = await LocalBackupService.executar(
+        destinoRaiz: destinoRaiz,
+        tipo: LocalBackupTipo.automatico,
+        nomeLoja: config.nomeLoja,
+        objectBox: objectBox,
+        lanSyncScheduler: lanSyncScheduler,
       );
-      pastaBackup.createSync(recursive: true);
-      await copiarDiretorioRecursivo(
-        origem: baseDadosDir,
-        destino: Directory(p.join(pastaBackup.path, 'dados_aplicacao')),
+
+      await BackupPosExecucaoService.aposBackupSucesso(
+        repository: repository,
+        pastaRaizPrimaria: destinoRaiz,
+        pastaBackup: resultado.pastaBackup,
       );
 
       await repository.atualizarUltimoBackupAutomaticoMs(
         DateTime.now().millisecondsSinceEpoch,
       );
+      await repository.limparFalhaBackupAutomatico();
       AuditoriaRegistrar.registrar(
         modulo: AuditoriaModulo.backup,
         acao: AuditoriaAcao.backupAutomatico,
         usuarioLogin: 'sistema',
         resumo: 'Backup automatico executado',
-        detalhes: {'caminho': pastaBackup.path},
+        detalhes: {'caminho': resultado.pastaBackup.path},
       );
-    } catch (_) {
-      // Silencioso: disco cheio/rede indisponivel; usuario ve status em Configuracoes.
+    } catch (e) {
+      await repository.registrarFalhaBackupAutomatico(e.toString());
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.backup,
+        acao: AuditoriaAcao.backupFalha,
+        usuarioLogin: 'sistema',
+        resumo: 'Falha no backup automatico',
+        detalhes: {'erro': e.toString(), 'pasta': pasta},
+      );
     } finally {
-      if (objectBox != null) {
-        try {
-          await objectBox.reabrirAposCopiaDeArquivos();
-        } catch (_) {}
-      }
-      if (syncParada && lanSyncScheduler != null) {
-        try {
-          await lanSyncScheduler.iniciar();
-        } catch (_) {}
-      }
       _emExecucao = false;
     }
   }
