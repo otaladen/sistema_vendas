@@ -90,7 +90,7 @@
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "48:6397976891055979669",
+      "lastPropertyId": "50:4327383752342422592",
       "name": "Produto",
       "properties": [
         {
@@ -336,6 +336,16 @@
           "id": "48:6397976891055979669",
           "name": "limiteDescontoPreco3",
           "type": 8
+        },
+        {
+          "id": "49:277392754143617818",
+          "name": "estoqueCd",
+          "type": 6
+        },
+        {
+          "id": "50:4327383752342422592",
+          "name": "substitutosIds",
+          "type": 9
         }
       ],
       "relations": []
@@ -2595,10 +2605,156 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "31:3789352748790709685",
+      "lastPropertyId": "15:404858052662321421",
+      "name": "ItemListaCompra",
+      "properties": [
+        {
+          "id": "1:3357863266151630496",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:3884776960917834717",
+          "name": "produtoId",
+          "indexId": "48:2428882302797446316",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Produto"
+        },
+        {
+          "id": "3:6976138911454551645",
+          "name": "descricaoLivre",
+          "type": 9
+        },
+        {
+          "id": "4:5956271714386846803",
+          "name": "quantidadeSugerida",
+          "type": 6
+        },
+        {
+          "id": "5:8874166416932236466",
+          "name": "quantidadeRecebida",
+          "type": 6
+        },
+        {
+          "id": "6:5329536358813162263",
+          "name": "unidade",
+          "type": 9
+        },
+        {
+          "id": "7:2474892791799294989",
+          "name": "fornecedorTexto",
+          "type": 9
+        },
+        {
+          "id": "8:5093128923214435316",
+          "name": "prioridade",
+          "type": 9
+        },
+        {
+          "id": "9:8758973934748943037",
+          "name": "observacao",
+          "type": 9
+        },
+        {
+          "id": "10:5375555754282805076",
+          "name": "origem",
+          "type": 9
+        },
+        {
+          "id": "11:4888079715663951371",
+          "name": "status",
+          "type": 9
+        },
+        {
+          "id": "12:3818933386033803756",
+          "name": "criadoPor",
+          "type": 9
+        },
+        {
+          "id": "13:1500799916790172978",
+          "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "14:6852046697915389609",
+          "name": "resolvidoEm",
+          "type": 10
+        },
+        {
+          "id": "15:404858052662321421",
+          "name": "nfeChaveResolucao",
+          "type": 9
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "32:2969408372510959620",
+      "lastPropertyId": "10:2068495824972444048",
+      "name": "RecadoLoja",
+      "properties": [
+        {
+          "id": "1:8303088075863922403",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:3618027408809943083",
+          "name": "texto",
+          "type": 9
+        },
+        {
+          "id": "3:2606572833920169840",
+          "name": "prioridade",
+          "type": 9
+        },
+        {
+          "id": "4:2858042943299770113",
+          "name": "destinoTipo",
+          "type": 9
+        },
+        {
+          "id": "5:1866784530022821063",
+          "name": "destinoPerfil",
+          "type": 9
+        },
+        {
+          "id": "6:2507845288632178657",
+          "name": "criadoPorLogin",
+          "type": 9
+        },
+        {
+          "id": "7:3619039757755381207",
+          "name": "criadoPorNome",
+          "type": 9
+        },
+        {
+          "id": "8:3790618378262010776",
+          "name": "leiturasJson",
+          "type": 9
+        },
+        {
+          "id": "9:595822249918582795",
+          "name": "ativo",
+          "type": 1
+        },
+        {
+          "id": "10:2068495824972444048",
+          "name": "criadoEm",
+          "type": 10
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "30:8087683908323979464",
-  "lastIndexId": "47:7539215899859775418",
+  "lastEntityId": "32:2969408372510959620",
+  "lastIndexId": "48:2428882302797446316",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

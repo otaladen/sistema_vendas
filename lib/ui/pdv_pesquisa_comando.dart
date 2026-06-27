@@ -27,7 +27,8 @@ class PdvPesquisaComando {
     final quantidadeDireta = RegExp(r'^\s*(\d{1,3})\s+(.+)$').firstMatch(texto);
     if (quantidadeDireta != null) {
       final qtd = int.tryParse(quantidadeDireta.group(1)!);
-      final termo = quantidadeDireta.group(2)!.trim();
+      var termo = quantidadeDireta.group(2)!.trim();
+      termo = termo.replaceFirst(RegExp(r'^de\s+', caseSensitive: false), '');
       if (qtd != null && qtd > 0 && termo.isNotEmpty) {
         return PdvPesquisaComando(
           termoBusca: termo,

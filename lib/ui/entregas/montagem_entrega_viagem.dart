@@ -35,16 +35,9 @@ List<MontagemEntregaViagem> montagemViagensDoMotorista(
   List<Venda> entregas,
   String motoristaNome,
 ) {
-  final filtradas = entregas
-      .where((v) => nomeMotoristaEntrega(v) == motoristaNome)
-      .toList();
-  filtradas.sort((a, b) {
-    final oa = a.ordemEntrega;
-    final ob = b.ordemEntrega;
-    if (oa > 0 && ob > 0 && oa != ob) return oa.compareTo(ob);
-    return a.id.compareTo(b.id);
-  });
-  final blocos = blocosEntregaComCarretoAgrupado(filtradas);
+  final filtradas = filtrarVendasMotorista(entregas, motoristaNome);
+  final ordenadas = ordenarParadasMotoristaDia(filtradas);
+  final blocos = blocosEntregaComCarretoAgrupado(ordenadas);
   return blocos
       .map(
         (b) => MontagemEntregaViagem(

@@ -442,3 +442,19 @@ String textoBuscaCuringaProduto({
   if (apelidosNormalizados.isEmpty) return nomeNormalizado;
   return '$nomeNormalizado ${apelidosNormalizados.join(' ')}';
 }
+
+/// Dica curta abaixo do campo de busca (consulta PDV); null = sem helper.
+String? dicaBuscaContextual(String termoBruto) {
+  final termo = termoBruto.trim();
+  if (termo.isEmpty) return null;
+  if (termo.contains('%')) {
+    return 'Trechos: use % entre partes (ex.: tub%sod%25)';
+  }
+  if (consultaEanProvavelCompleto(termo) || consultaPareceCodigoBarras(termo)) {
+    return 'Codigo de barras — Enter confirma';
+  }
+  if (termo.length < 3) {
+    return 'Min. 3 caracteres ou escaneie EAN';
+  }
+  return null;
+}

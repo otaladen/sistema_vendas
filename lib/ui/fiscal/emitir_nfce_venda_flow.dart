@@ -7,6 +7,7 @@ import '../../data/sync/sync_cursor_storage.dart';
 import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
 import '../../domain/fiscal/abrir_danfe_focus.dart';
+import '../../domain/fiscal/caixa_fiscal_acao_helper.dart';
 import '../../domain/fiscal/fiscal_emissao_lock.dart';
 import '../../domain/fiscal/venda_documento_fiscal_mutex.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
@@ -110,10 +111,17 @@ class EmissaoNfceVendaResult {
 abstract final class EmitirNfceVendaFlow {
   EmitirNfceVendaFlow._();
 
-  static bool podeEmitir(Venda venda) {
+  static bool podeEmitir(Venda venda, {Cliente? cliente}) {
     if (venda.cancelada || venda.status != 'finalizada') return false;
     if (venda.itens.isEmpty) return false;
     if (VendaDocumentoFiscalMutex.bloqueiaNovaNfce(venda)) return false;
+    if (CaixaFiscalAcaoHelper.mensagemBloqueioNfceClienteCnpj(
+          cliente: cliente,
+          venda: venda,
+        ) !=
+        null) {
+      return false;
+    }
     if (venda.nfceEmissaoEmAndamento) return false;
     return true;
   }
@@ -150,12 +158,19 @@ abstract final class EmitirNfceVendaFlow {
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     var vendaAtual = deps.vendaRepository.obterPorId(venda.id) ?? venda;
+    final cliente = clienteDaVenda(vendaAtual, deps.clienteRepository);
 
     while (context.mounted) {
       vendaAtual = deps.vendaRepository.obterPorId(venda.id) ?? vendaAtual;
 
-      if (!podeEmitir(vendaAtual)) {
+      if (!podeEmitir(vendaAtual, cliente: cliente)) {
+        final bloqueioCnpj =
+            CaixaFiscalAcaoHelper.mensagemBloqueioNfceClienteCnpj(
+          cliente: cliente,
+          venda: vendaAtual,
+        );
         final bloqueio =
+            bloqueioCnpj ??
             VendaDocumentoFiscalMutex.mensagemBloqueioNovaNfce(vendaAtual);
         messenger.showSnackBar(
           SnackBar(

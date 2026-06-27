@@ -112,6 +112,7 @@ class LanSyncServerManager {
       final token = syncToken.trim();
       if (token.isNotEmpty) {
         env['SYNC_TOKEN'] = token;
+        env['SYNC_REQUIRE_TOKEN'] = '1';
       }
       final process = await Process.start(
         exe,

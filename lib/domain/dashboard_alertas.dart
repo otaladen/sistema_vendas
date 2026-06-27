@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/lista_compra_repository.dart';
 import '../data/app_config_repository.dart';
 import '../data/models/conta_pagar.dart';
 import '../data/objectbox.dart';
@@ -18,6 +19,7 @@ enum DashboardAlertaTipo {
   fiadoVenceHoje,
   entregaAtrasada,
   estoqueCritico,
+  listaCompraPendente,
   orcamentoAntigo,
   contaPagarVencida,
   backupAtrasado,
@@ -140,6 +142,24 @@ class DashboardAlertasService {
     }
 
     if (podeEstoque) {
+      final listaRepo = ListaCompraRepository(objectBox);
+      final listaAtivos = listaRepo.contarAtivos();
+      final listaUrgentes = listaRepo.contarAtivos(apenasUrgentes: true);
+      if (listaAtivos > 0) {
+        alertas.add(
+          DashboardAlerta(
+            tipo: DashboardAlertaTipo.listaCompraPendente,
+            titulo: 'Lista de compras',
+            detalhe: listaUrgentes > 0
+                ? '$listaAtivos item(ns) para comprar ($listaUrgentes urgente(s))'
+                : '$listaAtivos item(ns) para comprar',
+            icone: Icons.playlist_add_check_outlined,
+            destino: MainMenuDestino.estoque,
+            prioridade: listaUrgentes > 0 ? 22 : 28,
+          ),
+        );
+      }
+
       final critico = produtoRepository
           .listarTodos()
           .where((p) => p.estoqueReal < p.quantidadeMinima)

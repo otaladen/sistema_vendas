@@ -23,7 +23,6 @@ import 'relatorio_historico_fechamento_page.dart';
 import 'relatorio_horarios_pico_page.dart';
 import 'relatorio_metas_vendedores_page.dart';
 import 'relatorio_log_sistema_page.dart';
-import 'relatorio_orcamentos_abertos_page.dart';
 import 'relatorio_produtos_mais_vendidos_page.dart';
 import 'relatorio_saidas_produto_page.dart';
 import 'relatorio_tabela_precos_page.dart';
@@ -301,32 +300,6 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
               vendedorRepository: vd,
               produtoRepository: p,
               objectBox: p.objectBox,
-            ),
-          ),
-        ),
-      ),
-      _RelatorioHubItem(
-        categoriaId: 'vendas',
-        categoriaTitulo: 'Vendas e faturamento',
-        categoriaIcone: Icons.point_of_sale_outlined,
-        icon: Icons.description_outlined,
-        relatorioCor: AppRelatorioId.orcamentos,
-        titulo: 'Orcamentos em aberto',
-        subtitulo:
-            'Orcamentos ainda nao finalizados no caixa — valor em pipeline.',
-        palavrasChave: const [
-          'orcamento',
-          'aberto',
-          'pipeline',
-          'pendente',
-          'caixa',
-        ],
-        onTap: () => Navigator.push<void>(
-          context,
-          MaterialPageRoute<void>(
-            builder: (_) => RelatorioOrcamentosAbertosPage(
-              vendaRepository: v,
-              clienteRepository: c,
             ),
           ),
         ),

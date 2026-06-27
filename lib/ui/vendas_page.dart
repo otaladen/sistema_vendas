@@ -174,6 +174,7 @@ class VendasPage extends StatelessWidget {
                               vendedorRepository: vendedorRepository,
                               appConfigRepository: appConfigRepository,
                               printService: printService,
+                              usuarioLogado: u,
                               usuarioAtual: u.login,
                               podeCancelarVendas: podeCancelar,
                               podeLeituraParcialCaixa: UsuarioPermissaoHelper.tem(

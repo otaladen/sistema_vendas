@@ -62,14 +62,9 @@ class SyncApiClient {
   }
 
   Uri _uri(String path, [Map<String, String>? query]) {
-    final q = <String, String>{};
-    if (query != null) q.addAll(query);
-    if (_syncToken.isNotEmpty) {
-      q[SyncAuth.queryParam] = _syncToken;
-    }
     final u = Uri.parse('$_base$path');
-    if (q.isEmpty) return u;
-    return u.replace(queryParameters: {...u.queryParameters, ...q});
+    if (query == null || query.isEmpty) return u;
+    return u.replace(queryParameters: {...u.queryParameters, ...query});
   }
 
   Future<bool> health() async {
@@ -112,7 +107,7 @@ class SyncApiClient {
     if (!configurado) return null;
     try {
       final r =
-          await http.get(_uri('/sync/presence')).timeout(const Duration(seconds: 8));
+          await http.get(_uri('/sync/presence'), headers: _headersJson()).timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return null;
       final decoded = jsonDecode(r.body);
       if (decoded is! Map<String, dynamic>) return null;
@@ -134,9 +129,7 @@ class SyncApiClient {
             'deviceId': deviceId,
             'limit': '$limit',
           }),
-          headers: _syncToken.isNotEmpty
-              ? {SyncAuth.headerName: _syncToken}
-              : null,
+          headers: _headersJson(),
         )
         .timeout(const Duration(seconds: 120));
     if (r.statusCode == 401 || r.statusCode == 403) {
@@ -189,9 +182,7 @@ class SyncApiClient {
       final r = await http
           .get(
             _uri('/sync/pod/$fileName'),
-            headers: _syncToken.isNotEmpty
-                ? {SyncAuth.headerName: _syncToken}
-                : null,
+            headers: _headersJson(),
           )
           .timeout(const Duration(seconds: 60));
       if (r.statusCode != 200) return null;

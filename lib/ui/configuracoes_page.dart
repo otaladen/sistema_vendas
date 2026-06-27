@@ -84,6 +84,12 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _horarioInconsistente = false;
   String _diagnosticoHorario = '';
   bool _permitirVendaSemEstoque = true;
+  bool _pdvExigirVendedor = false;
+  bool _pdvBalcaoRapido = true;
+  bool _pdvCheckoutDireto = true;
+  bool _pdvPularDialogOrcamentoSalvo = true;
+  bool _caixaFiscalNaoBloqueante = true;
+  final _caixaLimiteOrcamentosController = TextEditingController(text: '120');
   bool _mostrarCampoDescontoCaixa = true;
   bool _exigirAutorizacaoSegundaViaCupom = true;
   bool _umCaixaAbertoPorLoja = true;
@@ -151,6 +157,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _fiscalTokenController.dispose();
     _fiscalCnpjController.dispose();
     _fiscalIeController.dispose();
+    _caixaLimiteOrcamentosController.dispose();
     super.dispose();
   }
 
@@ -275,6 +282,13 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _impressoraPadrao = config.impressoraPadrao;
       _logoPath = config.logoPath;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
+      _pdvExigirVendedor = config.pdvExigirVendedor;
+      _pdvBalcaoRapido = config.pdvBalcaoRapido;
+      _pdvCheckoutDireto = config.pdvCheckoutDireto;
+      _pdvPularDialogOrcamentoSalvo = config.pdvPularDialogOrcamentoSalvo;
+      _caixaFiscalNaoBloqueante = config.caixaFiscalNaoBloqueante;
+      _caixaLimiteOrcamentosController.text =
+          '${config.caixaLimiteOrcamentosPendentes}';
       _mostrarCampoDescontoCaixa = config.mostrarCampoDescontoCaixa;
       _exigirAutorizacaoSegundaViaCupom =
           config.exigirAutorizacaoSegundaViaCupom;
@@ -508,6 +522,15 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               ) ??
               120,
           permitirVendaSemEstoque: _permitirVendaSemEstoque,
+          pdvExigirVendedor: _pdvExigirVendedor,
+          pdvBalcaoRapido: _pdvBalcaoRapido,
+          pdvCheckoutDireto: _pdvCheckoutDireto,
+          pdvPularDialogOrcamentoSalvo: _pdvPularDialogOrcamentoSalvo,
+          caixaFiscalNaoBloqueante: _caixaFiscalNaoBloqueante,
+          caixaLimiteOrcamentosPendentes: int.tryParse(
+                _caixaLimiteOrcamentosController.text.trim(),
+              ) ??
+              120,
           whatsappApiVersion: _whatsApiVersionController.text,
           whatsappPhoneNumberId: _whatsPhoneIdController.text,
           whatsappAccessToken: _whatsTokenController.text,
@@ -1583,6 +1606,84 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                           'Ativo por padrao. Vendas e finalizacao no caixa nunca '
                           'bloqueiam por falta de estoque (fisico pode ficar negativo). '
                           'Desative apenas para avisar no PDV ao adicionar produto.',
+                        ),
+                      ),
+                      const Divider(height: 28),
+                      Text(
+                        'Ponto de venda',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _pdvExigirVendedor,
+                        onChanged: (value) {
+                          setState(() => _pdvExigirVendedor = value);
+                        },
+                        title: const Text('Exigir vendedor no PDV'),
+                        subtitle: const Text(
+                          'Se ninguem estiver selecionado no topo da tela, '
+                          'obriga informar quem esta vendendo antes de enviar ao caixa.',
+                        ),
+                      ),
+                      const Divider(height: 28),
+                      Text(
+                        'Velocidade do atendimento',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _pdvBalcaoRapido,
+                        onChanged: (value) {
+                          setState(() => _pdvBalcaoRapido = value);
+                        },
+                        title: const Text('PDV balcao rapido'),
+                        subtitle: const Text(
+                          'Adiciona produto com qtd 1 sem dialog (retirada, sem carreto/misto).',
+                        ),
+                      ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _pdvCheckoutDireto,
+                        onChanged: (value) {
+                          setState(() => _pdvCheckoutDireto = value);
+                        },
+                        title: const Text('PDV checkout direto'),
+                        subtitle: const Text(
+                          'Envia ao caixa sem abrir o dialog de fechamento quando os dados ja estao no cabecalho.',
+                        ),
+                      ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _pdvPularDialogOrcamentoSalvo,
+                        onChanged: (value) {
+                          setState(() => _pdvPularDialogOrcamentoSalvo = value);
+                        },
+                        title: const Text('PDV: so snackbar apos salvar'),
+                        subtitle: const Text(
+                          'Nao abre dialog de impressao/PDF apos salvar o orcamento.',
+                        ),
+                      ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: _caixaFiscalNaoBloqueante,
+                        onChanged: (value) {
+                          setState(() => _caixaFiscalNaoBloqueante = value);
+                        },
+                        title: const Text('Caixa: fiscal em segundo plano'),
+                        subtitle: const Text(
+                          'Libera a fila para o proximo cliente enquanto NFC-e ou cupom emite em paralelo.',
+                        ),
+                      ),
+                      TextField(
+                        controller: _caixaLimiteOrcamentosController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Limite de orcamentos pendentes no caixa',
+                          hintText: '120',
+                          helperText:
+                              'Entre 20 e 500. Reduz memoria com historico grande.',
                         ),
                       ),
                       const SizedBox(height: 12),

@@ -6,6 +6,7 @@ import '../domain/entrega_filtro_util.dart';
 import '../data/conferencia_carga_repository.dart';
 import '../domain/entregas/conferencia_carga_validacao.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/operacao_permissao_guard.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/limite_credito_helper.dart';
 import '../config/fiscal_config.dart';
@@ -31,6 +32,7 @@ import '../model/linha_devolucao_entrada.dart';
 import '../model/linha_troca_saida.dart';
 import '../model/produto.dart';
 import '../model/registro_devolucao.dart';
+import '../model/usuario_sistema.dart';
 import '../model/venda.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
@@ -234,6 +236,18 @@ class ItemVendaInput {
   final String tipoEntregaItem;
   final int promocaoId;
   final String promocaoNomeSnapshot;
+}
+
+void validarItemVendaInput(ItemVendaInput input) {
+  if (input.produtoId <= 0) {
+    throw ArgumentError('Produto invalido no item da venda.');
+  }
+  if (input.quantidade <= 0) {
+    throw ArgumentError('Quantidade deve ser maior que zero.');
+  }
+  if (input.precoUnitario < 0) {
+    throw ArgumentError('Preco unitario nao pode ser negativo.');
+  }
 }
 
 ItemVenda _criarItemVendaFromInput(
@@ -599,6 +613,24 @@ class VendaRepository {
     if (ultimas.isEmpty) return null;
     final v = ultimas.first;
     return VendaFinalizacaoCaixaHelper.momentoFinalizacao(v);
+  }
+
+  /// Orcamento pendente pelo numero exibido ao cliente.
+  Venda? buscarOrcamentoPendentePorNumero(int numero) {
+    if (numero <= 0) return null;
+    final query = _db.vendaBox
+        .query(
+          Venda_.status
+              .equals('orcamento')
+              .and(Venda_.cancelada.equals(false))
+              .and(Venda_.numeroOrcamento.equals(numero)),
+        )
+        .build();
+    try {
+      return query.findFirst();
+    } finally {
+      query.close();
+    }
   }
 
   /// Segunda via: busca por numero do orcamento ou id interno da venda.
@@ -1159,6 +1191,52 @@ class VendaRepository {
     return alvo.length;
   }
 
+  /// Compras finalizadas do cliente com o produto no periodo (consulta PDV).
+  ({int comprasNoPeriodo, int quantidadeLiquida, DateTime? ultimaCompraEm})
+      resumoComprasClienteProduto(
+    int clienteId,
+    int produtoId, {
+    int dias = 90,
+  }) {
+    if (clienteId <= 0 || produtoId <= 0) {
+      return (
+        comprasNoPeriodo: 0,
+        quantidadeLiquida: 0,
+        ultimaCompraEm: null,
+      );
+    }
+    final fim = DateTime.now().toUtc();
+    final inicio = fim.subtract(Duration(days: dias));
+    final vendas = listarComprasFinalizadasPorCliente(
+      clienteId,
+      inicio: inicio,
+      fim: fim,
+    );
+    var compras = 0;
+    var qtd = 0;
+    DateTime? ultima;
+    for (final venda in vendas) {
+      var qtdNaVenda = 0;
+      for (final item in venda.itens) {
+        if (item.produto.targetId != produtoId) continue;
+        final liquida = item.quantidade - item.quantidadeDevolvida;
+        if (liquida <= 0) continue;
+        qtdNaVenda += liquida;
+      }
+      if (qtdNaVenda <= 0) continue;
+      compras++;
+      qtd += qtdNaVenda;
+      if (ultima == null || venda.data.isAfter(ultima)) {
+        ultima = venda.data;
+      }
+    }
+    return (
+      comprasNoPeriodo: compras,
+      quantidadeLiquida: qtd,
+      ultimaCompraEm: ultima,
+    );
+  }
+
   List<Venda> listarComprasFinalizadasPorCliente(
     int clienteId, {
     DateTime? inicio,
@@ -1469,6 +1547,9 @@ class VendaRepository {
     if (itensInput.isEmpty) {
       throw ArgumentError('A venda deve conter ao menos um item.');
     }
+    for (final input in itensInput) {
+      validarItemVendaInput(input);
+    }
 
     final novoId = _db.store.runInTransaction(TxMode.write, () {
       final venda = Venda(
@@ -1542,6 +1623,9 @@ class VendaRepository {
   }) {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
+    }
+    for (final input in itensInput) {
+      validarItemVendaInput(input);
     }
     var descontoRegistrado = 0.0;
     var numeroOrcamentoRegistrado = 0;
@@ -1766,7 +1850,8 @@ class VendaRepository {
     return novoId;
   }
 
-  /// Agrupa entregas de carreto (mesmo cliente) para a equipe ver como um unico carregamento.
+  /// Agrupa entregas de carreto na mesma viagem do caminhao (carga + ordem das paradas).
+  /// Clientes podem ser diferentes; cada nota continua independente (fiado, POD, status).
   void definirGrupoEntregaLogistica(
     Set<int> vendaIds, {
     String motoristaEntrega = '',
@@ -1793,16 +1878,11 @@ class VendaRepository {
           );
         }
       }
-      final clienteRef = vendas.first.cliente.targetId;
-      if (clienteRef == 0) {
-        throw StateError(
-          'Vendas sem cliente nao podem ser agrupadas (cadastre o cliente).',
-        );
-      }
       for (final v in vendas) {
-        if (v.cliente.targetId != clienteRef) {
+        if (v.cliente.targetId <= 0) {
           throw StateError(
-            'Agrupar na mesma carga exige o mesmo cliente em todas as notas.',
+            'Pedido ${v.numeroOrcamento} sem cliente cadastrado. '
+            'Cadastre o cliente antes de agrupar na viagem.',
           );
         }
       }
@@ -1872,6 +1952,50 @@ class VendaRepository {
       }
     });
     _notificarRedeAposEscrita(vendaIds: vendaIds);
+  }
+
+  static String _nomeMotoristaEntregaVenda(Venda venda) {
+    if (venda.motoristaEntrega.trim().isNotEmpty) {
+      return venda.motoristaEntrega.trim();
+    }
+    for (final linha in venda.observacaoEntrega.split('\n')) {
+      final limpa = linha.trim();
+      if (limpa.startsWith('Motorista:')) {
+        final nome = limpa.substring('Motorista:'.length).trim();
+        if (nome.isNotEmpty) return nome;
+      }
+    }
+    return '';
+  }
+
+  /// Define a sequencia de paradas (1..n) do motorista no dia (sem agrupar viagem).
+  void atualizarSequenciaEntregaMotorista(
+    String motoristaEntrega,
+    List<int> vendaIdsOrdenados,
+  ) {
+    final alvo = motoristaEntrega.trim().toLowerCase();
+    if (alvo.isEmpty) {
+      throw StateError('Informe o motorista.');
+    }
+    final ids = List<int>.from(vendaIdsOrdenados);
+    if (ids.length < 2) return;
+    _db.store.runInTransaction(TxMode.write, () {
+      for (var i = 0; i < ids.length; i++) {
+        final v = _db.vendaBox.get(ids[i]);
+        if (v == null) {
+          throw StateError('Venda ${ids[i]} nao encontrada.');
+        }
+        final mot = _nomeMotoristaEntregaVenda(v).toLowerCase();
+        if (mot.isEmpty || mot != alvo) {
+          throw StateError(
+            'Pedido ${v.numeroOrcamento} nao pertence a este motorista.',
+          );
+        }
+        v.ordemEntrega = i + 1;
+        _db.vendaBox.put(v);
+      }
+    });
+    _notificarRedeAposEscrita(vendaIds: ids);
   }
 
   /// Define a sequencia de paradas (1..n) no mesmo [grupoEntregaFreteId].
@@ -1974,6 +2098,9 @@ class VendaRepository {
   }) {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
+    }
+    for (final input in itensInput) {
+      validarItemVendaInput(input);
     }
     var descontoRegistrado = 0.0;
     var numeroOrcamentoRegistrado = 0;
@@ -2980,8 +3107,10 @@ class VendaRepository {
     }
   }
 
-  int contarComNfcePendenteEmissao() =>
-      listarComNfcePendenteEmissao(limite: 10000).length;
+  int contarComNfcePendenteEmissao() {
+    final lista = listarComNfcePendenteEmissao(limite: 500);
+    return lista.length;
+  }
 
   /// NFC-e aguardando SEFAZ no periodo da venda (nao entra no ZIP do fechamento).
   List<Venda> listarNfcePendenteFocusNoPeriodo({
@@ -3165,6 +3294,8 @@ class VendaRepository {
       statusEntrega: filtro.statusEntrega,
       inicio: filtro.inicio,
       fim: filtro.fim,
+      dataMarcadaInicio: filtro.dataMarcadaInicio,
+      dataMarcadaFim: filtro.dataMarcadaFim,
     );
     return _aplicarFiltrosEntregasEmMemoria(candidatas, filtro);
   }
@@ -3194,6 +3325,8 @@ class VendaRepository {
       statusEntrega: filtroContagem.statusEntrega,
       inicio: filtroContagem.inicio,
       fim: filtroContagem.fim,
+      dataMarcadaInicio: filtroContagem.dataMarcadaInicio,
+      dataMarcadaFim: filtroContagem.dataMarcadaFim,
     );
     final paraContagem =
         _aplicarFiltrosEntregasEmMemoria(baseContagem, filtroContagem);
@@ -3208,6 +3341,8 @@ class VendaRepository {
       statusEntrega: filtroLista.statusEntrega,
       inicio: filtroLista.inicio,
       fim: filtroLista.fim,
+      dataMarcadaInicio: filtroLista.dataMarcadaInicio,
+      dataMarcadaFim: filtroLista.dataMarcadaFim,
     );
     final lista = _aplicarFiltrosEntregasEmMemoria(candidatasLista, filtroLista);
     lista.sort(_ordenarEntregasPorPrioridadeEData);
@@ -3223,6 +3358,8 @@ class VendaRepository {
     required String statusEntrega,
     DateTime? inicio,
     DateTime? fim,
+    DateTime? dataMarcadaInicio,
+    DateTime? dataMarcadaFim,
   }) {
     var cond = Venda_.status
         .equals('finalizada')
@@ -3242,6 +3379,18 @@ class VendaRepository {
     }
     if (fimUtc != null) {
       cond = cond.and(Venda_.data.lessOrEqualDate(fimUtc));
+    }
+    if (dataMarcadaInicio != null) {
+      cond = cond.and(
+        Venda_.dataEntregaMarcada.greaterOrEqualDate(
+          dataMarcadaInicio.toUtc(),
+        ),
+      );
+    }
+    if (dataMarcadaFim != null) {
+      cond = cond.and(
+        Venda_.dataEntregaMarcada.lessOrEqualDate(dataMarcadaFim.toUtc()),
+      );
     }
 
     final query = _db.vendaBox
@@ -3267,10 +3416,11 @@ class VendaRepository {
     final vendedor = filtro.filtroVendedor.trim().toLowerCase();
 
     var out = candidatas.where((venda) {
-      if (!EntregaFiltroUtil.atendeFiltroDataMarcada(
-        venda,
-        filtro.filtroDataMarcada,
-      )) {
+      if (!filtro.dataMarcadaFiltradaNoBanco &&
+          !EntregaFiltroUtil.atendeFiltroDataMarcada(
+            venda,
+            filtro.filtroDataMarcada,
+          )) {
         return false;
       }
       if (termo.isNotEmpty &&
@@ -3821,11 +3971,17 @@ class VendaRepository {
   }
 
   int _proximoNumeroOrcamento() {
-    final orcamentos = listarTodas().map((v) => v.numeroOrcamento);
-    final maior = orcamentos.isEmpty
-        ? 0
-        : orcamentos.reduce((a, b) => a > b ? a : b);
-    return maior + 1;
+    final query = _db.vendaBox
+        .query()
+        .order(Venda_.numeroOrcamento, flags: Order.descending)
+        .build();
+    try {
+      query.limit = 1;
+      final maior = query.findFirst()?.numeroOrcamento ?? 0;
+      return maior + 1;
+    } finally {
+      query.close();
+    }
   }
 
   double _calcularBrutoOrcamento(int vendaId, double valorFrete) {
@@ -4145,7 +4301,11 @@ class VendaRepository {
     String motivo = '',
     String canceladaPor = '',
     bool omitirAuditoriaIndividual = false,
+    UsuarioSistema? usuarioExecutor,
   }) {
+    if (usuarioExecutor != null) {
+      OperacaoPermissaoGuard.exigirCancelarVendas(usuarioExecutor);
+    }
     final motivoLimpo = motivo.trim();
     final usuarioCancelamento = canceladaPor.trim();
     var statusAntes = '';

@@ -33,6 +33,30 @@ class KitOrcamentoRepository {
     return k;
   }
 
+  /// Kits ativos que contem o produto (consulta PDV / sugestao de composicao).
+  List<KitOrcamento> listarAtivosComProduto(int produtoId, {int limite = 3}) {
+    if (produtoId <= 0 || limite <= 0) return const [];
+    final q = _db.kitOrcamentoItemBox
+        .query(KitOrcamentoItem_.produto.equals(produtoId))
+        .build();
+    try {
+      final vistos = <int>{};
+      final out = <KitOrcamento>[];
+      for (final linha in q.find()) {
+        final kitId = linha.kit.targetId;
+        if (kitId <= 0 || vistos.contains(kitId)) continue;
+        final kit = obterPorId(kitId);
+        if (kit == null || !kit.ativo) continue;
+        vistos.add(kitId);
+        out.add(kit);
+        if (out.length >= limite) break;
+      }
+      return out;
+    } finally {
+      q.close();
+    }
+  }
+
   void salvar(KitOrcamento kit, List<KitOrcamentoItem> itens) {
     if (kit.nome.trim().isEmpty) {
       throw ArgumentError('Nome do kit e obrigatorio.');

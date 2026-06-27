@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'seletor_menu_modo_app.dart';
 import 'seletor_tema_app.dart';
 
 /// Barra inferior com Temas, usuario e data/hora (referencia ao ERP legado).
@@ -64,7 +65,9 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Row(
               children: [
-                const SeletorTemaApp(),
+                const SeletorMenuModoApp(compacto: true),
+                const SizedBox(width: 2),
+                const SeletorTemaApp(compacto: true),
                 const Spacer(),
                 if (login != null && login.isNotEmpty)
                   Flexible(

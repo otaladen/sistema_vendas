@@ -1653,8 +1653,16 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                     },
                                     itemBuilder: (context) {
                                       final temNfce = v.nfceEmitida;
+                                      final clienteVenda =
+                                          EmitirNfceVendaFlow.clienteDaVenda(
+                                        v,
+                                        widget.clienteRepository,
+                                      );
                                       final podeEmitirNfce =
-                                          EmitirNfceVendaFlow.podeEmitir(v);
+                                          EmitirNfceVendaFlow.podeEmitir(
+                                        v,
+                                        cliente: clienteVenda,
+                                      );
                                       final temNfe55 = widget.vendaRepository
                                               .obterNfe55AutorizadaPorVenda(
                                             v.id,

@@ -9,10 +9,14 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../domain/entrega_venda_helper.dart';
+import '../domain/pdv_balcao_rapido_helper.dart';
 import '../domain/quantidade_venda_util.dart';
 import '../domain/troca_com_nota_pdv_intent.dart';
 import '../domain/limite_credito_helper.dart';
 import '../domain/pagamento_orcamento.dart';
+import '../domain/pdv_tabela_preco_util.dart';
+import '../domain/pdv_consulta_multi_deposito_util.dart';
+import '../domain/pdv_kit_orcamento_insercao.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../domain/permissao_usuario.dart';
@@ -22,6 +26,8 @@ import '../domain/produto_limite_desconto_pdv.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../data/app_config_repository.dart';
+import '../domain/lista_compra_item_constantes.dart';
+import '../data/lista_compra_repository.dart';
 import '../data/cliente_repository.dart';
 import '../data/kit_orcamento_repository.dart';
 import '../data/promocao_repository.dart';
@@ -50,6 +56,7 @@ import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'pdv_consulta_preview_panel.dart';
 import 'pdv_consulta_produtos_page.dart';
+import 'widgets/anotar_lista_compra_dialog.dart';
 import 'pdv_pesquisa_comando.dart';
 import 'produto_detalhe_venda_page.dart';
 import 'layout/app_layout.dart';
@@ -189,7 +196,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   /// Linha selecionada no carrinho (navegacao com setas).
   int? _indiceLinhaCarrinho;
 
-  /// Tabela de preco ativa (carrinho inteiro + novos itens; F1/F3).
+  /// Tabela de preco para novos itens (F1–F3 sem linha selecionada).
   String _precoListaAtivo = 'preco1';
   String _formaPagamentoSelecionada = 'dinheiro';
   int _parcelasSelecionadas = 1;
@@ -269,6 +276,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       _carrinho[index].tipoEntregaItem = EntregaVendaHelper.proximoTipoItem(
         _carrinho[index].tipoEntregaItem,
       );
+    });
+  }
+
+  void _alternarTabelaPrecoLinhaCarrinho(int index) {
+    if (index < 0 || index >= _carrinho.length) return;
+    setState(() {
+      final linha = _carrinho[index];
+      final proxima = PdvTabelaPrecoUtil.proxima(linha.precoTipo);
+      _aplicarTabelaPrecoNaLinha(linha, proxima);
+      _promoCarrinho.aplicarRegrasCarrinho(
+        _carrinho,
+        dataReferencia: DateTime.now(),
+        segmentoCliente: _segmentoClienteAtivo,
+      );
+      _indiceLinhaCarrinho = index;
     });
   }
 
@@ -361,6 +383,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   DateTime? _dataEntregaMarcada;
   bool _permitirVendaSemEstoque = false;
   double _maxDescontoPercentualPdv = 15;
+  bool _pdvExigirVendedor = false;
+  bool _pdvBalcaoRapido = true;
+  bool _pdvCheckoutDireto = true;
+  bool _pdvPularDialogOrcamentoSalvo = true;
 
   /// `percentual` | `valor` — desconto sempre limitado ao configurado (% sobre subtotal).
   String _tipoDescontoPdV = 'percentual';
@@ -477,6 +503,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
     setState(() {
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
+      _pdvExigirVendedor = config.pdvExigirVendedor;
+      _pdvBalcaoRapido = config.pdvBalcaoRapido;
+      _pdvCheckoutDireto = config.pdvCheckoutDireto;
+      _pdvPularDialogOrcamentoSalvo = config.pdvPularDialogOrcamentoSalvo;
       _maxDescontoPercentualPdv = widget.usuarioLogado.tetoDescontoPercentualPdv(
         config.maxDescontoPercentualPdv,
       );
@@ -735,27 +765,54 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
   }
 
+  Future<void> _aplicarProdutoBuscaInteligente(
+    Produto produto,
+    PdvPesquisaComando comando,
+  ) async {
+    _registrarProdutoRecente(produto);
+    final qtd = (comando.quantidadeDireta ?? 1).toDouble();
+    if (comando.quantidadeDireta != null || comando.adicaoDireta) {
+      await _adicionarComQuantidade(
+        produto,
+        qtd,
+        precoTipo: _precoListaAtivo,
+        tipoEntregaItem: _tipoEntregaSelecionada,
+      );
+      return;
+    }
+    if (_pdvBalcaoRapido &&
+        PdvBalcaoRapidoHelper.podeAdicionarDireto(
+          carrinhoTemCarreto: _carrinhoTemItemCarreto,
+          tipoEntregaSelecionada: _tipoEntregaSelecionada,
+          pagamentoMisto: _pagamentoMistoPdV,
+          edicaoOrcamento: _orcamentoEmEdicaoId != null,
+        )) {
+      await _adicionarComQuantidade(
+        produto,
+        1,
+        precoTipo: _precoListaAtivo,
+        tipoEntregaItem: _tipoEntregaSelecionada,
+      );
+      return;
+    }
+    await _adicionarAoOrcamento(produto);
+  }
+
   Future<void> _processarEntradaPesquisaPdv() async {
     if (!mounted) return;
     final comando = PdvPesquisaComando.parse(_pesquisaController.text);
     final termo = comando.termoBusca;
     if (termo.isNotEmpty) {
-      final porBarras = widget.produtoRepository.resolverLeitorCodigoBarras(
+      final resolvido = widget.produtoRepository.resolverPesquisaPdv(
         termo,
+        clienteId: _clienteSelecionadoId,
       );
-      if (porBarras != null) {
+      if (resolvido.deveAutoSelecionar && resolvido.produtoAuto != null) {
         _pesquisaController.clear();
-        _registrarProdutoRecente(porBarras);
-        final qtd = comando.quantidadeDireta ?? 1;
-        if (comando.adicaoDireta || comando.quantidadeDireta != null) {
-          await _adicionarComQuantidade(
-            porBarras,
-            qtd.toDouble(),
-            precoTipo: _precoListaAtivo,
-          );
-        } else {
-          await _adicionarAoOrcamento(porBarras);
-        }
+        await _aplicarProdutoBuscaInteligente(
+          resolvido.produtoAuto!,
+          comando,
+        );
         _voltarFocoParaPesquisa();
         return;
       }
@@ -766,8 +823,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   Future<void> _abrirConsultaProdutos() async {
     if (!mounted) return;
     final texto = _pesquisaController.text;
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!mounted) return;
 
-    final result = await Navigator.of(context).push<PdvConsultaProdutoResult>(
+    final result = await Navigator.of(context, rootNavigator: true)
+        .push<PdvConsultaProdutoResult>(
       MaterialPageRoute(
         fullscreenDialog: true,
         builder: (ctx) => PdvConsultaProdutosPage(
@@ -788,6 +848,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             segmentoCliente: _segmentoClienteAtivo,
           ),
           quantidadeNoOrcamentoDe: _quantidadeProdutoNoCarrinho,
+          criadoPorListaCompra: widget.usuarioLogado.login,
+          kitOrcamentoRepository: _kitOrcamentoRepo,
+          mostrarMargemGerente: UsuarioPermissaoHelper.tem(
+            widget.usuarioLogado,
+            PermissaoUsuario.verCustoMargem,
+          ),
+          margemMinimaPadrao: config.margemMinimaPercentualPadrao,
+          rotulosDeposito: const PdvConsultaDepositoRotulos(),
         ),
       ),
     );
@@ -798,7 +866,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
     if (result == null) return;
 
-    _definirTabelaPrecoPdv(result.precoListaAtivo);
+    if (result.inserirKit) {
+      await _inserirKitPorId(
+        result.kitInserirId!,
+        result.quantidadeKitsInserir!,
+      );
+      return;
+    }
+
+    setState(() {
+      _precoListaAtivo =
+          PdvTabelaPrecoUtil.normalizar(result.precoListaAtivo);
+    });
     _registrarProdutoRecente(result.produto);
 
     if (result.adicaoDireta) {
@@ -1042,6 +1121,31 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _irParaPesquisaProdutos();
   }
 
+  void _snackbarSemEstoqueComOpcaoCompra(Produto produto) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Sem estoque de ${produto.nome}.'),
+        action: SnackBarAction(
+          label: 'Anotar compra',
+          onPressed: () {
+            final repo =
+                ListaCompraRepository(widget.produtoRepository.objectBox);
+            mostrarAnotarListaCompraDialog(
+              context,
+              repository: repo,
+              produto: produto,
+              quantidadeInicial: 1,
+              origem: ListaCompraItemOrigem.vendaPerdida,
+              criadoPor: widget.usuarioLogado.login,
+              urgente: true,
+              observacaoInicial: 'Cliente solicitou no PDV',
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _adicionarComQuantidade(
     Produto produtoIn,
     double quantidadeVenda, {
@@ -1137,9 +1241,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
       final disp = fresh.estoqueLivreParaVenda;
       if (disp <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sem estoque de ${produto.nome}.')),
-        );
+        _snackbarSemEstoqueComOpcaoCompra(produto);
         return;
       }
       final jaNoCarrinho = _quantidadeProdutoNoCarrinho(produto.id);
@@ -1189,6 +1291,43 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _aplicarDescontoCreditoTrocaComNotaSePossivel();
     _registrarProdutoRecente(produto);
     _voltarFocoParaPesquisa();
+  }
+
+  Future<void> _inserirKitPorId(int kitId, int quantidadeKits) async {
+    if (kitId <= 0 || quantidadeKits <= 0) return;
+
+    final montada = PdvKitOrcamentoInsercaoUtil.montar(
+      kitRepository: _kitOrcamentoRepo,
+      produtoRepository: widget.produtoRepository,
+      kitId: kitId,
+      quantidadeKits: quantidadeKits,
+    );
+
+    if (montada == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kit invalido ou sem itens ativos para inserir.'),
+        ),
+      );
+      return;
+    }
+
+    for (final linha in montada.linhas) {
+      await _adicionarComQuantidade(linha.produto, linha.quantidade);
+    }
+
+    if (!mounted) return;
+    if (montada.itensIgnorados > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${montada.itensIgnorados} item(ns) do kit '
+            '"${montada.nomeKit}" ignorados (produto inativo ou removido).',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _inserirKitNoOrcamento() async {
@@ -1288,35 +1427,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       return;
     }
 
-    final completo = _kitOrcamentoRepo.obterPorId(escolhido.id);
-    if (completo == null || !mounted) {
-      return;
-    }
-    final itens = completo.itens.toList()
-      ..sort((a, b) => a.ordem.compareTo(b.ordem));
-
-    var ignorados = 0;
-    for (final it in itens) {
-      final pid = it.produto.targetId;
-      final p = pid != 0 ? widget.produtoRepository.obterPorId(pid) : null;
-      if (p == null || !p.ativo) {
-        ignorados++;
-        continue;
-      }
-      final q = it.quantidade * mult;
-      await _adicionarComQuantidade(p, q.toDouble());
-    }
-
-    if (!mounted) return;
-    if (ignorados > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '$ignorados item(ns) do kit ignorados (produto inativo ou removido).',
-          ),
-        ),
-      );
-    }
+    await _inserirKitPorId(escolhido.id, mult);
   }
 
   void _ajustarIndiceAposRemoverCarrinho(int removido) {
@@ -1374,6 +1485,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         _ajustarIndiceAposRemoverCarrinho(index);
       } else {
         item.quantidade = nova;
+        _recalcularPrecoLinhaCarrinho(item);
+        _promoCarrinho.aplicarRegrasCarrinho(
+          _carrinho,
+          dataReferencia: DateTime.now(),
+          segmentoCliente: _segmentoClienteAtivo,
+        );
       }
     });
   }
@@ -1422,6 +1539,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
     if (event.logicalKey == LogicalKeyboardKey.keyE) {
       _alternarTipoEntregaLinhaCarrinho(idx);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyT) {
+      _alternarTabelaPrecoLinhaCarrinho(idx);
       return KeyEventResult.handled;
     }
     if (ctrl && event.logicalKey == LogicalKeyboardKey.keyD) {
@@ -1483,6 +1604,71 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     return _vendedoresAtivos.where((v) => v.id == id).firstOrNull;
   }
 
+  /// Quando [pdvExigirVendedor] esta ativo, abre dialogo para escolher vendedor.
+  /// Retorna `false` se o usuario cancelar ou nao houver vendedores ativos.
+  Future<bool> _garantirVendedorPdvObrigatorio() async {
+    if (!_pdvExigirVendedor) return true;
+    if (_vendedorSelecionadoPdv() != null) return true;
+
+    if (_vendedoresAtivos.isEmpty) {
+      _carregarDadosIniciais();
+    }
+    final vendedoresAtivos = _vendedoresAtivos;
+    if (vendedoresAtivos.isEmpty) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Nenhum vendedor ativo cadastrado. Cadastre em Cadastros → Vendedores.',
+          ),
+        ),
+      );
+      return false;
+    }
+
+    if (vendedoresAtivos.length == 1) {
+      _vendedorSelecionadoId = vendedoresAtivos.first.id;
+      if (!mounted) return false;
+      if (_checkoutDialogAberto) {
+        _checkoutDialogSetState?.call(() {});
+      } else {
+        setState(() {});
+      }
+      return true;
+    }
+
+    int? vendedorSelecionadoId;
+    final confirmar = await showDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return _DialogoSelecionarVendedorPdv(
+          vendedoresAtivos: vendedoresAtivos,
+          pesquisarVendedores: (termo) => widget.vendedorRepository
+              .pesquisar(termo)
+              .where((v) => v.ativo)
+              .take(60)
+              .toList(),
+          onConfirmar: (id) {
+            vendedorSelecionadoId = id;
+            Navigator.pop(dialogContext, true);
+          },
+          onCancelar: () => Navigator.pop(dialogContext, false),
+        );
+      },
+    );
+    if (confirmar != true || vendedorSelecionadoId == null) return false;
+    if (!mounted) return false;
+    _vendedorSelecionadoId = vendedorSelecionadoId;
+    if (_checkoutDialogAberto) {
+      _checkoutDialogSetState?.call(() {});
+    } else {
+      setState(() {});
+    }
+    return true;
+  }
+
   String _rotuloCurtoVendedorPdV(Vendedor? vendedor) {
     if (vendedor == null) return 'Vendedor';
     final nome = vendedor.apelido.trim().isNotEmpty
@@ -1500,10 +1686,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final itens = <DropdownMenuItem<int?>>[
-      const DropdownMenuItem<int?>(
-        value: null,
-        child: Text('Sem vendedor'),
-      ),
+      if (!_pdvExigirVendedor)
+        const DropdownMenuItem<int?>(
+          value: null,
+          child: Text('Sem vendedor'),
+        ),
       ..._vendedoresAtivos.map(
         (v) => DropdownMenuItem<int?>(
           value: v.id,
@@ -1516,8 +1703,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     ];
 
     final vendedorAtual = _vendedorSelecionadoPdv();
+    final semVendedorObrigatorio = _pdvExigirVendedor && vendedorAtual == null;
     final tooltip = vendedorAtual == null
-        ? 'Vendedor da venda (opcional)'
+        ? (_pdvExigirVendedor
+            ? 'Vendedor (obrigatorio)'
+            : 'Vendedor da venda (opcional)')
         : _rotuloItemVendedorPdV(vendedorAtual);
 
     return FocusTraversalOrder(
@@ -1533,7 +1723,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           color: scheme.surface.withValues(alpha: 0.35),
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: scheme.outlineVariant.withValues(alpha: 0.45),
+            color: semVendedorObrigatorio
+                ? scheme.error.withValues(alpha: 0.75)
+                : scheme.outlineVariant.withValues(alpha: 0.45),
+            width: semVendedorObrigatorio ? 1.5 : 1,
           ),
         ),
         child: Padding(
@@ -1555,8 +1748,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               ),
               borderRadius: BorderRadius.circular(6),
               hint: Text(
-                'Vendedor',
-                style: theme.textTheme.labelSmall,
+                _pdvExigirVendedor ? 'Vendedor *' : 'Vendedor',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: semVendedorObrigatorio ? scheme.error : null,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
               items: itens,
@@ -1591,8 +1786,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       order: const NumericFocusOrder(2),
       child: Tooltip(
         message:
-            'Tabela de preco (carrinho e novos itens): '
-            '${_rotuloCurtoPrecoListaCabecalhoPdV(_precoListaAtivo)} (F1–F3)',
+            'Tabela para os proximos produtos'
+            ' (${_rotuloCurtoPrecoListaCabecalhoPdV(_precoListaAtivo)}). '
+            'Nao altera itens ja no carrinho — use T ou F1–F3 com linha selecionada.',
         waitDuration: const Duration(milliseconds: 400),
         child: SizedBox(
           width: _larguraSeletorPrecoAppBarPdv,
@@ -1627,7 +1823,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                   items: itens,
                   onChanged: (value) {
                     if (value == null) return;
-                    _definirTabelaPrecoPdv(value);
+                    _definirTabelaPrecoPadraoNovosItens(value);
                   },
                 ),
               ),
@@ -2097,7 +2293,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         _valorFreteController.clear();
         _enderecoEntregaController.clear();
         _observacaoEntregaController.clear();
-        _atualizarPrecosCarrinhoComTabela(_precoListaAtivo);
+        _atualizarPrecosCarrinhoPreservandoTabelas();
       });
       return;
     }
@@ -2115,8 +2311,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         cliente,
         cliente.indiceEnderecoPadraoEntrega(),
       );
-      _atualizarPrecosCarrinhoComTabela(tabela);
-      _aplicarSugestaoFormaPagamentoPorTabela(tabela);
+      _precoListaAtivo = PdvTabelaPrecoUtil.normalizar(tabela);
+      _atualizarPrecosCarrinhoPreservandoTabelas();
+      _aplicarSugestaoFormaPagamentoParaCarrinhoAtual();
     });
     if (!cliente.ativo && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2677,6 +2874,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         onAlterarQuantidade: _alterarQuantidadeCarrinho,
         onRemoverItem: _removerItemCarrinho,
         onAlternarTipoEntrega: _alternarTipoEntregaLinhaCarrinho,
+        onAlternarTabelaPreco: _alternarTabelaPrecoLinhaCarrinho,
         onDividirLinha: _dividirLinhaCarrinho,
         onAlterarPrecoLinha: _alterarPrecoLinhaCarrinho,
         onIrPesquisaQuandoVazio: () => unawaited(_abrirConsultaProdutos()),
@@ -2708,39 +2906,98 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     return widget.clienteRepository.obterPorId(id)?.segmento;
   }
 
-  String _normalizarTabelaPrecoPdv(String? valor) {
-    switch (valor) {
-      case 'preco2':
-      case 'preco3':
-        return valor!;
-      case 'preco1':
-      default:
-        return 'preco1';
+  String _normalizarTabelaPrecoPdv(String? valor) =>
+      PdvTabelaPrecoUtil.normalizar(valor);
+
+  void _aplicarTabelaPrecoNaLinha(
+    _OrcamentoItemDraft linha,
+    String novaTabela,
+  ) {
+    final tabela = _normalizarTabelaPrecoPdv(novaTabela);
+    if (linha.precoUnitarioManual) {
+      linha.precoTipo = tabela;
+      return;
     }
+    final r = _resolverPrecoProduto(
+      linha.produto,
+      precoTipoLista: tabela,
+      quantidade: linha.quantidadeEstoque,
+    );
+    linha.precoUnitario = r.precoFinal;
+    linha.precoTipo = r.precoTipo;
+    linha.promocaoId = r.promocaoId;
+    linha.promocaoNome = r.promocaoNome;
   }
 
-  /// Atualiza [_precoListaAtivo] e recalcula precos de todas as linhas do carrinho.
-  void _atualizarPrecosCarrinhoComTabela(String novaTabela) {
-    final tabela = _normalizarTabelaPrecoPdv(novaTabela);
-    _precoListaAtivo = tabela;
+  void _recalcularPrecoLinhaCarrinho(_OrcamentoItemDraft linha) {
+    if (linha.precoUnitarioManual) return;
+    final r = _resolverPrecoProduto(
+      linha.produto,
+      precoTipoLista: linha.precoTipo,
+      quantidade: linha.quantidadeEstoque,
+    );
+    linha.precoUnitario = r.precoFinal;
+    linha.precoTipo = r.precoTipo;
+    linha.promocaoId = r.promocaoId;
+    linha.promocaoNome = r.promocaoNome;
+  }
+
+  /// Recalcula precos linha a linha, preservando a tabela de cada item.
+  void _atualizarPrecosCarrinhoPreservandoTabelas() {
     if (_carrinho.isEmpty) return;
     for (final linha in _carrinho) {
-      if (linha.precoUnitarioManual) continue;
-      final r = _resolverPrecoProduto(
-        linha.produto,
-        precoTipoLista: tabela,
-        quantidade: linha.quantidadeEstoque,
-      );
-      linha.precoUnitario = r.precoFinal;
-      linha.precoTipo = r.precoTipo;
-      linha.promocaoId = r.promocaoId;
-      linha.promocaoNome = r.promocaoNome;
+      _recalcularPrecoLinhaCarrinho(linha);
     }
     _promoCarrinho.aplicarRegrasCarrinho(
       _carrinho,
       dataReferencia: DateTime.now(),
       segmentoCliente: _segmentoClienteAtivo,
     );
+  }
+
+  Set<String> _idsMeiosPagamentoCarrinhoAtual() =>
+      PdvTabelaPrecoUtil.meiosPagamentoUniao(
+        _carrinho.isEmpty
+            ? [_precoListaAtivo]
+            : _carrinho.map((l) => l.precoTipo),
+        _meiosPagamentoPorTabelaPdv,
+        _opcoesFormaPagamentoPdV.map((o) => o.id).toList(),
+      ).toSet();
+
+  void _aplicarSugestaoFormaPagamentoParaCarrinhoAtual({
+    bool preservarSelecaoAtual = false,
+  }) {
+    final tabelas = PdvTabelaPrecoUtil.tabelasDistintas(
+      _carrinho.map((l) => l.precoTipo),
+    );
+    if (tabelas.length <= 1) {
+      final tabela = tabelas.isEmpty ? _precoListaAtivo : tabelas.first;
+      _aplicarSugestaoFormaPagamentoPorTabela(
+        tabela,
+        preservarSelecaoAtual: preservarSelecaoAtual,
+      );
+      return;
+    }
+    final ids = _idsMeiosPagamentoCarrinhoAtual();
+    if (preservarSelecaoAtual && ids.contains(_formaPagamentoSelecionada)) {
+      return;
+    }
+    if (ids.contains(_formaPagamentoSelecionada)) return;
+    _formaPagamentoSelecionada = ids.first;
+    if (_formaPagamentoSelecionada != 'cartao_credito') {
+      _parcelasSelecionadas = 1;
+    }
+  }
+
+  String _rotuloFormaPagamentoCheckoutPdV() {
+    if (PdvTabelaPrecoUtil.carrinhoMisto(_carrinho.map((l) => l.precoTipo))) {
+      return 'tabelas mistas';
+    }
+    final tabelas = PdvTabelaPrecoUtil.tabelasDistintas(
+      _carrinho.map((l) => l.precoTipo),
+    );
+    final tabela = tabelas.isEmpty ? _precoListaAtivo : tabelas.first;
+    return _rotuloPreco(tabela);
   }
 
   void _aplicarSugestaoFormaPagamentoPorTabela(
@@ -2768,12 +3025,40 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
   }
 
-  void _definirTabelaPrecoPdv(String novaTabela) {
+  void _definirTabelaPrecoPadraoNovosItens(String novaTabela) {
     final tabela = _normalizarTabelaPrecoPdv(novaTabela);
     if (tabela == _precoListaAtivo) return;
     setState(() {
-      _atualizarPrecosCarrinhoComTabela(tabela);
-      _aplicarSugestaoFormaPagamentoPorTabela(tabela);
+      _precoListaAtivo = tabela;
+      _aplicarSugestaoFormaPagamentoParaCarrinhoAtual();
+    });
+  }
+
+  /// F1–F3: atualiza padrao para novos itens e, com linha selecionada, essa linha.
+  void _aplicarTabelaPrecoAtalhoPdv(String novaTabela) {
+    final tabela = _normalizarTabelaPrecoPdv(novaTabela);
+    final idx = _indiceLinhaCarrinho;
+    final linhaSelecionada =
+        idx != null && idx >= 0 && idx < _carrinho.length;
+    if (!linhaSelecionada) {
+      _definirTabelaPrecoPadraoNovosItens(novaTabela);
+      return;
+    }
+    final linha = _carrinho[idx];
+    if (_normalizarTabelaPrecoPdv(linha.precoTipo) == tabela &&
+        _precoListaAtivo == tabela &&
+        !linha.precoUnitarioManual) {
+      return;
+    }
+    setState(() {
+      _precoListaAtivo = tabela;
+      _aplicarTabelaPrecoNaLinha(linha, tabela);
+      _promoCarrinho.aplicarRegrasCarrinho(
+        _carrinho,
+        dataReferencia: DateTime.now(),
+        segmentoCliente: _segmentoClienteAtivo,
+      );
+      _aplicarSugestaoFormaPagamentoParaCarrinhoAtual();
     });
   }
 
@@ -2796,7 +3081,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   void _recalcularPromocoesCarrinho() {
     if (_carrinho.isEmpty) return;
-    _atualizarPrecosCarrinhoComTabela(_precoListaAtivo);
+    _atualizarPrecosCarrinhoPreservandoTabelas();
   }
 
   PromocaoPrecoResult _resolverPrecoProduto(
@@ -2840,6 +3125,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   Future<void> _adicionarAoOrcamento(Produto produto) async {
     final produtoAtual = _produtoAtualizadoParaPdv(produto);
+    if (_pdvBalcaoRapido &&
+        PdvBalcaoRapidoHelper.podeAdicionarDireto(
+          carrinhoTemCarreto: _carrinhoTemItemCarreto,
+          tipoEntregaSelecionada: _tipoEntregaSelecionada,
+          pagamentoMisto: _pagamentoMistoPdV,
+          edicaoOrcamento: _orcamentoEmEdicaoId != null,
+        )) {
+      await _adicionarComQuantidade(
+        produtoAtual,
+        1,
+        precoTipo: _precoListaAtivo,
+        tipoEntregaItem: _tipoEntregaSelecionada,
+      );
+      return;
+    }
     final result = await showDialog<_AdicionarOrcamentoResult>(
       context: context,
       builder: (context) => _AdicionarAoOrcamentoDialog(
@@ -2917,8 +3217,26 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   List<({String id, String rotulo, IconData icone})>
-      _opcoesFormaPagamentoPdVAtivas() =>
-          _opcoesFormaPagamentoPdVParaTabela(_precoListaAtivo);
+      _opcoesFormaPagamentoPdVAtivas() {
+    final ids = PdvTabelaPrecoUtil.meiosPagamentoUniao(
+      _carrinho.isEmpty
+          ? [_precoListaAtivo]
+          : _carrinho.map((l) => l.precoTipo),
+      _meiosPagamentoPorTabelaPdv,
+      _opcoesFormaPagamentoPdV.map((o) => o.id).toList(),
+    );
+    final opcoes = <({String id, String rotulo, IconData icone})>[];
+    for (final id in ids) {
+      if (id == 'fiado' && !_podeVenderFiado) continue;
+      for (final op in _opcoesFormaPagamentoPdV) {
+        if (op.id == id) {
+          opcoes.add(op);
+          break;
+        }
+      }
+    }
+    return opcoes;
+  }
 
   bool _podeSelecionarMeioMistoFiado(String meioAtualLinha) {
     if (meioAtualLinha == 'fiado') return true;
@@ -2987,7 +3305,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Forma de pagamento ($atalhos ou setas) · ${_rotuloPreco(_precoListaAtivo)}',
+          'Forma de pagamento ($atalhos ou setas) · ${_rotuloFormaPagamentoCheckoutPdV()}',
           style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
@@ -3450,6 +3768,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         _janelaEntregaSelecionada == 'nao_definida') {
       return 'Para entrega agendada, selecione janela Manha ou Tarde.';
     }
+    if (_pdvExigirVendedor && _vendedorSelecionadoPdv() == null) {
+      return 'Informe quem esta vendendo (vendedor no topo da tela).';
+    }
     return null;
   }
 
@@ -3462,6 +3783,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       if (!ok || !mounted) return;
       _checkoutDialogSetState?.call(() {});
     }
+    if (!await _garantirVendedorPdvObrigatorio()) return;
     final erro = _mensagemErroConfirmarCheckout();
     if (erro != null) {
       if (!mounted) return;
@@ -3504,11 +3826,29 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       );
       return;
     }
+    if (!await _garantirVendedorPdvObrigatorio()) return;
     _aplicarEnderecoCarretoDoClienteSeVazio();
-    _aplicarSugestaoFormaPagamentoPorTabela(
-      _precoListaAtivo,
+    _aplicarSugestaoFormaPagamentoParaCarrinhoAtual(
       preservarSelecaoAtual: _orcamentoEmEdicaoId != null,
     );
+    if (_pdvCheckoutDireto &&
+        PdvBalcaoRapidoHelper.podeCheckoutDireto(
+          carrinhoTemCarreto: _carrinhoTemItemCarreto,
+          pagamentoMisto: _pagamentoMistoPdV,
+          precisaPlanoFiado: _precisaPlanoFiadoPdV(),
+          temDescontoInformado: _valorDescontoReaisPdV() > 0.001,
+          edicaoOrcamento: _orcamentoEmEdicaoId != null,
+        )) {
+      final erro = _mensagemErroConfirmarCheckout();
+      if (erro != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(erro)),
+        );
+        return;
+      }
+      await _salvarOrcamento();
+      return;
+    }
     _checkoutMaisOpcoesExpandido =
         _pagamentoMistoPdV || _orcamentoEmEdicaoId != null;
     final scrollCheckout = ScrollController();
@@ -4507,6 +4847,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       );
       return;
     }
+    if (!await _garantirVendedorPdvObrigatorio()) return;
     if (_descontoPdVUltrapassaTetoSemAutorizacao()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -5433,6 +5774,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   Future<void> _mostrarAcoesPdfOrcamento(Venda venda) async {
     final numOrcamento =
         venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id;
+    if (_pdvPularDialogOrcamentoSalvo) {
+      return;
+    }
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     _dialogoOrcamentoSalvoAberto = true;
@@ -5811,7 +6155,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           SelecionarPrecoListaIntent:
               CallbackAction<SelecionarPrecoListaIntent>(
                 onInvoke: (intent) {
-                  _definirTabelaPrecoPdv(intent.precoTipo);
+                  _aplicarTabelaPrecoAtalhoPdv(intent.precoTipo);
                   return null;
                 },
               ),
@@ -6037,7 +6381,7 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                     ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
                     : null,
                 hintText: modoBarraCarrinho
-                    ? 'Pesquisar produto · Leitor EAN · Enter/F4 consulta'
+                    ? 'Pesquisar produto · Enter/F4 consulta · unico resultado entra direto'
                     : null,
                 labelText: modoBarraCarrinho
                     ? null
@@ -6138,6 +6482,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
     required this.onAlterarQuantidade,
     required this.onRemoverItem,
     required this.onAlternarTipoEntrega,
+    required this.onAlternarTabelaPreco,
     required this.onDividirLinha,
     required this.onAlterarPrecoLinha,
     required this.onIrPesquisaQuandoVazio,
@@ -6154,6 +6499,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
   final void Function(int index, int delta) onAlterarQuantidade;
   final void Function(int index) onRemoverItem;
   final void Function(int index) onAlternarTipoEntrega;
+  final void Function(int index) onAlternarTabelaPreco;
   final Future<void> Function(int index) onDividirLinha;
   final Future<void> Function(int index) onAlterarPrecoLinha;
   final VoidCallback onIrPesquisaQuandoVazio;
@@ -6268,10 +6614,12 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
                   ? item.rotuloQuantidadeCarrinho
                   : null,
               tipoEntregaItem: item.tipoEntregaItem,
+              precoTipo: item.precoTipo,
               selecionado: selecionado,
               linhaImpar: index.isOdd,
               onTap: () => widget.onSelecionarLinha(index),
               onAlternarTipoEntrega: () => widget.onAlternarTipoEntrega(index),
+              onAlternarTabelaPreco: () => widget.onAlternarTabelaPreco(index),
               onDiminuir: () => widget.onAlterarQuantidade(index, -1),
               onAumentar: () => widget.onAlterarQuantidade(index, 1),
               onDividir: () => widget.onDividirLinha(index),
@@ -7283,7 +7631,7 @@ class _AdicionarAoOrcamentoDialogState
   }
 }
 
-/// F1/F3 alternam a tabela de preco (carrinho inteiro e novos itens).
+/// F1–F3: tabela da linha selecionada ou padrao para novos itens.
 class SelecionarPrecoListaIntent extends Intent {
   const SelecionarPrecoListaIntent(this.precoTipo);
   final String precoTipo;
@@ -7381,4 +7729,123 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
         fracionada: produto.permiteQuantidadeFracionada,
       ) *
       precoUnitario;
+}
+
+class _DialogoSelecionarVendedorPdv extends StatefulWidget {
+  const _DialogoSelecionarVendedorPdv({
+    required this.vendedoresAtivos,
+    required this.pesquisarVendedores,
+    required this.onConfirmar,
+    required this.onCancelar,
+  });
+
+  final List<Vendedor> vendedoresAtivos;
+  final List<Vendedor> Function(String termo) pesquisarVendedores;
+  final ValueChanged<int> onConfirmar;
+  final VoidCallback onCancelar;
+
+  @override
+  State<_DialogoSelecionarVendedorPdv> createState() =>
+      _DialogoSelecionarVendedorPdvState();
+}
+
+class _DialogoSelecionarVendedorPdvState
+    extends State<_DialogoSelecionarVendedorPdv> {
+  late List<Vendedor> _vendedoresExibidos;
+  int? _vendedorSelecionadoId;
+  late final TextEditingController _pesquisaController;
+
+  @override
+  void initState() {
+    super.initState();
+    _vendedoresExibidos = widget.vendedoresAtivos.take(60).toList();
+    _pesquisaController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _pesquisaController.dispose();
+    super.dispose();
+  }
+
+  void _atualizarBusca(String termo) {
+    final t = termo.trim();
+    setState(() {
+      _vendedoresExibidos = t.isEmpty
+          ? widget.vendedoresAtivos.take(60).toList()
+          : widget.pesquisarVendedores(t);
+    });
+  }
+
+  String _nomeVendedor(Vendedor v) {
+    final nome = v.apelido.trim().isNotEmpty
+        ? v.apelido.trim()
+        : v.nomeCompleto.trim();
+    return nome.isEmpty ? 'Vendedor ${v.id}' : nome;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Quem esta vendendo?'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Selecione o vendedor responsavel por esta venda.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _pesquisaController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Buscar vendedor',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: _atualizarBusca,
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 280,
+              child: _vendedoresExibidos.isEmpty
+                  ? const Center(
+                      child: Text('Nenhum vendedor encontrado.'),
+                    )
+                  : ListView.builder(
+                      itemCount: _vendedoresExibidos.length,
+                      itemBuilder: (context, index) {
+                        final v = _vendedoresExibidos[index];
+                        final codigo = v.codigoInterno.trim();
+                        return ListTile(
+                          dense: true,
+                          selected: _vendedorSelecionadoId == v.id,
+                          title: Text(_nomeVendedor(v)),
+                          subtitle: codigo.isEmpty ? null : Text(codigo),
+                          onTap: () =>
+                              setState(() => _vendedorSelecionadoId = v.id),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: widget.onCancelar,
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          onPressed: _vendedorSelecionadoId == null
+              ? null
+              : () => widget.onConfirmar(_vendedorSelecionadoId!),
+          child: const Text('Confirmar'),
+        ),
+      ],
+    );
+  }
 }

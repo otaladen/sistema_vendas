@@ -27,14 +27,20 @@ final List<StreamSink<Object?>> _wsClientes = [];
 /// Ultimo heartbeat por estacao ([stationId] = epoch ms UTC). TTL define "online".
 const int _presenceTtlMs = 90000;
 
-/// Se definido, exige header `x-sync-token` ou query `token` em `/sync/*`.
+/// Se definido, exige header `x-sync-token` em `/sync/*`.
+/// Query `token` ainda aceita por compatibilidade, mas clientes novos usam so header.
 final String _syncToken = (Platform.environment['SYNC_TOKEN'] ?? '').trim();
 
+/// Quando `1`, recusa sync se SYNC_TOKEN estiver vazio (producao na LAN).
+final bool _syncRequireToken =
+    (Platform.environment['SYNC_REQUIRE_TOKEN'] ?? '').trim() == '1';
+
 bool _syncAutorizado(Request request) {
-  if (_syncToken.isEmpty) return true;
   final path = request.url.path;
   if (path == '/health') return true;
   if (!path.startsWith('/sync')) return true;
+  if (_syncRequireToken && _syncToken.isEmpty) return false;
+  if (_syncToken.isEmpty) return true;
   final header = (request.headers['x-sync-token'] ?? '').trim();
   final query = (request.url.queryParameters['token'] ?? '').trim();
   return header == _syncToken || query == _syncToken;
@@ -124,8 +130,18 @@ void main(List<String> args) async {
   print(
     'sistema_vendas sync server | db=$dbPath | pod=$podDir | '
     'http://${server.address.address}:$port | ws=/sync/stream | '
-    'auth=${_syncToken.isEmpty ? "desligada" : "token ativo"}',
+    'auth=${_syncToken.isEmpty ? (_syncRequireToken ? "BLOQUEADA-defina_SYNC_TOKEN" : "desligada") : "token ativo"}',
   );
+  if (_syncRequireToken && _syncToken.isEmpty) {
+    print(
+      'AVISO: SYNC_REQUIRE_TOKEN=1 mas SYNC_TOKEN vazio — rotas /sync/* recusadas.',
+    );
+  } else if (_syncToken.isEmpty) {
+    print(
+      'AVISO: servidor sem SYNC_TOKEN — qualquer PC na rede pode sincronizar. '
+      'Defina SYNC_TOKEN e o mesmo valor em Configuracoes > Rede.',
+    );
+  }
 }
 
 String _diretorioPodEntrega() {

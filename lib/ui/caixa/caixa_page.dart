@@ -28,10 +28,16 @@ import '../../domain/promocao_cadastro.dart';
 import '../../domain/promocao_preco_result.dart';
 import '../../domain/promocao_preco_service.dart';
 import '../../domain/produto_limite_desconto_pdv.dart';
+import '../../domain/fiscal/caixa_fiscal_acao_helper.dart';
 import '../../domain/fiscal/cliente_fiscal_helper.dart';
 import '../../domain/venda_documento_pos_caixa.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../config/focus_nfe_runtime.dart';
+import '../../data/kit_orcamento_repository.dart';
+import '../../domain/pdv_consulta_multi_deposito_util.dart';
+import '../../domain/pdv_kit_orcamento_insercao.dart';
+import '../../domain/permissao_usuario.dart';
+import '../../domain/usuario_permissao_helper.dart';
 import '../../domain/pagamento_orcamento.dart';
 import '../../domain/plano_fiado.dart';
 import '../../domain/ultimas_vendas_finalizadas_ordenacao.dart';
@@ -77,6 +83,7 @@ import 'caixa_ultimas_vendas_list.dart';
 import 'widgets/caixa_cobranca_painel.dart';
 import 'widgets/caixa_pos_venda_fiscal_painel.dart';
 import '../vendas/cancelar_venda_ui.dart';
+import 'widgets/caixa_importar_orcamento_field.dart';
 
 class CaixaPage extends StatefulWidget {
   const CaixaPage({
@@ -87,6 +94,7 @@ class CaixaPage extends StatefulWidget {
     required this.vendedorRepository,
     required this.appConfigRepository,
     required this.printService,
+    required this.usuarioLogado,
     required this.usuarioAtual,
     required this.podeCancelarVendas,
     required this.podeLeituraParcialCaixa,
@@ -101,6 +109,7 @@ class CaixaPage extends StatefulWidget {
   final VendedorRepository vendedorRepository;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
+  final UsuarioSistema usuarioLogado;
   final String usuarioAtual;
   final bool podeCancelarVendas;
   final bool podeLeituraParcialCaixa;
@@ -114,6 +123,9 @@ class CaixaPage extends StatefulWidget {
 
 class _CaixaPageState extends State<CaixaPage> {
   static const String _kCaixaAuditoriaKey = 'caixa_auditoria_eventos_v1';
+
+  late final KitOrcamentoRepository _kitOrcamentoRepo =
+      KitOrcamentoRepository(widget.produtoRepository.objectBox);
 
   static String _prefsUltimoTrocoValor(String terminalId) =>
       'caixa_${terminalId}_ultimo_troco_valor_v1';
@@ -179,6 +191,10 @@ class _CaixaPageState extends State<CaixaPage> {
   UltimasVendasFinalizadasOrdenacao _ordenacaoUltimasVendas =
       UltimasVendasFinalizadasOrdenacao.padrao;
   bool _correcaoFinalizadaEmDisparada = false;
+  bool _caixaFiscalNaoBloqueante = true;
+  int _caixaLimiteOrcamentosPendentes = 120;
+  final _importarOrcamentoController = TextEditingController();
+  final _importarOrcamentoFocus = FocusNode(debugLabel: 'caixaImportarOrcamento');
 
   PromocaoPrecoService get _promoPreco => _promoPrecoCache ??= PromocaoPrecoService(
         PromocaoRepository(widget.produtoRepository.objectBox),
@@ -513,6 +529,9 @@ class _CaixaPageState extends State<CaixaPage> {
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       _mostrarDescontoCaixa = config.mostrarCampoDescontoCaixa;
       _maxDescontoPercentualPdv = config.maxDescontoPercentualPdv;
+      _caixaFiscalNaoBloqueante = config.caixaFiscalNaoBloqueante;
+      _caixaLimiteOrcamentosPendentes =
+          config.caixaLimiteOrcamentosPendentes.clamp(20, 500);
     });
   }
 
@@ -698,6 +717,25 @@ class _CaixaPageState extends State<CaixaPage> {
     });
   }
 
+  Future<void> _importarOrcamentoPorNumero(int numero) async {
+    if (!_caixaAberto) {
+      CaixaFeedback.erro(context, 'Abra o caixa antes de importar orcamentos.');
+      return;
+    }
+    final venda =
+        widget.vendaRepository.buscarOrcamentoPendentePorNumero(numero);
+    if (venda == null) {
+      if (!mounted) return;
+      CaixaFeedback.erro(
+        context,
+        'Orcamento $numero nao encontrado ou ja foi finalizado.',
+      );
+      return;
+    }
+    _importarOrcamentoController.clear();
+    _selecionarOrcamentoParaConferencia(venda);
+  }
+
   void _voltarParaFila() {
     _disposeMistoEdicao();
     setState(() {
@@ -840,7 +878,9 @@ class _CaixaPageState extends State<CaixaPage> {
   void _carregarOrcamentos() {
     unawaited(_recarregarSessaoRede());
     setState(() {
-      _orcamentos = widget.vendaRepository.listarOrcamentosPendentes();
+      _orcamentos = widget.vendaRepository.listarOrcamentosPendentes(
+        limit: _caixaLimiteOrcamentosPendentes,
+      );
 
       if (_selecionado != null) {
         _selecionado = _orcamentos
@@ -2879,9 +2919,13 @@ class _CaixaPageState extends State<CaixaPage> {
     final precoLista = _precoListaPadraoConferencia(venda);
     final clienteId = venda.cliente.targetId;
     final cid = clienteId > 0 ? clienteId : null;
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!mounted) return;
 
-    final result = await Navigator.of(context).push<PdvConsultaProdutoResult>(
+    final result = await Navigator.of(context, rootNavigator: true)
+        .push<PdvConsultaProdutoResult>(
       MaterialPageRoute(
+        fullscreenDialog: true,
         builder: (_) => PdvConsultaProdutosPage(
           produtoRepository: widget.produtoRepository,
           vendaRepository: widget.vendaRepository,
@@ -2903,6 +2947,14 @@ class _CaixaPageState extends State<CaixaPage> {
             dataReferencia: DateTime.now(),
             segmentoCliente: _segmentoClienteConferencia,
           ),
+          quantidadeNoOrcamentoDe: _quantidadeProdutoNoOrcamentoSelecionado,
+          kitOrcamentoRepository: _kitOrcamentoRepo,
+          mostrarMargemGerente: UsuarioPermissaoHelper.tem(
+            widget.usuarioLogado,
+            PermissaoUsuario.verCustoMargem,
+          ),
+          margemMinimaPadrao: config.margemMinimaPercentualPadrao,
+          rotulosDeposito: const PdvConsultaDepositoRotulos(),
         ),
       ),
     );
@@ -2923,6 +2975,18 @@ class _CaixaPageState extends State<CaixaPage> {
     String precoLista,
   ) async {
     _registrarProdutoRecenteConferencia(result.produto.id);
+
+    if (result.inserirKit) {
+      await _inserirKitConferencia(
+        venda,
+        result.kitInserirId!,
+        result.quantidadeKitsInserir!,
+        precoLista: result.precoListaAtivo.isNotEmpty
+            ? result.precoListaAtivo
+            : precoLista,
+      );
+      return;
+    }
 
     if (result.adicaoDireta) {
       await _adicionarProdutoAoOrcamentoConferencia(
@@ -2960,6 +3024,50 @@ class _CaixaPageState extends State<CaixaPage> {
           ? result.precoListaAtivo
           : precoLista,
     );
+  }
+
+  Future<void> _inserirKitConferencia(
+    Venda venda,
+    int kitId,
+    int quantidadeKits, {
+    required String precoLista,
+  }) async {
+    final montada = PdvKitOrcamentoInsercaoUtil.montar(
+      kitRepository: _kitOrcamentoRepo,
+      produtoRepository: widget.produtoRepository,
+      kitId: kitId,
+      quantidadeKits: quantidadeKits,
+    );
+    if (montada == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kit invalido ou sem itens ativos para inserir.'),
+        ),
+      );
+      return;
+    }
+
+    for (final linha in montada.linhas) {
+      await _adicionarProdutoAoOrcamentoConferencia(
+        venda,
+        linha.produto,
+        linha.quantidade.round(),
+        precoLista: precoLista,
+      );
+    }
+
+    if (!mounted) return;
+    if (montada.itensIgnorados > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${montada.itensIgnorados} item(ns) do kit '
+            '"${montada.nomeKit}" ignorados (produto inativo ou removido).',
+          ),
+        ),
+      );
+    }
   }
 
   Future<int?> _perguntarQuantidadeProdutoConferencia(
@@ -3697,12 +3805,19 @@ class _CaixaPageState extends State<CaixaPage> {
       if (!mounted) return;
       CaixaFeedback.sucesso(context, 'Venda $numCupom finalizada.');
       unawaited(_tentarAbrirGavetaPosPagamento());
+      final sessaoPosVenda = CaixaPosVendaSessao(
+        venda: vendaFinalizada,
+        totalRecebido: totalRecebido,
+        troco: trocoFinal,
+      );
+      if (_caixaFiscalNaoBloqueante) {
+        _prepararCaixaPosProximaVenda();
+        _agendarFiscalPosVendaEmSegundoPlano(sessaoPosVenda);
+        _atualizarResumoNfcePendenteEmissao();
+        return;
+      }
       setState(() {
-        _posVenda = CaixaPosVendaSessao(
-          venda: vendaFinalizada,
-          totalRecebido: totalRecebido,
-          troco: trocoFinal,
-        );
+        _posVenda = sessaoPosVenda;
         _painelCobrancaAberto = false;
         _etapaCaixa = CaixaEtapa.fiscal;
         _selecionado = null;
@@ -3718,41 +3833,86 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
-  /// Dinheiro/fiado -> cupom interno; PIX/cartao -> NFC-e.
+  /// Dinheiro/fiado -> cupom; PIX/cartao -> NFC-e; CNPJ + eletronico -> NF-e 55.
   String? _acaoFiscalAutomaticaPorPagamento(Venda venda) {
-    switch (venda.formaPagamento) {
-      case 'dinheiro':
-      case 'fiado':
-        return 'cupom';
-      case 'pix':
-      case 'cartao_credito':
-      case 'cartao_debito':
-      case 'transferencia':
-        return 'nfce';
-      case 'misto':
-        return _acaoFiscalAutomaticaPagamentoMisto(venda);
-      default:
-        return 'nfce';
-    }
+    return CaixaFiscalAcaoHelper.acaoAutomaticaPorPagamento(
+      venda: venda,
+      cliente: _clienteDaVenda(venda),
+    );
   }
 
-  String? _acaoFiscalAutomaticaPagamentoMisto(Venda venda) {
-    final linhas = PagamentoOrcamentoCodec.decode(venda.pagamentosJson);
-    if (linhas.isEmpty) return null;
-    const eletronicos = {'pix', 'cartao_credito', 'cartao_debito'};
-    if (linhas.any((l) => eletronicos.contains(l.meio))) {
-      return 'nfce';
-    }
-    if (linhas.any((l) => l.meio == 'fiado' || l.meio == 'dinheiro')) {
-      return 'cupom';
-    }
-    return 'cupom';
+  bool _bloqueiaNovaNfceNoCaixa(Venda venda) {
+    return CaixaFiscalAcaoHelper.bloqueiaNovaNfceNoCaixa(
+      venda: venda,
+      cliente: _clienteDaVenda(venda),
+    );
   }
 
   void _agendarDocumentoFiscalAutomatico() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_dispararDocumentoFiscalAutomatico());
     });
+  }
+
+  void _agendarFiscalPosVendaEmSegundoPlano(CaixaPosVendaSessao sessao) {
+    unawaited(_executarFiscalPosVendaEmSegundoPlano(sessao));
+  }
+
+  Future<void> _executarFiscalPosVendaEmSegundoPlano(
+    CaixaPosVendaSessao sessao,
+  ) async {
+    final venda =
+        widget.vendaRepository.obterPorId(sessao.venda.id) ?? sessao.venda;
+    final acao = _acaoFiscalAutomaticaPorPagamento(venda);
+    if (acao == null) return;
+    if (_documentoFiscalCaixaJaAtendido(venda, acao)) return;
+
+    if (acao == 'nfe55') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Venda ${venda.numeroOrcamento} exige NF-e 55. '
+            'Abra Notas fiscais quando puder.',
+          ),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+      return;
+    }
+
+    try {
+      if (acao == 'nfce') {
+        final bloqueioCnpj = CaixaFiscalAcaoHelper.mensagemBloqueioNfceClienteCnpj(
+          cliente: _clienteDaVenda(venda),
+          venda: venda,
+        );
+        if (bloqueioCnpj != null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(bloqueioCnpj)),
+            );
+          }
+          return;
+        }
+        await _emitirNfceParaVenda(venda);
+      } else if (acao == 'cupom') {
+        await _imprimirCupomNaoFiscalPosVenda(
+          venda: venda,
+          totalRecebido: sessao.totalRecebido,
+          troco: sessao.troco,
+        );
+      }
+      _atualizarResumoNfcePendenteEmissao();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Documento fiscal em segundo plano: $e'),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    }
   }
 
   Future<void> _dispararDocumentoFiscalAutomatico() async {
@@ -3862,14 +4022,10 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   bool _documentoFiscalCaixaJaAtendido(Venda venda, String acao) {
-    switch (acao) {
-      case 'nfce':
-        return venda.nfceEmitida || venda.nfceProcessandoPendenteFocus;
-      case 'cupom':
-        return venda.cupomNaoFiscalEmitidoEm != null;
-      default:
-        return false;
-    }
+    return CaixaFiscalAcaoHelper.documentoFiscalJaAtendido(
+      venda: venda,
+      acao: acao,
+    );
   }
 
   Future<void> _mostrarErroBaixaEstoqueAnomala(Venda venda) async {
@@ -3947,6 +4103,12 @@ class _CaixaPageState extends State<CaixaPage> {
         if (!mounted) return;
         await _tentarBaixaEstoquePosNfe55Autorizada(vendaId);
         _atualizarPosVendaDoRepositorio();
+        if (!mounted) return;
+        final vendaAtual = _vendaPosCaixaAtualizada() ?? venda;
+        if (vendaAtual.nfe55Autorizada &&
+            _vendaComDocumentoPosCaixaObrigatorio(vendaAtual)) {
+          await _encerrarPosVendaFiscal();
+        }
       } finally {
         if (mounted) setState(() => _posVendaProcessando = false);
       }
@@ -3955,6 +4117,20 @@ class _CaixaPageState extends State<CaixaPage> {
 
     if (acao == 'nfce') {
       final vendaAtual = _vendaPosCaixaAtualizada() ?? venda;
+      final bloqueioCnpj = CaixaFiscalAcaoHelper.mensagemBloqueioNfceClienteCnpj(
+        cliente: _clienteDaVenda(vendaAtual),
+        venda: vendaAtual,
+      );
+      if (bloqueioCnpj != null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(bloqueioCnpj),
+            duration: const Duration(seconds: 8),
+          ),
+        );
+        return;
+      }
       final bloqueioNfce =
           VendaDocumentoFiscalMutex.mensagemBloqueioNovaNfce(vendaAtual);
       if (bloqueioNfce != null) {
@@ -4025,19 +4201,11 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<UsuarioSistema> _resolverUsuarioSessaoParaNfe() async {
-    final todos = await UsuarioRepository().listarTodos();
+    final todos = await _usuarioRepository.listarTodos();
     for (final u in todos) {
-      if (u.login == widget.usuarioAtual) return u;
+      if (u.login == widget.usuarioLogado.login) return u;
     }
-    return UsuarioSistema(
-      id: 'sessao',
-      nome: widget.usuarioAtual,
-      login: widget.usuarioAtual,
-      senha: '',
-      admin: true,
-      podeEmitirNfeSaida: true,
-      podeCancelarNfeSaida: true,
-    );
+    return widget.usuarioLogado;
   }
 
   Future<void> _tentarBaixaEstoquePosNfe55Autorizada(int vendaId) async {
@@ -4994,6 +5162,14 @@ class _CaixaPageState extends State<CaixaPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        CaixaImportarOrcamentoField(
+          controller: _importarOrcamentoController,
+          focusNode: _importarOrcamentoFocus,
+          habilitado: _caixaAberto,
+          onImportar: (n) => unawaited(_importarOrcamentoPorNumero(n)),
+          onAbrirPesquisa: () => unawaited(_abrirPesquisaOrcamento()),
+        ),
+        const SizedBox(height: 8),
         _buildBarraAcoesIniciaisCaixa(context),
         const SizedBox(height: 10),
         Expanded(child: _buildPainelStatusCaixa(context)),
@@ -5427,6 +5603,8 @@ class _CaixaPageState extends State<CaixaPage> {
                 _acaoFiscalAutomaticaPorPagamento(vendaAtual),
             onCupomNaoFiscal: () => unawaited(_executarAcaoPosVendaFiscal('cupom')),
             onEmitirNfce: () => unawaited(_executarAcaoPosVendaFiscal('nfce')),
+            onEmitirNfe55: () => unawaited(_executarAcaoPosVendaFiscal('nfe55')),
+            bloqueiaNovaNfce: _bloqueiaNovaNfceNoCaixa(vendaAtual),
             onConcluir: () => unawaited(_encerrarPosVendaFiscal()),
             onCancelarVenda: () =>
                 unawaited(_cancelarVendaNoCaixa(venda)),
@@ -5510,6 +5688,8 @@ class _CaixaPageState extends State<CaixaPage> {
     _itensScrollController.dispose();
     _pesquisaProdutoConferenciaController.dispose();
     _pesquisaProdutoConferenciaFocus.dispose();
+    _importarOrcamentoController.dispose();
+    _importarOrcamentoFocus.dispose();
     _disposeMistoEdicao();
     super.dispose();
   }

@@ -30,7 +30,10 @@ import 'reajuste_preco_lote_page.dart';
 import 'estoque/ajuste_estoque_dialog.dart';
 import 'estoque/estoque_diagnostico_sheet.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
+import 'lista_compra_page.dart';
 import 'sugestao_compra_page.dart';
+import '../data/lista_compra_repository.dart';
+import 'widgets/anotar_lista_compra_dialog.dart';
 import 'widgets/produto_busca_input.dart';
 
 final NumberFormat _moedaBRL = NumberFormat('#,##0.00', 'pt_BR');
@@ -294,6 +297,31 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       ),
     );
     if (mounted) _recarregarProdutos();
+  }
+
+  Future<void> _abrirListaCompra() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ListaCompraPage(
+          produtoRepository: widget.produtoRepository,
+          usuarioLogado: widget.usuarioLogado,
+        ),
+      ),
+    );
+    if (mounted) _recarregarProdutos();
+  }
+
+  Future<void> _anotarProdutoListaCompra(Produto produto) async {
+    final repo = ListaCompraRepository(widget.produtoRepository.objectBox);
+    await mostrarAnotarListaCompraDialog(
+      context,
+      repository: repo,
+      produto: produto,
+      quantidadeInicial: produto.quantidadeMinima > produto.estoqueAtual
+          ? (produto.quantidadeMinima - produto.estoqueAtual).clamp(1, 99999)
+          : 1,
+      criadoPor: widget.usuarioLogado.login,
+    );
   }
 
   Future<void> _abrirReajustePrecos(List<Produto> escopo) async {
@@ -608,6 +636,11 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             ),
           ],
           IconButton(
+            tooltip: 'Lista de compras',
+            icon: const Icon(Icons.playlist_add_check_outlined),
+            onPressed: _abrirListaCompra,
+          ),
+          IconButton(
             tooltip: 'Sugestao de compra',
             icon: const Icon(Icons.shopping_cart_outlined),
             onPressed: _abrirSugestaoCompra,
@@ -708,6 +741,10 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                 'Abra a sugestao de compra para repor.',
               ),
               actions: [
+                TextButton(
+                  onPressed: _abrirListaCompra,
+                  child: const Text('Lista de compras'),
+                ),
                 TextButton(
                   onPressed: _abrirSugestaoCompra,
                   child: const Text('Ver sugestao'),
@@ -1037,9 +1074,19 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                                 _abrirAjusteEstoque(produto);
                               } else if (v == 'extrato') {
                                 _abrirExtratoEstoque(produto);
+                              } else if (v == 'comprar') {
+                                _anotarProdutoListaCompra(produto);
                               }
                             },
                             itemBuilder: (ctx) => [
+                              const PopupMenuItem(
+                                value: 'comprar',
+                                child: ListTile(
+                                  dense: true,
+                                  leading: Icon(Icons.playlist_add_outlined),
+                                  title: Text('Anotar para comprar'),
+                                ),
+                              ),
                               const PopupMenuItem(
                                 value: 'ajustar',
                                 child: ListTile(

@@ -86,6 +86,24 @@ class EmpresaConfig {
 
     /// Regime Focus: 1 = Simples Nacional, 3 = Regime Normal (sincroniza na LAN).
     this.regimeTributarioEmitente = FiscalConfig.regimeTributarioEmitente,
+
+    /// PDV: pula dialog ao adicionar item (qtd 1, retirada, preco do cabecalho).
+    this.pdvBalcaoRapido = true,
+
+    /// PDV: envia ao caixa sem dialog de checkout quando dados ja estao no cabecalho.
+    this.pdvCheckoutDireto = true,
+
+    /// PDV: apos salvar, so snackbar com numero (sem dialog de impressao).
+    this.pdvPularDialogOrcamentoSalvo = true,
+
+    /// Caixa: emite NFC-e em segundo plano e libera fila para proximo cliente.
+    this.caixaFiscalNaoBloqueante = true,
+
+    /// Caixa: maximo de orcamentos pendentes carregados na memoria.
+    this.caixaLimiteOrcamentosPendentes = 120,
+
+    /// PDV: obriga escolher vendedor antes de enviar orcamento ao caixa.
+    this.pdvExigirVendedor = false,
   });
 
   final String nomeLoja;
@@ -174,6 +192,13 @@ class EmpresaConfig {
 
   final int regimeTributarioEmitente;
 
+  final bool pdvBalcaoRapido;
+  final bool pdvCheckoutDireto;
+  final bool pdvPularDialogOrcamentoSalvo;
+  final bool caixaFiscalNaoBloqueante;
+  final int caixaLimiteOrcamentosPendentes;
+  final bool pdvExigirVendedor;
+
   LayoutImpressaoEmpresa get layoutImpressao =>
       LayoutImpressaoEmpresa.fromJsonString(layoutImpressaoJson);
 
@@ -219,6 +244,12 @@ class EmpresaConfig {
     bool? abrirGavetaAutomatica,
     int? gavetaPino,
     int? regimeTributarioEmitente,
+    bool? pdvBalcaoRapido,
+    bool? pdvCheckoutDireto,
+    bool? pdvPularDialogOrcamentoSalvo,
+    bool? caixaFiscalNaoBloqueante,
+    int? caixaLimiteOrcamentosPendentes,
+    bool? pdvExigirVendedor,
   }) {
     return EmpresaConfig(
       nomeLoja: nomeLoja ?? this.nomeLoja,
@@ -287,6 +318,16 @@ class EmpresaConfig {
       regimeTributarioEmitente: regimeTributarioEmitente != null
           ? regimeTributarioEmitente.clamp(1, 3)
           : this.regimeTributarioEmitente,
+      pdvBalcaoRapido: pdvBalcaoRapido ?? this.pdvBalcaoRapido,
+      pdvCheckoutDireto: pdvCheckoutDireto ?? this.pdvCheckoutDireto,
+      pdvPularDialogOrcamentoSalvo:
+          pdvPularDialogOrcamentoSalvo ?? this.pdvPularDialogOrcamentoSalvo,
+      caixaFiscalNaoBloqueante:
+          caixaFiscalNaoBloqueante ?? this.caixaFiscalNaoBloqueante,
+      caixaLimiteOrcamentosPendentes: caixaLimiteOrcamentosPendentes != null
+          ? caixaLimiteOrcamentosPendentes.clamp(20, 500)
+          : this.caixaLimiteOrcamentosPendentes,
+      pdvExigirVendedor: pdvExigirVendedor ?? this.pdvExigirVendedor,
     );
   }
 }
@@ -351,6 +392,13 @@ class AppConfigRepository {
       'config_alertas_proativos_intervalo_min';
   static const _kModoImplantacaoLocal = 'sync_modo_implantacao_local_v1';
   static const _kRegimeTributarioEmitente = 'config_regime_tributario_emitente_v1';
+  static const _kPdvBalcaoRapido = 'config_pdv_balcao_rapido_v1';
+  static const _kPdvCheckoutDireto = 'config_pdv_checkout_direto_v1';
+  static const _kPdvPularDialogOrcamentoSalvo =
+      'config_pdv_pular_dialog_orcamento_salvo_v1';
+  static const _kCaixaFiscalNaoBloqueante = 'config_caixa_fiscal_nao_bloqueante_v1';
+  static const _kCaixaLimiteOrcamentos = 'config_caixa_limite_orcamentos_v1';
+  static const _kPdvExigirVendedor = 'config_pdv_exigir_vendedor_v1';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -437,6 +485,18 @@ class AppConfigRepository {
         }
         return r;
       }(),
+      pdvBalcaoRapido: prefs.getBool(_kPdvBalcaoRapido) ?? true,
+      pdvCheckoutDireto: prefs.getBool(_kPdvCheckoutDireto) ?? true,
+      pdvPularDialogOrcamentoSalvo:
+          prefs.getBool(_kPdvPularDialogOrcamentoSalvo) ?? true,
+      caixaFiscalNaoBloqueante:
+          prefs.getBool(_kCaixaFiscalNaoBloqueante) ?? true,
+      caixaLimiteOrcamentosPendentes: () {
+        final n = prefs.getInt(_kCaixaLimiteOrcamentos);
+        if (n == null || n < 20) return 120;
+        return n.clamp(20, 500);
+      }(),
+      pdvExigirVendedor: prefs.getBool(_kPdvExigirVendedor) ?? false,
     );
     return SyncLocalConfig.aplicarSobre(base);
   }
@@ -573,6 +633,21 @@ class AppConfigRepository {
       _kRegimeTributarioEmitente,
       config.regimeTributarioEmitente.clamp(1, 3),
     );
+    await prefs.setBool(_kPdvBalcaoRapido, config.pdvBalcaoRapido);
+    await prefs.setBool(_kPdvCheckoutDireto, config.pdvCheckoutDireto);
+    await prefs.setBool(
+      _kPdvPularDialogOrcamentoSalvo,
+      config.pdvPularDialogOrcamentoSalvo,
+    );
+    await prefs.setBool(
+      _kCaixaFiscalNaoBloqueante,
+      config.caixaFiscalNaoBloqueante,
+    );
+    await prefs.setInt(
+      _kCaixaLimiteOrcamentos,
+      config.caixaLimiteOrcamentosPendentes.clamp(20, 500),
+    );
+    await prefs.setBool(_kPdvExigirVendedor, config.pdvExigirVendedor);
     await FiscalConfigStore.aplicarRegimeEmpresa(config.regimeTributarioEmitente);
     await SyncLocalConfig.salvarCamposLocais(config);
     if (propagarRede) {

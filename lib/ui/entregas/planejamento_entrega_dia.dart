@@ -98,6 +98,28 @@ class PlanejamentoEntregaDia {
     }
     return out;
   }
+
+  /// Segunda-feira da semana que contem [referencia].
+  static DateTime inicioSemana(DateTime referencia) {
+    final d = soDia(referencia);
+    return d.subtract(Duration(days: d.weekday - DateTime.monday));
+  }
+
+  /// Fim do dia local (23:59:59.999).
+  static DateTime fimDoDia(DateTime dia) {
+    final d = soDia(dia);
+    return DateTime(d.year, d.month, d.day, 23, 59, 59, 999);
+  }
+
+  static List<DateTime> diasDaSemana(DateTime inicioSemana) {
+    final base = soDia(inicioSemana);
+    return List.generate(7, (i) => base.add(Duration(days: i)));
+  }
+
+  static const _siglasDiaSemana = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
+
+  static String siglaDiaSemana(DateTime dia) =>
+      _siglasDiaSemana[dia.weekday - DateTime.monday];
 }
 
 /// Barra fixa: Hoje, Amanha, Sem data, Todas + escolher data.
@@ -181,6 +203,159 @@ class BarraPlanejamentoEntregaDia extends StatelessWidget {
       label: Text(qtd > 0 ? '$titulo · $qtd' : titulo),
       selected: _estaAtivo(chave),
       onSelected: (ligar) => onSelecionar(ligar ? chave : null),
+    );
+  }
+}
+
+/// Faixa horizontal com os 7 dias da semana (contagem + selecao rapida).
+class FaixaSemanaPlanejamentoEntrega extends StatelessWidget {
+  const FaixaSemanaPlanejamentoEntrega({
+    super.key,
+    required this.inicioSemana,
+    required this.resumoPorDia,
+    required this.chaveSelecionada,
+    required this.onSelecionarDia,
+    required this.onSemanaAnterior,
+    required this.onSemanaProxima,
+  });
+
+  final DateTime inicioSemana;
+  final Map<String, int> resumoPorDia;
+  final String? chaveSelecionada;
+  final ValueChanged<DateTime> onSelecionarDia;
+  final VoidCallback onSemanaAnterior;
+  final VoidCallback onSemanaProxima;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final dias = PlanejamentoEntregaDia.diasDaSemana(inicioSemana);
+    final hojeChave = PlanejamentoEntregaDia.chaveDeDateTime(DateTime.now());
+    final tituloSemana =
+        '${PlanejamentoEntregaDia.tituloMesAno(inicioSemana)} · semana';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              tooltip: 'Semana anterior',
+              visualDensity: VisualDensity.compact,
+              onPressed: onSemanaAnterior,
+              icon: const Icon(Icons.chevron_left),
+            ),
+            Expanded(
+              child: Text(
+                tituloSemana,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Proxima semana',
+              visualDensity: VisualDensity.compact,
+              onPressed: onSemanaProxima,
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            for (final dia in dias) ...[
+              Expanded(
+                child: _celulaDia(
+                  context,
+                  dia: dia,
+                  qtd: resumoPorDia[
+                          PlanejamentoEntregaDia.chaveDeDateTime(dia)] ??
+                      0,
+                  selecionado: chaveSelecionada ==
+                      PlanejamentoEntregaDia.chaveDeDateTime(dia),
+                  ehHoje: PlanejamentoEntregaDia.chaveDeDateTime(dia) ==
+                      hojeChave,
+                  scheme: scheme,
+                  theme: theme,
+                  onTap: () => onSelecionarDia(dia),
+                ),
+              ),
+              if (dia != dias.last) const SizedBox(width: 4),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _celulaDia(
+    BuildContext context, {
+    required DateTime dia,
+    required int qtd,
+    required bool selecionado,
+    required bool ehHoje,
+    required ColorScheme scheme,
+    required ThemeData theme,
+    required VoidCallback onTap,
+  }) {
+    final bg = selecionado
+        ? scheme.primaryContainer
+        : ehHoje
+            ? scheme.secondaryContainer.withValues(alpha: 0.55)
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.35);
+    final border = selecionado
+        ? scheme.primary
+        : ehHoje
+            ? scheme.primary.withValues(alpha: 0.45)
+            : scheme.outlineVariant.withValues(alpha: 0.35);
+
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: border, width: selecionado ? 1.5 : 1),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                PlanejamentoEntregaDia.siglaDiaSemana(dia),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: selecionado ? scheme.onPrimaryContainer : null,
+                ),
+              ),
+              Text(
+                '${dia.day}',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: selecionado ? scheme.onPrimaryContainer : null,
+                ),
+              ),
+              Text(
+                qtd > 0 ? '$qtd' : '·',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: qtd > 0
+                      ? (selecionado
+                          ? scheme.onPrimaryContainer
+                          : scheme.primary)
+                      : scheme.onSurfaceVariant,
+                  fontWeight: qtd > 0 ? FontWeight.w700 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

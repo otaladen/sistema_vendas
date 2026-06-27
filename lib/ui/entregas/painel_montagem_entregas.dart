@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -16,6 +14,8 @@ import 'montagem_impressao_lote.dart';
 import 'montagem_mapa_rota.dart';
 import 'romaneio_carga_consolidada.dart';
 import 'romaneio_relatorios.dart';
+
+enum _PainelViagemSecao { carga, rota }
 
 /// Painel principal: dia + motorista + viagem → carga consolidada e paradas.
 class PainelMontagemEntregas extends StatefulWidget {
@@ -45,6 +45,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
   String? _viagemChaveSelecionada;
   bool _modoAgrupar = false;
   final Set<int> _idsSelecionadas = {};
+  _PainelViagemSecao _secaoViagem = _PainelViagemSecao.carga;
 
   @override
   void initState() {
@@ -154,12 +155,9 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
   }
 
   List<Venda> _paradasMotoristaNoDia(String motorista) {
-    final viagens = montagemViagensDoMotorista(widget.entregas, motorista);
-    final paradas = <Venda>[];
-    for (final v in viagens) {
-      paradas.addAll(v.vendasOrdenadas);
-    }
-    return paradas;
+    return ordenarParadasMotoristaDia(
+      filtrarVendasMotorista(widget.entregas, motorista),
+    );
   }
 
   MontagemEntregaViagem? get _viagemAtual {
@@ -240,21 +238,16 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
             viagem.vendas,
             widget.quantidadeItemEntrega,
           );
+    final paradasMotorista = motoristaLogisticaDefinido(_motoristaSelecionado!)
+        ? _paradasMotoristaNoDia(_motoristaSelecionado!)
+        : const <Venda>[];
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final estreito = constraints.maxWidth < 720 ||
-            constraints.maxHeight < 680;
+        final estreito = constraints.maxWidth < 900;
         final colViagens = estreito
             ? const BoxConstraints()
-            : const BoxConstraints(maxWidth: 280, minWidth: 240);
-        final alturaListaViagens = estreito
-            ? (constraints.maxHeight < 480
-                ? 72.0
-                : constraints.maxHeight < 520
-                    ? 96.0
-                    : 120.0)
-            : null;
+            : const BoxConstraints(maxWidth: 300, minWidth: 260);
 
         final seletorMotorista = _faixaMotoristas(motoristas);
         final alertaSemMotorista = _faixaAlertaSemMotorista();
@@ -262,8 +255,10 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
           motorista: _motoristaSelecionado!,
           viagens: viagens,
           viagem: viagem,
+          paradasMotorista: paradasMotorista,
         );
         final listaViagens = _listaViagens(viagens);
+        final seletorViagensCompacto = _seletorViagensHorizontal(viagens);
         final painelPrincipal = _modoAgrupar
             ? _painelAgruparViagens(_motoristaSelecionado!)
             : viagem == null
@@ -291,13 +286,10 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                 ),
                 const SizedBox(height: 6),
               ],
-              const SizedBox(height: 8),
-              if (!_modoAgrupar) ...[
-                SizedBox(
-                  height: alturaListaViagens ?? 120,
-                  child: listaViagens,
-                ),
-                const Divider(height: 1),
+              if (!_modoAgrupar && viagens.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                seletorViagensCompacto,
+                const SizedBox(height: 6),
               ],
               Expanded(child: painelPrincipal),
             ],
@@ -323,7 +315,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
               ),
               const SizedBox(height: 6),
             ],
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Expanded(
               child: _modoAgrupar
                   ? painelPrincipal
@@ -434,9 +426,11 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
     required String motorista,
     required List<MontagemEntregaViagem> viagens,
     required MontagemEntregaViagem? viagem,
+    required List<Venda> paradasMotorista,
   }) {
-    final paradasMotorista = _paradasMotoristaNoDia(motorista);
     final motIndef = !motoristaLogisticaDefinido(motorista);
+    final podeRotaDia =
+        widget.podeGerenciarStatus && paradasMotorista.length >= 2;
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Wrap(
@@ -460,6 +454,12 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                 _modoAgrupar ? 'Cancelar agrupar' : 'Agrupar viagens',
               ),
             ),
+          if (podeRotaDia)
+            OutlinedButton.icon(
+              onPressed: () => _abrirRotaMotoristaDia(motorista, paradasMotorista),
+              icon: const Icon(Icons.format_list_numbered_rounded, size: 18),
+              label: Text('Rota do dia (${paradasMotorista.length})'),
+            ),
           OutlinedButton.icon(
             onPressed: viagem == null
                 ? null
@@ -480,17 +480,106 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
             onPressed: motIndef
                 ? () => _avisarMotoristaIndefinido()
                 : () => showMontagemImpressaoLoteSheet(
-              context: context,
-              callbacks: widget.callbacks,
-              motorista: motorista,
-              viagens: viagens,
-              viagemAtual: viagem,
-            ),
+                      context: context,
+                      callbacks: widget.callbacks,
+                      motorista: motorista,
+                      viagens: viagens,
+                      viagemAtual: viagem,
+                    ),
             icon: const Icon(Icons.print_outlined, size: 18),
             label: const Text('Impressao em lote'),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _seletorViagensHorizontal(List<MontagemEntregaViagem> viagens) {
+    if (viagens.isEmpty) return const SizedBox.shrink();
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest
+          .withValues(alpha: 0.35),
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Viagens (${viagens.length})',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: viagens.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 6),
+                itemBuilder: (context, i) {
+                  final v = viagens[i];
+                  final sel = v.chave == _viagemChaveSelecionada;
+                  final prog = montagemProgressoCargaViagem(v.vendas);
+                  return ChoiceChip(
+                    label: Text(
+                      '${i + 1}. ${v.vendas.length} parada(s) · $prog/3',
+                    ),
+                    selected: sel,
+                    onSelected: (_) => setState(
+                      () => _viagemChaveSelecionada = v.chave,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _abrirRotaMotoristaDia(
+    String motorista,
+    List<Venda> paradas,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        final altura = MediaQuery.sizeOf(ctx).height * 0.72;
+        return SafeArea(
+          child: SizedBox(
+            height: altura,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    'Rota do motorista no dia',
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    'Ordene as ${paradas.length} paradas de $motorista. '
+                    'Mapa e romaneio seguem esta sequencia.',
+                    style: Theme.of(ctx).textTheme.bodySmall,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: _conteudoRotaMotoristaDia(motorista, paradas),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -589,43 +678,39 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
 
   Widget _cabecalhoViagem(
     MontagemEntregaViagem viagem,
-    List<Venda> ordenadas, {
-    required bool compacto,
-  }) {
+    List<Venda> ordenadas,
+  ) {
     final scheme = Theme.of(context).colorScheme;
     final prog = montagemProgressoCargaViagem(ordenadas);
     final checklistOk = montagemChecklistViagemCompleto(ordenadas);
-    final densidade = compacto ? VisualDensity.compact : VisualDensity.standard;
-    final padding = compacto
-        ? const EdgeInsets.fromLTRB(8, 6, 8, 6)
-        : const EdgeInsets.fromLTRB(12, 10, 12, 10);
 
     return Material(
       color: scheme.primaryContainer.withValues(alpha: 0.35),
       child: Padding(
-        padding: padding,
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               viagem.rotulo,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w800,
-                    fontSize: compacto ? 15 : null,
                   ),
             ),
             Text(
               '${ordenadas.length} parada(s) · Motorista: ${viagem.motorista}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            SizedBox(height: compacto ? 6 : 10),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 6,
               runSpacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 FilterChip(
-                  visualDensity: densidade,
+                  visualDensity: VisualDensity.compact,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   label: const Text('Separado'),
                   selected: ordenadas.every((v) => v.cargaSeparada),
@@ -634,7 +719,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                       : null,
                 ),
                 FilterChip(
-                  visualDensity: densidade,
+                  visualDensity: VisualDensity.compact,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   label: const Text('Carregado'),
                   selected: ordenadas.every((v) => v.cargaCarregada),
@@ -643,7 +728,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                       : null,
                 ),
                 FilterChip(
-                  visualDensity: densidade,
+                  visualDensity: VisualDensity.compact,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   label: const Text('Saiu'),
                   selected: ordenadas.every((v) => v.cargaSaiu),
@@ -652,7 +737,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                       : null,
                 ),
                 Chip(
-                  visualDensity: densidade,
+                  visualDensity: VisualDensity.compact,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   avatar: Icon(
                     checklistOk ? Icons.check_circle : Icons.timelapse,
@@ -661,66 +746,18 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                   ),
                   label: Text('Carga $prog/3'),
                 ),
-              ],
-            ),
-            SizedBox(height: compacto ? 4 : 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                FilledButton.tonalIcon(
-                  style: FilledButton.styleFrom(visualDensity: densidade),
-                  onPressed: () => widget.callbacks.emitirRelatorio(
-                    tipo: RelatorioEntregaTipo.separacaoViagem,
-                    viagem: ordenadas,
-                    salvarPdf: false,
-                  ),
-                  icon: const Icon(Icons.inventory_2_outlined, size: 18),
-                  label: const Text('Separacao (PDF)'),
-                ),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(visualDensity: densidade),
-                  onPressed: motoristaLogisticaDefinido(viagem.motorista)
-                      ? () => widget.callbacks.emitirRelatorio(
-                            tipo: RelatorioEntregaTipo.romaneioMotoristaDia,
-                            motorista: viagem.motorista,
-                            viagem: ordenadas,
-                            salvarPdf: false,
-                          )
-                      : _avisarMotoristaIndefinido,
-                  icon: const Icon(Icons.assignment_outlined, size: 18),
-                  label: const Text('Romaneio'),
-                ),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(visualDensity: densidade),
-                  onPressed: () => _abrirMapaRota(ordenadas),
-                  icon: const Icon(Icons.map_outlined, size: 18),
-                  label: const Text('Mapa rota'),
-                ),
-                if (widget.podeGerenciarStatus)
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(visualDensity: densidade),
-                    onPressed: () {
-                      if (viagem.ehGrupo) {
-                        widget.callbacks.editarMotoristaGrupo(
-                          viagem.grupoId,
-                          viagem.motorista,
-                        );
-                      } else {
-                        widget.callbacks.editarMotoristaPedido(ordenadas.first);
-                      }
-                    },
-                    icon: const Icon(Icons.person_outline, size: 18),
-                    label: const Text('Motorista'),
-                  ),
                 if (widget.podeGerenciarStatus) ...[
                   OutlinedButton(
-                    style: OutlinedButton.styleFrom(visualDensity: densidade),
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
                     onPressed: () => _statusViagem('roteirizada'),
                     child: const Text('Roteirizar'),
                   ),
                   FilledButton(
-                    style: FilledButton.styleFrom(visualDensity: densidade),
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
                     onPressed: checklistOk
                         ? () => _statusViagem('saiu_entrega')
                         : null,
@@ -728,6 +765,80 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                   ),
                 ],
               ],
+            ),
+            Theme(
+              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(bottom: 4),
+                title: Text(
+                  'Mais acoes',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                children: [
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: () => widget.callbacks.emitirRelatorio(
+                          tipo: RelatorioEntregaTipo.separacaoViagem,
+                          viagem: ordenadas,
+                          salvarPdf: false,
+                        ),
+                        icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                        label: const Text('Separacao (PDF)'),
+                      ),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: motoristaLogisticaDefinido(viagem.motorista)
+                            ? () => widget.callbacks.emitirRelatorio(
+                                  tipo: RelatorioEntregaTipo.romaneioMotoristaDia,
+                                  motorista: viagem.motorista,
+                                  viagem: ordenadas,
+                                  salvarPdf: false,
+                                )
+                            : _avisarMotoristaIndefinido,
+                        icon: const Icon(Icons.assignment_outlined, size: 18),
+                        label: const Text('Romaneio'),
+                      ),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: () => _abrirMapaRota(ordenadas),
+                        icon: const Icon(Icons.map_outlined, size: 18),
+                        label: const Text('Mapa rota'),
+                      ),
+                      if (widget.podeGerenciarStatus)
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: () {
+                            if (viagem.ehGrupo) {
+                              widget.callbacks.editarMotoristaGrupo(
+                                viagem.grupoId,
+                                viagem.motorista,
+                              );
+                            } else {
+                              widget.callbacks.editarMotoristaPedido(
+                                ordenadas.first,
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.person_outline, size: 18),
+                          label: const Text('Motorista'),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -777,6 +888,124 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _seletorSecaoViagem(MontagemEntregaViagem viagem, List<Venda> ordenadas) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+      child: SegmentedButton<_PainelViagemSecao>(
+        segments: [
+          const ButtonSegment(
+            value: _PainelViagemSecao.carga,
+            icon: Icon(Icons.inventory_2_outlined, size: 18),
+            label: Text('Carga'),
+          ),
+          ButtonSegment(
+            value: _PainelViagemSecao.rota,
+            icon: const Icon(Icons.route_outlined, size: 18),
+            label: Text('Rota (${ordenadas.length})'),
+          ),
+        ],
+        selected: {_secaoViagem},
+        onSelectionChanged: (s) => setState(() => _secaoViagem = s.first),
+      ),
+    );
+  }
+
+  Widget _conteudoRotaMotoristaDia(String motorista, List<Venda> paradas) {
+    final dataFmt = DateFormat('dd/MM/yyyy');
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+      itemCount: paradas.length,
+      separatorBuilder: (_, _) => const Divider(height: 1, indent: 48),
+      itemBuilder: (context, i) {
+        final v = paradas[i];
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (widget.podeGerenciarStatus)
+                Column(
+                  children: [
+                    IconButton(
+                      tooltip: 'Subir',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 28,
+                      ),
+                      onPressed: i == 0
+                          ? null
+                          : () => widget.callbacks.trocarParadaMotorista(
+                                motorista,
+                                paradas,
+                                i,
+                                i - 1,
+                              ),
+                      icon: const Icon(Icons.arrow_upward, size: 20),
+                    ),
+                    IconButton(
+                      tooltip: 'Descer',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 28,
+                      ),
+                      onPressed: i == paradas.length - 1
+                          ? null
+                          : () => widget.callbacks.trocarParadaMotorista(
+                                motorista,
+                                paradas,
+                                i,
+                                i + 1,
+                              ),
+                      icon: const Icon(Icons.arrow_downward, size: 20),
+                    ),
+                  ],
+                ),
+              CircleAvatar(
+                radius: 14,
+                child: Text(
+                  '${i + 1}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Pedido ${v.numeroOrcamento} · '
+                      '${v.cliente.target?.nomeRazao ?? 'Cliente'}',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    Text(
+                      v.enderecoEntrega,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    Text(
+                      v.dataEntregaMarcada == null
+                          ? 'Sem data marcada'
+                          : 'Entrega: ${dataFmt.format(v.dataEntregaMarcada!.toLocal())}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -932,43 +1161,27 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
     List<RomaneioCargaConsolidadaLinha> linhas,
   ) {
     final ordenadas = viagem.vendasOrdenadas;
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final modoScroll = constraints.maxHeight < 580;
-        final cabecalho = _cabecalhoViagem(
-          viagem,
-          ordenadas,
-          compacto: modoScroll,
-        );
-        final carga = _secaoCargaConsolidada(viagem, linhas);
-        final rota = _secaoRotaParadas(viagem, ordenadas);
-
-        if (modoScroll) {
-          final alturaCarga = math.max(180.0, constraints.maxHeight * 0.42);
-          final alturaRota = math.max(160.0, constraints.maxHeight * 0.38);
-          return SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                cabecalho,
-                SizedBox(height: alturaCarga, child: carga),
-                SizedBox(height: alturaRota, child: rota),
-              ],
-            ),
+    final cabecalho = _cabecalhoViagem(viagem, ordenadas);
+    final seletor = _seletorSecaoViagem(viagem, ordenadas);
+    final corpo = _secaoViagem == _PainelViagemSecao.carga
+        ? _secaoCargaConsolidada(
+            viagem,
+            linhas,
+            margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+          )
+        : _secaoRotaParadas(
+            viagem,
+            ordenadas,
+            margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
           );
-        }
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            cabecalho,
-            Expanded(flex: 3, child: carga),
-            Expanded(flex: 2, child: rota),
-          ],
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        cabecalho,
+        seletor,
+        Expanded(child: corpo),
+      ],
     );
   }
 }

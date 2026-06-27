@@ -18,6 +18,7 @@ import '../../objectbox.g.dart';
 import '../produto_repository.dart';
 import '../venda_repository.dart';
 import '../vendedor_repository.dart';
+import '../../domain/recado_loja_helper.dart';
 import '../../domain/produto_estoque_sync.dart';
 import 'sync_conflict_log.dart';
 import 'sync_cursor_storage.dart';
@@ -136,6 +137,8 @@ class SyncFullSync {
     'conta_pagar',
     'reajuste_preco',
     'auditoria_evento',
+    'item_lista_compra',
+    'recado_loja',
   ];
 
   Future<void> _montarEntidadeCompleta(
@@ -346,6 +349,25 @@ class SyncFullSync {
             entity,
             e.id,
             SyncEntityCodecOperacional.auditoriaEventoParaMap(e),
+          );
+        }
+      case 'item_lista_compra':
+        for (final i in _db.itemListaCompraBox.getAll()) {
+          _add(
+            m,
+            entity,
+            i.id,
+            SyncEntityCodecOperacional.itemListaCompraParaMap(i),
+          );
+        }
+        break;
+      case 'recado_loja':
+        for (final r in _db.recadoLojaBox.getAll()) {
+          _add(
+            m,
+            entity,
+            r.id,
+            SyncEntityCodecOperacional.recadoLojaParaMap(r),
           );
         }
     }
@@ -581,6 +603,27 @@ class SyncFullSync {
             SyncEntityCodecOperacional.auditoriaEventoParaMap(ev),
           );
         }
+      case 'item_lista_compra':
+        final ic = _db.itemListaCompraBox.get(localId);
+        if (ic != null) {
+          _add(
+            m,
+            entity,
+            ic.id,
+            SyncEntityCodecOperacional.itemListaCompraParaMap(ic),
+          );
+        }
+        break;
+      case 'recado_loja':
+        final recado = _db.recadoLojaBox.get(localId);
+        if (recado != null) {
+          _add(
+            m,
+            entity,
+            recado.id,
+            SyncEntityCodecOperacional.recadoLojaParaMap(recado),
+          );
+        }
     }
   }
 
@@ -725,6 +768,12 @@ class SyncFullSync {
           SyncEntityCodecOperacional.auditoriaEventoDeMap(payload),
         );
         break;
+      case 'item_lista_compra':
+        await _aplicarItemListaCompra(payload);
+        break;
+      case 'recado_loja':
+        await _aplicarRecadoLoja(payload);
+        break;
     }
   }
 
@@ -839,7 +888,38 @@ class SyncFullSync {
       case 'auditoria_evento':
         _db.auditoriaEventoBox.remove(id);
         break;
+      case 'item_lista_compra':
+        _db.itemListaCompraBox.remove(id);
+        break;
+      case 'recado_loja':
+        _db.recadoLojaBox.remove(id);
+        break;
     }
+  }
+
+  Future<void> _aplicarItemListaCompra(Map<String, dynamic> payload) async {
+    final item = SyncEntityCodecOperacional.itemListaCompraDeMap(payload);
+    final pid = (payload['produtoId'] as num?)?.toInt() ?? 0;
+    if (pid > 0) {
+      final p = _db.produtoBox.get(pid);
+      if (p != null) item.produto.target = p;
+    }
+    _db.itemListaCompraBox.put(item);
+  }
+
+  Future<void> _aplicarRecadoLoja(Map<String, dynamic> payload) async {
+    final incoming = SyncEntityCodecOperacional.recadoLojaDeMap(payload);
+    final id = incoming.id;
+    if (id > 0) {
+      final local = _db.recadoLojaBox.get(id);
+      if (local != null) {
+        incoming.leiturasJson = RecadoLojaHelper.mesclarLeiturasJson(
+          local.leiturasJson,
+          incoming.leiturasJson,
+        );
+      }
+    }
+    _db.recadoLojaBox.put(incoming);
   }
 
   Future<void> _aplicarContaPagar(Map<String, dynamic> payload) async {

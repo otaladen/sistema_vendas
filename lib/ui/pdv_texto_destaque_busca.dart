@@ -6,6 +6,8 @@ TextSpan pdvTextoDestaqueBusca({
   required String texto,
   required String termoBusca,
   required TextStyle estiloBase,
+  bool linhaSelecionada = false,
+  bool usarFundo = false,
 }) {
   final termo = termoBusca.trim().toLowerCase();
   if (termo.isEmpty) {
@@ -14,9 +16,9 @@ TextSpan pdvTextoDestaqueBusca({
   final scheme = Theme.of(context).colorScheme;
   final textoLower = texto.toLowerCase();
   final destaque = estiloBase.copyWith(
-    color: scheme.onPrimaryContainer,
-    fontWeight: FontWeight.normal,
-    backgroundColor: scheme.primaryContainer,
+    color: linhaSelecionada ? scheme.onPrimaryContainer : scheme.primary,
+    fontWeight: FontWeight.w700,
+    backgroundColor: usarFundo ? scheme.primaryContainer : null,
   );
   final spans = <TextSpan>[];
   var cursor = 0;

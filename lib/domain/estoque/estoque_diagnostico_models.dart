@@ -12,6 +12,7 @@ enum EstoqueDiagnosticoCodigo {
   vendaFlagBaixaSemMovimento,
   saldoDivergenteKardex,
   reservaNegativa,
+  carretoReservaAusente,
 }
 
 class EstoqueDiagnosticoAchado {

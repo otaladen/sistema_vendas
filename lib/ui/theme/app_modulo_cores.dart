@@ -121,6 +121,8 @@ abstract final class AppModuloCores {
         return harmonizar(scheme, 320);
       case DashboardAlertaTipo.entregaAtrasada:
         return destino(context, MainMenuDestino.entregas);
+      case DashboardAlertaTipo.listaCompraPendente:
+        return harmonizar(scheme, 155);
       case DashboardAlertaTipo.estoqueCritico:
         return destino(context, MainMenuDestino.estoque);
       case DashboardAlertaTipo.orcamentoAntigo:

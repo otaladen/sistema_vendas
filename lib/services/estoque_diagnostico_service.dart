@@ -2,6 +2,7 @@ import '../data/movimento_estoque_repository.dart';
 import '../data/objectbox.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/estoque/estoque_diagnostico_models.dart';
+import '../domain/entregas/carreto_checklist_estoque_helper.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
@@ -67,6 +68,7 @@ class EstoqueDiagnosticoService {
     }
 
     if (!temLevaAgoraPendente || venda.estoqueBaixadoCupom) {
+      achados.addAll(_achadosCarretoReservaPendente(venda));
       return achados;
     }
 
@@ -82,7 +84,28 @@ class EstoqueDiagnosticoService {
         podeReprocessarBaixa: true,
       ),
     );
+    achados.addAll(_achadosCarretoReservaPendente(venda));
     return achados;
+  }
+
+  List<EstoqueDiagnosticoAchado> _achadosCarretoReservaPendente(Venda venda) {
+    final problemas =
+        CarretoChecklistEstoqueHelper.problemasReservaCarretoPendente(venda);
+    if (problemas.isEmpty) return const [];
+
+    final controle = VendaDocumentoRotuloHelper.rotuloControleInterno(venda);
+    return [
+      EstoqueDiagnosticoAchado(
+        codigo: EstoqueDiagnosticoCodigo.carretoReservaAusente,
+        severidade: EstoqueDiagnosticoSeveridade.critico,
+        titulo: '$controle aguarda saida do carro sem estoque suficiente',
+        detalhe:
+            '${problemas.join('\n')}\n'
+            'Revise o kardex do produto em Estoque ou ajuste a reserva antes '
+            'de marcar "Saiu" no Patio.',
+        vendaId: venda.id,
+      ),
+    ];
   }
 
   List<EstoqueDiagnosticoAchado> _diagnosticarProdutos() {

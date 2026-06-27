@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/pdv_consulta_multi_deposito_util.dart';
+import '../../domain/pdv_estoque_semaforo_util.dart';
 import '../../model/produto.dart';
+import 'pdv_consulta_semaforo_estoque.dart';
 
 /// Resumo explicito de estoque para PDV: fisico, reservado e disponivel.
 class PdvEstoqueResumoPanel extends StatelessWidget {
@@ -9,17 +12,14 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
     required this.produto,
     this.compacto = false,
     this.quantidadeNoOrcamento = 0,
+    this.rotulosDeposito = const PdvConsultaDepositoRotulos(),
   });
 
   final Produto produto;
   final bool compacto;
   /// Quantidade deste produto ja no carrinho/orcamento (unidade de estoque).
   final int quantidadeNoOrcamento;
-
-  bool get _critico =>
-      produto.estoqueReal < produto.quantidadeMinima && produto.estoqueReal > 0;
-
-  bool get _zerado => produto.estoqueReal <= 0;
+  final PdvConsultaDepositoRotulos rotulosDeposito;
 
   @override
   Widget build(BuildContext context) {
@@ -30,27 +30,27 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
     final reservado = produto.estoqueReservado;
     final noOrcamento = quantidadeNoOrcamento.clamp(0, 1 << 30);
     final restanteAposOrcamento = disponivel - noOrcamento;
-
-    Color corDisponivel = scheme.primary;
-    if (_zerado) {
-      corDisponivel = scheme.error;
-    } else if (_critico || disponivel <= 0 || restanteAposOrcamento < 0) {
-      corDisponivel = scheme.error;
-    } else if (disponivel <= produto.quantidadeMinima ||
-        restanteAposOrcamento <= produto.quantidadeMinima) {
-      corDisponivel = scheme.tertiary;
-    }
+    final nivel = PdvEstoqueSemaforoUtil.nivelDe(
+      produto,
+      quantidadeNoOrcamento: noOrcamento,
+    );
+    final corDisponivel = PdvEstoqueSemaforoUtil.corDe(context, nivel);
+    final rotuloNivel = PdvEstoqueSemaforoUtil.rotuloNivel(nivel);
 
     if (compacto) {
+      final linhaCd = PdvConsultaMultiDepositoUtil.exibirCd(produto)
+          ? ' · ${rotulosDeposito.cd} ${produto.estoqueCd}'
+          : '';
       final linhaOrcamento = noOrcamento > 0
           ? ' · Orc. $noOrcamento · Rest. $restanteAposOrcamento'
           : '';
       return Tooltip(
-        message:
-            'Disponivel: $disponivel · Fisico: $fisico · Reservado: $reservado'
-            '$linhaOrcamento',
+        message: PdvEstoqueSemaforoUtil.tooltipDe(
+          produto,
+          quantidadeNoOrcamento: noOrcamento,
+        ),
         child: Text(
-          'Disp. $disponivel · Fis. $fisico · Res. $reservado$linhaOrcamento',
+          'Disp. $disponivel · Fis. $fisico · Res. $reservado$linhaCd$linhaOrcamento',
           style: theme.textTheme.labelSmall?.copyWith(
             color: corDisponivel,
             fontWeight: FontWeight.w700,
@@ -73,12 +73,22 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Estoque',
-            style: theme.textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: scheme.onSurfaceVariant,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Estoque · $rotuloNivel',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              PdvConsultaSemaforoEstoque(
+                produto: produto,
+                quantidadeNoOrcamento: noOrcamento,
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           Row(
@@ -110,6 +120,16 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
               ),
             ],
           ),
+          if (PdvConsultaMultiDepositoUtil.exibirCd(produto)) ...[
+            const SizedBox(height: 6),
+            Text(
+              '${rotulosDeposito.cd}: ${produto.estoqueCd} ${produto.unidade}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: scheme.secondary,
+              ),
+            ),
+          ],
           if (reservado > 0) ...[
             const SizedBox(height: 4),
             Text(

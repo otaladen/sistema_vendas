@@ -10,8 +10,10 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'theme/app_semantic_helper.dart';
+import '../data/lista_compra_repository.dart';
 import '../data/produto_repository.dart';
 import '../domain/permissao_usuario.dart';
+import '../domain/produto_substitutos_util.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
@@ -33,6 +35,7 @@ import '../services/produto_imagem_service.dart';
 import 'layout/app_layout.dart';
 import 'widgets/abas_historico_produto_widget.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
+import 'widgets/anotar_lista_compra_dialog.dart';
 import 'widgets/produto_busca_input.dart';
 
 class _CadastroProdutoSalvarIntent extends Intent {
@@ -248,6 +251,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   final _cestController = TextEditingController();
   final _cfopVendaController = TextEditingController();
   final _localizacaoController = TextEditingController();
+  final _estoqueCdController = TextEditingController();
   final _precoCustoController = TextEditingController();
   final _preco1Controller = TextEditingController();
   final _preco2Controller = TextEditingController();
@@ -285,6 +289,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   _ModoAlvoPrecificacao _modoAlvoPrecificacao = _ModoAlvoPrecificacao.markup;
   bool _embalagemMultiplica = true;
   bool _permiteQuantidadeFracionada = false;
+  List<int> _substitutosIds = const [];
   DateTime? _ultimaVendaEmCadastro;
   DateTime? _criadoEmCadastro;
   DateTime? _ultimaCompraEmCadastro;
@@ -429,6 +434,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     _cestController.dispose();
     _cfopVendaController.dispose();
     _localizacaoController.dispose();
+    _estoqueCdController.dispose();
     _precoCustoController.dispose();
     _preco1Controller.dispose();
     _preco2Controller.dispose();
@@ -1367,6 +1373,16 @@ class _ProdutosPageState extends State<ProdutosPage>
           ),
         );
 
+        Widget anotarCompra = Tooltip(
+          message: 'Anotar este produto na lista de compras',
+          child: OutlinedButton.icon(
+            style: etiquetaStyle,
+            onPressed: _anotarParaListaCompra,
+            icon: const Icon(Icons.playlist_add_outlined),
+            label: const Text('Anotar compra'),
+          ),
+        );
+
         if (narrow) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1387,6 +1403,8 @@ class _ProdutosPageState extends State<ProdutosPage>
               SizedBox(width: double.infinity, child: cancelar),
               const SizedBox(height: _erpGap8),
               SizedBox(width: double.infinity, child: espelhar),
+              const SizedBox(height: _erpGap8),
+              SizedBox(width: double.infinity, child: anotarCompra),
               const SizedBox(height: _erpGap8),
               SizedBox(width: double.infinity, child: etiqueta),
               const SizedBox(height: _erpGap8),
@@ -1412,6 +1430,8 @@ class _ProdutosPageState extends State<ProdutosPage>
             cancelar,
             const SizedBox(width: _erpGap16),
             espelhar,
+            const SizedBox(width: _erpGap16),
+            anotarCompra,
             const SizedBox(width: _erpGap16),
             etiqueta,
             const SizedBox(width: _erpGap16),
@@ -1622,6 +1642,8 @@ class _ProdutosPageState extends State<ProdutosPage>
       _cestController.clear();
       _cfopVendaController.clear();
       _localizacaoController.clear();
+      _estoqueCdController.clear();
+      _substitutosIds = const [];
       _grupoTributarioSelecionado = GrupoTributarioProduto.tributado.codigo;
       _icmsOrigemSelecionado = kFiscalValorAutomatico;
       _icmsCstSelecionado = kFiscalValorAutomatico;
@@ -1991,6 +2013,33 @@ class _ProdutosPageState extends State<ProdutosPage>
       if (!mounted) return;
       _codigoBarrasFocus.requestFocus();
     });
+  }
+
+  Future<void> _anotarParaListaCompra() async {
+    final nome = _nomeController.text.trim();
+    if (nome.isEmpty && _produtoEmEdicaoId == null) {
+      _definirStatus(
+        'Informe o nome do produto antes de anotar para compra.',
+        erro: true,
+      );
+      return;
+    }
+    final repo = ListaCompraRepository(widget.produtoRepository.objectBox);
+    Produto? produto;
+    if (_produtoEmEdicaoId != null) {
+      produto = widget.produtoRepository.obterPorId(_produtoEmEdicaoId!);
+    }
+    await mostrarAnotarListaCompraDialog(
+      context,
+      repository: repo,
+      produto: produto,
+      descricaoLivre: produto == null ? nome : '',
+      quantidadeInicial: produto != null &&
+              produto.quantidadeMinima > produto.estoqueAtual
+          ? (produto.quantidadeMinima - produto.estoqueAtual).clamp(1, 99999)
+          : 1,
+      criadoPor: widget.usuarioLogado?.login ?? '',
+    );
   }
 
   Future<void> _limparFormularioComConfirmacao() async {
@@ -3605,6 +3654,107 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
   }
 
+  Future<void> _adicionarSubstitutoCadastro() async {
+    final buscaCtrl = TextEditingController();
+    var resultados = <Produto>[];
+
+    final escolhido = await showDialog<Produto>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDlg) {
+            void buscar() {
+              final termo = buscaCtrl.text.trim();
+              setDlg(() {
+                resultados = termo.isEmpty
+                    ? const []
+                    : widget.produtoRepository
+                        .pesquisarPadraoPdv(termo)
+                        .where((p) => p.ativo)
+                        .take(12)
+                        .toList();
+              });
+            }
+
+            return AlertDialog(
+              title: const Text('Adicionar substituto'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: buscaCtrl,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Buscar produto',
+                        hintText: 'Nome, SKU ou codigo de barras',
+                      ),
+                      onSubmitted: (_) => buscar(),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.tonal(
+                        onPressed: buscar,
+                        child: const Text('Buscar'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 220,
+                      child: resultados.isEmpty
+                          ? const Center(
+                              child: Text('Digite e busque um produto.'),
+                            )
+                          : ListView.builder(
+                              itemCount: resultados.length,
+                              itemBuilder: (_, i) {
+                                final p = resultados[i];
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(p.nome, maxLines: 1),
+                                  subtitle: Text(
+                                    p.codigoInterno.trim().isNotEmpty
+                                        ? 'SKU ${p.codigoInterno}'
+                                        : 'Sem SKU',
+                                  ),
+                                  onTap: () => Navigator.pop(ctx, p),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancelar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    buscaCtrl.dispose();
+
+    if (escolhido == null || !mounted) return;
+    if (escolhido.id == _produtoEmEdicaoId) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('O produto nao pode ser substituto de si mesmo.')),
+      );
+      return;
+    }
+    if (_substitutosIds.contains(escolhido.id)) return;
+
+    setState(() {
+      _substitutosIds = [..._substitutosIds, escolhido.id];
+    });
+  }
+
   Future<void> _salvarProduto() async {
     setState(() {
       _tentouSalvar = true;
@@ -3631,6 +3781,8 @@ class _ProdutosPageState extends State<ProdutosPage>
     final cest = _cestController.text.replaceAll(RegExp(r'\D'), '');
     final cfopVenda = _cfopVendaController.text.trim();
     final localizacao = _localizacaoController.text.trim();
+    final estoqueCd = (int.tryParse(_estoqueCdController.text.trim()) ?? 0)
+        .clamp(0, 999999999);
     final precoCusto = _parseValorMonetario(_precoCustoController.text);
     final produtoExistente = _produtoEmEdicaoId == null
         ? null
@@ -3703,6 +3855,8 @@ class _ProdutosPageState extends State<ProdutosPage>
       apelidosBusca: apelidosBusca,
       fotoPath: fotoPathFinal,
       localizacao: localizacao,
+      estoqueCd: estoqueCd,
+      substitutosIds: ProdutoSubstitutosUtil.formatIds(_substitutosIds),
       ncm: ncm,
       cest: cest,
       grupoTributario: _grupoTributarioSelecionado,
@@ -3813,6 +3967,10 @@ class _ProdutosPageState extends State<ProdutosPage>
       _icmsCstSelecionado = produto.icmsSituacaoTributaria;
       _pisCofinsCstSelecionado = produto.pisCofinsSituacaoTributaria;
       _localizacaoController.text = produto.localizacao;
+      _estoqueCdController.text =
+          produto.estoqueCd > 0 ? produto.estoqueCd.toString() : '';
+      _substitutosIds =
+          List<int>.from(ProdutoSubstitutosUtil.parseIds(produto.substitutosIds));
       _precoCustoController.text = _formatarValorMonetario(produto.precoCusto);
       _preco1Controller.text = _formatarValorMonetario(
         produto.preco1 > 0 ? produto.preco1 : produto.precoVenda,
@@ -5993,6 +6151,100 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               hint:
                                                                   'Corredor, prateleira, nivel',
                                                             ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(
+                                                    height: _erpGap16,
+                                                  ),
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      _erpFieldLabel(
+                                                        'Estoque no CD (deposito secundario)',
+                                                        context,
+                                                      ),
+                                                      TextField(
+                                                        controller:
+                                                            _estoqueCdController,
+                                                        keyboardType:
+                                                            TextInputType
+                                                                .number,
+                                                        decoration:
+                                                            _erpInputDecoration(
+                                                          context,
+                                                          hint:
+                                                              '0 = nao exibir na consulta',
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(
+                                                    height: _erpGap16,
+                                                  ),
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      _erpFieldLabel(
+                                                        'Substitutos cadastrados',
+                                                        context,
+                                                      ),
+                                                      Text(
+                                                        'Aparecem primeiro na consulta PDV (badge Cad.).',
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .bodySmall,
+                                                      ),
+                                                      const SizedBox(height: 8),
+                                                      Wrap(
+                                                        spacing: 6,
+                                                        runSpacing: 6,
+                                                        children: [
+                                                          for (final sid
+                                                              in _substitutosIds)
+                                                            InputChip(
+                                                              label: Text(
+                                                                widget
+                                                                        .produtoRepository
+                                                                        .obterPorId(
+                                                                            sid)
+                                                                        ?.nome ??
+                                                                    '#$sid',
+                                                                maxLines: 1,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                              ),
+                                                              onDeleted: () =>
+                                                                  setState(() {
+                                                                _substitutosIds =
+                                                                    _substitutosIds
+                                                                        .where((id) =>
+                                                                            id !=
+                                                                            sid)
+                                                                        .toList();
+                                                              }),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                      Align(
+                                                        alignment:
+                                                            Alignment.centerLeft,
+                                                        child: TextButton.icon(
+                                                          onPressed:
+                                                              _adicionarSubstitutoCadastro,
+                                                          icon: const Icon(
+                                                            Icons
+                                                                .playlist_add_outlined,
+                                                          ),
+                                                          label: const Text(
+                                                            'Adicionar substituto',
+                                                          ),
+                                                        ),
                                                       ),
                                                     ],
                                                   ),

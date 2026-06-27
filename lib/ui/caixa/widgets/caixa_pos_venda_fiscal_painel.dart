@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 
 import '../../../domain/caixa_fiscal_status.dart';
 import '../../../domain/venda_documento_rotulo_helper.dart';
-import '../../../domain/fiscal/venda_documento_fiscal_mutex.dart';
 import '../../../model/cliente.dart';
 import '../../../model/venda.dart';
 import '../caixa_fiscal_chip.dart';
@@ -24,6 +23,8 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
     this.acaoFiscalSugerida,
     required this.onCupomNaoFiscal,
     required this.onEmitirNfce,
+    required this.onEmitirNfe55,
+    required this.bloqueiaNovaNfce,
     required this.onConcluir,
     required this.onCancelarVenda,
   });
@@ -41,6 +42,8 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
   final String? acaoFiscalSugerida;
   final VoidCallback onCupomNaoFiscal;
   final VoidCallback onEmitirNfce;
+  final VoidCallback onEmitirNfe55;
+  final bool bloqueiaNovaNfce;
   final VoidCallback onConcluir;
   final VoidCallback onCancelarVenda;
 
@@ -50,7 +53,6 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
     final scheme = theme.colorScheme;
     final fiscalInfo = CaixaFiscalStatusHelper.deVenda(venda, orcamentoPendente: false);
 
-    final bloqueiaNovaNfce = VendaDocumentoFiscalMutex.bloqueiaNovaNfce(venda);
     final atalhos = <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.digit2): onCupomNaoFiscal,
       const SingleActivator(LogicalKeyboardKey.numpad2): onCupomNaoFiscal,
@@ -58,6 +60,12 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
     if (!bloqueiaNovaNfce) {
       atalhos[const SingleActivator(LogicalKeyboardKey.digit3)] = onEmitirNfce;
       atalhos[const SingleActivator(LogicalKeyboardKey.numpad3)] = onEmitirNfce;
+    }
+    if (exigeNfe55 && !jaTemNfe55) {
+      atalhos[const SingleActivator(LogicalKeyboardKey.enter)] = onEmitirNfe55;
+      atalhos[const SingleActivator(LogicalKeyboardKey.numpadEnter)] =
+          onEmitirNfe55;
+    } else if (!bloqueiaNovaNfce) {
       atalhos[const SingleActivator(LogicalKeyboardKey.enter)] = onEmitirNfce;
       atalhos[const SingleActivator(LogicalKeyboardKey.numpadEnter)] =
           onEmitirNfce;
@@ -134,6 +142,7 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
                     acaoFiscalSugerida: acaoFiscalSugerida,
                     onCupom: onCupomNaoFiscal,
                     onNfce: onEmitirNfce,
+                    onNfe55: onEmitirNfe55,
                   );
                   if (empilhar) {
                     return SingleChildScrollView(
@@ -214,8 +223,12 @@ class CaixaPosVendaFiscalPainel extends StatelessWidget {
             ],
             Text(
               podeConcluir
-                  ? 'Atalhos: Enter/3 = NFC-e · 2 = cupom · 1/Esc = concluir'
-                  : 'Atalhos: Enter/3 = NFC-e · 2 = cupom',
+                  ? (exigeNfe55 && !jaTemNfe55
+                      ? 'Atalhos: Enter = NF-e · 2 = cupom · 1/Esc = concluir'
+                      : 'Atalhos: Enter/3 = NFC-e · 2 = cupom · 1/Esc = concluir')
+                  : (exigeNfe55 && !jaTemNfe55
+                      ? 'Atalhos: Enter = NF-e · 2 = cupom'
+                      : 'Atalhos: Enter/3 = NFC-e · 2 = cupom'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -342,6 +355,7 @@ class _AcoesFiscais extends StatelessWidget {
     this.acaoFiscalSugerida,
     required this.onCupom,
     required this.onNfce,
+    required this.onNfe55,
   });
 
   final bool processando;
@@ -352,6 +366,7 @@ class _AcoesFiscais extends StatelessWidget {
   final String? acaoFiscalSugerida;
   final VoidCallback onCupom;
   final VoidCallback onNfce;
+  final VoidCallback onNfe55;
 
   @override
   Widget build(BuildContext context) {
@@ -389,8 +404,12 @@ class _AcoesFiscais extends StatelessWidget {
                               ? 'Dinheiro ou fiado: cupom nao fiscal sera '
                                   'emitido automaticamente (controle interno; '
                                   'estoque ja baixado na finalizacao).'
-                              : 'PIX ou cartao: NFC-e sera emitida '
-                                  'automaticamente (estoque ja baixado na finalizacao).',
+                              : acaoFiscalSugerida == 'nfe55'
+                                  ? 'Cliente CNPJ com pagamento eletronico: '
+                                      'a NF-e modelo 55 sera aberta '
+                                      'automaticamente (sem NFC-e).'
+                                  : 'PIX ou cartao: NFC-e sera emitida '
+                                      'automaticamente (estoque ja baixado na finalizacao).',
                           style: theme.textTheme.bodySmall?.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
@@ -401,7 +420,7 @@ class _AcoesFiscais extends StatelessWidget {
                 ),
               ),
             ],
-            if (exigeNfe55 && !jaTemNfe55) ...[
+            if (exigeNfe55 && !jaTemNfe55 && acaoFiscalSugerida != 'nfe55') ...[
               const SizedBox(height: 10),
               Material(
                 color: Colors.amber.shade50,
@@ -415,8 +434,7 @@ class _AcoesFiscais extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Cliente CNPJ — emita NF-e modelo 55 pelo menu '
-                          'Notas fiscais quando necessario.',
+                          'Cliente CNPJ — emita NF-e modelo 55 (botao abaixo ou Enter).',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: Colors.amber.shade900,
                             fontWeight: FontWeight.w600,
@@ -429,6 +447,21 @@ class _AcoesFiscais extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 12),
+            if (exigeNfe55 && !jaTemNfe55) ...[
+              _botaoAcao(
+                context,
+                icone: Icons.description_outlined,
+                titulo: jaTemNfe55 ? 'NF-e ja emitida' : 'Emitir NF-e modelo 55',
+                subtitulo: jaTemNfe55
+                    ? 'Documento fiscal da venda'
+                    : 'Nota para CNPJ (cartao/PIX entram no caixa normalmente)',
+                atalho: 'Enter',
+                destaque:
+                    acaoFiscalSugerida == 'nfe55' && !processando && !jaTemNfe55,
+                onPressed: processando || jaTemNfe55 ? null : onNfe55,
+              ),
+              const SizedBox(height: 8),
+            ],
             _botaoAcao(
               context,
               icone: Icons.receipt_outlined,
@@ -445,11 +478,15 @@ class _AcoesFiscais extends StatelessWidget {
               titulo: bloqueiaNovaNfce
                   ? (jaTemNfe55
                       ? 'NFC-e indisponivel (ja tem NF-e)'
-                      : 'NFC-e ja emitida')
+                      : exigeNfe55
+                          ? 'NFC-e indisponivel (cliente CNPJ)'
+                          : 'NFC-e ja emitida')
                   : 'Emitir NFC-e',
               subtitulo: bloqueiaNovaNfce && jaTemNfe55
                   ? 'Uma venda nao pode ter NFC-e e NF-e juntas'
-                  : 'Nota fiscal (estoque ja baixado na finalizacao)',
+                  : bloqueiaNovaNfce && exigeNfe55
+                      ? 'Use NF-e modelo 55 para este cliente'
+                      : 'Nota fiscal consumidor (estoque ja baixado na finalizacao)',
               atalho: bloqueiaNovaNfce ? '—' : '3 · Enter',
               destaque:
                   acaoFiscalSugerida == 'nfce' && !bloqueiaNovaNfce && !processando,

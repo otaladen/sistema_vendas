@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../data/cliente_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../model/cliente.dart';
+import '../../model/usuario_sistema.dart';
 import '../../model/venda.dart';
 import 'relatorio_drill_down.dart';
 import 'relatorio_export_util.dart';
@@ -19,6 +20,8 @@ class RelatorioOrcamentosAbertosPage extends StatefulWidget {
     this.exibirExportacoesRelatorio = true,
     this.podeEditarNoPdv = false,
     this.onEditarNoPdv,
+    this.podeApagarOrcamentos = false,
+    this.usuarioExecutor,
   });
 
   final VendaRepository vendaRepository;
@@ -28,6 +31,8 @@ class RelatorioOrcamentosAbertosPage extends StatefulWidget {
   final bool exibirExportacoesRelatorio;
   final bool podeEditarNoPdv;
   final Future<void> Function(BuildContext context, Venda venda)? onEditarNoPdv;
+  final bool podeApagarOrcamentos;
+  final UsuarioSistema? usuarioExecutor;
 
   @override
   State<RelatorioOrcamentosAbertosPage> createState() =>
@@ -206,6 +211,15 @@ class _RelatorioOrcamentosAbertosPageState
       _buscaController.text.trim().isNotEmpty;
 
   Future<void> _confirmarApagarOrcamento(Venda venda) async {
+    if (!widget.podeApagarOrcamentos || widget.usuarioExecutor == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sem permissao para apagar orcamentos.'),
+        ),
+      );
+      return;
+    }
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -233,6 +247,8 @@ class _RelatorioOrcamentosAbertosPageState
       widget.vendaRepository.cancelarVenda(
         venda.id,
         motivo: 'Exclusao manual na lista de orcamentos em aberto',
+        canceladaPor: widget.usuarioExecutor!.login,
+        usuarioExecutor: widget.usuarioExecutor,
       );
       _carregar();
       if (!mounted) return;
@@ -250,6 +266,15 @@ class _RelatorioOrcamentosAbertosPageState
   }
 
   Future<void> _abrirManutencaoOrcamentos() async {
+    if (!widget.podeApagarOrcamentos || widget.usuarioExecutor == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sem permissao para manutencao de orcamentos.'),
+        ),
+      );
+      return;
+    }
     var dataLimite = DateTime.now();
     final dataController = TextEditingController(
       text: DateFormat('dd/MM/yyyy').format(dataLimite),
@@ -481,10 +506,11 @@ class _RelatorioOrcamentosAbertosPageState
       appBar: AppBar(
         title: Text(widget.tituloAppBar),
         actions: [
-          TextButton(
-            onPressed: _abrirManutencaoOrcamentos,
-            child: const Text('Manutencao'),
-          ),
+          if (widget.podeApagarOrcamentos)
+            TextButton(
+              onPressed: _abrirManutencaoOrcamentos,
+              child: const Text('Manutencao'),
+            ),
           if (widget.exibirExportacoesRelatorio)
             RelatorioExportacoesMenu(
               nomeArquivo: 'orcamentos_abertos',
@@ -594,14 +620,15 @@ class _RelatorioOrcamentosAbertosPageState
                                 onPressed: () =>
                                     widget.onEditarNoPdv!(context, v),
                               ),
-                            IconButton(
-                              tooltip: 'Apagar orcamento',
-                              icon: Icon(
-                                Icons.delete_outline,
-                                color: Theme.of(context).colorScheme.error,
+                            if (widget.podeApagarOrcamentos)
+                              IconButton(
+                                tooltip: 'Apagar orcamento',
+                                icon: Icon(
+                                  Icons.delete_outline,
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                                onPressed: () => _confirmarApagarOrcamento(v),
                               ),
-                              onPressed: () => _confirmarApagarOrcamento(v),
-                            ),
                             const Icon(Icons.chevron_right),
                           ],
                         ),

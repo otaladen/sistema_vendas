@@ -202,7 +202,7 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
   ];
 
   static const _precoCliente = <_PdvAtalhoItem>[
-    (tecla: 'F1–F3', descricao: 'tabela de preço', destaque: false),
+    (tecla: 'F1–F3', descricao: 'tabela (linha no carrinho ou novos)', destaque: false),
     (tecla: 'Shift+F2', descricao: 'foco no cliente', destaque: false),
     (tecla: 'Ctrl+N', descricao: 'novo cliente', destaque: false),
     (tecla: 'Shift+F4', descricao: 'lista de clientes', destaque: false),
@@ -218,6 +218,7 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
 
   static const _carrinho = <_PdvAtalhoItem>[
     (tecla: 'E', descricao: 'entrega da linha', destaque: false),
+    (tecla: 'T', descricao: 'tabela da linha', destaque: false),
     (tecla: 'Ctrl+D', descricao: 'divide item', destaque: false),
     (tecla: 'Ctrl+P', descricao: 'altera preço (gerente)', destaque: true),
     (tecla: '+ / −', descricao: 'quantidade', destaque: false),
@@ -306,6 +307,62 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
   }
 }
 
+/// Dica compacta na consulta de produtos do PDV.
+class PdvAtalhosAjudaConsulta extends StatelessWidget {
+  const PdvAtalhosAjudaConsulta({super.key});
+
+  static const _itens = <_PdvAtalhoItem>[
+    (tecla: 'F1–F3', descricao: 'tabela para adicionar', destaque: false),
+    (tecla: '+ / −', descricao: 'quantidade no painel', destaque: false),
+    (tecla: 'Enter', descricao: 'adiciona selecionado', destaque: true),
+    (tecla: 'F7', descricao: 'painel / drawer', destaque: false),
+    (tecla: 'F9', descricao: 'detalhes', destaque: false),
+    (tecla: 'F8', descricao: 'busca', destaque: false),
+    (tecla: '↑↓', descricao: 'lista', destaque: false),
+    (tecla: 'Esc', descricao: 'voltar', destaque: false),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (var i = 0; i < _itens.length; i++) ...[
+              if (i > 0)
+                Text(
+                  '·',
+                  style: TextStyle(
+                    color: scheme.outline,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              PdvAtalhoLinha(
+                tecla: _itens[i].tecla,
+                descricao: _itens[i].descricao,
+                destaque: _itens[i].destaque,
+                compacto: true,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Dica compacta acima da lista do carrinho.
 class PdvAtalhosAjudaCarrinho extends StatelessWidget {
   const PdvAtalhosAjudaCarrinho({super.key});
@@ -315,6 +372,7 @@ class PdvAtalhosAjudaCarrinho extends StatelessWidget {
     (tecla: '↑↓', descricao: 'troca item', destaque: false),
     (tecla: '+ / −', descricao: 'quantidade', destaque: false),
     (tecla: 'E', descricao: 'entrega', destaque: false),
+    (tecla: 'T', descricao: 'tabela', destaque: false),
     (tecla: 'Ctrl+D', descricao: 'dividir', destaque: false),
     (tecla: 'Ctrl+P', descricao: 'preço', destaque: true),
     (tecla: 'Del', descricao: 'remove', destaque: false),

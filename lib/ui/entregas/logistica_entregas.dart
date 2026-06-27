@@ -64,6 +64,13 @@ int contarEntregasSemMotorista(List<Venda> entregas) => entregas
     .where((v) => !motoristaLogisticaDefinido(nomeMotoristaEntrega(v)))
     .length;
 
+/// True quando ha 2+ clientes distintos entre as vendas (agrupamento multi-parada).
+bool agrupamentoTemClientesDistintos(List<Venda> vendas) {
+  if (vendas.length < 2) return false;
+  final clientes = vendas.map((v) => v.cliente.targetId).where((id) => id > 0);
+  return clientes.toSet().length > 1;
+}
+
 String rotuloGrupoLogistica(List<Venda> bloco) {
   final nums = bloco.map((v) {
     if (v.numeroOrcamento > 0) return '${v.numeroOrcamento}';
@@ -74,14 +81,28 @@ String rotuloGrupoLogistica(List<Venda> bloco) {
   return '$prefixo · $nums';
 }
 
-/// Ordem para romaneio do motorista: viagem (grupo) e parada dentro da viagem.
+/// Ordem para romaneio/rota do motorista: [ordemEntrega] global do dia, depois grupo.
 int compararVendaRomaneioMotorista(Venda a, Venda b) {
+  final oa = a.ordemEntrega;
+  final ob = b.ordemEntrega;
+  if (oa > 0 && ob > 0 && oa != ob) return oa.compareTo(ob);
+  if (oa > 0 && ob <= 0) return -1;
+  if (oa <= 0 && ob > 0) return 1;
+
   final ga = a.grupoEntregaFreteId;
   final gb = b.grupoEntregaFreteId;
+  if (ga > 0 && ga == gb) return compareVendaOrdemMesmoCarro(a, b);
   if (ga > 0 && gb > 0 && ga != gb) return ga.compareTo(gb);
   if (ga > 0 && gb <= 0) return -1;
   if (ga <= 0 && gb > 0) return 1;
-  return compareVendaOrdemMesmoCarro(a, b);
+  return a.id.compareTo(b.id);
+}
+
+/// Paradas do motorista no dia, na ordem da rota (sem exigir agrupamento).
+List<Venda> ordenarParadasMotoristaDia(List<Venda> paradas) {
+  final copy = List<Venda>.from(paradas);
+  copy.sort(compararVendaRomaneioMotorista);
+  return copy;
 }
 
 List<Venda> filtrarVendasMotorista(List<Venda> base, String motorista) {
@@ -92,11 +113,8 @@ List<Venda> filtrarVendasMotorista(List<Venda> base, String motorista) {
       .toList();
 }
 
-List<Venda> ordenarRomaneioMotorista(List<Venda> vendas) {
-  final copy = List<Venda>.from(vendas);
-  copy.sort(compararVendaRomaneioMotorista);
-  return copy;
-}
+List<Venda> ordenarRomaneioMotorista(List<Venda> vendas) =>
+    ordenarParadasMotoristaDia(vendas);
 
 List<String> motoristasDistintosNasEntregas(List<Venda> entregas) {
   final set = <String>{};

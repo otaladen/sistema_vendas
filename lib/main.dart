@@ -8,6 +8,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'domain/auditoria_catalogo.dart';
 
 import 'data/app_config_repository.dart';
+import 'data/app_menu_modo_repository.dart';
 import 'data/app_tema_repository.dart';
 import 'data/auditoria_repository.dart';
 import 'data/auto_backup_service.dart';
@@ -35,6 +36,8 @@ import 'ui/app_startup_error_page.dart';
 import 'ui/layout/app_layout.dart';
 import 'ui/login_page.dart';
 import 'ui/main_menu_page.dart';
+import 'ui/theme/app_menu_modo_id.dart';
+import 'ui/theme/app_menu_modo_scope.dart';
 import 'ui/theme/app_tema_id.dart';
 import 'ui/theme/app_tema_scope.dart';
 import 'ui/theme/app_theme_builder.dart';
@@ -152,6 +155,7 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   UsuarioSistema? _usuarioLogado;
   AppTemaId _temaAtual = AppTemaId.verde;
+  AppMenuModoId _menuModoAtual = AppMenuModoId.classico;
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
   Timer? _timerBackupAutomatico;
   late final PrintService _printService;
@@ -160,7 +164,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(_carregarTemaInicial());
+    unawaited(_carregarPersonalizacaoInicial());
     _printService = PrintService(widget.appConfigRepository);
     _timerBackupAutomatico = Timer.periodic(
       const Duration(minutes: 5),
@@ -208,10 +212,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     return c.nomeLoja;
   }
 
-  Future<void> _carregarTemaInicial() async {
-    final tema = await AppTemaRepository.carregar();
+  Future<void> _carregarPersonalizacaoInicial() async {
+    final results = await Future.wait([
+      AppTemaRepository.carregar(),
+      AppMenuModoRepository.carregar(),
+    ]);
     if (!mounted) return;
-    setState(() => _temaAtual = tema);
+    setState(() {
+      _temaAtual = results[0] as AppTemaId;
+      _menuModoAtual = results[1] as AppMenuModoId;
+    });
   }
 
   Future<void> _definirTema(AppTemaId tema) async {
@@ -223,6 +233,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     setState(() => _temaAtual = tema);
   }
 
+  Future<void> _definirMenuModo(AppMenuModoId modo) async {
+    await AppMenuModoRepository.salvar(
+      modo,
+      login: _usuarioLogado?.login,
+    );
+    if (!mounted) return;
+    setState(() => _menuModoAtual = modo);
+  }
+
   Future<void> _entrar(UsuarioSistema usuario) async {
     AuditoriaRegistrar.definirUsuarioSessao(usuario.login);
     AuditoriaRegistrar.registrar(
@@ -231,12 +250,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       usuarioLogin: usuario.login,
       resumo: 'Login: ${usuario.nome} (${usuario.login})',
     );
-    final temaUsuario =
-        await AppTemaRepository.carregar(login: usuario.login);
+    final personalizacao = await Future.wait([
+      AppTemaRepository.carregar(login: usuario.login),
+      AppMenuModoRepository.carregar(login: usuario.login),
+    ]);
     if (!mounted) return;
     setState(() {
       _usuarioLogado = usuario;
-      _temaAtual = temaUsuario;
+      _temaAtual = personalizacao[0] as AppTemaId;
+      _menuModoAtual = personalizacao[1] as AppMenuModoId;
     });
   }
 
@@ -253,11 +275,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     AuditoriaRegistrar.limparUsuarioSessao();
     widget.lanSyncScheduler.parar();
     await _executarBackupAoFechar();
-    final temaMaquina = await AppTemaRepository.carregar();
+    final personalizacao = await Future.wait([
+      AppTemaRepository.carregar(),
+      AppMenuModoRepository.carregar(),
+    ]);
     if (!mounted) return;
     setState(() {
       _usuarioLogado = null;
-      _temaAtual = temaMaquina;
+      _temaAtual = personalizacao[0] as AppTemaId;
+      _menuModoAtual = personalizacao[1] as AppMenuModoId;
     });
   }
 
@@ -266,39 +292,46 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     return AppTemaScope(
       temaAtual: _temaAtual,
       definirTema: _definirTema,
-      child: MaterialApp(
-        title: 'Sistema de Vendas',
-        builder: buildAdaptiveAppShell,
-        theme: AppThemeBuilder.build(_temaAtual),
-        home: _usuarioLogado == null
-          ? LoginPage(
-              usuarioRepository: _usuarioRepository,
-              onLoginSuccess: _entrar,
-            )
-          : Builder(
-              builder: (context) {
-                final produtoRepository =
-                    ProdutoRepository(widget.objectBox);
-                final vendaRepository = VendaRepository(
-                  widget.objectBox,
-                  onAposEscrita: produtoRepository.invalidarCacheBusca,
-                );
-                return MainAppShellPage(
-                  objectBox: widget.objectBox,
-                  produtoRepository: produtoRepository,
-                  clienteRepository: ClienteRepository(widget.objectBox),
-                  vendaRepository: vendaRepository,
-                  vendedorRepository: VendedorRepository(widget.objectBox),
-                  funcionarioRepository: FuncionarioRepository(widget.objectBox),
-                  motoristaRepository: MotoristaRepository(widget.objectBox),
-                  usuarioLogado: _usuarioLogado!,
-                  onLogout: () => unawaited(_sair()),
-                  lanSyncScheduler: widget.lanSyncScheduler,
-                  appConfigRepository: widget.appConfigRepository,
-                  printService: _printService,
-                );
-              },
-            ),
+      child: AppMenuModoScope(
+        modoAtual: _menuModoAtual,
+        definirModo: _definirMenuModo,
+        child: MaterialApp(
+          title: 'Sistema de Vendas',
+          builder: buildAdaptiveAppShell,
+          theme: AppThemeBuilder.build(_temaAtual),
+          home: _usuarioLogado == null
+              ? LoginPage(
+                  usuarioRepository: _usuarioRepository,
+                  onLoginSuccess: _entrar,
+                )
+              : Builder(
+                  builder: (context) {
+                    final produtoRepository =
+                        ProdutoRepository(widget.objectBox);
+                    final vendaRepository = VendaRepository(
+                      widget.objectBox,
+                      onAposEscrita: produtoRepository.invalidarCacheBusca,
+                    );
+                    return MainAppShellPage(
+                      objectBox: widget.objectBox,
+                      produtoRepository: produtoRepository,
+                      clienteRepository: ClienteRepository(widget.objectBox),
+                      vendaRepository: vendaRepository,
+                      vendedorRepository:
+                          VendedorRepository(widget.objectBox),
+                      funcionarioRepository:
+                          FuncionarioRepository(widget.objectBox),
+                      motoristaRepository:
+                          MotoristaRepository(widget.objectBox),
+                      usuarioLogado: _usuarioLogado!,
+                      onLogout: () => unawaited(_sair()),
+                      lanSyncScheduler: widget.lanSyncScheduler,
+                      appConfigRepository: widget.appConfigRepository,
+                      printService: _printService,
+                    );
+                  },
+                ),
+        ),
       ),
     );
   }

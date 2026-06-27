@@ -1,5 +1,7 @@
 import '../../data/models/conta_pagar.dart';
 import '../../model/auditoria_evento.dart';
+import '../../model/item_lista_compra.dart';
+import '../../model/recado_loja.dart';
 import '../../model/movimento_estoque.dart';
 import '../../model/reajuste_preco.dart';
 import '../../model/reajuste_preco_item.dart';
@@ -199,5 +201,73 @@ class SyncEntityCodecOperacional {
         entidadeId: (m['entidadeId'] ?? '').toString(),
         resumo: (m['resumo'] ?? '').toString(),
         detalhesJson: (m['detalhesJson'] ?? '').toString(),
+      );
+
+  // --- ItemListaCompra ---
+  static Map<String, dynamic> itemListaCompraParaMap(ItemListaCompra i) => {
+        'id': i.id,
+        'produtoId': i.produto.targetId,
+        'descricaoLivre': i.descricaoLivre,
+        'quantidadeSugerida': i.quantidadeSugerida,
+        'quantidadeRecebida': i.quantidadeRecebida,
+        'unidade': i.unidade,
+        'fornecedorTexto': i.fornecedorTexto,
+        'prioridade': i.prioridade,
+        'observacao': i.observacao,
+        'origem': i.origem,
+        'status': i.status,
+        'criadoPor': i.criadoPor,
+        'criadoEm': _dt(i.criadoEm),
+        'resolvidoEm': _dt(i.resolvidoEm),
+        'nfeChaveResolucao': i.nfeChaveResolucao,
+      };
+
+  static ItemListaCompra itemListaCompraDeMap(Map<String, dynamic> m) {
+    final item = ItemListaCompra(
+      id: (m['id'] as num?)?.toInt() ?? 0,
+      descricaoLivre: (m['descricaoLivre'] ?? '').toString(),
+      quantidadeSugerida: (m['quantidadeSugerida'] as num?)?.toInt() ?? 1,
+      quantidadeRecebida: (m['quantidadeRecebida'] as num?)?.toInt() ?? 0,
+      unidade: (m['unidade'] ?? 'UN').toString(),
+      fornecedorTexto: (m['fornecedorTexto'] ?? '').toString(),
+      prioridade: (m['prioridade'] ?? '').toString(),
+      observacao: (m['observacao'] ?? '').toString(),
+      origem: (m['origem'] ?? '').toString(),
+      status: (m['status'] ?? '').toString(),
+      criadoPor: (m['criadoPor'] ?? '').toString(),
+      criadoEm: _parseDt((m['criadoEm'] ?? '').toString()) ?? DateTime.now(),
+      resolvidoEm: _parseDt((m['resolvidoEm'] ?? '').toString()),
+      nfeChaveResolucao: (m['nfeChaveResolucao'] ?? '').toString(),
+    );
+    final pid = (m['produtoId'] as num?)?.toInt() ?? 0;
+    if (pid > 0) item.produto.targetId = pid;
+    return item;
+  }
+
+  // --- RecadoLoja ---
+  static Map<String, dynamic> recadoLojaParaMap(RecadoLoja r) => {
+        'id': r.id,
+        'texto': r.texto,
+        'prioridade': r.prioridade,
+        'destinoTipo': r.destinoTipo,
+        'destinoPerfil': r.destinoPerfil,
+        'criadoPorLogin': r.criadoPorLogin,
+        'criadoPorNome': r.criadoPorNome,
+        'leiturasJson': r.leiturasJson,
+        'ativo': r.ativo,
+        'criadoEm': _dt(r.criadoEm),
+      };
+
+  static RecadoLoja recadoLojaDeMap(Map<String, dynamic> m) => RecadoLoja(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        texto: (m['texto'] ?? '').toString(),
+        prioridade: (m['prioridade'] ?? 'normal').toString(),
+        destinoTipo: (m['destinoTipo'] ?? 'todos').toString(),
+        destinoPerfil: (m['destinoPerfil'] ?? '').toString(),
+        criadoPorLogin: (m['criadoPorLogin'] ?? '').toString(),
+        criadoPorNome: (m['criadoPorNome'] ?? '').toString(),
+        leiturasJson: (m['leiturasJson'] ?? '[]').toString(),
+        ativo: m['ativo'] != false,
+        criadoEm: _parseDt((m['criadoEm'] ?? '').toString()) ?? DateTime.now(),
       );
 }

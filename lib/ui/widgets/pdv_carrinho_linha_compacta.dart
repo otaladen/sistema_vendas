@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'pdv_botao_tabela_preco_item.dart';
 import 'pdv_tipo_entrega_item.dart';
 import 'promocao_badge.dart';
 
@@ -15,10 +16,12 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     this.detalheQuantidade,
     this.rotuloUnidade,
     required this.tipoEntregaItem,
+    required this.precoTipo,
     required this.selecionado,
     this.linhaImpar = false,
     required this.onTap,
     required this.onAlternarTipoEntrega,
+    required this.onAlternarTabelaPreco,
     required this.onDiminuir,
     required this.onAumentar,
     required this.onDividir,
@@ -40,10 +43,12 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final String? detalheQuantidade;
   final String? rotuloUnidade;
   final String tipoEntregaItem;
+  final String precoTipo;
   final bool selecionado;
   final bool linhaImpar;
   final VoidCallback onTap;
   final VoidCallback onAlternarTipoEntrega;
+  final VoidCallback onAlternarTabelaPreco;
   final VoidCallback onDiminuir;
   final VoidCallback onAumentar;
   final VoidCallback onDividir;
@@ -94,6 +99,11 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                     compacto: true,
                     tipoEntregaItem: tipoEntregaItem,
                     onPressed: onAlternarTipoEntrega,
+                  ),
+                  PdvBotaoTabelaPrecoItem(
+                    compacto: true,
+                    precoTipo: precoTipo,
+                    onPressed: onAlternarTabelaPreco,
                   ),
                   Expanded(
                     child: Column(

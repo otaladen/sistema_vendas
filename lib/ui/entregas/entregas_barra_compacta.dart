@@ -24,7 +24,24 @@ class EntregasBarraCompacta extends StatelessWidget {
     required this.mostrarProximosDias,
     required this.onAlternarProximosDias,
     required this.proximosDiasExpandido,
+    required this.statusSelecionado,
+    required this.rotuloStatus,
+    required this.onStatusRapido,
+    required this.filtroSemMotoristaAtivo,
+    required this.onFiltroSemMotorista,
+    required this.inicioSemanaExibida,
+    required this.onSemanaAnterior,
+    required this.onSemanaProxima,
+    required this.onSelecionarDiaSemana,
   });
+
+  static const statusRapidos = [
+    'todos',
+    'pendente',
+    'roteirizada',
+    'saiu_entrega',
+    'entregue',
+  ];
 
   final int atrasadas;
   final int pendentesHoje;
@@ -44,6 +61,15 @@ class EntregasBarraCompacta extends StatelessWidget {
   final bool mostrarProximosDias;
   final VoidCallback onAlternarProximosDias;
   final bool proximosDiasExpandido;
+  final String statusSelecionado;
+  final String Function(String status) rotuloStatus;
+  final ValueChanged<String> onStatusRapido;
+  final bool filtroSemMotoristaAtivo;
+  final ValueChanged<bool> onFiltroSemMotorista;
+  final DateTime inicioSemanaExibida;
+  final VoidCallback onSemanaAnterior;
+  final VoidCallback onSemanaProxima;
+  final ValueChanged<DateTime> onSelecionarDiaSemana;
 
   @override
   Widget build(BuildContext context) {
@@ -133,6 +159,15 @@ class EntregasBarraCompacta extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
+              FaixaSemanaPlanejamentoEntrega(
+                inicioSemana: inicioSemanaExibida,
+                resumoPorDia: resumoPorDia,
+                chaveSelecionada: chaveDiaSelecionada,
+                onSelecionarDia: onSelecionarDiaSemana,
+                onSemanaAnterior: onSemanaAnterior,
+                onSemanaProxima: onSemanaProxima,
+              ),
+              const SizedBox(height: 6),
               BarraPlanejamentoEntregaDia(
                 resumoPorDia: resumoPorDia,
                 chaveSelecionada: chaveDiaSelecionada,
@@ -177,7 +212,122 @@ class EntregasBarraCompacta extends StatelessWidget {
                   mostrarTitulo: false,
                 ),
             ],
+            const SizedBox(height: 6),
+            Text(
+              'Status',
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                for (final status in statusRapidos)
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    label: Text(
+                      rotuloStatus(status),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    selected: statusSelecionado == status,
+                    onSelected: (_) => onStatusRapido(status),
+                  ),
+                FilterChip(
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  avatar: Icon(
+                    Icons.person_off_outlined,
+                    size: 16,
+                    color: filtroSemMotoristaAtivo
+                        ? theme.colorScheme.error
+                        : Colors.grey,
+                  ),
+                  label: Text(
+                    estreita ? 'S/ mot.' : 'Sem motorista',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  selected: filtroSemMotoristaAtivo,
+                  onSelected: onFiltroSemMotorista,
+                ),
+              ],
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Alerta de entregas sem motorista no dia (lista e patio).
+class EntregasFaixaSemMotorista extends StatelessWidget {
+  const EntregasFaixaSemMotorista({
+    super.key,
+    required this.quantidade,
+    required this.podeGerenciar,
+    required this.filtroAtivo,
+    required this.onAlternarFiltro,
+    this.onDefinirMotoristaEmLote,
+  });
+
+  final int quantidade;
+  final bool podeGerenciar;
+  final bool filtroAtivo;
+  final VoidCallback onAlternarFiltro;
+  final VoidCallback? onDefinirMotoristaEmLote;
+
+  @override
+  Widget build(BuildContext context) {
+    if (quantidade == 0) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 4),
+      child: Material(
+        color: scheme.errorContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onAlternarFiltro,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Icon(Icons.warning_amber_rounded, color: scheme.error, size: 20),
+                Text(
+                  filtroAtivo
+                      ? 'Mostrando $quantidade entrega(s) sem motorista.'
+                      : '$quantidade entrega(s) sem motorista neste dia. Toque para filtrar.',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onErrorContainer,
+                  ),
+                ),
+                if (filtroAtivo)
+                  TextButton(
+                    onPressed: onAlternarFiltro,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Ver todas'),
+                  ),
+                if (podeGerenciar && onDefinirMotoristaEmLote != null)
+                  FilledButton.tonal(
+                    onPressed: onDefinirMotoristaEmLote,
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                    child: Text('Definir motorista ($quantidade)'),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );

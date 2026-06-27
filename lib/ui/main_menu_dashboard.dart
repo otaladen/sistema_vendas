@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../data/app_config_repository.dart';
 import '../../data/caixa_sessao_repository.dart';
 import '../../data/menu_favoritos_repository.dart';
+import '../../data/recado_loja_repository.dart';
 import '../../data/sync/sync_log.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/filtro_listagem_entregas.dart';
@@ -16,6 +17,7 @@ import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
 import '../../domain/main_menu_destino.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
+import '../../model/recado_loja.dart';
 import '../../services/alertas_proativos_service.dart';
 import '../../services/lan_sync_server_manager.dart';
 import 'loja_ao_vivo_page.dart';
@@ -24,6 +26,8 @@ import 'relatorios/relatorio_entregas_helper.dart';
 import 'theme/app_modulo_cores.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
+import 'recados_loja_page.dart';
+import 'widgets/recados_loja_faixa.dart';
 import 'widgets/dashboard_alertas_strip.dart';
 import 'widgets/app_rodape_status_bar.dart';
 import 'widgets/main_menu_widgets.dart';
@@ -84,6 +88,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
   Timer? _alertasProativosTimer;
   AlertasProativosService? _alertasProativosService;
   List<MainMenuDestino> _favoritos = const [];
+  List<RecadoLoja> _recadosNaoLidos = const [];
   Timer? _fiscalPendenciasTimer;
 
   @override
@@ -252,9 +257,13 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       vendaRepository: deps.vendaRepository,
     ).total;
 
+    final recadoRepo = RecadoLojaRepository(deps.objectBox);
+    final recadosNaoLidos = recadoRepo.listarNaoLidosParaUsuario(u);
+
     if (!mounted) return;
     setState(() {
       _config = config;
+      _recadosNaoLidos = recadosNaoLidos;
       _resumo = _MainMenuResumo(
         vendasHoje: vendas.length,
         faturamentoHoje: faturamento,
@@ -295,6 +304,28 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       UsuarioPermissaoHelper.tem(MainMenuDeps.of(context).usuarioLogado, p);
 
   void _ir(MainMenuDestino d) => MainMenuRouter.abrir(context, d);
+
+  void _abrirRecados() {
+    final deps = MainMenuDeps.of(context);
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => RecadosLojaPage(
+          objectBox: deps.objectBox,
+          usuarioLogado: deps.usuarioLogado,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) _carregarPainel();
+    });
+  }
+
+  void _marcarRecadoLido(RecadoLoja recado) {
+    final deps = MainMenuDeps.of(context);
+    RecadoLojaRepository(deps.objectBox)
+        .marcarLido(recado.id, deps.usuarioLogado.login);
+    _carregarPainel();
+  }
 
   void _abrirLojaAoVivo() {
     final deps = MainMenuDeps.of(context);
@@ -401,6 +432,26 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                   ),
                   const SizedBox(height: 16),
                 ],
+                if (_recadosNaoLidos.isNotEmpty) ...[
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: MainMenuSectionHeader(titulo: 'Recados'),
+                      ),
+                      TextButton(
+                        onPressed: _abrirRecados,
+                        child: const Text('Ver todos'),
+                      ),
+                    ],
+                  ),
+                  RecadosLojaFaixa(
+                    recados: _recadosNaoLidos,
+                    usuario: u,
+                    onAbrirTodos: _abrirRecados,
+                    onMarcarLido: _marcarRecadoLido,
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 if (resumo != null && resumo.alertas.isNotEmpty) ...[
                   const MainMenuSectionHeader(titulo: 'Atencao'),
                   DashboardAlertasStrip(
@@ -415,6 +466,16 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                   podeCaixa: podeCaixa,
                   podeEntregas: podeEntregas,
                   podeFinanceiro: podeFinanceiro,
+                ),
+                const SizedBox(height: 12),
+                HubNavButton(
+                  icon: Icons.campaign_outlined,
+                  corDestaque: Colors.deepPurple.shade400,
+                  titulo: 'Recados da loja',
+                  subtitulo: _recadosNaoLidos.isEmpty
+                      ? 'Avisos para a equipe — nenhum pendente.'
+                      : '${_recadosNaoLidos.length} recado(s) nao lido(s). Toque para abrir.',
+                  onTap: _abrirRecados,
                 ),
                 if (podeVendas) ...[
                   const SizedBox(height: 12),

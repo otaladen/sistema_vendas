@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../data/cliente_repository.dart';
 import '../../data/usuario_repository.dart';
 import '../../data/venda_repository.dart';
+import '../../domain/operacao_permissao_guard.dart';
+import '../../model/usuario_sistema.dart';
 import '../../model/venda.dart';
 import '../../services/venda_fiscal_service.dart';
 import '../fiscal/widgets/nfe_historico_acoes_dialog.dart';
@@ -24,14 +26,21 @@ String rotuloVendaParaUsuario(Venda v) {
 class CancelarVendaUi {
   CancelarVendaUi._();
 
-  static Future<(bool autorizado, String usuarioAutorizador)> autorizar({
+  static Future<(bool autorizado, UsuarioSistema? usuario)> autorizar({
     required BuildContext context,
     required UsuarioRepository usuarioRepository,
     required String usuarioAtual,
     required bool podeCancelarVendas,
   }) async {
     if (podeCancelarVendas) {
-      return (true, usuarioAtual);
+      final todos = await usuarioRepository.listarTodos();
+      for (final u in todos) {
+        if (u.login == usuarioAtual &&
+            u.ativo &&
+            OperacaoPermissaoGuard.podeCancelarVendas(u)) {
+          return (true, u);
+        }
+      }
     }
     final loginController = TextEditingController();
     final senhaController = TextEditingController();
@@ -46,7 +55,7 @@ class CancelarVendaUi {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Informe usuario com permissao (admin/financeiro/manutencao de caixa).',
+                  'Informe usuario com permissao de cancelar vendas.',
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -78,7 +87,7 @@ class CancelarVendaUi {
     if (confirmar != true) {
       loginController.dispose();
       senhaController.dispose();
-      return (false, '');
+      return (false, null);
     }
     final login = loginController.text.trim();
     final senha = senhaController.text.trim();
@@ -87,13 +96,11 @@ class CancelarVendaUi {
     final usuario = await usuarioRepository.autenticar(login, senha);
     final autorizado = usuario != null &&
         usuario.ativo &&
-        (usuario.admin ||
-            usuario.podeFinanceiro ||
-            usuario.podeManutencaoAuditoriaCaixa);
+        OperacaoPermissaoGuard.podeCancelarVendas(usuario);
     if (!autorizado) {
-      return (false, '');
+      return (false, null);
     }
-    return (true, usuario.login);
+    return (true, usuario);
   }
 
   static Future<CancelarVendaUiResultado> executar({
@@ -118,7 +125,7 @@ class CancelarVendaUi {
       usuarioAtual: usuarioAtual,
       podeCancelarVendas: podeCancelarVendas,
     );
-    if (!context.mounted || !autorizado.$1) {
+    if (!context.mounted || !autorizado.$1 || autorizado.$2 == null) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Cancelamento nao autorizado.')),
@@ -257,14 +264,15 @@ class CancelarVendaUi {
       vendaRepository.cancelarVenda(
         vendaAtual.id,
         motivo: motivo,
-        canceladaPor: autorizado.$2,
+        canceladaPor: autorizado.$2!.login,
+        usuarioExecutor: autorizado.$2,
       );
       if (!context.mounted) return CancelarVendaUiResultado.sucesso;
       final sufixoMotivo = motivo.isEmpty ? '' : ' Motivo: $motivo';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${rotuloVendaParaUsuario(vendaAtual)} cancelada por ${autorizado.$2}.$sufixoMotivo',
+            '${rotuloVendaParaUsuario(vendaAtual)} cancelada por ${autorizado.$2!.login}.$sufixoMotivo',
           ),
         ),
       );

@@ -18,7 +18,7 @@ int contarFiltrosEntregaAtivos({
   if (status != 'todos') n++;
   if (motorista != 'todos') n++;
   if (vendedor != 'todos') n++;
-  if (agrupamento != 'bairro') n++;
+  if (agrupamento != 'motorista') n++;
   if (dataMarcada != 'todos') n++;
   if (bairro.trim().isNotEmpty) n++;
   if (numeroNota.trim().isNotEmpty) n++;
@@ -45,7 +45,7 @@ List<String> resumosFiltrosEntregaAtivos({
     chips.add('Motorista: $nomeMotoristaExibicao');
   }
   if (vendedor != 'todos') chips.add('Vendedor: $nomeVendedorExibicao');
-  if (agrupamento != 'bairro') {
+  if (agrupamento != 'motorista') {
     chips.add('Agrupar: ${agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}');
   }
   if (dataMarcada != 'todos') {

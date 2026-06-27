@@ -26,6 +26,8 @@ import '../model/promocao.dart';
 import '../model/promocao_combo_item.dart';
 import '../model/promocao_item.dart';
 import '../model/auditoria_evento.dart';
+import '../model/item_lista_compra.dart';
+import '../model/recado_loja.dart';
 import '../model/conferencia_carga_romaneio.dart';
 import '../model/reajuste_preco.dart';
 import '../model/reajuste_preco_item.dart';
@@ -69,6 +71,8 @@ class ObjectBox {
   late Box<ReajustePreco> reajustePrecoBox;
   late Box<ReajustePrecoItem> reajustePrecoItemBox;
   late Box<AuditoriaEvento> auditoriaEventoBox;
+  late Box<ItemListaCompra> itemListaCompraBox;
+  late Box<RecadoLoja> recadoLojaBox;
   late Box<ConferenciaCargaRomaneio> conferenciaCargaRomaneioBox;
   late Directory productImagesDir;
   late String storeDirectoryPath;
@@ -103,6 +107,8 @@ class ObjectBox {
     reajustePrecoBox = Box<ReajustePreco>(store);
     reajustePrecoItemBox = Box<ReajustePrecoItem>(store);
     auditoriaEventoBox = Box<AuditoriaEvento>(store);
+    itemListaCompraBox = Box<ItemListaCompra>(store);
+    recadoLojaBox = Box<RecadoLoja>(store);
     conferenciaCargaRomaneioBox = Box<ConferenciaCargaRomaneio>(store);
   }
 

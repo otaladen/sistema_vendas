@@ -23,8 +23,8 @@ import '../../services/lan_sync_server_manager.dart';
 import '../../services/print_service.dart';
 import '../layout/app_layout.dart';
 import '../main_menu_dashboard.dart';
-import '../theme/app_modulo_cores.dart';
 import '../widgets/app_rodape_status_bar.dart';
+import 'app_menu_lateral.dart';
 import 'app_shell_scope.dart';
 import 'main_menu_deps.dart';
 import 'main_menu_router.dart';
@@ -209,11 +209,6 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
         favoritos: _favoritos,
       );
 
-  int get _indiceRail {
-    final idx = _itensRail.indexOf(_destino);
-    return idx >= 0 ? idx : 0;
-  }
-
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -236,7 +231,17 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
                 Expanded(
                   child: Row(
                     children: [
-                      _rail(context),
+                      AppMenuLateral(
+                        itens: _itensRail,
+                        destinoAtual: _destino,
+                        onSelecionar: _irPara,
+                        estendido: _railEstendido,
+                        onAlternarEstendido: () =>
+                            setState(() => _railEstendido = !_railEstendido),
+                        badgeDe: _badgeRail,
+                        quantidadeFavoritos: _favoritos.length,
+                        larguraTela: constraints.maxWidth,
+                      ),
                       const VerticalDivider(width: 1, thickness: 1),
                       Expanded(
                         child: Navigator(
@@ -270,85 +275,4 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     if (d == MainMenuDestino.configuracoes && _backupAlerta) return 1;
     return 0;
   }
-
-  Widget _rail(BuildContext context) {
-    final tema = Theme.of(context);
-    final itens = _itensRail;
-    final larguraEstendida = constraintsLargura(context) >= 1200;
-
-    return NavigationRail(
-      extended: _railEstendido && larguraEstendida,
-      minExtendedWidth: 200,
-      selectedIndex: _indiceRail.clamp(0, itens.length - 1),
-      onDestinationSelected: (i) => _irPara(itens[i]),
-      leading: Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 4),
-        child: IconButton(
-          tooltip: _railEstendido ? 'Recolher menu' : 'Expandir menu',
-          onPressed: () => setState(() => _railEstendido = !_railEstendido),
-          icon: Icon(
-            _railEstendido
-                ? Icons.menu_open_rounded
-                : Icons.menu_rounded,
-          ),
-        ),
-      ),
-      labelType: _railEstendido && larguraEstendida
-          ? NavigationRailLabelType.none
-          : NavigationRailLabelType.all,
-      destinations: [
-        for (final d in itens)
-          NavigationRailDestination(
-            icon: _iconeRail(
-              d,
-              selecionado: false,
-              badge: _badgeRail(d),
-            ),
-            selectedIcon: _iconeRail(
-              d,
-              selecionado: true,
-              badge: _badgeRail(d),
-            ),
-            label: Text(
-              d.titulo,
-              style: TextStyle(
-                color: d == _destino ? d.cor(context) : null,
-                fontWeight: d == _destino ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-          ),
-      ],
-      trailing: _favoritos.isNotEmpty
-          ? Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                '${_favoritos.length} fav.',
-                style: tema.textTheme.labelSmall?.copyWith(
-                  color: tema.colorScheme.onSurface.withValues(alpha: 0.55),
-                ),
-                textAlign: TextAlign.center,
-              ),
-            )
-          : null,
-    );
-  }
-
-  Widget _iconeRail(
-    MainMenuDestino d, {
-    required bool selecionado,
-    required int badge,
-  }) {
-    final icone = Icon(
-      d.icone,
-      color: selecionado ? d.cor(context) : null,
-    );
-    if (badge <= 0) return icone;
-    return Badge(
-      label: Text(badge > 99 ? '99+' : '$badge'),
-      child: icone,
-    );
-  }
-
-  double constraintsLargura(BuildContext context) =>
-      MediaQuery.sizeOf(context).width;
 }

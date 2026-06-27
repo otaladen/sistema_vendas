@@ -7,6 +7,9 @@ import 'package:path/path.dart' as p;
 import '../model/historico_entrada.dart';
 import '../model/movimento_estoque.dart';
 import '../model/produto.dart';
+import '../domain/pdv_consulta_similares_util.dart';
+import '../domain/produto_substitutos_util.dart';
+import '../domain/pdv_busca_inteligente.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../services/gerenciador_estoque_service.dart';
 import 'movimento_estoque_repository.dart';
@@ -120,6 +123,77 @@ class ProdutoRepository extends ChangeNotifier {
     } finally {
       query.close();
     }
+  }
+
+  /// Candidatos para sugestao de substitutos na consulta PDV.
+  List<Produto> listarCandidatosSimilaresConsulta(
+    Produto referencia, {
+    int limite = 80,
+  }) {
+    if (referencia.id <= 0 || limite <= 0) return const [];
+    if (!PdvConsultaSimilaresUtil.referenciaElegivel(referencia)) {
+      return const [];
+    }
+    _migrarCampoAtivoLegadoUmaVez();
+
+    final categoria = referencia.categoria.trim();
+    final subcategoria = referencia.subcategoria.trim();
+    late final Query<Produto> query;
+
+    if (PdvConsultaSimilaresUtil.subcategoriaUtil(subcategoria)) {
+      query = _db.produtoBox
+          .query(
+            Produto_.ativo.equals(true) &
+                Produto_.subcategoria.equals(subcategoria, caseSensitive: false),
+          )
+          .order(Produto_.nome)
+          .build();
+    } else if (PdvConsultaSimilaresUtil.categoriaEspecifica(categoria)) {
+      query = _db.produtoBox
+          .query(
+            Produto_.ativo.equals(true) &
+                Produto_.categoria.equals(categoria, caseSensitive: false),
+          )
+          .order(Produto_.nome)
+          .build();
+    } else {
+      return const [];
+    }
+
+    try {
+      query.limit = limite + 1;
+      final produtos = query
+          .find()
+          .where(
+            (p) =>
+                p.id != referencia.id &&
+                PdvConsultaSimilaresUtil.candidatoCompativel(referencia, p),
+          )
+          .take(limite)
+          .toList();
+      _normalizarDadosLegados(produtos);
+      return produtos;
+    } finally {
+      query.close();
+    }
+  }
+
+  /// Substitutos cadastrados manualmente no produto (consulta PDV pacote 5).
+  List<Produto> listarSubstitutosCadastrados(int produtoId) {
+    if (produtoId <= 0) return const [];
+    final ref = obterPorId(produtoId);
+    if (ref == null) return const [];
+    final ids = ProdutoSubstitutosUtil.parseIds(ref.substitutosIds);
+    if (ids.isEmpty) return const [];
+
+    final out = <Produto>[];
+    for (final id in ids) {
+      if (id == produtoId) continue;
+      final p = obterPorId(id);
+      if (p == null || !p.ativo) continue;
+      out.add(p);
+    }
+    return out;
   }
 
   /// Migracao unica: registros antigos ganham coluna [ativo]; define todos como ativos.
@@ -454,6 +528,100 @@ class ProdutoRepository extends ChangeNotifier {
     );
   }
 
+  /// Busca PDV com regra de auto-selecao: so quando ha exatamente 1 correspondencia
+  /// real (codigo de barras, codigo interno ou unico no ranking).
+  PdvPesquisaResolvida resolverPesquisaPdv(
+    String termo, {
+    int? clienteId,
+    bool somenteAtivos = true,
+  }) {
+    final consulta = termo.trim();
+    if (consulta.isEmpty) {
+      return PdvPesquisaResolvida.vazia;
+    }
+
+    final barras = resolverLeitorCodigoBarras(
+      consulta,
+      somenteAtivos: somenteAtivos,
+    );
+    if (barras != null) {
+      return PdvPesquisaResolvida(
+        produtos: [barras],
+        totalCorrespondencias: 1,
+        produtoAuto: barras,
+        motivoAuto: PdvBuscaAutoMotivo.codigoBarras,
+      );
+    }
+
+    final codigoInterno = _buscarPorCodigoInternoExato(
+      consulta,
+      somenteAtivos: somenteAtivos,
+    );
+    if (codigoInterno != null) {
+      return PdvPesquisaResolvida(
+        produtos: [codigoInterno],
+        totalCorrespondencias: 1,
+        produtoAuto: codigoInterno,
+        motivoAuto: PdvBuscaAutoMotivo.codigoInterno,
+      );
+    }
+
+    final dupla = pesquisarPadraoPdv(
+      consulta,
+      clienteId: clienteId,
+      limite: 2,
+      somenteAtivos: somenteAtivos,
+    );
+    if (dupla.length == 1) {
+      return PdvPesquisaResolvida(
+        produtos: dupla,
+        totalCorrespondencias: 1,
+        produtoAuto: dupla.first,
+        motivoAuto: PdvBuscaAutoMotivo.unicoResultado,
+      );
+    }
+    if (dupla.length >= 2) {
+      final lista = pesquisarPadraoPdv(
+        consulta,
+        clienteId: clienteId,
+        limite: 50,
+        somenteAtivos: somenteAtivos,
+      );
+      return PdvPesquisaResolvida(
+        produtos: lista,
+        totalCorrespondencias: lista.length >= 2 ? lista.length : 2,
+      );
+    }
+
+    return const PdvPesquisaResolvida(
+      produtos: [],
+      totalCorrespondencias: 0,
+    );
+  }
+
+  Produto? _buscarPorCodigoInternoExato(
+    String termo, {
+    required bool somenteAtivos,
+  }) {
+    _garantirCachesAtualizados();
+    final norm = _normalizarTexto(termo.trim());
+    if (norm.isEmpty) return null;
+    for (final doc in _cacheDocs) {
+      if (!_incluirDocNaPesquisa(
+        doc,
+        somenteAtivos: somenteAtivos,
+        somenteInativos: false,
+        excluirProdutosInternos: true,
+      )) {
+        continue;
+      }
+      if (doc.codigoInternoNormalizado == norm) {
+        return doc.produto;
+      }
+    }
+    return null;
+  }
+
   /// [pesquisarPadraoPdv] restrito a uma lista ja carregada (ex.: estoque).
   List<Produto> pesquisarNaBasePadraoPdv(
     String termo,
@@ -596,19 +764,9 @@ class ProdutoRepository extends ChangeNotifier {
   }
 
   Map<int, double> _pontuacaoPorHistoricoVendas() {
-    final itens = _db.itemVendaBox.getAll();
     final acumulado = <int, int>{};
-    for (final item in itens) {
-      final venda = item.venda.target;
-      final produto = item.produto.target;
-      if (venda == null || produto == null) continue;
-      if (venda.status != 'finalizada' || venda.cancelada) continue;
-      acumulado.update(
-        produto.id,
-        (atual) => atual + item.quantidade,
-        ifAbsent: () => item.quantidade,
-      );
-    }
+    final vendaIds = _idsVendasFinalizadasRecentes();
+    _acumularQuantidadeItensPorVendas(vendaIds, acumulado);
     final score = <int, double>{};
     acumulado.forEach((produtoId, qtd) {
       score[produtoId] = math.log(qtd + 1) * 18;
@@ -619,20 +777,9 @@ class ProdutoRepository extends ChangeNotifier {
   Map<int, double> _pontuacaoPorCliente(int clienteId) {
     final cacheado = _cacheScoreCliente[clienteId];
     if (cacheado != null) return cacheado;
-    final itens = _db.itemVendaBox.getAll();
     final acumulado = <int, int>{};
-    for (final item in itens) {
-      final venda = item.venda.target;
-      final produto = item.produto.target;
-      if (venda == null || produto == null) continue;
-      if (venda.status != 'finalizada' || venda.cancelada) continue;
-      if (venda.cliente.targetId != clienteId) continue;
-      acumulado.update(
-        produto.id,
-        (atual) => atual + item.quantidade,
-        ifAbsent: () => item.quantidade,
-      );
-    }
+    final vendaIds = _idsVendasFinalizadasRecentes(clienteId: clienteId);
+    _acumularQuantidadeItensPorVendas(vendaIds, acumulado);
     final score = <int, double>{};
     acumulado.forEach((produtoId, qtd) {
       score[produtoId] = math.log(qtd + 1) * 24;
@@ -642,6 +789,62 @@ class ProdutoRepository extends ChangeNotifier {
     }
     _cacheScoreCliente[clienteId] = score;
     return score;
+  }
+
+  static const _historicoVendasDias = 90;
+
+  Set<int> _idsVendasFinalizadasRecentes({int? clienteId}) {
+    final desde = DateTime.now()
+        .subtract(const Duration(days: _historicoVendasDias))
+        .toUtc();
+    var cond = Venda_.status
+        .equals('finalizada')
+        .and(Venda_.cancelada.equals(false))
+        .and(Venda_.data.greaterOrEqualDate(desde));
+    if (clienteId != null && clienteId > 0) {
+      cond = cond.and(Venda_.cliente.equals(clienteId));
+    }
+    final query = _db.vendaBox.query(cond).build();
+    try {
+      return query
+          .find()
+          .map((v) => v.id)
+          .where((id) => id > 0)
+          .toSet();
+    } finally {
+      query.close();
+    }
+  }
+
+  void _acumularQuantidadeItensPorVendas(
+    Set<int> vendaIds,
+    Map<int, int> acumulado,
+  ) {
+    if (vendaIds.isEmpty) return;
+    final lista = vendaIds.toList();
+    const chunkSize = 48;
+    for (var i = 0; i < lista.length; i += chunkSize) {
+      final fim = math.min(i + chunkSize, lista.length);
+      final chunk = lista.sublist(i, fim);
+      var cond = ItemVenda_.venda.equals(chunk.first);
+      for (var j = 1; j < chunk.length; j++) {
+        cond = cond.or(ItemVenda_.venda.equals(chunk[j]));
+      }
+      final query = _db.itemVendaBox.query(cond).build();
+      try {
+        for (final item in query.find()) {
+          final produto = item.produto.target;
+          if (produto == null) continue;
+          acumulado.update(
+            produto.id,
+            (atual) => atual + item.quantidade,
+            ifAbsent: () => item.quantidade,
+          );
+        }
+      } finally {
+        query.close();
+      }
+    }
   }
 
   double _scoreProduto(

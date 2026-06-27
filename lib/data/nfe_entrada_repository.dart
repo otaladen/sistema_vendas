@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:intl/intl.dart';
 
+import '../domain/lista_compra_entrada_nfe_linha.dart';
 import '../domain/produto_embalagem.dart';
 import '../data/models/conta_pagar.dart';
 import '../model/fornecedor_nfe.dart';
@@ -12,6 +13,7 @@ import '../model/produto.dart';
 import '../model/vinculo_fornecedor_produto.dart';
 import '../objectbox.g.dart';
 import '../services/gerenciador_estoque_service.dart';
+import 'lista_compra_repository.dart';
 import 'nfe_entrada_xml_store.dart';
 import 'objectbox.dart';
 import 'produto_repository.dart' show calcularCustoMedioPonderadoEntradasNfe;
@@ -453,6 +455,7 @@ class NfeEntradaRepository {
     String? xmlOriginal,
   }) {
     final chaveNorm = nfe.chaveAcesso.replaceAll(RegExp(r'\D'), '');
+    final linhasResolucaoListaCompra = <ListaCompraEntradaNfeLinha>[];
     _db.store.runInTransaction(TxMode.write, () {
       if (chaveNorm.length != 44) {
         throw StateError(
@@ -626,6 +629,17 @@ class NfeEntradaRepository {
         hist.produto.target = produto;
         _db.historicoEntradaBox.put(hist);
         produtosAfetadosCustoMedio.add(produto.id);
+
+        if (produto.id > 0 && qtdInterna > 0) {
+          linhasResolucaoListaCompra.add(
+            ListaCompraEntradaNfeLinha(
+              produtoId: produto.id,
+              quantidadeRecebida: qtdInterna,
+              fornecedorNome: nomeFantasiaOuRazao,
+              nfeChave: chaveNorm,
+            ),
+          );
+        }
       }
 
       for (final pid in produtosAfetadosCustoMedio) {
@@ -663,6 +677,12 @@ class NfeEntradaRepository {
 
     if (xmlOriginal != null && xmlOriginal.trim().isNotEmpty) {
       _xmlStore.salvarXml(chaveNorm, xmlOriginal);
+    }
+
+    if (linhasResolucaoListaCompra.isNotEmpty) {
+      ListaCompraRepository(_db).resolverPorEntradaNfe(
+        linhasResolucaoListaCompra,
+      );
     }
 
     _notificarMutacaoNfeEntrada();

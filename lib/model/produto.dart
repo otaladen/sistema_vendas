@@ -21,6 +21,8 @@ class Produto {
     this.apelidosBusca = '',
     this.fotoPath = '',
     this.localizacao = '',
+    this.estoqueCd = 0,
+    this.substitutosIds = '',
     this.ncm = '',
     this.cest = '',
     this.grupoTributario = 'tributado',
@@ -88,6 +90,13 @@ class Produto {
 
   String fotoPath;
   String localizacao;
+
+  /// Estoque no deposito secundario (CD). Zero = nao controlado separadamente.
+  int estoqueCd;
+
+  /// IDs de produtos substitutos cadastrados (; ou ,).
+  String substitutosIds;
+
   /// NCM — 8 digitos (obrigatorio para NFC-e).
   String ncm;
   /// CEST — 7 digitos (ST / material de construcao).

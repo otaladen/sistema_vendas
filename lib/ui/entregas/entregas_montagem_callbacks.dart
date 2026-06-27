@@ -10,6 +10,7 @@ class EntregasMontagemCallbacks {
     required this.atualizarStatus,
     required this.emitirRelatorio,
     required this.trocarParada,
+    required this.trocarParadaMotorista,
     required this.editarMotoristaGrupo,
     required this.abrirDetalheItens,
     required this.abrirNavegacao,
@@ -47,6 +48,13 @@ class EntregasMontagemCallbacks {
     int indiceB,
   ) trocarParada;
 
+  final Future<void> Function(
+    String motorista,
+    List<Venda> ordenadas,
+    int indiceA,
+    int indiceB,
+  ) trocarParadaMotorista;
+
   final Future<void> Function(int grupoId, String motoristaAtual)
       editarMotoristaGrupo;
 
@@ -54,7 +62,7 @@ class EntregasMontagemCallbacks {
   final void Function(Venda venda) abrirNavegacao;
   final VoidCallback recarregar;
 
-  /// Agrupa pedidos selecionados (mesmo cliente, carreto finalizado).
+  /// Agrupa pedidos selecionados (carreto finalizado; clientes podem ser diferentes).
   final Future<void> Function(Set<int> vendaIds) confirmarAgrupamento;
 
   /// Remove agrupamento das vendas selecionadas.
