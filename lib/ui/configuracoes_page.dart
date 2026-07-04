@@ -1,6 +1,6 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
@@ -11,7 +11,12 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_config_repository.dart';
+import '../data/produto_repository.dart';
+import 'configuracoes/obra_calculadora_config_section.dart';
 import 'configuracoes/backup_configuracao_section.dart';
+import 'configuracoes/config_page_shell.dart';
+import 'configuracoes/config_secao.dart';
+import 'configuracoes/config_section_card.dart';
 import '../data/mensageria_repository.dart';
 import '../data/objectbox.dart';
 import '../data/sync/lan_sync_scheduler.dart';
@@ -36,6 +41,7 @@ class ConfiguracoesPage extends StatefulWidget {
     required this.objectBox,
     required this.appConfigRepository,
     required this.printService,
+    required this.produtoRepository,
     this.lanSyncScheduler,
   });
 
@@ -43,6 +49,7 @@ class ConfiguracoesPage extends StatefulWidget {
   final ObjectBox objectBox;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
+  final ProdutoRepository produtoRepository;
   final LanSyncScheduler? lanSyncScheduler;
 
   @override
@@ -85,9 +92,36 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   String _diagnosticoHorario = '';
   bool _permitirVendaSemEstoque = true;
   bool _pdvExigirVendedor = false;
+  bool _pdvBloqueioVendedor = false;
+  bool _pdvBloqueioVendedorAposOrcamento = false;
+  bool _pdvBloqueioInatividadeAtivo = false;
+  final _pdvBloqueioInatividadeMinutosController =
+      TextEditingController(text: '5');
   bool _pdvBalcaoRapido = true;
   bool _pdvCheckoutDireto = true;
   bool _pdvPularDialogOrcamentoSalvo = true;
+  int _obraCalcTijoloProdutoId = 0;
+  int _obraCalcCimentoProdutoId = 0;
+  int _obraCalcAreiaProdutoId = 0;
+  int _obraCalcPisoProdutoId = 0;
+  double _obraCalcPerdaPadraoPct = 10;
+  double _obraCalcPerdaRebocoPct = 15;
+  double _obraCalcPerdaPisoPct = 10;
+  double _obraCalcEspessuraRebocoMm = 20;
+  double _obraCalcEspessuraContrapisoMm = 30;
+  double _obraCalcM2PorCaixaPiso = 1.44;
+  bool _obraCalcGeminiParseAtivo = false;
+  String _obraCalcTemplatesJson = '[]';
+  int _obraCalcBritaProdutoId = 0;
+  int _obraCalcTelhaProdutoId = 0;
+  int _obraCalcFerroProdutoId = 0;
+  double _obraCalcEspessuraLajeMm = 100;
+  double _obraCalcPerdaLajePct = 10;
+  double _obraCalcPerdaFundacaoPct = 10;
+  double _obraCalcPerdaTelhadoPct = 10;
+  double _obraCalcTelhasPorM2 = 16;
+  double _obraCalcInclinacaoTelhadoPct = 30;
+  bool _obraCalcUsarSubstitutoEstoqueZero = true;
   bool _caixaFiscalNaoBloqueante = true;
   final _caixaLimiteOrcamentosController = TextEditingController(text: '120');
   bool _mostrarCampoDescontoCaixa = true;
@@ -106,6 +140,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _filtroTextoLogController = TextEditingController();
   final _webhookPayloadController = TextEditingController();
   List<MensagemLog> _logsFiltrados = [];
+  int _indiceSecaoConfig = 0;
 
   String _rotuloStatusMensagem(String status) {
     switch (status) {
@@ -158,6 +193,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _fiscalCnpjController.dispose();
     _fiscalIeController.dispose();
     _caixaLimiteOrcamentosController.dispose();
+    _pdvBloqueioInatividadeMinutosController.dispose();
     super.dispose();
   }
 
@@ -283,9 +319,41 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _logoPath = config.logoPath;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       _pdvExigirVendedor = config.pdvExigirVendedor;
+      _pdvBloqueioVendedor = config.pdvBloqueioVendedor;
+      _pdvBloqueioVendedorAposOrcamento =
+          config.pdvBloqueioVendedorAposOrcamento;
+      _pdvBloqueioInatividadeAtivo =
+          config.pdvBloqueioVendedorInatividadeMinutos > 0;
+      _pdvBloqueioInatividadeMinutosController.text =
+          config.pdvBloqueioVendedorInatividadeMinutos > 0
+              ? '${config.pdvBloqueioVendedorInatividadeMinutos}'
+              : '5';
       _pdvBalcaoRapido = config.pdvBalcaoRapido;
       _pdvCheckoutDireto = config.pdvCheckoutDireto;
       _pdvPularDialogOrcamentoSalvo = config.pdvPularDialogOrcamentoSalvo;
+      _obraCalcTijoloProdutoId = config.obraCalcTijoloProdutoId;
+      _obraCalcCimentoProdutoId = config.obraCalcCimentoProdutoId;
+      _obraCalcAreiaProdutoId = config.obraCalcAreiaProdutoId;
+      _obraCalcPisoProdutoId = config.obraCalcPisoProdutoId;
+      _obraCalcPerdaPadraoPct = config.obraCalcPerdaPadraoPct;
+      _obraCalcPerdaRebocoPct = config.obraCalcPerdaRebocoPct;
+      _obraCalcPerdaPisoPct = config.obraCalcPerdaPisoPct;
+      _obraCalcEspessuraRebocoMm = config.obraCalcEspessuraRebocoMm;
+      _obraCalcEspessuraContrapisoMm = config.obraCalcEspessuraContrapisoMm;
+      _obraCalcM2PorCaixaPiso = config.obraCalcM2PorCaixaPiso;
+      _obraCalcGeminiParseAtivo = config.obraCalcGeminiParseAtivo;
+      _obraCalcTemplatesJson = config.obraCalcTemplatesJson;
+      _obraCalcBritaProdutoId = config.obraCalcBritaProdutoId;
+      _obraCalcTelhaProdutoId = config.obraCalcTelhaProdutoId;
+      _obraCalcFerroProdutoId = config.obraCalcFerroProdutoId;
+      _obraCalcEspessuraLajeMm = config.obraCalcEspessuraLajeMm;
+      _obraCalcPerdaLajePct = config.obraCalcPerdaLajePct;
+      _obraCalcPerdaFundacaoPct = config.obraCalcPerdaFundacaoPct;
+      _obraCalcPerdaTelhadoPct = config.obraCalcPerdaTelhadoPct;
+      _obraCalcTelhasPorM2 = config.obraCalcTelhasPorM2;
+      _obraCalcInclinacaoTelhadoPct = config.obraCalcInclinacaoTelhadoPct;
+      _obraCalcUsarSubstitutoEstoqueZero =
+          config.obraCalcUsarSubstitutoEstoqueZero;
       _caixaFiscalNaoBloqueante = config.caixaFiscalNaoBloqueante;
       _caixaLimiteOrcamentosController.text =
           '${config.caixaLimiteOrcamentosPendentes}';
@@ -523,9 +591,42 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               120,
           permitirVendaSemEstoque: _permitirVendaSemEstoque,
           pdvExigirVendedor: _pdvExigirVendedor,
+          pdvBloqueioVendedor: _pdvBloqueioVendedor,
+          pdvBloqueioVendedorAposOrcamento: _pdvBloqueioVendedor &&
+              _pdvBloqueioVendedorAposOrcamento,
+          pdvBloqueioVendedorInatividadeMinutos: _pdvBloqueioVendedor &&
+                  _pdvBloqueioInatividadeAtivo
+              ? (int.tryParse(
+                      _pdvBloqueioInatividadeMinutosController.text.trim(),
+                    ) ??
+                    5)
+                  .clamp(1, 480)
+              : 0,
           pdvBalcaoRapido: _pdvBalcaoRapido,
           pdvCheckoutDireto: _pdvCheckoutDireto,
           pdvPularDialogOrcamentoSalvo: _pdvPularDialogOrcamentoSalvo,
+          obraCalcTijoloProdutoId: _obraCalcTijoloProdutoId,
+          obraCalcCimentoProdutoId: _obraCalcCimentoProdutoId,
+          obraCalcAreiaProdutoId: _obraCalcAreiaProdutoId,
+          obraCalcPisoProdutoId: _obraCalcPisoProdutoId,
+          obraCalcPerdaPadraoPct: _obraCalcPerdaPadraoPct,
+          obraCalcPerdaRebocoPct: _obraCalcPerdaRebocoPct,
+          obraCalcPerdaPisoPct: _obraCalcPerdaPisoPct,
+          obraCalcEspessuraRebocoMm: _obraCalcEspessuraRebocoMm,
+          obraCalcEspessuraContrapisoMm: _obraCalcEspessuraContrapisoMm,
+          obraCalcM2PorCaixaPiso: _obraCalcM2PorCaixaPiso,
+          obraCalcGeminiParseAtivo: _obraCalcGeminiParseAtivo,
+          obraCalcTemplatesJson: _obraCalcTemplatesJson,
+          obraCalcBritaProdutoId: _obraCalcBritaProdutoId,
+          obraCalcTelhaProdutoId: _obraCalcTelhaProdutoId,
+          obraCalcFerroProdutoId: _obraCalcFerroProdutoId,
+          obraCalcEspessuraLajeMm: _obraCalcEspessuraLajeMm,
+          obraCalcPerdaLajePct: _obraCalcPerdaLajePct,
+          obraCalcPerdaFundacaoPct: _obraCalcPerdaFundacaoPct,
+          obraCalcPerdaTelhadoPct: _obraCalcPerdaTelhadoPct,
+          obraCalcTelhasPorM2: _obraCalcTelhasPorM2,
+          obraCalcInclinacaoTelhadoPct: _obraCalcInclinacaoTelhadoPct,
+          obraCalcUsarSubstitutoEstoqueZero: _obraCalcUsarSubstitutoEstoqueZero,
           caixaFiscalNaoBloqueante: _caixaFiscalNaoBloqueante,
           caixaLimiteOrcamentosPendentes: int.tryParse(
                 _caixaLimiteOrcamentosController.text.trim(),
@@ -991,14 +1092,1244 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     return double.tryParse(normalizado);
   }
 
-  Widget _configTab(List<Widget> children) {
+  Widget _configTab(List<Widget> children, {ConfigSecaoInfo? secao}) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children,
+        children: [
+          if (secao != null) ...[
+            Text(
+              secao.titulo,
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              secao.descricao,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          ...children,
+        ],
       ),
     );
+  }
+
+  Widget _painelEmpresa() {
+    return _configTab(
+      [
+        ConfigSectionCard(
+          icon: Icons.storefront_outlined,
+          title: 'Dados da empresa',
+          subtitle: 'Nome da loja, telefone e endereco usados em vendas e documentos.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _nomeLojaController,
+                decoration: const InputDecoration(labelText: 'Nome da loja'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _telefoneController,
+                decoration: const InputDecoration(labelText: 'Telefone da loja'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _enderecoController,
+                maxLines: 2,
+                decoration: const InputDecoration(labelText: 'Endereco da loja'),
+              ),
+              const SizedBox(height: 12),
+              ConfigSaveButton(
+                salvando: _salvando,
+                onPressed: _salvarConfig,
+                label: 'Salvar dados da empresa',
+              ),
+            ],
+          ),
+        ),
+      ],
+      secao: ConfigSecoes.todas[0],
+    );
+  }
+
+  Widget _painelPdv() {
+    return _configTab(
+      [
+        ConfigSectionCard(
+          icon: Icons.point_of_sale_outlined,
+          title: 'Regras comerciais do PDV',
+          subtitle: 'Controle vendedor, descontos, estoque e fluxo de atendimento.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _maxDescontoPercentualPdvController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Desconto maximo no Ponto de Venda (% sobre subtotal)',
+                  hintText: 'Ex.: 15',
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Limite percentual sobre o subtotal dos produtos (nao inclui frete). '
+                'No PDV o vendedor pode informar % ou valor em reais, desde que o '
+                'desconto em reais nao ultrapasse esse percentual do subtotal. '
+                'Use 0 para nao permitir desconto no PDV.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _permitirVendaSemEstoque,
+                onChanged: (value) {
+                  setState(() {
+                    _permitirVendaSemEstoque = value;
+                  });
+                },
+                title: const Text('Permitir venda sem estoque'),
+                subtitle: const Text(
+                  'Ativo por padrao. Vendas e finalizacao no caixa nunca bloqueiam '
+                  'por falta de estoque (fisico pode ficar negativo).',
+                ),
+              ),
+              const Divider(height: 28),
+              Text('Vendedor', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 4),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _pdvExigirVendedor,
+                onChanged: (value) {
+                  setState(() => _pdvExigirVendedor = value);
+                },
+                title: const Text('Exigir vendedor no PDV'),
+                subtitle: const Text(
+                  'Se ninguem estiver selecionado no topo da tela, obriga informar '
+                  'quem esta vendendo antes de enviar ao caixa.',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _pdvBloqueioVendedor,
+                onChanged: (value) {
+                  setState(() => _pdvBloqueioVendedor = value);
+                },
+                title: const Text('Bloqueio vendedor no PDV'),
+                subtitle: const Text(
+                  'Ao abrir o terminal, o vendedor informa a senha cadastrada ou '
+                  'login do sistema vinculado; o PDV identifica quem vende.',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _pdvBloqueioVendedorAposOrcamento,
+                onChanged: _pdvBloqueioVendedor
+                    ? (value) {
+                        setState(() => _pdvBloqueioVendedorAposOrcamento = value);
+                      }
+                    : null,
+                title: const Text('Bloquear vendedor apos enviar orcamento'),
+                subtitle: const Text(
+                  'A cada orcamento enviado ao caixa, limpa o vendedor e exige senha '
+                  'ou login antes da proxima venda.',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _pdvBloqueioInatividadeAtivo,
+                onChanged: _pdvBloqueioVendedor
+                    ? (value) {
+                        setState(() => _pdvBloqueioInatividadeAtivo = value);
+                      }
+                    : null,
+                title: const Text('Bloquear vendedor apos inatividade'),
+                subtitle: const Text(
+                  'Exige nova identificacao quando o terminal fica ocioso pelo '
+                  'tempo configurado abaixo.',
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 8),
+                child: TextField(
+                  controller: _pdvBloqueioInatividadeMinutosController,
+                  enabled: _pdvBloqueioVendedor && _pdvBloqueioInatividadeAtivo,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'Minutos de inatividade',
+                    helperText: 'Entre 1 e 480 minutos (8 horas).',
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const Divider(height: 28),
+              Text('Atendimento', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 4),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _pdvBalcaoRapido,
+                onChanged: (value) {
+                  setState(() => _pdvBalcaoRapido = value);
+                },
+                title: const Text('PDV balcao rapido'),
+                subtitle: const Text(
+                  'Adiciona produto com qtd 1 sem dialog (retirada, sem carreto/misto).',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _pdvCheckoutDireto,
+                onChanged: (value) {
+                  setState(() => _pdvCheckoutDireto = value);
+                },
+                title: const Text('PDV checkout direto'),
+                subtitle: const Text(
+                  'Envia ao caixa sem abrir o dialog de fechamento quando os dados '
+                  'ja estao no cabecalho.',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _pdvPularDialogOrcamentoSalvo,
+                onChanged: (value) {
+                  setState(() => _pdvPularDialogOrcamentoSalvo = value);
+                },
+                title: const Text('PDV: so snackbar apos salvar'),
+                subtitle: const Text(
+                  'Nao abre dialog de impressao/PDF apos salvar o orcamento.',
+                ),
+              ),
+              const SizedBox(height: 12),
+              ConfigSaveButton(
+                salvando: _salvando,
+                onPressed: _salvarConfig,
+                label: 'Salvar regras do PDV',
+              ),
+            ],
+          ),
+        ),
+        ConfigSectionCard(
+          icon: Icons.construction_outlined,
+          title: 'Calculadora de obra',
+          subtitle: 'Parede, reboco, laje, fundacao, telhado e projeto no PDV (F12).',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ObraCalculadoraConfigSection(
+                produtoRepository: widget.produtoRepository,
+                tijoloProdutoId: _obraCalcTijoloProdutoId,
+                cimentoProdutoId: _obraCalcCimentoProdutoId,
+                areiaProdutoId: _obraCalcAreiaProdutoId,
+                pisoProdutoId: _obraCalcPisoProdutoId,
+                britaProdutoId: _obraCalcBritaProdutoId,
+                telhaProdutoId: _obraCalcTelhaProdutoId,
+                ferroProdutoId: _obraCalcFerroProdutoId,
+                perdaPadraoPct: _obraCalcPerdaPadraoPct,
+                perdaRebocoPct: _obraCalcPerdaRebocoPct,
+                perdaPisoPct: _obraCalcPerdaPisoPct,
+                espessuraRebocoMm: _obraCalcEspessuraRebocoMm,
+                espessuraContrapisoMm: _obraCalcEspessuraContrapisoMm,
+                m2PorCaixaPiso: _obraCalcM2PorCaixaPiso,
+                geminiParseAtivo: _obraCalcGeminiParseAtivo,
+                templatesJson: _obraCalcTemplatesJson,
+                usarSubstitutoEstoqueZero: _obraCalcUsarSubstitutoEstoqueZero,
+                onChanged: ({
+                  tijoloProdutoId,
+                  cimentoProdutoId,
+                  areiaProdutoId,
+                  pisoProdutoId,
+                  britaProdutoId,
+                  telhaProdutoId,
+                  ferroProdutoId,
+                  perdaPadraoPct,
+                  perdaRebocoPct,
+                  perdaPisoPct,
+                  espessuraRebocoMm,
+                  espessuraContrapisoMm,
+                  m2PorCaixaPiso,
+                  geminiParseAtivo,
+                  templatesJson,
+                  usarSubstitutoEstoqueZero,
+                }) {
+                  setState(() {
+                    if (tijoloProdutoId != null) {
+                      _obraCalcTijoloProdutoId = tijoloProdutoId;
+                    }
+                    if (cimentoProdutoId != null) {
+                      _obraCalcCimentoProdutoId = cimentoProdutoId;
+                    }
+                    if (areiaProdutoId != null) {
+                      _obraCalcAreiaProdutoId = areiaProdutoId;
+                    }
+                    if (pisoProdutoId != null) {
+                      _obraCalcPisoProdutoId = pisoProdutoId;
+                    }
+                    if (britaProdutoId != null) {
+                      _obraCalcBritaProdutoId = britaProdutoId;
+                    }
+                    if (telhaProdutoId != null) {
+                      _obraCalcTelhaProdutoId = telhaProdutoId;
+                    }
+                    if (ferroProdutoId != null) {
+                      _obraCalcFerroProdutoId = ferroProdutoId;
+                    }
+                    if (perdaPadraoPct != null) {
+                      _obraCalcPerdaPadraoPct = perdaPadraoPct;
+                    }
+                    if (perdaRebocoPct != null) {
+                      _obraCalcPerdaRebocoPct = perdaRebocoPct;
+                    }
+                    if (perdaPisoPct != null) {
+                      _obraCalcPerdaPisoPct = perdaPisoPct;
+                    }
+                    if (espessuraRebocoMm != null) {
+                      _obraCalcEspessuraRebocoMm = espessuraRebocoMm;
+                    }
+                    if (espessuraContrapisoMm != null) {
+                      _obraCalcEspessuraContrapisoMm = espessuraContrapisoMm;
+                    }
+                    if (m2PorCaixaPiso != null) {
+                      _obraCalcM2PorCaixaPiso = m2PorCaixaPiso;
+                    }
+                    if (geminiParseAtivo != null) {
+                      _obraCalcGeminiParseAtivo = geminiParseAtivo;
+                    }
+                    if (templatesJson != null) {
+                      _obraCalcTemplatesJson = templatesJson;
+                    }
+                    if (usarSubstitutoEstoqueZero != null) {
+                      _obraCalcUsarSubstitutoEstoqueZero =
+                          usarSubstitutoEstoqueZero;
+                    }
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              ConfigSaveButton(
+                salvando: _salvando,
+                onPressed: _salvarConfig,
+                label: 'Salvar calculadora de obra',
+              ),
+            ],
+          ),
+        ),
+      ],
+      secao: ConfigSecoes.todas[1],
+    );
+  }
+
+  Widget _painelCaixa() {
+    return _configTab(
+      [
+        ConfigSectionCard(
+          icon: Icons.account_balance_wallet_outlined,
+          title: 'Operacao do caixa',
+          subtitle: 'Fechamento, autorizacoes e fila do caixa.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _limiteDivergenciaCaixaController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Limite de divergencia sem supervisor (R\$)',
+                  hintText: 'Ex.: 20,00',
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Defina o limite de divergencia para exigir autorizacao de '
+                'supervisor (admin/financeiro) no fechamento do caixa.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _mostrarCampoDescontoCaixa,
+                onChanged: (value) {
+                  setState(() {
+                    _mostrarCampoDescontoCaixa = value;
+                  });
+                },
+                title: const Text('Mostrar desconto rapido no Caixa'),
+                subtitle: const Text(
+                  'Desligue para ocultar o campo de desconto na tela do Caixa.',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _umCaixaAbertoPorLoja,
+                onChanged: (value) {
+                  setState(() => _umCaixaAbertoPorLoja = value);
+                },
+                title: const Text('Um unico caixa aberto por loja'),
+                subtitle: const Text(
+                  'Impede abrir caixa em outro terminal enquanto ja existir '
+                  'sessao aberta na rede.',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _exigirAutorizacaoSegundaViaCupom,
+                onChanged: (value) {
+                  setState(() {
+                    _exigirAutorizacaoSegundaViaCupom = value;
+                  });
+                },
+                title: const Text('Exigir autorizacao para segunda via do cupom'),
+                subtitle: const Text(
+                  'Quando ativo, o operador precisa informar login e senha de um '
+                  'usuario com permissao para imprimir a 2a via.',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _caixaFiscalNaoBloqueante,
+                onChanged: (value) {
+                  setState(() => _caixaFiscalNaoBloqueante = value);
+                },
+                title: const Text('Fiscal em segundo plano'),
+                subtitle: const Text(
+                  'Libera a fila para o proximo cliente enquanto NFC-e ou cupom '
+                  'emite em paralelo.',
+                ),
+              ),
+              TextField(
+                controller: _caixaLimiteOrcamentosController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Limite de orcamentos pendentes no caixa',
+                  hintText: '120',
+                  helperText: 'Entre 20 e 500. Reduz memoria com historico grande.',
+                ),
+              ),
+              const SizedBox(height: 12),
+              ConfigSaveButton(
+                salvando: _salvando,
+                onPressed: _salvarConfig,
+                label: 'Salvar configuracoes do caixa',
+              ),
+            ],
+          ),
+        ),
+      ],
+      secao: ConfigSecoes.todas[2],
+    );
+  }
+
+  Widget _painelFiscal() {
+    return _configTab(
+      [
+        ConfigSectionCard(
+          icon: Icons.auto_awesome_outlined,
+          title: 'IA — padronizar produtos (Gemini)',
+          subtitle:
+              'Usada no cadastro de produtos. Crie uma chave gratuita no Google AI Studio.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _geminiApiKeyController,
+                obscureText: _geminiChaveOculta,
+                decoration: InputDecoration(
+                  labelText: 'Chave API Gemini (GEMINI_API_KEY)',
+                  hintText: 'AIza...',
+                  suffixIcon: IconButton(
+                    tooltip: _geminiChaveOculta ? 'Mostrar chave' : 'Ocultar chave',
+                    onPressed: () =>
+                        setState(() => _geminiChaveOculta = !_geminiChaveOculta),
+                    icon: Icon(
+                      _geminiChaveOculta
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _abrirUrlGeminiAiStudio,
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text('Criar chave no AI Studio'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: _salvarChaveGemini,
+                    icon: const Icon(Icons.save_outlined, size: 18),
+                    label: const Text('Salvar chave Gemini'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        ConfigSectionCard(
+          icon: Icons.receipt_long_outlined,
+          title: 'Fiscal — Focus NFe (NFC-e / NF-e)',
+          subtitle:
+              'Token salvo neste PC (fora do Git). Ambiente padrao: ${FiscalConfig.ambiente}.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DropdownButtonFormField<int>(
+                initialValue: _fiscalRegime == FiscalRegimePadrao.simplesNacional
+                    ? FiscalRegimePadrao.simplesNacional
+                    : FiscalRegimePadrao.regimeNormal,
+                decoration: const InputDecoration(
+                  labelText: 'Regime tributario da loja',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: FiscalRegimePadrao.simplesNacional,
+                    child: Text('Simples Nacional'),
+                  ),
+                  DropdownMenuItem(
+                    value: FiscalRegimePadrao.regimeNormal,
+                    child: Text('Regime Normal'),
+                  ),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _fiscalRegime = v);
+                },
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Padrao na emissao e XML: ${FiscalRegimePadrao.resumoPadroesEmissao(_fiscalRegime)} '
+                '(produtos em Automatico). Valide com o contador.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                initialValue: _fiscalAmbiente,
+                decoration: const InputDecoration(
+                  labelText: 'Ambiente SEFAZ',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'homologacao',
+                    child: Text('Homologacao (testes)'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'producao',
+                    child: Text('Producao (validade juridica)'),
+                  ),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _fiscalAmbiente = v);
+                },
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _fiscalTokenController,
+                obscureText: _fiscalTokenOculto,
+                decoration: InputDecoration(
+                  labelText: 'Token API Focus',
+                  hintText: 'Cole o token do painel Focus',
+                  suffixIcon: IconButton(
+                    tooltip: _fiscalTokenOculto ? 'Mostrar token' : 'Ocultar token',
+                    onPressed: () =>
+                        setState(() => _fiscalTokenOculto = !_fiscalTokenOculto),
+                    icon: Icon(
+                      _fiscalTokenOculto
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _fiscalCnpjController,
+                decoration: const InputDecoration(
+                  labelText: 'CNPJ emitente (14 digitos)',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _fiscalIeController,
+                decoration: const InputDecoration(
+                  labelText: 'Inscricao estadual emitente',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _abrirPainelFocus,
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text('Painel Focus NFe'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: _salvarConfigFiscal,
+                    icon: const Icon(Icons.save_outlined, size: 18),
+                    label: const Text('Salvar fiscal'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        ConfigSectionCard(
+          icon: Icons.trending_up_outlined,
+          title: 'Margem minima padrao',
+          subtitle:
+              'Alerta na conferencia de NF-e de entrada quando a margem ficar abaixo deste valor.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _margemMinimaPadraoController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Margem minima padrao (%)',
+                  hintText: 'Ex.: 20',
+                ),
+              ),
+              const SizedBox(height: 12),
+              ConfigSaveButton(
+                salvando: _salvando,
+                onPressed: _salvarConfig,
+                label: 'Salvar margem minima',
+              ),
+            ],
+          ),
+        ),
+      ],
+      secao: ConfigSecoes.todas[3],
+    );
+  }
+
+  Widget _painelImpressao() {
+    return _configTab(
+      [
+        ConfigSectionCard(
+          icon: Icons.print_outlined,
+          title: 'Impressao e PDF',
+          subtitle: 'Modelo de documento, rodapes, impressora e teste de impressao.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _pastaPadraoPdfController,
+                decoration: InputDecoration(
+                  labelText: 'Pasta padrao de PDF (opcional)',
+                  suffixIcon: IconButton(
+                    tooltip: 'Escolher pasta',
+                    onPressed: _escolherPastaPadraoPdf,
+                    icon: const Icon(Icons.folder_open_outlined),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                initialValue: _modeloPdf,
+                decoration: const InputDecoration(labelText: 'Modelo de PDF'),
+                items: const [
+                  DropdownMenuItem(value: 'cupom', child: Text('Cupom (80mm)')),
+                  DropdownMenuItem(value: 'a4', child: Text('A4')),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() => _modeloPdf = value);
+                },
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Layout do cupom e orcamento'),
+                subtitle: const Text(
+                  'Divisorias, colunas, fontes e campos — com pre-visualizacao',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  await Navigator.push<void>(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => LayoutImpressaoPage(
+                        appConfigRepository: widget.appConfigRepository,
+                        printService: widget.printService,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Impressora padrao'),
+                subtitle: Text(
+                  _impressoraPadrao.trim().isEmpty
+                      ? 'Nao configurada — toque para abrir a tela dedicada'
+                      : _impressoraPadrao,
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  await Navigator.push<void>(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => ConfigImpressoraPage(
+                        printService: widget.printService,
+                        appConfigRepository: widget.appConfigRepository,
+                      ),
+                    ),
+                  );
+                  if (context.mounted) await _carregarConfig();
+                },
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _rodapeNotaController,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                minLines: 3,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                  labelText: 'Rodape da nota/cupom nao fiscal',
+                  alignLabelWithHint: true,
+                  hintText: 'Use Enter para nova linha',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _rodapeOrcamentoController,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                minLines: 3,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                  labelText: 'Rodape do orcamento',
+                  alignLabelWithHint: true,
+                  hintText: 'Use Enter para nova linha',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _escolherLogo,
+                      icon: const Icon(Icons.image_outlined),
+                      label: Text(_logoPath.isEmpty ? 'Selecionar logo' : 'Trocar logo'),
+                    ),
+                  ),
+                  if (_logoPath.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: _removerLogo,
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Remover'),
+                    ),
+                  ],
+                ],
+              ),
+              if (_logoPath.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Logo selecionada: ${p.basename(_logoPath)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+              const SizedBox(height: 12),
+              ConfigSaveButton(
+                salvando: _salvando,
+                onPressed: _salvarConfig,
+                label: 'Salvar configuracoes de impressao/PDF',
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _imprimirTeste,
+                  icon: const Icon(Icons.print_outlined),
+                  label: const Text('Teste de impressao'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      secao: ConfigSecoes.todas[4],
+    );
+  }
+
+  Widget _painelRede() {
+    return _configTab(
+      [
+        RedeSincronizacaoCard(
+          configRepository: widget.appConfigRepository,
+          lanSyncScheduler: widget.lanSyncScheduler,
+        ),
+      ],
+      secao: ConfigSecoes.todas[5],
+    );
+  }
+
+  Widget _painelBackup() {
+    return _configTab(
+      [
+        BackupConfiguracaoSection(
+          appConfigRepository: widget.appConfigRepository,
+          objectBox: widget.objectBox,
+          lanSyncScheduler: widget.lanSyncScheduler,
+          nomeLoja: _nomeLojaController.text.trim().isEmpty
+              ? 'LOJA DE MATERIAIS'
+              : _nomeLojaController.text.trim(),
+        ),
+      ],
+      secao: ConfigSecoes.todas[6],
+    );
+  }
+
+  Widget _painelMensagens() {
+    return _configTab(
+      [
+        ConfigSectionCard(
+          icon: Icons.notifications_active_outlined,
+          title: 'Alertas proativos WhatsApp',
+          subtitle: 'Fiado vencido, estoque zerado e caixa aberto apos 18h.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _alertasProativosWhatsappAtivos,
+                onChanged: (value) {
+                  setState(() => _alertasProativosWhatsappAtivos = value);
+                },
+                title: const Text('Ativar alertas proativos'),
+                subtitle: const Text(
+                  'Envia alertas para o numero do dono (requer mensageria configurada).',
+                ),
+              ),
+              TextField(
+                controller: _whatsappDonoController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'WhatsApp do dono',
+                  hintText: 'Ex.: 5511999999999',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _alertasIntervaloController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Intervalo entre alertas (minutos)',
+                  hintText: '120',
+                ),
+              ),
+              const SizedBox(height: 12),
+              ConfigSaveButton(
+                salvando: _salvando,
+                onPressed: _salvarConfig,
+                label: 'Salvar alertas proativos',
+              ),
+            ],
+          ),
+        ),
+        ConfigSectionCard(
+          icon: Icons.chat_outlined,
+          title: 'Mensageria (WhatsApp/SMS)',
+          subtitle: 'Credenciais, templates, fila e monitoramento de envios.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _mensageriaBackendUrlController,
+                decoration: const InputDecoration(
+                  labelText: 'Backend URL de envio (opcional)',
+                  hintText: 'https://seu-backend/send-whatsapp',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _whatsApiVersionController,
+                decoration: const InputDecoration(
+                  labelText: 'WhatsApp API Version',
+                  hintText: 'v20.0',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _whatsPhoneIdController,
+                decoration: const InputDecoration(
+                  labelText: 'WhatsApp Phone Number ID',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _whatsTokenController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'WhatsApp Access Token',
+                ),
+              ),
+              const SizedBox(height: 8),
+              ConfigSaveButton(
+                salvando: _salvando,
+                onPressed: _salvarConfig,
+                label: 'Salvar credenciais de mensageria',
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _mostrarContratoBackendMensageria,
+                      icon: const Icon(Icons.description_outlined),
+                      label: const Text('Ver contrato do backend'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _testarBackendMensageria,
+                      icon: const Icon(Icons.wifi_tethering_outlined),
+                      label: const Text('Testar backend'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(child: Text('Templates: ${_templatesMensagem.length}')),
+                  Expanded(child: Text('Fila pendente: $_filaPendente')),
+                  Expanded(child: Text('Logs: $_logsTotais')),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 10,
+                runSpacing: 6,
+                children: [
+                  Text('Enviadas: $_logsEnviados'),
+                  Text('Entregues: $_logsEntregues'),
+                  Text('Lidas: $_logsLidos'),
+                  Text('Falhas: $_logsFalhas'),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _abrirCadastroTemplate,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Novo template'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _processarFilaMensagens,
+                      icon: const Icon(Icons.send_outlined),
+                      label: const Text('Processar fila'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (_templatesMensagem.isEmpty)
+                const Text('Nenhum template cadastrado.')
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 230),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _templatesMensagem.length,
+                    itemBuilder: (context, index) {
+                      final t = _templatesMensagem[index];
+                      return ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                        title: Text(t.nome),
+                        subtitle: Text(
+                          '${t.canal} | evento: ${t.evento} | ${t.ativo ? 'ativo' : 'inativo'}',
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Editar',
+                              onPressed: () => _abrirCadastroTemplate(template: t),
+                              icon: const Icon(Icons.edit_outlined),
+                            ),
+                            IconButton(
+                              tooltip: 'Excluir',
+                              onPressed: () => _removerTemplate(t),
+                              icon: const Icon(Icons.delete_outline),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 10),
+              const Divider(),
+              const SizedBox(height: 6),
+              Text(
+                'Monitor de fila e logs',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  SizedBox(
+                    width: 190,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _filtroStatusLog,
+                      decoration: const InputDecoration(labelText: 'Status'),
+                      items: const [
+                        DropdownMenuItem(value: 'todos', child: Text('Todos')),
+                        DropdownMenuItem(
+                          value: 'aceito_api',
+                          child: Text('Aceito pela API'),
+                        ),
+                        DropdownMenuItem(value: 'enviado', child: Text('Enviado')),
+                        DropdownMenuItem(value: 'entregue', child: Text('Entregue')),
+                        DropdownMenuItem(value: 'lido', child: Text('Lido')),
+                        DropdownMenuItem(value: 'falhou', child: Text('Falhou')),
+                      ],
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setState(() => _filtroStatusLog = v);
+                        _aplicarFiltroLogs();
+                      },
+                    ),
+                  ),
+                  SizedBox(
+                    width: 170,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _filtroCanalLog,
+                      decoration: const InputDecoration(labelText: 'Canal'),
+                      items: const [
+                        DropdownMenuItem(value: 'todos', child: Text('Todos')),
+                        DropdownMenuItem(
+                          value: 'whatsapp',
+                          child: Text('WhatsApp'),
+                        ),
+                        DropdownMenuItem(value: 'sms', child: Text('SMS')),
+                      ],
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setState(() => _filtroCanalLog = v);
+                        _aplicarFiltroLogs();
+                      },
+                    ),
+                  ),
+                  SizedBox(
+                    width: 280,
+                    child: TextField(
+                      controller: _filtroTextoLogController,
+                      decoration: const InputDecoration(
+                        labelText: 'Buscar destino/template/erro',
+                      ),
+                      onSubmitted: (_) => _aplicarFiltroLogs(),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _aplicarFiltroLogs,
+                    icon: const Icon(Icons.search),
+                    label: const Text('Filtrar'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (_logsFiltrados.isEmpty)
+                const Text('Nenhum log para os filtros atuais.')
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 230),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _logsFiltrados.length,
+                    itemBuilder: (context, index) {
+                      final log = _logsFiltrados[index];
+                      return ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                        title: Text(
+                          '${log.canal.toUpperCase()} | ${_rotuloStatusMensagem(log.statusEntrega)} | cliente ${log.clienteId}',
+                        ),
+                        subtitle: Text(log.destino),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(log.resultado),
+                            if (log.resultado == 'falhou')
+                              IconButton(
+                                tooltip: 'Reenfileirar',
+                                onPressed: () => _reenfileirarFalhaDeLog(log),
+                                icon: const Icon(Icons.refresh),
+                              ),
+                            if (log.resultado == 'falhou')
+                              IconButton(
+                                tooltip: 'Ver erro detalhado',
+                                onPressed: () => _verErroDetalhadoLog(log),
+                                icon: const Icon(Icons.error_outline),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _webhookPayloadController,
+                minLines: 3,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  labelText: 'Payload webhook WhatsApp (JSON)',
+                  hintText: 'Cole aqui o payload de status do WhatsApp.',
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _processarWebhookWhatsapp,
+                icon: const Icon(Icons.hub_outlined),
+                label: const Text('Processar webhook de status'),
+              ),
+            ],
+          ),
+        ),
+      ],
+      secao: ConfigSecoes.todas[7],
+    );
+  }
+
+  Widget _painelSistema(
+    String agoraFmt,
+    String ultimaVendaFmt,
+    String sinal,
+    String h,
+    String m,
+  ) {
+    return _configTab(
+      [
+        ConfigSectionCard(
+          icon: Icons.schedule_outlined,
+          title: 'Data e hora do sistema',
+          subtitle: 'Diagnostico de consistencia para emissao e operacao de vendas.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Agora (sistema): $agoraFmt'),
+              Text('Fuso horario: ${_agoraSistema.timeZoneName} (UTC$sinal$h:$m)'),
+              Text('Ultima venda finalizada: $ultimaVendaFmt'),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _horarioInconsistente
+                      ? Colors.red.withValues(alpha: 0.08)
+                      : Colors.green.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _horarioInconsistente
+                        ? Colors.red.withValues(alpha: 0.45)
+                        : Colors.green.withValues(alpha: 0.45),
+                  ),
+                ),
+                child: Text(_diagnosticoHorario),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _carregarDiagnosticoHorario,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Atualizar diagnostico'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _abrirAjusteDataHoraSO,
+                      icon: const Icon(Icons.schedule),
+                      label: const Text('Ajustar no sistema'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _sincronizarHorarioWindows,
+                  icon: const Icon(Icons.sync),
+                  label: const Text('Sincronizar horario agora (Windows)'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      secao: ConfigSecoes.todas[8],
+    );
+  }
+
+  Widget _corpoSecaoConfig(
+    String agoraFmt,
+    String ultimaVendaFmt,
+    String sinal,
+    String h,
+    String m,
+  ) {
+    final secaoInfo = ConfigSecoes.todas[_indiceSecaoConfig.clamp(
+      0,
+      ConfigSecoes.todas.length - 1,
+    )];
+    switch (secaoInfo.id) {
+      case 'empresa':
+        return _painelEmpresa();
+      case 'pdv':
+        return _painelPdv();
+      case 'caixa':
+        return _painelCaixa();
+      case 'fiscal':
+        return _painelFiscal();
+      case 'impressao':
+        return _painelImpressao();
+      case 'rede':
+        return _painelRede();
+      case 'backup':
+        return _painelBackup();
+      case 'mensagens':
+        return _painelMensagens();
+      case 'sistema':
+        return _painelSistema(agoraFmt, ultimaVendaFmt, sinal, h, m);
+      default:
+        return _painelEmpresa();
+    }
   }
 
   @override
@@ -1013,1114 +2344,14 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     final h = offset.inHours.abs().toString().padLeft(2, '0');
     final m = (offset.inMinutes.abs() % 60).toString().padLeft(2, '0');
 
-    return DefaultTabController(
-      length: 7,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('CONFIGURACOES'),
-          bottom: TabBar(
-            isScrollable: true,
-            tabs: const [
-              Tab(text: 'Empresa'),
-              Tab(text: 'PDF'),
-              Tab(text: 'Caixa'),
-              Tab(text: 'Rede'),
-              Tab(text: 'Backup'),
-              Tab(text: 'Mensagens'),
-              Tab(text: 'Horario'),
-            ],
-          ),
-        ),
-        body: TabBarView(
-          children: [
-            _configTab([
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Empresa',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _nomeLojaController,
-                        decoration: const InputDecoration(
-                          labelText: 'Nome da loja',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _telefoneController,
-                        decoration: const InputDecoration(
-                          labelText: 'Telefone da loja',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _enderecoController,
-                        maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: 'Endereco da loja',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _salvando ? null : _salvarConfig,
-                          icon: const Icon(Icons.save_outlined),
-                          label: Text(
-                            _salvando
-                                ? 'Salvando...'
-                                : 'Salvar dados da empresa',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'IA â€” padronizar produtos (Gemini)',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Usada no cadastro de produtos (icone de varinha no nome). '
-                        'Crie uma chave gratuita em Google AI Studio e cole abaixo.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _geminiApiKeyController,
-                        obscureText: _geminiChaveOculta,
-                        decoration: InputDecoration(
-                          labelText: 'Chave API Gemini (GEMINI_API_KEY)',
-                          hintText: 'AIza...',
-                          suffixIcon: IconButton(
-                            tooltip: _geminiChaveOculta
-                                ? 'Mostrar chave'
-                                : 'Ocultar chave',
-                            onPressed: () => setState(
-                              () => _geminiChaveOculta = !_geminiChaveOculta,
-                            ),
-                            icon: Icon(
-                              _geminiChaveOculta
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: () => _abrirUrlGeminiAiStudio(),
-                            icon: const Icon(Icons.open_in_new, size: 18),
-                            label: const Text('Criar chave no AI Studio'),
-                          ),
-                          FilledButton.icon(
-                            onPressed: _salvarChaveGemini,
-                            icon: const Icon(Icons.save_outlined, size: 18),
-                            label: const Text('Salvar chave Gemini'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Fiscal â€” Focus NFe (NFC-e / NF-e)',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Token obrigatorio nesta tela (salvo sÃ³ neste PC, '
-                        'fora do Git). Ambiente padrao do codigo: '
-                        '${FiscalConfig.ambiente}. CNPJ/IE padrao: '
-                        '${FiscalConfig.cnpjEmitente}.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 10),
-                      DropdownButtonFormField<int>(
-                        value: _fiscalRegime == FiscalRegimePadrao.simplesNacional
-                            ? FiscalRegimePadrao.simplesNacional
-                            : FiscalRegimePadrao.regimeNormal,
-                        decoration: const InputDecoration(
-                          labelText: 'Regime tributario da loja',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: FiscalRegimePadrao.simplesNacional,
-                            child: Text('Simples Nacional'),
-                          ),
-                          DropdownMenuItem(
-                            value: FiscalRegimePadrao.regimeNormal,
-                            child: Text('Regime Normal'),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          if (v == null) return;
-                          setState(() => _fiscalRegime = v);
-                        },
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Padrao na emissao e XML: '
-                        '${FiscalRegimePadrao.resumoPadroesEmissao(_fiscalRegime)} '
-                        '(produtos em Automatico). Valide com o contador.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: _fiscalAmbiente,
-                        decoration: const InputDecoration(
-                          labelText: 'Ambiente SEFAZ',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'homologacao',
-                            child: Text('Homologacao (testes)'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'producao',
-                            child: Text('Producao (validade juridica)'),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          if (v == null) return;
-                          setState(() => _fiscalAmbiente = v);
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _fiscalTokenController,
-                        obscureText: _fiscalTokenOculto,
-                        decoration: InputDecoration(
-                          labelText: 'Token API Focus',
-                          hintText: 'Cole o token do painel Focus',
-                          suffixIcon: IconButton(
-                            tooltip: _fiscalTokenOculto
-                                ? 'Mostrar token'
-                                : 'Ocultar token',
-                            onPressed: () => setState(
-                              () => _fiscalTokenOculto = !_fiscalTokenOculto,
-                            ),
-                            icon: Icon(
-                              _fiscalTokenOculto
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _fiscalCnpjController,
-                        decoration: const InputDecoration(
-                          labelText: 'CNPJ emitente (14 digitos)',
-                          border: OutlineInputBorder(),
-                        ),
-                        keyboardType: TextInputType.number,
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _fiscalIeController,
-                        decoration: const InputDecoration(
-                          labelText: 'Inscricao estadual emitente',
-                          border: OutlineInputBorder(),
-                        ),
-                        keyboardType: TextInputType.number,
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: _abrirPainelFocus,
-                            icon: const Icon(Icons.open_in_new, size: 18),
-                            label: const Text('Painel Focus NFe'),
-                          ),
-                          FilledButton.icon(
-                            onPressed: _salvarConfigFiscal,
-                            icon: const Icon(Icons.save_outlined, size: 18),
-                            label: const Text('Salvar fiscal'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ]),
-            _configTab([
-              const SizedBox(height: 10),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Impressao e PDF',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _pastaPadraoPdfController,
-                        decoration: InputDecoration(
-                          labelText: 'Pasta padrao de PDF (opcional)',
-                          suffixIcon: IconButton(
-                            tooltip: 'Escolher pasta',
-                            onPressed: _escolherPastaPadraoPdf,
-                            icon: const Icon(Icons.folder_open_outlined),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        initialValue: _modeloPdf,
-                        decoration: const InputDecoration(
-                          labelText: 'Modelo de PDF',
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'cupom',
-                            child: Text('Cupom (80mm)'),
-                          ),
-                          DropdownMenuItem(value: 'a4', child: Text('A4')),
-                        ],
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() => _modeloPdf = value);
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Layout do cupom e orcamento'),
-                        subtitle: const Text(
-                          'Divisorias, colunas, fontes e campos â€” com pre-visualizacao',
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () async {
-                          await Navigator.push<void>(
-                            context,
-                            MaterialPageRoute<void>(
-                              builder: (_) => LayoutImpressaoPage(
-                                appConfigRepository: widget.appConfigRepository,
-                                printService: widget.printService,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Impressora padrao'),
-                        subtitle: Text(
-                          _impressoraPadrao.trim().isEmpty
-                              ? 'Nao configurada â€” toque para abrir a tela dedicada'
-                              : _impressoraPadrao,
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () async {
-                          await Navigator.push<void>(
-                            context,
-                            MaterialPageRoute<void>(
-                              builder: (_) => ConfigImpressoraPage(
-                                printService: widget.printService,
-                                appConfigRepository: widget.appConfigRepository,
-                              ),
-                            ),
-                          );
-                          if (context.mounted) await _carregarConfig();
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _rodapeNotaController,
-                        keyboardType: TextInputType.multiline,
-                        textInputAction: TextInputAction.newline,
-                        minLines: 3,
-                        maxLines: 8,
-                        decoration: const InputDecoration(
-                          labelText: 'Rodape da nota/cupom nao fiscal',
-                          alignLabelWithHint: true,
-                          hintText: 'Use Enter para nova linha',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _rodapeOrcamentoController,
-                        keyboardType: TextInputType.multiline,
-                        textInputAction: TextInputAction.newline,
-                        minLines: 3,
-                        maxLines: 8,
-                        decoration: const InputDecoration(
-                          labelText: 'Rodape do orcamento',
-                          alignLabelWithHint: true,
-                          hintText: 'Use Enter para nova linha',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _escolherLogo,
-                              icon: const Icon(Icons.image_outlined),
-                              label: Text(
-                                _logoPath.isEmpty
-                                    ? 'Selecionar logo'
-                                    : 'Trocar logo',
-                              ),
-                            ),
-                          ),
-                          if (_logoPath.isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            OutlinedButton.icon(
-                              onPressed: _removerLogo,
-                              icon: const Icon(Icons.delete_outline),
-                              label: const Text('Remover'),
-                            ),
-                          ],
-                        ],
-                      ),
-                      if (_logoPath.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Logo selecionada: ${p.basename(_logoPath)}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _salvando ? null : _salvarConfig,
-                          icon: const Icon(Icons.save_outlined),
-                          label: Text(
-                            _salvando
-                                ? 'Salvando...'
-                                : 'Salvar configuracoes de impressao/PDF',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _imprimirTeste,
-                          icon: const Icon(Icons.print_outlined),
-                          label: const Text('Teste de impressao'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ]),
-            _configTab([
-              const SizedBox(height: 10),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Caixa',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _limiteDivergenciaCaixaController,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText:
-                              'Limite de divergencia sem supervisor (R\$)',
-                          hintText: 'Ex.: 20,00',
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Defina o limite de divergencia para exigir autorizacao '
-                        'de supervisor (admin/financeiro) no fechamento do caixa.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 12),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _mostrarCampoDescontoCaixa,
-                        onChanged: (value) {
-                          setState(() {
-                            _mostrarCampoDescontoCaixa = value;
-                          });
-                        },
-                        title: const Text('Mostrar desconto rapido no Caixa'),
-                        subtitle: const Text(
-                          'Desligue para ocultar o campo de desconto na tela do Caixa. '
-                          'O total segue sem desconto adicional pelo operador.',
-                        ),
-                      ),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _umCaixaAbertoPorLoja,
-                        onChanged: (value) {
-                          setState(() => _umCaixaAbertoPorLoja = value);
-                        },
-                        title: const Text('Um unico caixa aberto por loja'),
-                        subtitle: const Text(
-                          'Impede abrir caixa em outro terminal enquanto '
-                          'ja existir sessao aberta na rede.',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _margemMinimaPadraoController,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText: 'Margem minima padrao (%)',
-                          hintText: 'Ex.: 20',
-                          helperText:
-                              'Alerta na conferencia de NF-e de entrada quando '
-                              'a margem sobre venda ficar abaixo deste valor.',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _alertasProativosWhatsappAtivos,
-                        onChanged: (value) {
-                          setState(
-                            () => _alertasProativosWhatsappAtivos = value,
-                          );
-                        },
-                        title: const Text('Alertas proativos WhatsApp'),
-                        subtitle: const Text(
-                          'Fiado vencido, estoque zerado e caixa aberto apos 18h '
-                          'para o numero do dono (requer mensageria configurada).',
-                        ),
-                      ),
-                      TextField(
-                        controller: _whatsappDonoController,
-                        keyboardType: TextInputType.phone,
-                        decoration: const InputDecoration(
-                          labelText: 'WhatsApp do dono',
-                          hintText: 'Ex.: 5511999999999',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _alertasIntervaloController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Intervalo entre alertas (minutos)',
-                          hintText: '120',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _exigirAutorizacaoSegundaViaCupom,
-                        onChanged: (value) {
-                          setState(() {
-                            _exigirAutorizacaoSegundaViaCupom = value;
-                          });
-                        },
-                        title: const Text(
-                          'Exigir autorizacao para segunda via do cupom',
-                        ),
-                        subtitle: const Text(
-                          'Quando ativo, o operador precisa informar login e senha '
-                          'de um usuario com permissao para imprimir a 2a via. '
-                          'Desligue para permitir a reimpressao direta no Caixa '
-                          'e na listagem de vendas.',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _maxDescontoPercentualPdvController,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText:
-                              'Desconto maximo no Ponto de Venda (% sobre subtotal)',
-                          hintText: 'Ex.: 15',
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Limite percentual sobre o subtotal dos produtos (nao inclui frete). '
-                        'No PDV o vendedor pode informar % ou valor em reais, desde que o '
-                        'desconto em reais nao ultrapasse esse percentual do subtotal. '
-                        'Use 0 para nao permitir desconto no PDV â€” so no Caixa, se estiver '
-                        'habilitado acima.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 8),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _permitirVendaSemEstoque,
-                        onChanged: (value) {
-                          setState(() {
-                            _permitirVendaSemEstoque = value;
-                          });
-                        },
-                        title: const Text('Permitir venda sem estoque'),
-                        subtitle: const Text(
-                          'Ativo por padrao. Vendas e finalizacao no caixa nunca '
-                          'bloqueiam por falta de estoque (fisico pode ficar negativo). '
-                          'Desative apenas para avisar no PDV ao adicionar produto.',
-                        ),
-                      ),
-                      const Divider(height: 28),
-                      Text(
-                        'Ponto de venda',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 4),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _pdvExigirVendedor,
-                        onChanged: (value) {
-                          setState(() => _pdvExigirVendedor = value);
-                        },
-                        title: const Text('Exigir vendedor no PDV'),
-                        subtitle: const Text(
-                          'Se ninguem estiver selecionado no topo da tela, '
-                          'obriga informar quem esta vendendo antes de enviar ao caixa.',
-                        ),
-                      ),
-                      const Divider(height: 28),
-                      Text(
-                        'Velocidade do atendimento',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 4),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _pdvBalcaoRapido,
-                        onChanged: (value) {
-                          setState(() => _pdvBalcaoRapido = value);
-                        },
-                        title: const Text('PDV balcao rapido'),
-                        subtitle: const Text(
-                          'Adiciona produto com qtd 1 sem dialog (retirada, sem carreto/misto).',
-                        ),
-                      ),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _pdvCheckoutDireto,
-                        onChanged: (value) {
-                          setState(() => _pdvCheckoutDireto = value);
-                        },
-                        title: const Text('PDV checkout direto'),
-                        subtitle: const Text(
-                          'Envia ao caixa sem abrir o dialog de fechamento quando os dados ja estao no cabecalho.',
-                        ),
-                      ),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _pdvPularDialogOrcamentoSalvo,
-                        onChanged: (value) {
-                          setState(() => _pdvPularDialogOrcamentoSalvo = value);
-                        },
-                        title: const Text('PDV: so snackbar apos salvar'),
-                        subtitle: const Text(
-                          'Nao abre dialog de impressao/PDF apos salvar o orcamento.',
-                        ),
-                      ),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: _caixaFiscalNaoBloqueante,
-                        onChanged: (value) {
-                          setState(() => _caixaFiscalNaoBloqueante = value);
-                        },
-                        title: const Text('Caixa: fiscal em segundo plano'),
-                        subtitle: const Text(
-                          'Libera a fila para o proximo cliente enquanto NFC-e ou cupom emite em paralelo.',
-                        ),
-                      ),
-                      TextField(
-                        controller: _caixaLimiteOrcamentosController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Limite de orcamentos pendentes no caixa',
-                          hintText: '120',
-                          helperText:
-                              'Entre 20 e 500. Reduz memoria com historico grande.',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _salvando ? null : _salvarConfig,
-                          icon: const Icon(Icons.save_outlined),
-                          label: Text(
-                            _salvando
-                                ? 'Salvando...'
-                                : 'Salvar regras do caixa',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ]),
-            _configTab([
-              const SizedBox(height: 10),
-              RedeSincronizacaoCard(
-                configRepository: widget.appConfigRepository,
-                lanSyncScheduler: widget.lanSyncScheduler,
-              ),
-            ]),
-            _configTab([
-              BackupConfiguracaoSection(
-                appConfigRepository: widget.appConfigRepository,
-                objectBox: widget.objectBox,
-                lanSyncScheduler: widget.lanSyncScheduler,
-                nomeLoja: _nomeLojaController.text.trim().isEmpty
-                    ? 'LOJA DE MATERIAIS'
-                    : _nomeLojaController.text.trim(),
-              ),
-            ]),
-            _configTab([
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Mensageria (WhatsApp/SMS)',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _mensageriaBackendUrlController,
-                        decoration: const InputDecoration(
-                          labelText: 'Backend URL de envio (opcional)',
-                          hintText: 'https://seu-backend/send-whatsapp',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _whatsApiVersionController,
-                        decoration: const InputDecoration(
-                          labelText: 'WhatsApp API Version',
-                          hintText: 'v20.0',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _whatsPhoneIdController,
-                        decoration: const InputDecoration(
-                          labelText: 'WhatsApp Phone Number ID',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _whatsTokenController,
-                        obscureText: true,
-                        decoration: const InputDecoration(
-                          labelText: 'WhatsApp Access Token',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _salvando ? null : _salvarConfig,
-                          icon: const Icon(Icons.save_outlined),
-                          label: Text(
-                            _salvando
-                                ? 'Salvando...'
-                                : 'Salvar credenciais de mensageria',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _mostrarContratoBackendMensageria,
-                              icon: const Icon(Icons.description_outlined),
-                              label: const Text('Ver contrato do backend'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _testarBackendMensageria,
-                              icon: const Icon(Icons.wifi_tethering_outlined),
-                              label: const Text('Testar backend'),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Templates: ${_templatesMensagem.length}',
-                            ),
-                          ),
-                          Expanded(
-                            child: Text('Fila pendente: $_filaPendente'),
-                          ),
-                          Expanded(child: Text('Logs: $_logsTotais')),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 6,
-                        children: [
-                          Text('Enviadas: $_logsEnviados'),
-                          Text('Entregues: $_logsEntregues'),
-                          Text('Lidas: $_logsLidos'),
-                          Text('Falhas: $_logsFalhas'),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _abrirCadastroTemplate,
-                              icon: const Icon(Icons.add),
-                              label: const Text('Novo template'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _processarFilaMensagens,
-                              icon: const Icon(Icons.send_outlined),
-                              label: const Text('Processar fila'),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      if (_templatesMensagem.isEmpty)
-                        const Text('Nenhum template cadastrado.')
-                      else
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 230),
-                          child: ListView.builder(
-                            shrinkWrap: true,
-                            itemCount: _templatesMensagem.length,
-                            itemBuilder: (context, index) {
-                              final t = _templatesMensagem[index];
-                              return ListTile(
-                                dense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                title: Text(t.nome),
-                                subtitle: Text(
-                                  '${t.canal} | evento: ${t.evento} | ${t.ativo ? 'ativo' : 'inativo'}',
-                                ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Editar',
-                                      onPressed: () =>
-                                          _abrirCadastroTemplate(template: t),
-                                      icon: const Icon(Icons.edit_outlined),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Excluir',
-                                      onPressed: () => _removerTemplate(t),
-                                      icon: const Icon(Icons.delete_outline),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      const SizedBox(height: 10),
-                      const Divider(),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Monitor de fila e logs',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          SizedBox(
-                            width: 190,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _filtroStatusLog,
-                              decoration: const InputDecoration(
-                                labelText: 'Status',
-                              ),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'todos',
-                                  child: Text('Todos'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'aceito_api',
-                                  child: Text('Aceito pela API'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'enviado',
-                                  child: Text('Enviado'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'entregue',
-                                  child: Text('Entregue'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'lido',
-                                  child: Text('Lido'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'falhou',
-                                  child: Text('Falhou'),
-                                ),
-                              ],
-                              onChanged: (v) {
-                                if (v == null) return;
-                                setState(() => _filtroStatusLog = v);
-                                _aplicarFiltroLogs();
-                              },
-                            ),
-                          ),
-                          SizedBox(
-                            width: 170,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _filtroCanalLog,
-                              decoration: const InputDecoration(
-                                labelText: 'Canal',
-                              ),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'todos',
-                                  child: Text('Todos'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'whatsapp',
-                                  child: Text('WhatsApp'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'sms',
-                                  child: Text('SMS'),
-                                ),
-                              ],
-                              onChanged: (v) {
-                                if (v == null) return;
-                                setState(() => _filtroCanalLog = v);
-                                _aplicarFiltroLogs();
-                              },
-                            ),
-                          ),
-                          SizedBox(
-                            width: 280,
-                            child: TextField(
-                              controller: _filtroTextoLogController,
-                              decoration: const InputDecoration(
-                                labelText: 'Buscar destino/template/erro',
-                              ),
-                              onSubmitted: (_) => _aplicarFiltroLogs(),
-                            ),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _aplicarFiltroLogs,
-                            icon: const Icon(Icons.search),
-                            label: const Text('Filtrar'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      if (_logsFiltrados.isEmpty)
-                        const Text('Nenhum log para os filtros atuais.')
-                      else
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 230),
-                          child: ListView.builder(
-                            shrinkWrap: true,
-                            itemCount: _logsFiltrados.length,
-                            itemBuilder: (context, index) {
-                              final log = _logsFiltrados[index];
-                              return ListTile(
-                                dense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                title: Text(
-                                  '${log.canal.toUpperCase()} | ${_rotuloStatusMensagem(log.statusEntrega)} | cliente ${log.clienteId}',
-                                ),
-                                subtitle: Text(log.destino),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(log.resultado),
-                                    if (log.resultado == 'falhou')
-                                      IconButton(
-                                        tooltip: 'Reenfileirar',
-                                        onPressed: () =>
-                                            _reenfileirarFalhaDeLog(log),
-                                        icon: const Icon(Icons.refresh),
-                                      ),
-                                    if (log.resultado == 'falhou')
-                                      IconButton(
-                                        tooltip: 'Ver erro detalhado',
-                                        onPressed: () =>
-                                            _verErroDetalhadoLog(log),
-                                        icon: const Icon(Icons.error_outline),
-                                      ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _webhookPayloadController,
-                        minLines: 3,
-                        maxLines: 5,
-                        decoration: const InputDecoration(
-                          labelText: 'Payload webhook WhatsApp (JSON)',
-                          hintText:
-                              'Cole aqui o payload de status do WhatsApp.',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: _processarWebhookWhatsapp,
-                        icon: const Icon(Icons.hub_outlined),
-                        label: const Text('Processar webhook de status'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ]),
-            _configTab([
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Data e hora do sistema',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 10),
-                      Text('Agora (sistema): $agoraFmt'),
-                      Text(
-                        'Fuso horario: ${_agoraSistema.timeZoneName} (UTC$sinal$h:$m)',
-                      ),
-                      Text('Ultima venda finalizada: $ultimaVendaFmt'),
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: _horarioInconsistente
-                              ? Colors.red.withValues(alpha: 0.08)
-                              : Colors.green.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: _horarioInconsistente
-                                ? Colors.red.withValues(alpha: 0.45)
-                                : Colors.green.withValues(alpha: 0.45),
-                          ),
-                        ),
-                        child: Text(_diagnosticoHorario),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _carregarDiagnosticoHorario,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Atualizar diagnostico'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: _abrirAjusteDataHoraSO,
-                              icon: const Icon(Icons.schedule),
-                              label: const Text('Ajustar no sistema'),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _sincronizarHorarioWindows,
-                          icon: const Icon(Icons.sync),
-                          label: const Text(
-                            'Sincronizar horario agora (Windows)',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ]),
-          ],
-        ),
-      ),
+    return ConfigPageShell(
+      secaoAtual: _indiceSecaoConfig,
+      onSecaoChanged: (novoIndice) {
+        setState(() {
+          _indiceSecaoConfig = novoIndice.clamp(0, ConfigSecoes.todas.length - 1);
+        });
+      },
+      child: _corpoSecaoConfig(agoraFmt, ultimaVendaFmt, sinal, h, m),
     );
   }
 }

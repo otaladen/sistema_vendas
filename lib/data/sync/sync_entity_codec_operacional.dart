@@ -1,6 +1,8 @@
 import '../../data/models/conta_pagar.dart';
 import '../../model/auditoria_evento.dart';
 import '../../model/item_lista_compra.dart';
+import '../../model/produto_sugestao_venda.dart';
+import '../../model/sugestao_venda_metrica_evento.dart';
 import '../../model/recado_loja.dart';
 import '../../model/movimento_estoque.dart';
 import '../../model/reajuste_preco.dart';
@@ -243,6 +245,66 @@ class SyncEntityCodecOperacional {
     if (pid > 0) item.produto.targetId = pid;
     return item;
   }
+
+  // --- ProdutoSugestaoVenda ---
+  static Map<String, dynamic> produtoSugestaoVendaParaMap(
+    ProdutoSugestaoVenda s,
+  ) =>
+      {
+        'id': s.id,
+        'produtoOrigemId': s.produtoOrigemId,
+        'produtoSugeridoId': s.produtoSugeridoId,
+        'tipo': s.tipo,
+        'quantidadeSugerida': s.quantidadeSugerida,
+        'prioridade': s.prioridade,
+        'observacao': s.observacao,
+        'ativo': s.ativo,
+      };
+
+  static ProdutoSugestaoVenda produtoSugestaoVendaDeMap(
+    Map<String, dynamic> m,
+  ) =>
+      ProdutoSugestaoVenda(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        produtoOrigemId: (m['produtoOrigemId'] as num?)?.toInt() ?? 0,
+        produtoSugeridoId: (m['produtoSugeridoId'] as num?)?.toInt() ?? 0,
+        tipo: (m['tipo'] ?? 'complementar').toString(),
+        quantidadeSugerida: (m['quantidadeSugerida'] as num?)?.toInt() ?? 1,
+        prioridade: (m['prioridade'] as num?)?.toInt() ?? 0,
+        observacao: (m['observacao'] ?? '').toString(),
+        ativo: m['ativo'] as bool? ?? true,
+      );
+
+  // --- SugestaoVendaMetricaEvento ---
+  static Map<String, dynamic> sugestaoVendaMetricaParaMap(
+    SugestaoVendaMetricaEvento e,
+  ) =>
+      {
+        'id': e.id,
+        'produtoOrigemId': e.produtoOrigemId,
+        'produtoSugeridoId': e.produtoSugeridoId,
+        'tipoEvento': e.tipoEvento,
+        'canal': e.canal,
+        'fonte': e.fonte,
+        'quantidade': e.quantidade,
+        'usuarioLogin': e.usuarioLogin,
+        'dataHora': _dt(e.dataHora),
+      };
+
+  static SugestaoVendaMetricaEvento sugestaoVendaMetricaDeMap(
+    Map<String, dynamic> m,
+  ) =>
+      SugestaoVendaMetricaEvento(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        produtoOrigemId: (m['produtoOrigemId'] as num?)?.toInt() ?? 0,
+        produtoSugeridoId: (m['produtoSugeridoId'] as num?)?.toInt() ?? 0,
+        tipoEvento: (m['tipoEvento'] ?? '').toString(),
+        canal: (m['canal'] ?? '').toString(),
+        fonte: (m['fonte'] ?? '').toString(),
+        quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
+        usuarioLogin: (m['usuarioLogin'] ?? '').toString(),
+        dataHora: _parseDt((m['dataHora'] ?? '').toString()) ?? DateTime.now(),
+      );
 
   // --- RecadoLoja ---
   static Map<String, dynamic> recadoLojaParaMap(RecadoLoja r) => {

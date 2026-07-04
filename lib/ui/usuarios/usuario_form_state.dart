@@ -27,6 +27,7 @@ class UsuarioFormState {
   bool get admin => _usuario.admin;
   String get motoristaEntregaNome => _usuario.motoristaEntregaNome;
   bool get podeModoMotorista => _usuario.podeModoMotorista;
+  int get vendedorId => _usuario.vendedorId;
   UsuarioSistema get usuario => _usuario;
   PerfilUsuarioPreset get perfilSelecionado => _perfilSelecionado;
 
@@ -50,6 +51,11 @@ class UsuarioFormState {
     if (!v) {
       _usuario = _usuario.copyWith(motoristaEntregaNome: '');
     }
+  }
+
+  void definirVendedorId(int? id) {
+    _perfilSelecionado = PerfilUsuarioPreset.customizado;
+    _usuario = _usuario.copyWith(vendedorId: id ?? 0);
   }
 
   /// Texto do teto de desconto; vazio = usar configuracao da empresa.

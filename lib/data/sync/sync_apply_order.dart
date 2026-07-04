@@ -6,6 +6,8 @@ abstract final class SyncApplyOrder {
     'empresa_config': 5,
     'fornecedor_nfe': 10,
     'produto': 20,
+    'produto_sugestao_venda': 25,
+    'sugestao_venda_metrica': 26,
     'cliente': 30,
     'vendedor': 40,
     'funcionario': 50,

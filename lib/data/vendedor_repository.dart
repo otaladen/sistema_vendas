@@ -1,3 +1,4 @@
+import '../domain/usuario_senha_codec.dart';
 import '../model/vendedor.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
@@ -50,6 +51,27 @@ class VendedorRepository {
   }
 
   Vendedor? obterPorId(int id) => _db.vendedorBox.get(id);
+
+  bool temSenhaPdvConfigurada(Vendedor vendedor) =>
+      vendedor.senhaPdv.trim().isNotEmpty;
+
+  /// Identifica vendedor ativo pela senha do terminal. Null se invalida ou ambigua.
+  Vendedor? autenticarPorSenhaPdv(String senhaPlain) {
+    final senha = senhaPlain.trim();
+    if (senha.isEmpty) return null;
+
+    Vendedor? unico;
+    for (final v in listarAtivos()) {
+      if (!temSenhaPdvConfigurada(v)) continue;
+      if (!UsuarioSenhaCodec.verificar(senha, v.senhaPdv)) continue;
+      if (unico != null) return null;
+      unico = v;
+    }
+    return unico;
+  }
+
+  int contarAtivosComSenhaPdv() =>
+      listarAtivos().where(temSenhaPdvConfigurada).length;
 
   bool existeCodigoParaOutro({
     required String codigoNormalizado,

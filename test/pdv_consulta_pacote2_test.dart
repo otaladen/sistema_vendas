@@ -62,4 +62,11 @@ void main() {
       PdvEstoqueSemaforoNivel.vermelho,
     );
   });
+
+  test('rotulo quantidade lista padroniza grandes numeros', () {
+    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(49), '49');
+    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(420), '420');
+    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(12500), '12,5k');
+    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(99746991), '99,7M');
+  });
 }

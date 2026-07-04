@@ -1,10 +1,13 @@
 import '../data/kit_orcamento_repository.dart';
 import '../data/produto_repository.dart';
+import '../data/produto_sugestao_venda_repository.dart';
 import '../data/venda_repository.dart';
+import '../domain/sugestao_venda_tipo.dart';
 import '../model/kit_orcamento.dart';
 import '../model/produto.dart';
 import 'pdv_consulta_multi_deposito_util.dart';
 import 'pdv_consulta_similares_util.dart';
+import 'pdv_sugestao_venda_historico_service.dart';
 import 'produto_precificacao.dart';
 
 /// Resumo de compras do cliente para um produto.
@@ -63,6 +66,8 @@ class PdvConsultaProdutoSimilar {
   final int estoqueDisponivel;
   final double precoReferencia;
   final bool cadastrado;
+
+  bool get semEstoque => estoqueDisponivel <= 0;
 }
 
 /// Kit de orcamento que inclui o produto selecionado.
@@ -78,12 +83,64 @@ class PdvConsultaKitResumo {
   final int quantidadeItens;
 }
 
+/// Produto agregado sugerido para oferta ao cliente.
+class PdvConsultaAgregadoVenda {
+  const PdvConsultaAgregadoVenda({
+    required this.produtoId,
+    required this.nome,
+    required this.estoqueDisponivel,
+    required this.precoReferencia,
+    required this.tipo,
+    required this.quantidadeSugerida,
+    this.observacao = '',
+    this.cadastrado = false,
+    this.historico = false,
+    this.vendasJuntasHistorico = 0,
+  });
+
+  final int produtoId;
+  final String nome;
+  final int estoqueDisponivel;
+  final double precoReferencia;
+  final SugestaoVendaTipo tipo;
+  final int quantidadeSugerida;
+  final String observacao;
+  final bool cadastrado;
+  final bool historico;
+  final int vendasJuntasHistorico;
+
+  bool get semEstoque => estoqueDisponivel <= 0;
+
+  String get rotuloOrigem {
+    if (historico) return 'Historico';
+    if (cadastrado) return 'Sugestao';
+    return '';
+  }
+
+  String detalheLinha(String Function(double) formatarMoeda) {
+    final precoQtd = semEstoque
+        ? 'Sem estoque · ${formatarMoeda(precoReferencia)} · $quantidadeSugerida un.'
+        : '$estoqueDisponivel · ${formatarMoeda(precoReferencia)} · $quantidadeSugerida un.';
+    if (historico) {
+      final vendas = vendasJuntasHistorico > 0
+          ? '$vendasJuntasHistorico vendas juntas · '
+          : '';
+      return 'Historico · $vendas$precoQtd';
+    }
+    if (cadastrado) {
+      return 'Sugestao · ${tipo.rotulo} · $precoQtd';
+    }
+    return '${tipo.rotulo} · $precoQtd';
+  }
+}
+
 /// Pacote de insights premium (consulta PDV pacote 3).
 class PdvConsultaInsightsPacote {
   const PdvConsultaInsightsPacote({
     this.historicoCliente,
     this.alertaMargem,
     this.similares = const [],
+    this.agregados = const [],
     this.kits = const [],
     this.rotuloDeposito,
     this.trechoAplicacao,
@@ -92,6 +149,7 @@ class PdvConsultaInsightsPacote {
   final PdvConsultaHistoricoClienteProduto? historicoCliente;
   final PdvConsultaAlertaMargem? alertaMargem;
   final List<PdvConsultaProdutoSimilar> similares;
+  final List<PdvConsultaAgregadoVenda> agregados;
   final List<PdvConsultaKitResumo> kits;
   final String? rotuloDeposito;
   final String? trechoAplicacao;
@@ -100,6 +158,7 @@ class PdvConsultaInsightsPacote {
       historicoCliente != null ||
       alertaMargem != null ||
       similares.isNotEmpty ||
+      agregados.isNotEmpty ||
       kits.isNotEmpty ||
       (rotuloDeposito?.isNotEmpty ?? false) ||
       (trechoAplicacao?.isNotEmpty ?? false);
@@ -114,6 +173,7 @@ abstract final class PdvConsultaInsightsService {
     required ProdutoRepository produtoRepository,
     required VendaRepository vendaRepository,
     KitOrcamentoRepository? kitOrcamentoRepository,
+    ProdutoSugestaoVendaRepository? sugestaoVendaRepository,
     int? clienteId,
     required String precoListaAtivo,
     required double Function(Produto produto, String precoTipo) precoUnitarioDe,
@@ -125,7 +185,11 @@ abstract final class PdvConsultaInsightsService {
         const PdvConsultaDepositoRotulos(),
     int diasHistoricoCliente = 90,
     int limiteSimilares = 5,
+    int limiteAgregados = 8,
     int limiteKits = 3,
+    int diasHistoricoAgregados = 90,
+    int minimoVendasJuntasHistorico = 2,
+    Set<int> excluirProdutoIdsAgregados = const {},
   }) {
     PdvConsultaHistoricoClienteProduto? historico;
     if (clienteId != null && clienteId > 0) {
@@ -164,6 +228,19 @@ abstract final class PdvConsultaInsightsService {
         ? const <PdvConsultaKitResumo>[]
         : listarKitsComProduto(kitOrcamentoRepository, produto.id, limite: limiteKits);
 
+    final agregados = listarAgregadosParaPdv(
+      referencia: produto,
+      sugestaoVendaRepository: sugestaoVendaRepository,
+      vendaRepository: vendaRepository,
+      produtoRepository: produtoRepository,
+      precoListaAtivo: precoListaAtivo,
+      precoUnitarioDe: precoUnitarioDe,
+      limite: limiteAgregados,
+      excluirProdutoIds: excluirProdutoIdsAgregados,
+      diasHistorico: diasHistoricoAgregados,
+      minimoVendasJuntasHistorico: minimoVendasJuntasHistorico,
+    );
+
     final loc = PdvConsultaMultiDepositoUtil.montarRotuloInsights(
       produto,
       rotulos: rotulosDeposito,
@@ -176,6 +253,7 @@ abstract final class PdvConsultaInsightsService {
       historicoCliente: historico?.temHistorico == true ? historico : null,
       alertaMargem: alertaMargem,
       similares: similares,
+      agregados: agregados,
       kits: kits,
       rotuloDeposito: rotuloDeposito,
       trechoAplicacao: trechoAplicacao,
@@ -191,9 +269,17 @@ abstract final class PdvConsultaInsightsService {
   }) {
     if (limite <= 0 || referencia.id <= 0) return const [];
 
-    final cadastrados = produtoRepository
-        .listarSubstitutosCadastrados(referencia.id)
-        .where((p) => p.estoqueLivreParaVenda > 0)
+    final cadastradosBrutos = List<Produto>.from(
+      produtoRepository.listarSubstitutosCadastrados(referencia.id),
+    );
+    cadastradosBrutos.sort((a, b) {
+      final aComEstoque = a.estoqueLivreParaVenda > 0;
+      final bComEstoque = b.estoqueLivreParaVenda > 0;
+      if (aComEstoque != bComEstoque) return aComEstoque ? -1 : 1;
+      return a.nome.compareTo(b.nome);
+    });
+
+    final cadastrados = cadastradosBrutos
         .map(
           (p) => PdvConsultaProdutoSimilar(
             produtoId: p.id,
@@ -255,6 +341,92 @@ abstract final class PdvConsultaInsightsService {
         );
       }),
     ];
+  }
+
+  static List<PdvConsultaAgregadoVenda> listarAgregadosComEstoque(
+    Produto referencia,
+    ProdutoSugestaoVendaRepository sugestaoVendaRepository,
+    ProdutoRepository produtoRepository, {
+    required String precoListaAtivo,
+    required double Function(Produto produto, String precoTipo) precoUnitarioDe,
+    int limite = 8,
+    Set<int> excluirProdutoIds = const {},
+  }) {
+    if (limite <= 0 || referencia.id <= 0) return const [];
+
+    final linhas = sugestaoVendaRepository.listarPorProdutoOrigem(referencia.id);
+    final result = <PdvConsultaAgregadoVenda>[];
+    for (final linha in linhas) {
+      if (result.length >= limite) break;
+      if (excluirProdutoIds.contains(linha.produtoSugeridoId)) continue;
+      final p = produtoRepository.obterPorId(linha.produtoSugeridoId);
+      if (p == null || !p.ativo) continue;
+      result.add(
+        PdvConsultaAgregadoVenda(
+          produtoId: p.id,
+          nome: p.nome,
+          estoqueDisponivel: p.estoqueLivreParaVenda,
+          precoReferencia: precoUnitarioDe(p, precoListaAtivo),
+          tipo: SugestaoVendaTipo.fromCodigo(linha.tipo),
+          quantidadeSugerida: linha.quantidadeSugerida,
+          observacao: linha.observacao.trim(),
+          cadastrado: true,
+          historico: false,
+        ),
+      );
+    }
+    return result;
+  }
+
+  /// Cadastro manual + historico de vendas (prioridade ao cadastro).
+  static List<PdvConsultaAgregadoVenda> listarAgregadosParaPdv({
+    required Produto referencia,
+    ProdutoSugestaoVendaRepository? sugestaoVendaRepository,
+    required VendaRepository vendaRepository,
+    required ProdutoRepository produtoRepository,
+    required String precoListaAtivo,
+    required double Function(Produto produto, String precoTipo) precoUnitarioDe,
+    int limite = 8,
+    Set<int> excluirProdutoIds = const {},
+    int diasHistorico = 90,
+    int minimoVendasJuntasHistorico = 2,
+  }) {
+    if (limite <= 0 || referencia.id <= 0) return const [];
+
+    final excluir = {
+      ...excluirProdutoIds,
+      referencia.id,
+    };
+
+    final manual = sugestaoVendaRepository == null
+        ? const <PdvConsultaAgregadoVenda>[]
+        : listarAgregadosComEstoque(
+            referencia,
+            sugestaoVendaRepository,
+            produtoRepository,
+            precoListaAtivo: precoListaAtivo,
+            precoUnitarioDe: precoUnitarioDe,
+            limite: limite,
+            excluirProdutoIds: excluir,
+          );
+
+    final restante = limite - manual.length;
+    if (restante <= 0) return manual;
+
+    final idsManual = manual.map((e) => e.produtoId).toSet();
+    final historico = PdvSugestaoVendaHistoricoService.listarAgregadosHistorico(
+      referencia.id,
+      vendaRepository,
+      produtoRepository,
+      precoListaAtivo: precoListaAtivo,
+      precoUnitarioDe: precoUnitarioDe,
+      excluirProdutoIds: {...excluir, ...idsManual},
+      limite: restante,
+      dias: diasHistorico,
+      minimoVendasJuntas: minimoVendasJuntasHistorico,
+    );
+
+    return [...manual, ...historico];
   }
 
   static List<PdvConsultaKitResumo> listarKitsComProduto(

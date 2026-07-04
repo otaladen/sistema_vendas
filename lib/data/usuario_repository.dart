@@ -182,6 +182,23 @@ class UsuarioRepository {
     return null;
   }
 
+  Future<int> contarAtivosComVendedorVinculado() async {
+    final lista = await listarTodos();
+    return lista.where((u) => u.ativo && u.vendedorId > 0).length;
+  }
+
+  /// Login do sistema com vendedor vinculado ativo (identificacao no PDV).
+  Future<UsuarioSistema?> autenticarComVendedorVinculado(
+    String login,
+    String senha, {
+    required bool Function(int vendedorId) vendedorAtivo,
+  }) async {
+    final usuario = await autenticar(login, senha);
+    if (usuario == null || usuario.vendedorId <= 0) return null;
+    if (!vendedorAtivo(usuario.vendedorId)) return null;
+    return usuario;
+  }
+
   Future<void> _persistir(List<UsuarioSistema> usuarios) async {
     final prefs = await SharedPreferences.getInstance();
     final payload = jsonEncode(usuarios.map((u) => u.toMap()).toList());

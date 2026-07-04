@@ -82,6 +82,142 @@ class ProdutoEmbalagem {
     );
   }
 
+  /// Converte quantidade comercial (ex.: caixas) para a unidade de venda/estoque
+  /// (ex.: m²), sem arredondar — use para preco e subtotal no PDV.
+  static double quantidadeComercialParaUnidadeVenda({
+    required Produto produto,
+    required double quantidadeComercial,
+  }) {
+    if (quantidadeComercial <= 0 || !quantidadeComercial.isFinite) return 0;
+    final fator = produto.quantidadePorEmbalagem;
+    if (fator <= 0) return quantidadeComercial;
+    if (produto.embalagemMultiplica) {
+      return quantidadeComercial * fator;
+    }
+    return quantidadeComercial / fator;
+  }
+
+  static bool exigeQuantidadeDecimalUnidadeVenda(
+    Produto produto,
+    double quantidadeUnidadeVenda,
+  ) {
+    if (produto.permiteQuantidadeFracionada) return true;
+    if (quantidadeUnidadeVenda != quantidadeUnidadeVenda.roundToDouble()) {
+      return true;
+    }
+    if (vendaPodeUsarUnidadeCompra(produto)) {
+      final f = produto.quantidadePorEmbalagem;
+      if (f > 0 && f != f.roundToDouble()) return true;
+    }
+    return false;
+  }
+
+  static String formatarQuantidadeUnidadeVenda(
+    Produto produto,
+    double quantidade,
+  ) {
+    return QuantidadeVendaUtil.formatarExibicao(
+      quantidade,
+      fracionada: exigeQuantidadeDecimalUnidadeVenda(produto, quantidade),
+    );
+  }
+
+  /// Mesma regra de escala usada ao gravar [ItemVenda.quantidade] no PDV.
+  static bool leituraUsaEscalaFracionada(
+    Produto produto,
+    int quantidadeArmazenada,
+  ) {
+    if (produto.permiteQuantidadeFracionada) return true;
+    if (!vendaPodeUsarUnidadeCompra(produto)) return false;
+    if (quantidadeArmazenada < QuantidadeVendaUtil.escalaFracionada) {
+      return false;
+    }
+    final emUnidadeVenda = QuantidadeVendaUtil.valorExibicao(
+      quantidadeArmazenada,
+      fracionada: true,
+    );
+    return exigeQuantidadeDecimalUnidadeVenda(produto, emUnidadeVenda);
+  }
+
+  /// Converte [ItemVenda.quantidade] persistido para quantidade do carrinho PDV.
+  static ({int quantidadeDigitada, bool emUnidadeCompra})
+      quantidadeCarrinhoDeItemPersistido({
+    required Produto produto,
+    required int quantidadeArmazenada,
+  }) {
+    if (quantidadeArmazenada <= 0) {
+      return (quantidadeDigitada: 0, emUnidadeCompra: false);
+    }
+    if (vendaPodeUsarUnidadeCompra(produto)) {
+      if (quantidadeArmazenada < QuantidadeVendaUtil.escalaFracionada &&
+          !produto.permiteQuantidadeFracionada) {
+        return (
+          quantidadeDigitada: quantidadeArmazenada,
+          emUnidadeCompra: true,
+        );
+      }
+      final m2 = quantidadeVendaEfetivaItem(
+        produto: produto,
+        quantidadeArmazenada: quantidadeArmazenada,
+      );
+      var comercial = produto.embalagemMultiplica
+          ? m2 / produto.quantidadePorEmbalagem
+          : m2 * produto.quantidadePorEmbalagem;
+      if (!comercial.isFinite || comercial <= 0) {
+        comercial = quantidadeArmazenada.toDouble();
+      }
+      final digitada = comercial.round().clamp(1, 1 << 30);
+      return (quantidadeDigitada: digitada, emUnidadeCompra: true);
+    }
+    if (produto.permiteQuantidadeFracionada ||
+        leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
+      return (
+        quantidadeDigitada: quantidadeArmazenada,
+        emUnidadeCompra: false,
+      );
+    }
+    return (
+      quantidadeDigitada: quantidadeArmazenada,
+      emUnidadeCompra: false,
+    );
+  }
+
+  /// Interpreta [ItemVenda.quantidade] persistido (espelha a gravacao PDV).
+  static double quantidadeVendaEfetivaItem({
+    required Produto? produto,
+    required int quantidadeArmazenada,
+  }) {
+    if (produto == null) {
+      return QuantidadeVendaUtil.valorExibicao(
+        quantidadeArmazenada,
+        fracionada: false,
+      );
+    }
+    return QuantidadeVendaUtil.valorExibicao(
+      quantidadeArmazenada,
+      fracionada: leituraUsaEscalaFracionada(produto, quantidadeArmazenada),
+    );
+  }
+
+  /// Quantidade armazenada em [ItemVenda.quantidade] a partir do carrinho PDV.
+  static int quantidadeArmazenadaItemVenda({
+    required Produto produto,
+    required int quantidadeDigitada,
+    required bool emUnidadeCompra,
+  }) {
+    if (emUnidadeCompra && vendaPodeUsarUnidadeCompra(produto)) {
+      final m2 = quantidadeComercialParaUnidadeVenda(
+        produto: produto,
+        quantidadeComercial: quantidadeDigitada.toDouble(),
+      );
+      return QuantidadeVendaUtil.paraArmazenamento(
+        m2,
+        fracionada: exigeQuantidadeDecimalUnidadeVenda(produto, m2),
+      );
+    }
+    return quantidadeDigitada;
+  }
+
   /// Texto curto para UI (ex.: "1 CX = 12 UN").
   static String rotuloConversao(Produto produto) {
     final fator = produto.quantidadePorEmbalagem;
@@ -108,11 +244,6 @@ class ProdutoEmbalagem {
     required bool emUnidadeCompra,
   }) {
     final uVenda = normalizarUnidade(produto.unidade);
-    final qEstoque = quantidadeVendaParaEstoque(
-      produto: produto,
-      quantidadeDigitada: quantidadeDigitada,
-      emUnidadeCompra: emUnidadeCompra,
-    );
     if (!emUnidadeCompra || !vendaPodeUsarUnidadeCompra(produto)) {
       if (produto.permiteQuantidadeFracionada) {
         final qTxt = QuantidadeVendaUtil.formatarExibicao(
@@ -127,6 +258,11 @@ class ProdutoEmbalagem {
       return '$quantidadeDigitada $uVenda';
     }
     final uCompra = normalizarUnidade(produto.unidadeCompraEfetiva);
-    return '$quantidadeDigitada $uCompra (= $qEstoque $uVenda)';
+    final qVenda = quantidadeComercialParaUnidadeVenda(
+      produto: produto,
+      quantidadeComercial: quantidadeDigitada.toDouble(),
+    );
+    final qVendaTxt = formatarQuantidadeUnidadeVenda(produto, qVenda);
+    return '$quantidadeDigitada $uCompra (= $qVendaTxt $uVenda)';
   }
 }

@@ -13,12 +13,14 @@ class PdvConsultaPainelInsights extends StatelessWidget {
     required this.formatarMoeda,
     this.onSelecionarSimilar,
     this.onInserirKit,
+    this.onAdicionarAgregado,
   });
 
   final PdvConsultaInsightsPacote insights;
   final String Function(double) formatarMoeda;
   final ValueChanged<int>? onSelecionarSimilar;
   final ValueChanged<PdvConsultaKitResumo>? onInserirKit;
+  final ValueChanged<PdvConsultaAgregadoVenda>? onAdicionarAgregado;
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +115,29 @@ class PdvConsultaPainelInsights extends StatelessWidget {
             ),
           ),
         ],
+        if (insights.agregados.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _InsightCard(
+            icon: Icons.add_shopping_cart_outlined,
+            iconColor: scheme.primary,
+            titulo: 'Ofereca tambem',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < insights.agregados.length; i++) ...[
+                  if (i > 0) const Divider(height: 8),
+                  _AgregadoLinha(
+                    agregado: insights.agregados[i],
+                    formatarMoeda: formatarMoeda,
+                    onAdicionar: onAdicionarAgregado == null
+                        ? null
+                        : () => onAdicionarAgregado!(insights.agregados[i]),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
         if (insights.kits.isNotEmpty) ...[
           const SizedBox(height: 8),
           _InsightCard(
@@ -155,6 +180,82 @@ class PdvConsultaPainelInsights extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _AgregadoLinha extends StatelessWidget {
+  const _AgregadoLinha({
+    required this.agregado,
+    required this.formatarMoeda,
+    this.onAdicionar,
+  });
+
+  final PdvConsultaAgregadoVenda agregado;
+  final String Function(double) formatarMoeda;
+  final VoidCallback? onAdicionar;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    final detalhe = agregado.detalheLinha(formatarMoeda);
+
+    final conteudo = Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                agregado.nome,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                detalhe,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: agregado.semEstoque
+                      ? scheme.error
+                      : scheme.onSurfaceVariant,
+                  fontWeight: agregado.semEstoque ? FontWeight.w700 : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (onAdicionar != null)
+          Icon(
+            Icons.add,
+            size: 18,
+            color: scheme.primary.withValues(alpha: 0.85),
+          ),
+      ],
+    );
+
+    if (onAdicionar == null) return conteudo;
+
+    return Material(
+      color: Colors.transparent,
+      child: Tooltip(
+        message: 'Adicionar ${agregado.quantidadeSugerida}',
+        child: InkWell(
+          onTap: onAdicionar,
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: conteudo,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -330,10 +431,14 @@ class _SimilarLinha extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         Text(
-          '${similar.estoqueDisponivel} · ${formatarMoeda(similar.precoReferencia)}',
+          similar.semEstoque
+              ? 'Sem estoque · ${formatarMoeda(similar.precoReferencia)}'
+              : '${similar.estoqueDisponivel} · ${formatarMoeda(similar.precoReferencia)}',
           style: theme.textTheme.labelSmall?.copyWith(
-            color: scheme.onSurfaceVariant,
-            fontFeatures: const [FontFeature.tabularFigures()],
+            color: similar.semEstoque
+                ? scheme.error
+                : scheme.onSurfaceVariant,
+            fontWeight: similar.semEstoque ? FontWeight.w700 : null,
           ),
         ),
       ],

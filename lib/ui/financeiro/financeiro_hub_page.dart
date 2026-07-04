@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/caixa_sessao_repository.dart';
@@ -12,7 +14,9 @@ import '../../domain/main_menu_destino.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../model/usuario_sistema.dart';
-import '../relatorio_fiados_page.dart';
+import '../../domain/main_menu_sub_destino.dart';
+import '../shell/app_shell_scope.dart';
+import '../shell/hub_navigation.dart';
 import '../shell/main_menu_router.dart';
 import '../theme/app_modulo_cores.dart';
 import '../widgets/conta_sessao_app_bar_actions.dart';
@@ -20,8 +24,6 @@ import '../widgets/dashboard_alertas_strip.dart';
 import '../widgets/hub_nav_button.dart';
 import 'contas_pagar_page.dart';
 import 'contas_receber_page.dart';
-import 'relatorio_contas_pagar_page.dart';
-import 'tesouraria_semanal_page.dart';
 import 'widgets/financeiro_resumo_painel.dart';
 
 /// Hub do modulo Financeiro com painel executivo de tesouraria.
@@ -157,6 +159,15 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
 
   void _abrirReceber({FiltroContasReceber filtro = FiltroContasReceber.todos}) {
     if (!_podeFinanceiro) return;
+    if (filtro == FiltroContasReceber.todos &&
+        AppShellScope.maybeOf(context) != null) {
+      HubNavigation.abrirSub(
+        context,
+        MainMenuSubDestino.financeiroContasReceber,
+      );
+      unawaited(_carregar());
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -173,6 +184,15 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
 
   void _abrirPagar({FiltroContasPagar filtro = FiltroContasPagar.todos}) {
     if (!_podeFinanceiro) return;
+    if (filtro == FiltroContasPagar.todos &&
+        AppShellScope.maybeOf(context) != null) {
+      HubNavigation.abrirSub(
+        context,
+        MainMenuSubDestino.financeiroContasPagar,
+      );
+      unawaited(_carregar());
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -187,37 +207,26 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
 
   void _abrirRelatorioContasPagar() {
     if (!_podeFinanceiro) return;
-    Navigator.push(
+    HubNavigation.abrirSub(
       context,
-      MaterialPageRoute(
-        builder: (_) => RelatorioContasPagarPage(objectBox: widget.objectBox),
-      ),
+      MainMenuSubDestino.financeiroRelatorioContasPagar,
     );
   }
 
   void _abrirTesourariaSemanal() {
     if (!_podeFinanceiro) return;
-    Navigator.push(
+    HubNavigation.abrirSub(
       context,
-      MaterialPageRoute(
-        builder: (_) => TesourariaSemanalPage(
-          objectBox: widget.objectBox,
-          vendaRepository: widget.vendaRepository,
-        ),
-      ),
-    ).then((_) => _carregar());
+      MainMenuSubDestino.financeiroTesouraria,
+    );
+    unawaited(_carregar());
   }
 
   void _abrirRelatorioFiados() {
     if (!_podeRelatorioFiado) return;
-    Navigator.push(
+    HubNavigation.abrirSub(
       context,
-      MaterialPageRoute(
-        builder: (_) => RelatorioFiadosPage(
-          vendaRepository: widget.vendaRepository,
-          clienteRepository: widget.clienteRepository,
-        ),
-      ),
+      MainMenuSubDestino.financeiroRelatorioFiados,
     );
   }
 

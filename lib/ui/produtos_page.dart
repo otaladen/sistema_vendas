@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'theme/app_semantic_helper.dart';
 import '../data/lista_compra_repository.dart';
 import '../data/produto_repository.dart';
+import '../data/produto_sugestao_venda_repository.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/produto_substitutos_util.dart';
 import '../domain/produto_unidade_exibicao.dart';
@@ -23,6 +24,7 @@ import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/fiscal/produto_fiscal_catalog.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_precificacao.dart';
+import '../model/produto_sugestao_venda.dart';
 import '../model/produto.dart';
 import '../config/busca_imagem_config.dart';
 import '../services/brasil_api_service.dart';
@@ -37,6 +39,7 @@ import 'widgets/abas_historico_produto_widget.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'widgets/produto_busca_input.dart';
+import 'produtos/produtos_sugestoes_venda_section.dart';
 
 class _CadastroProdutoSalvarIntent extends Intent {
   const _CadastroProdutoSalvarIntent();
@@ -123,6 +126,33 @@ class _ProdutosPageState extends State<ProdutosPage>
     'CX',
     'LT',
   ];
+
+  /// Embalagens comuns na unidade de compra (NF-e / PDV em CX, SC…).
+  static const List<String> _unidadesCompraSugeridas = [
+    'CX',
+    'SC',
+    'FD',
+    'UN',
+    'KG',
+    'LT',
+    'M',
+    'M2',
+    'M3',
+    'MTS',
+  ];
+
+  static const Map<String, String> _rotuloUnidadeLongo = {
+    'UN': 'UN - Unidade',
+    'M': 'M - Metro',
+    'MTS': 'MTS - Metros',
+    'M2': 'M2 - Metro quadrado',
+    'M3': 'M3 - Metro cubico',
+    'KG': 'KG - Quilograma',
+    'SC': 'SC - Saco',
+    'CX': 'CX - Caixa',
+    'FD': 'FD - Fardo',
+    'LT': 'LT - Litro',
+  };
   static const String _categoriaOutros = 'Outros';
   static const Map<String, List<String>> _categoriasMateriaisConstrucao = {
     'Cimento e Argamassas': ['Cimento', 'Argamassa', 'Rejunte', 'Cal'],
@@ -290,6 +320,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   bool _embalagemMultiplica = true;
   bool _permiteQuantidadeFracionada = false;
   List<int> _substitutosIds = const [];
+  List<SugestaoVendaCadastroDraft> _sugestoesVenda = const [];
   DateTime? _ultimaVendaEmCadastro;
   DateTime? _criadoEmCadastro;
   DateTime? _ultimaCompraEmCadastro;
@@ -304,6 +335,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   final _formKey = GlobalKey<FormState>();
   bool _tentouSalvar = false;
   late final ProdutoImagemService _produtoImagemService;
+  late final ProdutoSugestaoVendaRepository _sugestaoVendaRepo;
   String _fotoPathAtual = '';
   String? _fotoOrigemLocalPath;
   bool _fotoFoiRemovida = false;
@@ -328,6 +360,9 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
     _produtoImagemService = ProdutoImagemService(
       imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
+    );
+    _sugestaoVendaRepo = ProdutoSugestaoVendaRepository(
+      widget.produtoRepository.objectBox,
     );
     initSafeSyncRefresh(
       onReload: _atualizarAposSyncRede,
@@ -1644,6 +1679,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       _localizacaoController.clear();
       _estoqueCdController.clear();
       _substitutosIds = const [];
+      _sugestoesVenda = const [];
       _grupoTributarioSelecionado = GrupoTributarioProduto.tributado.codigo;
       _icmsOrigemSelecionado = kFiscalValorAutomatico;
       _icmsCstSelecionado = kFiscalValorAutomatico;
@@ -2717,14 +2753,23 @@ class _ProdutosPageState extends State<ProdutosPage>
   Widget _buildCardEmbalagemUnidade(BuildContext context) {
     final uVenda = _normalizarUnidade(_unidadeSelecionada);
     final fator = _lerQuantidadeEmbalagem();
-    final uCompra = _unidadeCompraController.text.trim().isEmpty
-        ? uVenda
-        : _unidadeCompraController.text.trim().toUpperCase();
+    final uCompraCodigo = _unidadeCompraNoFormulario();
+    final uCompra = uCompraCodigo.isEmpty ? uVenda : uCompraCodigo;
     final preview = fator <= 1 || (fator - 1).abs() < 0.0001
         ? 'Sem conversao (1:1).'
         : (_embalagemMultiplica
             ? '1 $uCompra = ${fator == fator.roundToDouble() ? fator.toInt() : fator} $uVenda no estoque.'
             : '1 $uCompra entra como 1 $uVenda (estoque ÷ $fator).');
+    final opcoesCompra = _opcoesDropdownUnidadeCompra(uVenda);
+    final valorCompraDropdown = opcoesCompra.contains(uCompraCodigo)
+        ? uCompraCodigo
+        : '';
+    final helperEmbalagem = switch (uVenda) {
+      'M2' => 'Ex.: 2,43 (m² por caixa)',
+      'M3' => 'Ex.: 0,50 (m³ por unidade de compra)',
+      'M' || 'MTS' => 'Ex.: 2,44 (metros por rolo/caixa)',
+      _ => 'Ex.: 12 (unidades por embalagem)',
+    };
 
     return _erpSurfaceCard(
       context: context,
@@ -2735,14 +2780,34 @@ class _ProdutosPageState extends State<ProdutosPage>
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _erpFieldLabel('Unidade de compra (opcional)', context),
-              TextField(
-                controller: _unidadeCompraController,
-                textCapitalization: TextCapitalization.characters,
+              _erpFieldLabel('Unidade de compra', context),
+              DropdownButtonFormField<String>(
+                isDense: true,
+                isExpanded: true,
+                initialValue: valorCompraDropdown,
                 decoration: _erpInputDecoration(
                   context,
-                  hint: 'CX, FD, SC — vazio = $uVenda',
+                  helper: 'Caixa, saco… — ou igual à unidade de venda',
                 ),
+                items: opcoesCompra
+                    .map(
+                      (codigo) => DropdownMenuItem(
+                        value: codigo,
+                        child: Text(
+                          codigo.isEmpty
+                              ? 'Igual à venda (${_rotuloUnidadeLongo[uVenda] ?? uVenda})'
+                              : (_rotuloUnidadeLongo[codigo] ?? codigo),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _unidadeCompraController.text = value;
+                  });
+                },
               ),
             ],
           ),
@@ -2756,8 +2821,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                     const TextInputType.numberWithOptions(decimal: true),
                 decoration: _erpInputDecoration(
                   context,
-                  helper: 'Ex.: 12 (unidades por caixa)',
+                  helper: helperEmbalagem,
                 ),
+                onChanged: (_) => setState(() {}),
               ),
             ],
           ),
@@ -2810,6 +2876,34 @@ class _ProdutosPageState extends State<ProdutosPage>
     final u = unidade.trim().toUpperCase();
     if (u == 'METRO') return 'M';
     return _unidades.contains(u) ? u : 'UN';
+  }
+
+  /// Unidade de compra cadastrada (vazio = igual à de venda).
+  String? _normalizarUnidadeCompraOpcional(String? unidade) {
+    if (unidade == null || unidade.trim().isEmpty) return null;
+    final u = unidade.trim().toUpperCase();
+    if (u == 'METRO') return 'M';
+    if (_unidadesCompraSugeridas.contains(u) || _unidades.contains(u)) {
+      return u;
+    }
+    for (final opt in _unidadesCompraSugeridas) {
+      if (u.contains(opt)) return opt;
+    }
+    return null;
+  }
+
+  String _unidadeCompraNoFormulario() {
+    return _normalizarUnidadeCompraOpcional(_unidadeCompraController.text) ??
+        '';
+  }
+
+  List<String> _opcoesDropdownUnidadeCompra(String uVenda) {
+    final out = <String>[''];
+    for (final u in _unidadesCompraSugeridas) {
+      if (u == uVenda) continue;
+      if (!out.contains(u)) out.add(u);
+    }
+    return out;
   }
 
   String? _validarNcm(String? value) {
@@ -3885,7 +3979,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       limiteDescontoPreco3:
           _parsePercentualLimiteDesconto(_limiteDescontoPreco3Controller.text) ??
               0,
-      unidadeCompra: _unidadeCompraController.text.trim(),
+      unidadeCompra: _unidadeCompraNoFormulario(),
       quantidadePorEmbalagem: _lerQuantidadeEmbalagem(),
       embalagemMultiplica: _embalagemMultiplica,
       permiteQuantidadeFracionada: _permiteQuantidadeFracionada,
@@ -3894,6 +3988,27 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
     final estavaEditando = _produtoEmEdicaoId != null;
     final idSalvo = widget.produtoRepository.salvar(produto);
+    try {
+      _sugestaoVendaRepo.substituirDoProduto(
+        idSalvo,
+        _sugestoesVenda
+            .map(
+              (d) => ProdutoSugestaoVenda(
+                produtoOrigemId: idSalvo,
+                produtoSugeridoId: d.produtoSugeridoId,
+                tipo: d.tipo.codigo,
+                quantidadeSugerida: d.quantidadeSugerida,
+                prioridade: d.prioridade,
+                observacao: d.observacao,
+                ativo: d.ativo,
+              ),
+            )
+            .toList(),
+      );
+    } catch (e) {
+      _definirStatus(e.toString(), erro: true);
+      return;
+    }
     final salvoPosGravacao = widget.produtoRepository.obterPorId(idSalvo);
     if (salvoPosGravacao != null) {
       ComprasPreditivasService(widget.produtoRepository.objectBox)
@@ -3971,6 +4086,10 @@ class _ProdutosPageState extends State<ProdutosPage>
           produto.estoqueCd > 0 ? produto.estoqueCd.toString() : '';
       _substitutosIds =
           List<int>.from(ProdutoSubstitutosUtil.parseIds(produto.substitutosIds));
+      _sugestoesVenda = _sugestaoVendaRepo
+          .listarPorProdutoOrigem(produto.id, somenteAtivas: false)
+          .map(SugestaoVendaCadastroDraft.fromEntity)
+          .toList();
       _precoCustoController.text = _formatarValorMonetario(produto.precoCusto);
       _preco1Controller.text = _formatarValorMonetario(
         produto.preco1 > 0 ? produto.preco1 : produto.precoVenda,
@@ -3987,7 +4106,8 @@ class _ProdutosPageState extends State<ProdutosPage>
           produto.leadTimeDias > 0 ? produto.leadTimeDias.toString() : '7';
       _estoqueSegurancaController.text = produto.estoqueSeguranca.toString();
       _unidadeSelecionada = _normalizarUnidade(produto.unidade);
-      _unidadeCompraController.text = produto.unidadeCompra;
+      _unidadeCompraController.text =
+          _normalizarUnidadeCompraOpcional(produto.unidadeCompra) ?? '';
       _quantidadeEmbalagemController.text =
           produto.quantidadePorEmbalagem.toString();
       _embalagemMultiplica = produto.embalagemMultiplica;
@@ -6194,7 +6314,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                         context,
                                                       ),
                                                       Text(
-                                                        'Aparecem primeiro na consulta PDV (badge Cad.).',
+                                                        'Aparecem na consulta PDV (badge Cad.), com ou sem estoque.',
                                                         style: Theme.of(context)
                                                             .textTheme
                                                             .bodySmall,
@@ -6247,6 +6367,20 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                         ),
                                                       ),
                                                     ],
+                                                  ),
+                                                  const SizedBox(
+                                                    height: _erpGap16,
+                                                  ),
+                                                  ProdutosSugestoesVendaSection(
+                                                    produtoRepository:
+                                                        widget.produtoRepository,
+                                                    sugestoes: _sugestoesVenda,
+                                                    produtoEmEdicaoId:
+                                                        _produtoEmEdicaoId,
+                                                    onChanged: (lista) =>
+                                                        setState(() {
+                                                      _sugestoesVenda = lista;
+                                                    }),
                                                   ),
                                                   const SizedBox(
                                                     height: _erpGap16,

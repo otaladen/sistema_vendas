@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/main_menu_destino.dart';
+import '../../domain/main_menu_sub_destino.dart';
+import '../../model/usuario_sistema.dart';
 import '../theme/app_menu_modo_estilo.dart';
 import '../theme/app_menu_modo_id.dart';
 import '../theme/app_modulo_cores.dart';
@@ -11,167 +13,51 @@ class AppMenuLateral extends StatelessWidget {
     super.key,
     required this.itens,
     required this.destinoAtual,
+    required this.subDestinoAtual,
+    required this.usuarioLogado,
     required this.onSelecionar,
+    required this.onSelecionarSub,
+    required this.gruposExpandidos,
+    required this.onAlternarGrupo,
     required this.estendido,
     required this.onAlternarEstendido,
     required this.badgeDe,
+    this.badgeSubDe,
     this.quantidadeFavoritos = 0,
     this.larguraTela = 1200,
   });
 
   final List<MainMenuDestino> itens;
   final MainMenuDestino destinoAtual;
+  final MainMenuSubDestino? subDestinoAtual;
+  final UsuarioSistema usuarioLogado;
   final ValueChanged<MainMenuDestino> onSelecionar;
+  final void Function(MainMenuDestino pai, MainMenuSubDestino sub) onSelecionarSub;
+  final Set<MainMenuDestino> gruposExpandidos;
+  final ValueChanged<MainMenuDestino> onAlternarGrupo;
   final bool estendido;
   final VoidCallback onAlternarEstendido;
   final int Function(MainMenuDestino destino) badgeDe;
+  final int Function(MainMenuSubDestino sub)? badgeSubDe;
   final int quantidadeFavoritos;
   final double larguraTela;
 
   @override
   Widget build(BuildContext context) {
-    if (AppMenuModoEstilo.usaRailPadrao(context)) {
-      return _RailClassico(
-        itens: itens,
-        destinoAtual: destinoAtual,
-        onSelecionar: onSelecionar,
-        estendido: estendido,
-        onAlternarEstendido: onAlternarEstendido,
-        badgeDe: badgeDe,
-        quantidadeFavoritos: quantidadeFavoritos,
-        larguraTela: larguraTela,
-      );
-    }
-    return _RailPersonalizado(
-      itens: itens,
-      destinoAtual: destinoAtual,
-      onSelecionar: onSelecionar,
-      estendido: estendido,
-      onAlternarEstendido: onAlternarEstendido,
-      badgeDe: badgeDe,
-      quantidadeFavoritos: quantidadeFavoritos,
-      larguraTela: larguraTela,
-    );
-  }
-}
-
-class _RailClassico extends StatelessWidget {
-  const _RailClassico({
-    required this.itens,
-    required this.destinoAtual,
-    required this.onSelecionar,
-    required this.estendido,
-    required this.onAlternarEstendido,
-    required this.badgeDe,
-    required this.quantidadeFavoritos,
-    required this.larguraTela,
-  });
-
-  final List<MainMenuDestino> itens;
-  final MainMenuDestino destinoAtual;
-  final ValueChanged<MainMenuDestino> onSelecionar;
-  final bool estendido;
-  final VoidCallback onAlternarEstendido;
-  final int Function(MainMenuDestino destino) badgeDe;
-  final int quantidadeFavoritos;
-  final double larguraTela;
-
-  @override
-  Widget build(BuildContext context) {
-    final tema = Theme.of(context);
-    final larguraEstendida = larguraTela >= 1200;
-    final indice = itens.indexOf(destinoAtual).clamp(0, itens.length - 1);
-
-    return NavigationRail(
-      extended: estendido && larguraEstendida,
-      minExtendedWidth: 200,
-      selectedIndex: indice,
-      onDestinationSelected: (i) => onSelecionar(itens[i]),
-      leading: Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 4),
-        child: IconButton(
-          tooltip: estendido ? 'Recolher menu' : 'Expandir menu',
-          onPressed: onAlternarEstendido,
-          icon: Icon(
-            estendido ? Icons.menu_open_rounded : Icons.menu_rounded,
-          ),
-        ),
-      ),
-      labelType: estendido && larguraEstendida
-          ? NavigationRailLabelType.none
-          : NavigationRailLabelType.all,
-      destinations: [
-        for (final d in itens)
-          NavigationRailDestination(
-            icon: _iconeComBadge(
-              context,
-              destino: d,
-              selecionado: false,
-              badge: badgeDe(d),
-            ),
-            selectedIcon: _iconeComBadge(
-              context,
-              destino: d,
-              selecionado: true,
-              badge: badgeDe(d),
-            ),
-            label: Text(
-              d.titulo,
-              style: TextStyle(
-                color: d == destinoAtual ? d.cor(context) : null,
-                fontWeight:
-                    d == destinoAtual ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-          ),
-      ],
-      trailing: quantidadeFavoritos > 0
-          ? Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                '$quantidadeFavoritos fav.',
-                style: tema.textTheme.labelSmall?.copyWith(
-                  color: tema.colorScheme.onSurface.withValues(alpha: 0.55),
-                ),
-                textAlign: TextAlign.center,
-              ),
-            )
-          : null,
-    );
-  }
-}
-
-class _RailPersonalizado extends StatelessWidget {
-  const _RailPersonalizado({
-    required this.itens,
-    required this.destinoAtual,
-    required this.onSelecionar,
-    required this.estendido,
-    required this.onAlternarEstendido,
-    required this.badgeDe,
-    required this.quantidadeFavoritos,
-    required this.larguraTela,
-  });
-
-  final List<MainMenuDestino> itens;
-  final MainMenuDestino destinoAtual;
-  final ValueChanged<MainMenuDestino> onSelecionar;
-  final bool estendido;
-  final VoidCallback onAlternarEstendido;
-  final int Function(MainMenuDestino destino) badgeDe;
-  final int quantidadeFavoritos;
-  final double larguraTela;
-
-  @override
-  Widget build(BuildContext context) {
-    final tema = Theme.of(context);
+    final classico = AppMenuModoEstilo.usaRailPadrao(context);
     final estendidoEfetivo = estendido && larguraTela >= 1200;
-    final largura = AppMenuModoEstilo.larguraLateralDe(context, estendidoEfetivo);
+    final largura = classico
+        ? (estendidoEfetivo ? 200.0 : 72.0)
+        : AppMenuModoEstilo.larguraLateralDe(context, estendidoEfetivo);
 
     return SizedBox(
       width: largura,
       child: DecoratedBox(
-        decoration: AppMenuModoEstilo.decoracaoPainelLateral(context),
+        decoration: classico
+            ? BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+              )
+            : AppMenuModoEstilo.decoracaoPainelLateral(context),
         child: Column(
           children: [
             Padding(
@@ -179,13 +65,17 @@ class _RailPersonalizado extends StatelessWidget {
               child: IconButton(
                 tooltip: estendido ? 'Recolher menu' : 'Expandir menu',
                 onPressed: onAlternarEstendido,
-                color: AppMenuModoEstilo.corIconeMenu(context),
+                color: classico
+                    ? null
+                    : AppMenuModoEstilo.corIconeMenu(context),
                 icon: Icon(
                   estendido ? Icons.menu_open_rounded : Icons.menu_rounded,
-                  size: AppMenuModoEstilo.modoAtual(context) ==
-                          AppMenuModoId.amplo
-                      ? 28
-                      : 24,
+                  size: classico
+                      ? 24
+                      : (AppMenuModoEstilo.modoAtual(context) ==
+                              AppMenuModoId.amplo
+                          ? 28
+                          : 24),
                 ),
               ),
             ),
@@ -195,9 +85,23 @@ class _RailPersonalizado extends StatelessWidget {
                 itemCount: itens.length,
                 itemBuilder: (context, index) {
                   final d = itens[index];
+                  if (MainMenuSubDestinoHelper.moduloTemSubmenu(d)) {
+                    return _ItemMenuGrupo(
+                      destino: d,
+                      destinoAtual: destinoAtual,
+                      subDestinoAtual: subDestinoAtual,
+                      usuarioLogado: usuarioLogado,
+                      expandido: gruposExpandidos.contains(d),
+                      menuExpandido: estendidoEfetivo,
+                      badge: badgeDe(d),
+                      badgeSubDe: badgeSubDe,
+                      onAlternarGrupo: () => onAlternarGrupo(d),
+                      onSelecionarSub: (sub) => onSelecionarSub(d, sub),
+                    );
+                  }
                   return _ItemMenuLateral(
                     destino: d,
-                    selecionado: d == destinoAtual,
+                    selecionado: d == destinoAtual && subDestinoAtual == null,
                     estendido: estendidoEfetivo,
                     badge: badgeDe(d),
                     onTap: () => onSelecionar(d),
@@ -210,14 +114,266 @@ class _RailPersonalizado extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
                   '$quantidadeFavoritos fav.',
-                  style: tema.textTheme.labelSmall?.copyWith(
-                    color: AppMenuModoEstilo.corRodapeLateral(context),
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: classico
+                            ? Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.55)
+                            : AppMenuModoEstilo.corRodapeLateral(context),
+                        fontWeight: FontWeight.w600,
+                      ),
                   textAlign: TextAlign.center,
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ItemMenuGrupo extends StatelessWidget {
+  const _ItemMenuGrupo({
+    required this.destino,
+    required this.destinoAtual,
+    required this.subDestinoAtual,
+    required this.usuarioLogado,
+    required this.expandido,
+    required this.menuExpandido,
+    required this.badge,
+    this.badgeSubDe,
+    required this.onAlternarGrupo,
+    required this.onSelecionarSub,
+  });
+
+  final MainMenuDestino destino;
+  final MainMenuDestino destinoAtual;
+  final MainMenuSubDestino? subDestinoAtual;
+  final UsuarioSistema usuarioLogado;
+  final bool expandido;
+  final bool menuExpandido;
+  final int badge;
+  final int Function(MainMenuSubDestino sub)? badgeSubDe;
+  final VoidCallback onAlternarGrupo;
+  final ValueChanged<MainMenuSubDestino> onSelecionarSub;
+
+  bool get _grupoAtivo => destinoAtual == destino;
+
+  List<MainMenuSubDestino> get _subitens =>
+      MainMenuSubDestinoHelper.subitensDe(destino, usuarioLogado);
+
+  Future<void> _abrirFlyoutRecolhido(BuildContext context) async {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final pos = box.localToGlobal(Offset.zero);
+    final selecionado = await showMenu<MainMenuSubDestino>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        pos.dx + box.size.width + 4,
+        pos.dy,
+        pos.dx + box.size.width + 280,
+        pos.dy + box.size.height,
+      ),
+      items: [
+        for (final sub in _subitens)
+          PopupMenuItem(
+            value: sub,
+            child: Row(
+              children: [
+                Icon(sub.icone, size: 20),
+                const SizedBox(width: 10),
+                Expanded(child: Text(sub.titulo)),
+              ],
+            ),
+          ),
+      ],
+    );
+    if (selecionado != null) onSelecionarSub(selecionado);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = AppMenuModoEstilo.paddingItem(context, menuExpandido);
+    final icone = _iconeComBadge(
+      context,
+      destino: destino,
+      selecionado: _grupoAtivo,
+      badge: badge,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: menuExpandido
+                  ? onAlternarGrupo
+                  : () => _abrirFlyoutRecolhido(context),
+              borderRadius: BorderRadius.circular(16),
+              child: Ink(
+                decoration: AppMenuModoEstilo.decoracaoItemLateral(
+                  context,
+                  destino: destino,
+                  selecionado: _grupoAtivo,
+                ),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: AppMenuModoEstilo.alturaItemMinima(context),
+                  ),
+                  child: Padding(
+                    padding: padding,
+                    child: menuExpandido
+                        ? Row(
+                            children: [
+                              icone,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  destino.titulo,
+                                  style: TextStyle(
+                                    fontSize: AppMenuModoEstilo.tamanhoFonteItem(
+                                      context,
+                                    ),
+                                    fontWeight: AppMenuModoEstilo.pesoTextoItem(
+                                      context,
+                                      _grupoAtivo,
+                                    ),
+                                    color: AppMenuModoEstilo.corTextoItem(
+                                      context,
+                                      destino: destino,
+                                      selecionado: _grupoAtivo,
+                                    ),
+                                    height: 1.2,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Icon(
+                                expandido
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                                size: 20,
+                                color: AppMenuModoEstilo.corIconeItem(
+                                  context,
+                                  destino: destino,
+                                  selecionado: _grupoAtivo,
+                                ),
+                              ),
+                            ],
+                          )
+                        : Center(child: icone),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (menuExpandido && expandido)
+            Padding(
+              padding: const EdgeInsets.only(left: 8, top: 2),
+              child: Column(
+                children: [
+                  for (final sub in _subitens)
+                    _ItemMenuSub(
+                      sub: sub,
+                      selecionado: subDestinoAtual == sub,
+                      pai: destino,
+                      badge: badgeSubDe?.call(sub) ?? 0,
+                      onTap: () => onSelecionarSub(sub),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ItemMenuSub extends StatelessWidget {
+  const _ItemMenuSub({
+    required this.sub,
+    required this.selecionado,
+    required this.pai,
+    required this.badge,
+    required this.onTap,
+  });
+
+  final MainMenuSubDestino sub;
+  final bool selecionado;
+  final MainMenuDestino pai;
+  final int badge;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final corModulo = _corSub(context, sub);
+    final fundo = selecionado
+        ? corModulo.withValues(alpha: 0.18)
+        : Colors.transparent;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Ink(
+            decoration: BoxDecoration(
+              color: fundo,
+              borderRadius: BorderRadius.circular(12),
+              border: selecionado
+                  ? Border.all(color: corModulo.withValues(alpha: 0.45))
+                  : null,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                children: [
+                  if (badge > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Badge(
+                        label: Text(badge > 99 ? '99+' : '$badge'),
+                        child: Icon(
+                          sub.icone,
+                          size: 18,
+                          color: selecionado ? corModulo : scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  else
+                    Icon(
+                      sub.icone,
+                      size: 18,
+                      color: selecionado ? corModulo : scheme.onSurfaceVariant,
+                    ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      sub.titulo,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            fontWeight:
+                                selecionado ? FontWeight.w700 : FontWeight.w500,
+                            color: selecionado
+                                ? scheme.onSurface
+                                : scheme.onSurfaceVariant,
+                            height: 1.15,
+                          ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -304,6 +460,40 @@ class _ItemMenuLateral extends StatelessWidget {
       ),
     );
   }
+}
+
+Color _corSub(BuildContext context, MainMenuSubDestino sub) {
+  final id = switch (sub) {
+    MainMenuSubDestino.vendasOrcamentos => AppModuloId.orcamentos,
+    MainMenuSubDestino.vendasListagem => AppModuloId.listagemVendas,
+    MainMenuSubDestino.vendasRelatorios => AppModuloId.relatoriosVendas,
+    MainMenuSubDestino.cadastrosProdutos => AppModuloId.produtos,
+    MainMenuSubDestino.cadastrosKitsOrcamento => AppModuloId.kitsOrcamento,
+    MainMenuSubDestino.cadastrosPromocoes => AppModuloId.promocoes,
+    MainMenuSubDestino.cadastrosMotoristas => AppModuloId.motoristasCadastro,
+    MainMenuSubDestino.cadastrosFuncionarios =>
+      AppModuloId.funcionariosCadastro,
+    MainMenuSubDestino.cadastrosClientes => AppModuloId.clientesCadastro,
+    MainMenuSubDestino.cadastrosVendedores => AppModuloId.vendedoresCadastro,
+    MainMenuSubDestino.cadastrosUsuarios => AppModuloId.usuariosCadastro,
+    MainMenuSubDestino.fiscalImportarNfe ||
+    MainMenuSubDestino.fiscalNotasImportadas ||
+    MainMenuSubDestino.fiscalPendencias ||
+    MainMenuSubDestino.fiscalNfeSaida ||
+    MainMenuSubDestino.fiscalRelatorioMensal ||
+    MainMenuSubDestino.fiscalExportarFechamento =>
+      null,
+    MainMenuSubDestino.financeiroTesouraria => AppModuloId.tesouraria,
+    MainMenuSubDestino.financeiroContasReceber => AppModuloId.contasReceber,
+    MainMenuSubDestino.financeiroContasPagar => AppModuloId.contasPagar,
+    MainMenuSubDestino.financeiroRelatorioContasPagar =>
+      AppModuloId.relatorioContasPagar,
+    MainMenuSubDestino.financeiroRelatorioFiados => AppModuloId.relatorioFiados,
+  };
+  if (id == null) {
+    return MainMenuDestino.notasFiscais.cor(context);
+  }
+  return AppModuloCores.modulo(context, id);
 }
 
 Widget _iconeComBadge(

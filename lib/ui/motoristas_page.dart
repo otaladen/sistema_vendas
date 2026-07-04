@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/motorista_repository.dart';
 import '../model/motorista.dart';
+import 'widgets/consulta_lista_vazia.dart';
 
 class MotoristasPage extends StatefulWidget {
   const MotoristasPage({super.key, required this.motoristaRepository});
@@ -13,6 +14,7 @@ class MotoristasPage extends StatefulWidget {
 }
 
 class _MotoristasPageState extends State<MotoristasPage> {
+  final _formKey = GlobalKey<FormState>();
   final _nomeController = TextEditingController();
   final _telefoneController = TextEditingController();
   final _pesquisaController = TextEditingController();
@@ -29,6 +31,7 @@ class _MotoristasPageState extends State<MotoristasPage> {
   }
 
   void _limparFormulario() {
+    _formKey.currentState?.reset();
     setState(() {
       _motoristaEmEdicaoId = null;
       _nomeController.clear();
@@ -49,11 +52,8 @@ class _MotoristasPageState extends State<MotoristasPage> {
   }
 
   void _salvar() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
     final nome = _nomeController.text.trim();
-    if (nome.isEmpty) {
-      setState(() => _status = 'Informe o nome do motorista.');
-      return;
-    }
     final idAtual = _motoristaEmEdicaoId ?? 0;
     if (widget.motoristaRepository.existeNomeParaOutro(
       nomeNormalizado: nome,
@@ -117,14 +117,28 @@ class _MotoristasPageState extends State<MotoristasPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          TextField(
-            controller: _nomeController,
-            decoration: const InputDecoration(labelText: 'Nome'),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _telefoneController,
-            decoration: const InputDecoration(labelText: 'Telefone'),
+          Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _nomeController,
+                  decoration: const InputDecoration(labelText: 'Nome'),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) {
+                      return 'Informe o nome do motorista.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _telefoneController,
+                  decoration: const InputDecoration(labelText: 'Telefone'),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 8),
           SwitchListTile(
@@ -167,7 +181,11 @@ class _MotoristasPageState extends State<MotoristasPage> {
           ),
           const SizedBox(height: 8),
           if (listados.isEmpty)
-            const Text('Nenhum motorista cadastrado.')
+            const ConsultaListaVazia(
+              mensagem: 'Nenhum motorista cadastrado.',
+              dica: 'Preencha o formulario acima e salve.',
+              icone: Icons.local_shipping_outlined,
+            )
           else
             ...listados.map(
               (m) => Card(
@@ -181,10 +199,12 @@ class _MotoristasPageState extends State<MotoristasPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
+                        tooltip: 'Editar',
                         onPressed: () => _editar(m),
                         icon: const Icon(Icons.edit_outlined),
                       ),
                       IconButton(
+                        tooltip: 'Remover',
                         onPressed: () => _remover(m),
                         icon: const Icon(Icons.delete_outline),
                       ),

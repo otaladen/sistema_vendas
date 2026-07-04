@@ -583,7 +583,7 @@ class CupomPdfLayout {
     required bool temVendedor,
     Cliente? cliente,
   }) {
-    var n = 3;
+    var n = 6;
     if (temCliente) {
       n++;
       if (layout.exibirDocumentoCliente &&
@@ -596,7 +596,7 @@ class CupomPdfLayout {
       }
     }
     if (temVendedor && layout.exibirVendedor) n++;
-    if (layout.exibirValidadeOrcamento) n += 2;
+    if (layout.exibirValidadeOrcamento) n++;
     return n;
   }
 
@@ -686,6 +686,25 @@ class CupomPdfLayout {
       linhasExtras: linhasExtras,
       comLogo: comLogo,
       segundaVia: segundaVia,
+    );
+  }
+
+  /// PDF de orcamento salvo em arquivo: largura termica, altura livre (nao corta itens).
+  static PdfPageFormat formatoPaginaOrcamentoSalvar({
+    required EmpresaModeloPdf modelo,
+    required ConfigLayoutImpressao layout,
+  }) {
+    if (modelo == EmpresaModeloPdf.a4) {
+      return PdfPageFormat.a4;
+    }
+    final margem = _margemPagina(layout);
+    return PdfPageFormat(
+      larguraPdfMm(layout) * PdfPageFormat.mm,
+      double.infinity,
+      marginTop: margem * PdfPageFormat.mm,
+      marginBottom: margem * PdfPageFormat.mm,
+      marginLeft: margem * PdfPageFormat.mm,
+      marginRight: margem * PdfPageFormat.mm,
     );
   }
 

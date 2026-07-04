@@ -1196,7 +1196,25 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
           ),
         ),
         const SizedBox(height: 12),
-        _buildResilienciaCard(context, ocupado),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text(
+            'Opcoes avancadas',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          subtitle: Text(
+            'Segundo destino, exportacao ZIP e tarefa agendada no Windows.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          children: [
+            _buildResilienciaConteudo(context, ocupado),
+          ],
+        ),
         const SizedBox(height: 12),
         Card(
           child: Padding(
@@ -1205,9 +1223,16 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Acoes manuais',
+                  'Acoes agora',
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Copia manual, restauracao e acesso a pasta de dados.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -1286,6 +1311,26 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     final theme = Theme.of(context);
     final cor = _corSaude(context);
     final s = _status;
+    final saude = s?.saude ?? BackupSaude.desconhecido;
+
+    final pastaAuto = _backupAutomaticoPasta.trim();
+    final pastaTxt = pastaAuto.isEmpty
+        ? 'Pasta automatica nao configurada'
+        : pastaAuto;
+
+    String proximoTxt = 'Automatico desligado';
+    if (_backupAutomaticoAtivo) {
+      if (s?.proximoBackupAutomaticoMs != null) {
+        proximoTxt =
+            'Proximo: ${_dataHora.format(DateTime.fromMillisecondsSinceEpoch(s!.proximoBackupAutomaticoMs!))}';
+      } else {
+        proximoTxt = 'Proximo: ao abrir o app';
+      }
+    }
+
+    final bancoTxt = _pastaDadosLocal.trim().isEmpty
+        ? _tamanhoBancoLocal
+        : '$_tamanhoBancoLocal · $_pastaDadosLocal';
 
     return Card(
       color: cor.withValues(alpha: 0.08),
@@ -1295,43 +1340,73 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.shield_outlined, color: cor, size: 22),
-                const SizedBox(width: 8),
-                Text(
-                  BackupStatusHelper.rotuloSaude(s?.saude ?? BackupSaude.desconhecido),
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
+                Container(
+                  width: 16,
+                  height: 16,
+                  margin: const EdgeInsets.only(top: 3),
+                  decoration: BoxDecoration(
                     color: cor,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: cor.withValues(alpha: 0.45),
+                        blurRadius: 6,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        BackupStatusHelper.rotuloSaude(saude),
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: cor,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _textoUltimoBackup(),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      if (s?.horasDesdeUltimo != null && s!.ultimoBackupMs > 0)
+                        Text(
+                          'Ha ${s.horasDesdeUltimo} hora(s)',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(_textoUltimoBackup(), style: theme.textTheme.bodyMedium),
-            if (s?.horasDesdeUltimo != null && s!.ultimoBackupMs > 0)
-              Text(
-                'Ha ${s.horasDesdeUltimo} hora(s)',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            const SizedBox(height: 8),
-            Text(
-              'Banco local: $_tamanhoBancoLocal',
-              style: theme.textTheme.bodySmall,
+            const SizedBox(height: 12),
+            _ResumoLinha(
+              icone: Icons.schedule_outlined,
+              rotulo: 'Proximo backup',
+              valor: proximoTxt,
             ),
-            if (_pastaDadosLocal.isNotEmpty)
-              Text(
-                _pastaDadosLocal,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+            const SizedBox(height: 6),
+            _ResumoLinha(
+              icone: Icons.folder_outlined,
+              rotulo: 'Destino automatico',
+              valor: pastaTxt,
+            ),
+            const SizedBox(height: 6),
+            _ResumoLinha(
+              icone: Icons.storage_outlined,
+              rotulo: 'Banco local',
+              valor: bancoTxt,
+            ),
             if (s?.exibirAlerta == true) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Text(
                 'Recomendado: faca backup agora ou ative o automatico '
                 '(alerta apos ${BackupStatusHelper.horasAlertaAtencao}h).',
@@ -1358,39 +1433,23 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     );
   }
 
-  Widget _buildResilienciaCard(BuildContext context, bool ocupado) {
+  Widget _buildResilienciaConteudo(BuildContext context, bool ocupado) {
     final theme = Theme.of(context);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Resiliencia avancada',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_redeModoServidor) ...[
+          Text(
+            'Este PC e servidor de sync — recomendado espelhar backups em pasta de rede.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w600,
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Segundo destino (rede/nuvem), exportacao ZIP e tarefa no Windows.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            if (_redeModoServidor) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Este PC e servidor de sync — recomendado espelhar backups em pasta de rede.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            SwitchListTile(
+          ),
+          const SizedBox(height: 8),
+        ],
+        SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Segundo destino (espelho)'),
               subtitle: const Text(
@@ -1472,8 +1531,6 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
               ),
             ],
           ],
-        ),
-      ),
     );
   }
 
@@ -1581,6 +1638,53 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ResumoLinha extends StatelessWidget {
+  const _ResumoLinha({
+    required this.icone,
+    required this.rotulo,
+    required this.valor,
+  });
+
+  final IconData icone;
+  final String rotulo;
+  final String valor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icone,
+          size: 16,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                rotulo,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              Text(
+                valor,
+                style: theme.textTheme.bodySmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

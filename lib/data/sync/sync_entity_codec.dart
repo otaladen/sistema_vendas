@@ -227,6 +227,7 @@ class SyncEntityCodec {
       'metaMensalValor': v.metaMensalValor,
       'observacoesComerciais': v.observacoesComerciais,
       'ativo': v.ativo,
+      'senhaPdv': v.senhaPdv,
       'criadoEm': v.criadoEm.toUtc().toIso8601String(),
     };
   }
@@ -244,6 +245,7 @@ class SyncEntityCodec {
       metaMensalValor: (m['metaMensalValor'] as num?)?.toDouble() ?? 0,
       observacoesComerciais: (m['observacoesComerciais'] ?? '').toString(),
       ativo: m['ativo'] != false,
+      senhaPdv: (m['senhaPdv'] ?? '').toString(),
       criadoEm: DateTime.tryParse((m['criadoEm'] ?? '').toString())?.toUtc(),
     );
   }

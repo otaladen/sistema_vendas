@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../domain/produto_embalagem.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../domain/promocao_info_vigente.dart';
 import '../domain/promocao_preco_result.dart';
@@ -146,6 +147,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
     this.insights,
     this.onSelecionarSimilar,
     this.onInserirKit,
+    this.onAdicionarAgregado,
     this.rotulosDeposito = const PdvConsultaDepositoRotulos(),
   });
 
@@ -161,7 +163,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
   final String tituloPainel;
   final PromocaoPrecoResult? promocaoAtiva;
   final PromocaoInfoVigente? campanhaPromo;
-  final int quantidadeNoOrcamento;
+  final num quantidadeNoOrcamento;
   final double? precoUnitarioLinha;
   final bool precoUnitarioManual;
   final VoidCallback? onAlterarPreco;
@@ -173,6 +175,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
   final PdvConsultaInsightsPacote? insights;
   final ValueChanged<int>? onSelecionarSimilar;
   final ValueChanged<PdvConsultaKitResumo>? onInserirKit;
+  final ValueChanged<PdvConsultaAgregadoVenda>? onAdicionarAgregado;
   final PdvConsultaDepositoRotulos rotulosDeposito;
 
   bool get _usarAbasInsights =>
@@ -216,7 +219,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
           ),
           child: PdvConsultaControlesAdicionar(
             key: controlesQuantidadeKey,
-            produtoId: produto.id,
+            produto: produto,
             onQuantidadeChanged: onQuantidadeChanged!,
             onAdicionar: onAdicionar!,
           ),
@@ -262,6 +265,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
                       formatarMoeda: formatarMoeda,
                       onSelecionarSimilar: onSelecionarSimilar,
                       onInserirKit: onInserirKit,
+                      onAdicionarAgregado: onAdicionarAgregado,
                     ),
                   ]),
                 ],
@@ -280,6 +284,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
             formatarMoeda: formatarMoeda,
             onSelecionarSimilar: onSelecionarSimilar,
             onInserirKit: onInserirKit,
+            onAdicionarAgregado: onAdicionarAgregado,
           ),
         ],
       ]);
@@ -497,12 +502,12 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
 class PdvConsultaControlesAdicionar extends StatefulWidget {
   const PdvConsultaControlesAdicionar({
     super.key,
-    required this.produtoId,
+    required this.produto,
     required this.onQuantidadeChanged,
     required this.onAdicionar,
   });
 
-  final int produtoId;
+  final Produto produto;
   final ValueChanged<int> onQuantidadeChanged;
   final VoidCallback onAdicionar;
 
@@ -518,6 +523,32 @@ class PdvConsultaControlesAdicionarState
 
   late int _quantidade;
 
+  bool get _emUnidadeCompra => widget.produto.pdvPodeVenderEmUnidadeCompra;
+
+  String get _rotuloUnidadeQuantidade {
+    if (_emUnidadeCompra) {
+      return ProdutoEmbalagem.normalizarUnidade(
+        widget.produto.unidadeCompraEfetiva,
+      );
+    }
+    return ProdutoEmbalagem.normalizarUnidade(widget.produto.unidade);
+  }
+
+  String? get _dicaConversao {
+    if (!_emUnidadeCompra) return null;
+    final conv = widget.produto.rotuloConversaoEmbalagem;
+    if (conv.isEmpty) return null;
+    final m2 = ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
+      produto: widget.produto,
+      quantidadeComercial: _quantidade.toDouble(),
+    );
+    final uVenda = ProdutoEmbalagem.normalizarUnidade(widget.produto.unidade);
+    final m2Txt = m2 == m2.roundToDouble()
+        ? m2.toStringAsFixed(0)
+        : m2.toStringAsFixed(2).replaceAll('.', ',');
+    return '$_quantidade $_rotuloUnidadeQuantidade = $m2Txt $uVenda no orcamento';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -528,7 +559,7 @@ class PdvConsultaControlesAdicionarState
   @override
   void didUpdateWidget(PdvConsultaControlesAdicionar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.produtoId != widget.produtoId) {
+    if (oldWidget.produto.id != widget.produto.id) {
       setState(() => _quantidade = _min);
       widget.onQuantidadeChanged(_quantidade);
     }
@@ -554,12 +585,22 @@ class PdvConsultaControlesAdicionarState
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Quantidade (+ / − no teclado)',
+          'Quantidade ($_rotuloUnidadeQuantidade) (+ / − no teclado)',
           style: theme.textTheme.labelMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: scheme.onSurfaceVariant,
           ),
         ),
+        if (_dicaConversao != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            _dicaConversao!,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
         const SizedBox(height: 6),
         DecoratedBox(
           decoration: BoxDecoration(

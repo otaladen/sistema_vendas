@@ -541,6 +541,28 @@ class SyncEntityCodecExtras {
         'whatsappDonoNumero': c.whatsappDonoNumero,
         'alertasProativosIntervaloMinutos': c.alertasProativosIntervaloMinutos,
         'regimeTributarioEmitente': c.regimeTributarioEmitente,
+        'obraCalcTijoloProdutoId': c.obraCalcTijoloProdutoId,
+        'obraCalcCimentoProdutoId': c.obraCalcCimentoProdutoId,
+        'obraCalcAreiaProdutoId': c.obraCalcAreiaProdutoId,
+        'obraCalcPisoProdutoId': c.obraCalcPisoProdutoId,
+        'obraCalcPerdaPadraoPct': c.obraCalcPerdaPadraoPct,
+        'obraCalcPerdaRebocoPct': c.obraCalcPerdaRebocoPct,
+        'obraCalcPerdaPisoPct': c.obraCalcPerdaPisoPct,
+        'obraCalcEspessuraRebocoMm': c.obraCalcEspessuraRebocoMm,
+        'obraCalcEspessuraContrapisoMm': c.obraCalcEspessuraContrapisoMm,
+        'obraCalcM2PorCaixaPiso': c.obraCalcM2PorCaixaPiso,
+        'obraCalcGeminiParseAtivo': c.obraCalcGeminiParseAtivo,
+        'obraCalcTemplatesJson': c.obraCalcTemplatesJson,
+        'obraCalcBritaProdutoId': c.obraCalcBritaProdutoId,
+        'obraCalcTelhaProdutoId': c.obraCalcTelhaProdutoId,
+        'obraCalcFerroProdutoId': c.obraCalcFerroProdutoId,
+        'obraCalcEspessuraLajeMm': c.obraCalcEspessuraLajeMm,
+        'obraCalcPerdaLajePct': c.obraCalcPerdaLajePct,
+        'obraCalcPerdaFundacaoPct': c.obraCalcPerdaFundacaoPct,
+        'obraCalcPerdaTelhadoPct': c.obraCalcPerdaTelhadoPct,
+        'obraCalcTelhasPorM2': c.obraCalcTelhasPorM2,
+        'obraCalcInclinacaoTelhadoPct': c.obraCalcInclinacaoTelhadoPct,
+        'obraCalcUsarSubstitutoEstoqueZero': c.obraCalcUsarSubstitutoEstoqueZero,
       };
 
   static EmpresaConfig empresaConfigDeMap(
@@ -620,6 +642,94 @@ class SyncEntityCodecExtras {
         }
         return v;
       }(),
+      obraCalcTijoloProdutoId:
+          (m['obraCalcTijoloProdutoId'] as num?)?.toInt() ??
+              base.obraCalcTijoloProdutoId,
+      obraCalcCimentoProdutoId:
+          (m['obraCalcCimentoProdutoId'] as num?)?.toInt() ??
+              base.obraCalcCimentoProdutoId,
+      obraCalcAreiaProdutoId:
+          (m['obraCalcAreiaProdutoId'] as num?)?.toInt() ??
+              base.obraCalcAreiaProdutoId,
+      obraCalcPerdaPadraoPct: () {
+        final v = (m['obraCalcPerdaPadraoPct'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcPerdaPadraoPct;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcPisoProdutoId:
+          (m['obraCalcPisoProdutoId'] as num?)?.toInt() ??
+              base.obraCalcPisoProdutoId,
+      obraCalcPerdaRebocoPct: () {
+        final v = (m['obraCalcPerdaRebocoPct'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcPerdaRebocoPct;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcPerdaPisoPct: () {
+        final v = (m['obraCalcPerdaPisoPct'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcPerdaPisoPct;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcEspessuraRebocoMm: () {
+        final v = (m['obraCalcEspessuraRebocoMm'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcEspessuraRebocoMm;
+        return v.clamp(5, 50).toDouble();
+      }(),
+      obraCalcEspessuraContrapisoMm: () {
+        final v = (m['obraCalcEspessuraContrapisoMm'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcEspessuraContrapisoMm;
+        return v.clamp(10, 80).toDouble();
+      }(),
+      obraCalcM2PorCaixaPiso: () {
+        final v = (m['obraCalcM2PorCaixaPiso'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcM2PorCaixaPiso;
+        return v.clamp(0.1, 10).toDouble();
+      }(),
+      obraCalcGeminiParseAtivo:
+          m['obraCalcGeminiParseAtivo'] as bool? ?? base.obraCalcGeminiParseAtivo,
+      obraCalcTemplatesJson:
+          (m['obraCalcTemplatesJson'] ?? base.obraCalcTemplatesJson).toString(),
+      obraCalcBritaProdutoId:
+          (m['obraCalcBritaProdutoId'] as num?)?.toInt() ??
+              base.obraCalcBritaProdutoId,
+      obraCalcTelhaProdutoId:
+          (m['obraCalcTelhaProdutoId'] as num?)?.toInt() ??
+              base.obraCalcTelhaProdutoId,
+      obraCalcFerroProdutoId:
+          (m['obraCalcFerroProdutoId'] as num?)?.toInt() ??
+              base.obraCalcFerroProdutoId,
+      obraCalcEspessuraLajeMm: () {
+        final v = (m['obraCalcEspessuraLajeMm'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcEspessuraLajeMm;
+        return v.clamp(50, 200).toDouble();
+      }(),
+      obraCalcPerdaLajePct: () {
+        final v = (m['obraCalcPerdaLajePct'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcPerdaLajePct;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcPerdaFundacaoPct: () {
+        final v = (m['obraCalcPerdaFundacaoPct'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcPerdaFundacaoPct;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcPerdaTelhadoPct: () {
+        final v = (m['obraCalcPerdaTelhadoPct'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcPerdaTelhadoPct;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcTelhasPorM2: () {
+        final v = (m['obraCalcTelhasPorM2'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcTelhasPorM2;
+        return v.clamp(8, 40).toDouble();
+      }(),
+      obraCalcInclinacaoTelhadoPct: () {
+        final v = (m['obraCalcInclinacaoTelhadoPct'] as num?)?.toDouble();
+        if (v == null) return base.obraCalcInclinacaoTelhadoPct;
+        return v.clamp(0, 60).toDouble();
+      }(),
+      obraCalcUsarSubstitutoEstoqueZero:
+          m['obraCalcUsarSubstitutoEstoqueZero'] as bool? ??
+              base.obraCalcUsarSubstitutoEstoqueZero,
     );
   }
 

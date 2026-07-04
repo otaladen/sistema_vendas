@@ -1156,6 +1156,8 @@ class ProdutoRepository extends ChangeNotifier {
     destino.apelidosBusca = origem.apelidosBusca;
     destino.fotoPath = origem.fotoPath;
     destino.localizacao = origem.localizacao;
+    destino.estoqueCd = origem.estoqueCd;
+    destino.substitutosIds = origem.substitutosIds;
     destino.ncm = origem.ncm;
     destino.cest = origem.cest;
     destino.grupoTributario = origem.grupoTributario;

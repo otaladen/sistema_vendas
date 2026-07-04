@@ -508,85 +508,341 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         : 'Conectar a este servidor e sincronizar';
   }
 
-  Widget _secaoTitulo(String titulo) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 16, bottom: 8),
-      child: Text(
-        titulo,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
+  Widget _buildPainelStatus(ThemeData tema, SyncLogEntry? ultimoLog) {
+    final erro = tema.colorScheme.error;
+    final onVar = tema.colorScheme.onSurfaceVariant;
+
+    final syncLigada = _syncAtiva;
+    final papel = _modoServidor ? 'Servidor' : 'Cliente';
+
+    late final Color corSemaforo;
+    late final String rotuloSemaforo;
+
+    if (!syncLigada) {
+      corSemaforo = tema.colorScheme.outline;
+      rotuloSemaforo = 'Sync desligada';
+    } else if (!_servidorOnline) {
+      corSemaforo = erro;
+      rotuloSemaforo = 'Servidor offline';
+    } else if (ultimoLog != null && !ultimoLog.sucesso) {
+      corSemaforo = Colors.orange.shade800;
+      rotuloSemaforo = 'Sync com falha';
+    } else if (ultimoLog?.sucesso == true) {
+      corSemaforo = Colors.green.shade700;
+      rotuloSemaforo = 'Sincronizado';
+    } else {
+      corSemaforo = Colors.orange.shade800;
+      rotuloSemaforo = 'Aguardando sync';
+    }
+
+    String syncTxt = 'Nenhuma sincronizacao ainda';
+    if (ultimoLog != null) {
+      syncTxt = ultimoLog.sucesso
+          ? 'Ultima sync OK as ${_formatarHora(ultimoLog.em)}'
+          : 'Ultima sync falhou as ${_formatarHora(ultimoLog.em)}';
+    }
+
+    final endereco = _modoServidor
+        ? (_urlController.text.trim().isEmpty
+            ? (_ipLocal ?? 'IP nao detectado')
+            : _urlController.text.trim())
+        : (_urlController.text.trim().isEmpty
+            ? 'Informe o endereco do servidor'
+            : _urlController.text.trim());
+
+    return Card(
+      color: corSemaforo.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 14,
+                  height: 14,
+                  margin: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(
+                    color: corSemaforo,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: corSemaforo.withValues(alpha: 0.45),
+                        blurRadius: 6,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        rotuloSemaforo,
+                        style: tema.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: corSemaforo,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$papel · $syncTxt',
+                        style: tema.textTheme.bodySmall?.copyWith(color: onVar),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 10),
+            Text(
+              'Endereco: $endereco',
+              style: tema.textTheme.bodySmall,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildPainelStatus(ThemeData tema, SyncLogEntry? ultimoLog) {
-    final erro = tema.colorScheme.error;
-    final primaria = tema.colorScheme.primaryContainer;
-    final onPrimaria = tema.colorScheme.onPrimaryContainer;
+  Widget _buildAssistenteSimplificado(ThemeData tema) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_modoServidor) _buildModoServidor(tema) else _buildModoCliente(),
+        const SizedBox(height: 8),
+        _buildCampoToken(),
+        const SizedBox(height: 4),
+        Text(
+          'Mesmo token no servidor e em todos os clientes.',
+          style: tema.textTheme.bodySmall?.copyWith(
+            color: tema.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _salvando ? null : _configurarRedeCompleta,
+            icon: _salvando
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.link_outlined),
+            label: Text(_rotuloBotaoPrincipal()),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: (_salvando || _testandoRede)
+                ? null
+                : () => _testarConexao(),
+            icon: _testandoRede
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.wifi_tethering_outlined),
+            label: Text(_testandoRede ? 'Testando...' : 'Testar conexao'),
+          ),
+        ),
+        ValueListenableBuilder<SyncLogEntry?>(
+          valueListenable: SyncLog.ultimo,
+          builder: (context, ultimoLog, _) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildPainelConflitos(tema),
+                if (ultimoLog != null && !ultimoLog.sucesso)
+                  _buildErroComAjuda(tema, ultimoLog),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
 
-    final syncLigada = _syncAtiva;
-    final papel = _modoServidor ? 'Servidor' : 'Cliente';
-    String servidorTxt;
-    Color servidorCor;
-    if (!_syncAtiva) {
-      servidorTxt = 'Sync desligada';
-      servidorCor = tema.colorScheme.outline;
-    } else if (_servidorOnline) {
-      servidorTxt = 'Servidor online';
-      servidorCor = Colors.green.shade700;
-    } else {
-      servidorTxt = 'Servidor offline ou nao testado';
-      servidorCor = erro;
-    }
-
-    String syncTxt = 'Nenhuma sync ainda';
-    Color syncCor = tema.colorScheme.onSurfaceVariant;
-    if (ultimoLog != null) {
-      if (ultimoLog.sucesso) {
-        syncTxt = 'Ultima sync OK (${_formatarHora(ultimoLog.em)})';
-        syncCor = Colors.green.shade800;
-      } else {
-        syncTxt =
-            'Ultima sync falhou (${_formatarHora(ultimoLog.em)})';
-        syncCor = erro;
-      }
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: primaria.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: tema.colorScheme.outlineVariant),
+  Widget _buildOpcoesAvancadasRede(ThemeData tema) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      title: Text(
+        'Opcoes avancadas',
+        style: tema.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.hub_outlined, color: onPrimaria, size: 22),
-              const SizedBox(width: 8),
-              Text(
-                'Status da rede',
-                style: tema.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: onPrimaria,
-                ),
+      subtitle: Text(
+        'Implantacao, salvar manual, sync e servidor',
+        style: tema.textTheme.bodySmall?.copyWith(
+          color: tema.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      children: [
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: _modoImplantacao,
+          onChanged: _alternarModoImplantacao,
+          title: const Text('Modo implantacao (este PC)'),
+          subtitle: const Text(
+            'Intervalo 60s e espera 3s antes de sync apos varias gravacoes.',
+          ),
+        ),
+        const SizedBox(height: 8),
+        ValueListenableBuilder<SyncLogEntry?>(
+          valueListenable: SyncLog.ultimo,
+          builder: (context, ultimoLog, _) {
+            return _buildChecklist(tema, ultimoLog);
+          },
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _salvando ? null : () => _salvar(),
+                icon: const Icon(Icons.save_outlined, size: 18),
+                label: Text(_salvando ? 'Salvando...' : 'Salvar'),
               ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: (_sincronizando || _salvando)
+                    ? null
+                    : _sincronizarAgora,
+                icon: _sincronizando
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cloud_sync_outlined, size: 18),
+                label: Text(_sincronizando ? 'Sync...' : 'Sync agora'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _buildControlesServidorAvancado(tema),
+      ],
+    );
+  }
+
+  Widget _buildControlesServidorAvancado(ThemeData tema) {
+    final onVar = tema.colorScheme.onSurfaceVariant;
+    final erro = tema.colorScheme.error;
+
+    if (_modoServidor) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: (_iniciandoServidor || _servidorOnline)
+                    ? null
+                    : _iniciarServidor,
+                icon: _iniciandoServidor
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.play_arrow_outlined, size: 20),
+                label: const Text('Iniciar servidor'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _parandoServidor || !_servidorOnline
+                    ? null
+                    : _pararServidor,
+                icon: const Icon(Icons.stop_outlined, size: 20),
+                label: const Text('Parar'),
+              ),
+              if (Platform.isWindows)
+                OutlinedButton(
+                  onPressed: _liberarFirewall,
+                  child: const Text('Liberar porta no firewall'),
+                ),
             ],
           ),
-          const SizedBox(height: 8),
-          _StatusLinha(rotulo: 'Papel', valor: papel),
-          _StatusLinha(
-            rotulo: 'Sincronizacao',
-            valor: syncLigada ? 'Ativa' : 'Desativada',
+          if (_ipLocal != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _copiarEnderecoClientes,
+              icon: const Icon(Icons.copy_outlined, size: 18),
+              label: Text(
+                'Copiar endereco para outros PCs (${_ipLocal!}:$_porta)',
+              ),
+            ),
+          ],
+          const Divider(height: 24),
+          Text(
+            'Estacoes conectadas',
+            style: tema.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          _StatusLinha(rotulo: 'Conexao', valor: servidorTxt, valorCor: servidorCor),
-          _StatusLinha(rotulo: 'Dados', valor: syncTxt, valorCor: syncCor),
+          const SizedBox(height: 4),
+          Text(
+            'PCs com o app aberto e sincronizacao ativa.',
+            style: tema.textTheme.bodySmall?.copyWith(color: onVar),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _carregandoPresenca ? null : _atualizarPresenca,
+            icon: _carregandoPresenca
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.devices_outlined),
+            label: Text(
+              _carregandoPresenca ? 'Consultando...' : 'Ver estacoes online',
+            ),
+          ),
+          if (_presencaErro.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _presencaErro,
+                style: TextStyle(color: erro, fontSize: 13),
+              ),
+            ),
+          if (_estacoesAtivas != null && _presencaErro.isEmpty) ...[
+            const SizedBox(height: 8),
+            Text('Total ativo: $_estacoesAtivas'),
+            ..._estacoesLista.map((s) {
+              final lab = (s['label'] ?? '').toString();
+              return Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('• ${lab.isEmpty ? "PC" : lab}'),
+              );
+            }),
+          ],
         ],
-      ),
+      );
+    }
+
+    return Text(
+      'No modo cliente, o servidor principal controla as estacoes.',
+      style: tema.textTheme.bodySmall?.copyWith(color: onVar),
     );
   }
 
@@ -903,341 +1159,91 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     );
   }
 
-  Widget _buildAvancado(ThemeData tema) {
-    final onVar = tema.colorScheme.onSurfaceVariant;
-    final erro = tema.colorScheme.error;
-    return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      title: Text(
-        'Avancado',
-        style: tema.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-      ),
-      subtitle: const Text(
-        'Servidor, firewall, estacoes online',
-        style: TextStyle(fontSize: 12),
-      ),
-      children: [
-        if (_modoServidor) ...[
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton.icon(
-                onPressed: (_iniciandoServidor || _servidorOnline)
-                    ? null
-                    : _iniciarServidor,
-                icon: _iniciandoServidor
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.play_arrow_outlined, size: 20),
-                label: const Text('Iniciar servidor'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _parandoServidor || !_servidorOnline
-                    ? null
-                    : _pararServidor,
-                icon: const Icon(Icons.stop_outlined, size: 20),
-                label: const Text('Parar'),
-              ),
-              if (Platform.isWindows)
-                OutlinedButton(
-                  onPressed: _liberarFirewall,
-                  child: const Text('Liberar porta no firewall'),
-                ),
-            ],
-          ),
-          if (_ipLocal != null) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _copiarEnderecoClientes,
-              icon: const Icon(Icons.copy_outlined, size: 18),
-              label: Text(
-                'Copiar endereco para outros PCs (${_ipLocal!}:$_porta)',
-              ),
-            ),
-          ],
-          const Divider(height: 24),
-          Text(
-            'Estacoes conectadas',
-            style: tema.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'PCs com o app aberto e sincronizacao ativa.',
-            style: tema.textTheme.bodySmall?.copyWith(color: onVar),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _carregandoPresenca ? null : _atualizarPresenca,
-            icon: _carregandoPresenca
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.devices_outlined),
-            label: Text(
-              _carregandoPresenca ? 'Consultando...' : 'Ver estacoes online',
-            ),
-          ),
-          if (_presencaErro.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(_presencaErro, style: TextStyle(color: erro, fontSize: 13)),
-            ),
-          if (_estacoesAtivas != null && _presencaErro.isEmpty) ...[
-            const SizedBox(height: 8),
-            Text('Total ativo: $_estacoesAtivas'),
-            ..._estacoesLista.map((s) {
-              final lab = (s['label'] ?? '').toString();
-              return Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('• ${lab.isEmpty ? "PC" : lab}'),
-              );
-            }),
-          ],
-        ] else
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              'No modo cliente, o servidor principal controla as estacoes. '
-              'Use Testar conexao para validar o acesso.',
-              style: tema.textTheme.bodySmall?.copyWith(color: onVar),
-            ),
-          ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final tema = Theme.of(context);
 
     if (_carregando) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Center(child: CircularProgressIndicator()),
-        ),
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: CircularProgressIndicator()),
       );
     }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Rede e sincronizacao (LAN)',
-              style: tema.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Escolha o papel deste computador. O servidor concentra os dados; '
+          'os outros PCs conectam ao IP dele na mesma rede Wi-Fi/cabo.',
+          style: tema.textTheme.bodySmall?.copyWith(
+            color: tema.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ValueListenableBuilder<SyncLogEntry?>(
+          valueListenable: SyncLog.ultimo,
+          builder: (context, ultimoLog, _) {
+            return _buildPainelStatus(tema, ultimoLog);
+          },
+        ),
+        const SizedBox(height: 12),
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(
+              value: true,
+              label: Text('Servidor neste PC'),
+              icon: Icon(Icons.dns_outlined),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Escolha o papel deste computador. O servidor concentra os dados; '
-              'os outros PCs conectam ao IP dele na mesma rede Wi-Fi/cabo.',
-              style: tema.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            ValueListenableBuilder<SyncLogEntry?>(
-              valueListenable: SyncLog.ultimo,
-              builder: (context, ultimoLog, _) {
-                return _buildPainelStatus(tema, ultimoLog);
-              },
-            ),
-            const SizedBox(height: 12),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                  value: true,
-                  label: Text('Servidor neste PC'),
-                  icon: Icon(Icons.dns_outlined),
-                ),
-                ButtonSegment(
-                  value: false,
-                  label: Text('Outro PC e o servidor'),
-                  icon: Icon(Icons.lan_outlined),
-                ),
-              ],
-              selected: {_modoServidor},
-              onSelectionChanged: (s) => _aoMudarModo(s.first),
-            ),
-            const SizedBox(height: 8),
-            SwitchListTile.adaptive(
-              contentPadding: EdgeInsets.zero,
-              value: _syncAtiva,
-              onChanged: (v) => setState(() => _syncAtiva = v),
-              title: const Text('Usar sincronizacao na rede local'),
-              subtitle: const Text(
-                'Sincroniza cadastros, estoque, vendas, NF-e, kits, usuarios e configuracoes.',
-              ),
-            ),
-            if (_syncAtiva)
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                value: _modoImplantacao,
-                onChanged: _alternarModoImplantacao,
-                title: const Text('Modo implantacao (este PC)'),
-                subtitle: const Text(
-                  'Reduz carga na rede: intervalo 60s e espera 3s antes de sync '
-                  'apos varias gravacoes. Preferencia local — nao replica nos outros PCs.',
-                ),
-              ),
-            if (!_syncAtiva) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: tema.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'Com a sincronizacao desligada, este PC trabalha apenas com '
-                  'dados locais. Ative o switch acima para configurar token, '
-                  'endereco e sincronizar com outros computadores.',
-                  style: tema.textTheme.bodySmall,
-                ),
-              ),
-            ] else ...[
-              _secaoTitulo('Passo 1 — Configuracao'),
-              if (_modoServidor) _buildModoServidor(tema) else _buildModoCliente(),
-              const SizedBox(height: 8),
-              _buildCampoToken(),
-              const SizedBox(height: 4),
-              Text(
-                'Mesmo token no servidor e em todos os clientes. Senhas de login '
-                'nao sao replicadas.',
-                style: tema.textTheme.bodySmall,
-              ),
-              _secaoTitulo('Passo 2 — Conexao'),
-              ValueListenableBuilder<SyncLogEntry?>(
-                valueListenable: SyncLog.ultimo,
-                builder: (context, ultimoLog, _) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildChecklist(tema, ultimoLog),
-                      _buildPainelConflitos(tema),
-                      if (ultimoLog != null && !ultimoLog.sucesso)
-                        _buildErroComAjuda(tema, ultimoLog),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: (_salvando || _testandoRede)
-                      ? null
-                      : () => _testarConexao(),
-                  icon: _testandoRede
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.wifi_tethering_outlined),
-                  label: Text(_testandoRede ? 'Testando...' : 'Testar conexao'),
-                ),
-              ),
-              _secaoTitulo('Passo 3 — Dados'),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _salvando ? null : _configurarRedeCompleta,
-                  icon: const Icon(Icons.auto_fix_high_outlined),
-                  label: Text(_rotuloBotaoPrincipal()),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _salvando ? null : () => _salvar(),
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(_salvando ? 'Salvando...' : 'Salvar'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: (_sincronizando || _salvando)
-                          ? null
-                          : _sincronizarAgora,
-                      icon: _sincronizando
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.cloud_sync_outlined),
-                      label: Text(
-                        _sincronizando ? 'Sync...' : 'Sincronizar agora',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              _buildAvancado(tema),
-            ],
-            const SizedBox(height: 12),
-            Center(
-              child: TextButton.icon(
-                onPressed: () => SyncRedeAjuda.mostrarDialogPrimeiraSync(context),
-                icon: const Icon(Icons.help_outline, size: 18),
-                label: const Text('Problemas na primeira sincronizacao?'),
-              ),
+            ButtonSegment(
+              value: false,
+              label: Text('Outro PC e o servidor'),
+              icon: Icon(Icons.lan_outlined),
             ),
           ],
+          selected: {_modoServidor},
+          onSelectionChanged: (s) => _aoMudarModo(s.first),
         ),
-      ),
-    );
-  }
-}
-
-class _StatusLinha extends StatelessWidget {
-  const _StatusLinha({
-    required this.rotulo,
-    required this.valor,
-    this.valorCor,
-  });
-
-  final String rotulo;
-  final String valor;
-  final Color? valorCor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(rotulo, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 8),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: _syncAtiva,
+          onChanged: (v) => setState(() => _syncAtiva = v),
+          title: const Text('Usar sincronizacao na rede local'),
+          subtitle: const Text(
+            'Cadastros, estoque, vendas, NF-e e configuracoes entre PCs.',
           ),
-          Expanded(
+        ),
+        if (!_syncAtiva) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: tema.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
             child: Text(
-              valor,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: valorCor,
-                  ),
+              'Com a sincronizacao desligada, este PC trabalha apenas com '
+              'dados locais. Ative o switch acima para conectar outros '
+              'computadores da loja.',
+              style: tema.textTheme.bodySmall,
             ),
           ),
+        ] else ...[
+          const SizedBox(height: 8),
+          _buildAssistenteSimplificado(tema),
+          const SizedBox(height: 4),
+          _buildOpcoesAvancadasRede(tema),
         ],
-      ),
+        const SizedBox(height: 12),
+        Center(
+          child: TextButton.icon(
+            onPressed: () => SyncRedeAjuda.mostrarDialogPrimeiraSync(context),
+            icon: const Icon(Icons.help_outline, size: 18),
+            label: const Text('Problemas na primeira sincronizacao?'),
+          ),
+        ),
+      ],
     );
   }
 }

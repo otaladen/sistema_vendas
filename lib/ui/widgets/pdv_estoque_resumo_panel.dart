@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/pdv_consulta_multi_deposito_util.dart';
 import '../../domain/pdv_estoque_semaforo_util.dart';
+import '../../domain/produto_embalagem.dart';
 import '../../model/produto.dart';
 import 'pdv_consulta_semaforo_estoque.dart';
 
@@ -18,7 +19,7 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
   final Produto produto;
   final bool compacto;
   /// Quantidade deste produto ja no carrinho/orcamento (unidade de estoque).
-  final int quantidadeNoOrcamento;
+  final num quantidadeNoOrcamento;
   final PdvConsultaDepositoRotulos rotulosDeposito;
 
   @override
@@ -28,8 +29,16 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
     final disponivel = produto.estoqueLivreParaVenda;
     final fisico = produto.estoqueReal;
     final reservado = produto.estoqueReservado;
-    final noOrcamento = quantidadeNoOrcamento.clamp(0, 1 << 30);
+    final noOrcamento = quantidadeNoOrcamento.clamp(0, 1 << 30).toDouble();
     final restanteAposOrcamento = disponivel - noOrcamento;
+    final noOrcTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+      produto,
+      noOrcamento,
+    );
+    final restanteTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+      produto,
+      restanteAposOrcamento.clamp(0, double.infinity),
+    );
     final nivel = PdvEstoqueSemaforoUtil.nivelDe(
       produto,
       quantidadeNoOrcamento: noOrcamento,
@@ -42,7 +51,7 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
           ? ' · ${rotulosDeposito.cd} ${produto.estoqueCd}'
           : '';
       final linhaOrcamento = noOrcamento > 0
-          ? ' · Orc. $noOrcamento · Rest. $restanteAposOrcamento'
+          ? ' · Orc. $noOrcTxt · Rest. $restanteTxt'
           : '';
       return Tooltip(
         message: PdvEstoqueSemaforoUtil.tooltipDe(
@@ -54,7 +63,6 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
           style: theme.textTheme.labelSmall?.copyWith(
             color: corDisponivel,
             fontWeight: FontWeight.w700,
-            fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
       );
@@ -143,8 +151,8 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               restanteAposOrcamento < 0
-                  ? 'Neste orcamento: $noOrcamento · Restante: $restanteAposOrcamento (acima do disponivel)'
-                  : 'Neste orcamento: $noOrcamento · Restante: $restanteAposOrcamento',
+                  ? 'Neste orcamento: $noOrcTxt · Restante: $restanteTxt (acima do disponivel)'
+                  : 'Neste orcamento: $noOrcTxt · Restante: $restanteTxt',
               style: theme.textTheme.labelSmall?.copyWith(
                 color: restanteAposOrcamento < 0
                     ? scheme.error
@@ -178,10 +186,10 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
         Text(
           valor,
           style: (destaque
-                  ? theme.textTheme.titleMedium
-                  : theme.textTheme.titleSmall)
+                  ? theme.textTheme.bodyLarge
+                  : theme.textTheme.bodyMedium)
               ?.copyWith(
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w700,
             color: cor,
           ),
         ),

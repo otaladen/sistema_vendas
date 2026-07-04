@@ -71,7 +71,7 @@ abstract final class PdvConsultaColunas {
   PdvConsultaColunas._();
 
   static const double larguraUnidade = 32;
-  static const double larguraEstoque = 44;
+  static const double larguraEstoque = 56;
   static const double larguraPreco = 84;
   static const double larguraAcao = 40;
 }

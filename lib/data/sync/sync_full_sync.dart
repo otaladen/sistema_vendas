@@ -138,6 +138,8 @@ class SyncFullSync {
     'reajuste_preco',
     'auditoria_evento',
     'item_lista_compra',
+    'produto_sugestao_venda',
+    'sugestao_venda_metrica',
     'recado_loja',
   ];
 
@@ -358,6 +360,26 @@ class SyncFullSync {
             entity,
             i.id,
             SyncEntityCodecOperacional.itemListaCompraParaMap(i),
+          );
+        }
+        break;
+      case 'produto_sugestao_venda':
+        for (final s in _db.produtoSugestaoVendaBox.getAll()) {
+          _add(
+            m,
+            entity,
+            s.id,
+            SyncEntityCodecOperacional.produtoSugestaoVendaParaMap(s),
+          );
+        }
+        break;
+      case 'sugestao_venda_metrica':
+        for (final e in _db.sugestaoVendaMetricaEventoBox.getAll()) {
+          _add(
+            m,
+            entity,
+            e.id,
+            SyncEntityCodecOperacional.sugestaoVendaMetricaParaMap(e),
           );
         }
         break;
@@ -614,6 +636,28 @@ class SyncFullSync {
           );
         }
         break;
+      case 'produto_sugestao_venda':
+        final sv = _db.produtoSugestaoVendaBox.get(localId);
+        if (sv != null) {
+          _add(
+            m,
+            entity,
+            sv.id,
+            SyncEntityCodecOperacional.produtoSugestaoVendaParaMap(sv),
+          );
+        }
+        break;
+      case 'sugestao_venda_metrica':
+        final me = _db.sugestaoVendaMetricaEventoBox.get(localId);
+        if (me != null) {
+          _add(
+            m,
+            entity,
+            me.id,
+            SyncEntityCodecOperacional.sugestaoVendaMetricaParaMap(me),
+          );
+        }
+        break;
       case 'recado_loja':
         final recado = _db.recadoLojaBox.get(localId);
         if (recado != null) {
@@ -771,6 +815,16 @@ class SyncFullSync {
       case 'item_lista_compra':
         await _aplicarItemListaCompra(payload);
         break;
+      case 'produto_sugestao_venda':
+        _db.produtoSugestaoVendaBox.put(
+          SyncEntityCodecOperacional.produtoSugestaoVendaDeMap(payload),
+        );
+        break;
+      case 'sugestao_venda_metrica':
+        _db.sugestaoVendaMetricaEventoBox.put(
+          SyncEntityCodecOperacional.sugestaoVendaMetricaDeMap(payload),
+        );
+        break;
       case 'recado_loja':
         await _aplicarRecadoLoja(payload);
         break;
@@ -890,6 +944,12 @@ class SyncFullSync {
         break;
       case 'item_lista_compra':
         _db.itemListaCompraBox.remove(id);
+        break;
+      case 'produto_sugestao_venda':
+        _db.produtoSugestaoVendaBox.remove(id);
+        break;
+      case 'sugestao_venda_metrica':
+        _db.sugestaoVendaMetricaEventoBox.remove(id);
         break;
       case 'recado_loja':
         _db.recadoLojaBox.remove(id);

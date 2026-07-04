@@ -24,6 +24,42 @@ bool cpfValidoOuVazio(String cpf) {
   return d.endsWith('$d1$d2');
 }
 
+/// Valida CNPJ brasileiro (14 digitos). Retorna true se [cnpj] vazio.
+bool cnpjValidoOuVazio(String cnpj) {
+  final d = somenteDigitos(cnpj);
+  if (d.isEmpty) return true;
+  if (d.length != 14) return false;
+  if (RegExp(r'^(\d)\1{13}$').hasMatch(d)) return false;
+
+  int calcDigito(List<int> base, List<int> pesos) {
+    var soma = 0;
+    for (var i = 0; i < base.length; i++) {
+      soma += base[i] * pesos[i];
+    }
+    final resto = soma % 11;
+    return resto < 2 ? 0 : 11 - resto;
+  }
+
+  final nums = d.split('').map(int.parse).toList();
+  final d1 = calcDigito(nums.sublist(0, 12), const [
+    5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2,
+  ]);
+  final d2 = calcDigito(nums.sublist(0, 13), const [
+    6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2,
+  ]);
+  return nums[12] == d1 && nums[13] == d2;
+}
+
+/// Valida CPF ou CNPJ conforme [tipoPessoa] (`fisica` | `juridica`).
+bool documentoCpfCnpjValidoOuVazio(String doc, {required String tipoPessoa}) {
+  final d = somenteDigitos(doc);
+  if (d.isEmpty) return true;
+  if (tipoPessoa == 'juridica') {
+    return cnpjValidoOuVazio(doc);
+  }
+  return cpfValidoOuVazio(doc);
+}
+
 class CpfInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(

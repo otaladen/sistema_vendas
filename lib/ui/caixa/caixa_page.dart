@@ -34,6 +34,7 @@ import '../../domain/venda_documento_pos_caixa.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../config/focus_nfe_runtime.dart';
 import '../../data/kit_orcamento_repository.dart';
+import '../../data/produto_sugestao_venda_repository.dart';
 import '../../domain/pdv_consulta_multi_deposito_util.dart';
 import '../../domain/pdv_kit_orcamento_insercao.dart';
 import '../../domain/permissao_usuario.dart';
@@ -126,6 +127,8 @@ class _CaixaPageState extends State<CaixaPage> {
 
   late final KitOrcamentoRepository _kitOrcamentoRepo =
       KitOrcamentoRepository(widget.produtoRepository.objectBox);
+  late final ProdutoSugestaoVendaRepository _sugestaoVendaRepo =
+      ProdutoSugestaoVendaRepository(widget.produtoRepository.objectBox);
 
   static String _prefsUltimoTrocoValor(String terminalId) =>
       'caixa_${terminalId}_ultimo_troco_valor_v1';
@@ -2949,6 +2952,7 @@ class _CaixaPageState extends State<CaixaPage> {
           ),
           quantidadeNoOrcamentoDe: _quantidadeProdutoNoOrcamentoSelecionado,
           kitOrcamentoRepository: _kitOrcamentoRepo,
+          sugestaoVendaRepository: _sugestaoVendaRepo,
           mostrarMargemGerente: UsuarioPermissaoHelper.tem(
             widget.usuarioLogado,
             PermissaoUsuario.verCustoMargem,

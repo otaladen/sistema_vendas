@@ -104,6 +104,39 @@ class EmpresaConfig {
 
     /// PDV: obriga escolher vendedor antes de enviar orcamento ao caixa.
     this.pdvExigirVendedor = false,
+
+    /// PDV: terminal bloqueado ate o vendedor informar a senha cadastrada.
+    this.pdvBloqueioVendedor = false,
+
+    /// PDV: minutos sem atividade para exigir nova identificacao do vendedor (0 = desligado).
+    this.pdvBloqueioVendedorInatividadeMinutos = 0,
+
+    /// PDV: apos enviar orcamento ao caixa, exige identificar o vendedor de novo.
+    this.pdvBloqueioVendedorAposOrcamento = false,
+
+    /// Calculadora de obra (PDV): IDs de produto padrao (0 = nao configurado).
+    this.obraCalcTijoloProdutoId = 0,
+    this.obraCalcCimentoProdutoId = 0,
+    this.obraCalcAreiaProdutoId = 0,
+    this.obraCalcPisoProdutoId = 0,
+    this.obraCalcPerdaPadraoPct = 10,
+    this.obraCalcPerdaRebocoPct = 15,
+    this.obraCalcPerdaPisoPct = 10,
+    this.obraCalcEspessuraRebocoMm = 20,
+    this.obraCalcEspessuraContrapisoMm = 30,
+    this.obraCalcM2PorCaixaPiso = 1.44,
+    this.obraCalcGeminiParseAtivo = false,
+    this.obraCalcTemplatesJson = '[]',
+    this.obraCalcBritaProdutoId = 0,
+    this.obraCalcTelhaProdutoId = 0,
+    this.obraCalcFerroProdutoId = 0,
+    this.obraCalcEspessuraLajeMm = 100,
+    this.obraCalcPerdaLajePct = 10,
+    this.obraCalcPerdaFundacaoPct = 10,
+    this.obraCalcPerdaTelhadoPct = 10,
+    this.obraCalcTelhasPorM2 = 16,
+    this.obraCalcInclinacaoTelhadoPct = 30,
+    this.obraCalcUsarSubstitutoEstoqueZero = true,
   });
 
   final String nomeLoja;
@@ -198,6 +231,37 @@ class EmpresaConfig {
   final bool caixaFiscalNaoBloqueante;
   final int caixaLimiteOrcamentosPendentes;
   final bool pdvExigirVendedor;
+  final bool pdvBloqueioVendedor;
+  final int pdvBloqueioVendedorInatividadeMinutos;
+  final bool pdvBloqueioVendedorAposOrcamento;
+
+  /// Produtos padrao da calculadora de obra no PDV (ObjectBox id).
+  final int obraCalcTijoloProdutoId;
+  final int obraCalcCimentoProdutoId;
+  final int obraCalcAreiaProdutoId;
+  final int obraCalcPisoProdutoId;
+
+  /// Margem de perda padrao (%) na calculadora de obra.
+  final double obraCalcPerdaPadraoPct;
+  final double obraCalcPerdaRebocoPct;
+  final double obraCalcPerdaPisoPct;
+  final double obraCalcEspessuraRebocoMm;
+  final double obraCalcEspessuraContrapisoMm;
+  final double obraCalcM2PorCaixaPiso;
+  final bool obraCalcGeminiParseAtivo;
+
+  /// JSON array de [ObraCalculadoraTemplate].
+  final String obraCalcTemplatesJson;
+  final int obraCalcBritaProdutoId;
+  final int obraCalcTelhaProdutoId;
+  final int obraCalcFerroProdutoId;
+  final double obraCalcEspessuraLajeMm;
+  final double obraCalcPerdaLajePct;
+  final double obraCalcPerdaFundacaoPct;
+  final double obraCalcPerdaTelhadoPct;
+  final double obraCalcTelhasPorM2;
+  final double obraCalcInclinacaoTelhadoPct;
+  final bool obraCalcUsarSubstitutoEstoqueZero;
 
   LayoutImpressaoEmpresa get layoutImpressao =>
       LayoutImpressaoEmpresa.fromJsonString(layoutImpressaoJson);
@@ -250,6 +314,31 @@ class EmpresaConfig {
     bool? caixaFiscalNaoBloqueante,
     int? caixaLimiteOrcamentosPendentes,
     bool? pdvExigirVendedor,
+    bool? pdvBloqueioVendedor,
+    int? pdvBloqueioVendedorInatividadeMinutos,
+    bool? pdvBloqueioVendedorAposOrcamento,
+    int? obraCalcTijoloProdutoId,
+    int? obraCalcCimentoProdutoId,
+    int? obraCalcAreiaProdutoId,
+    int? obraCalcPisoProdutoId,
+    double? obraCalcPerdaPadraoPct,
+    double? obraCalcPerdaRebocoPct,
+    double? obraCalcPerdaPisoPct,
+    double? obraCalcEspessuraRebocoMm,
+    double? obraCalcEspessuraContrapisoMm,
+    double? obraCalcM2PorCaixaPiso,
+    bool? obraCalcGeminiParseAtivo,
+    String? obraCalcTemplatesJson,
+    int? obraCalcBritaProdutoId,
+    int? obraCalcTelhaProdutoId,
+    int? obraCalcFerroProdutoId,
+    double? obraCalcEspessuraLajeMm,
+    double? obraCalcPerdaLajePct,
+    double? obraCalcPerdaFundacaoPct,
+    double? obraCalcPerdaTelhadoPct,
+    double? obraCalcTelhasPorM2,
+    double? obraCalcInclinacaoTelhadoPct,
+    bool? obraCalcUsarSubstitutoEstoqueZero,
   }) {
     return EmpresaConfig(
       nomeLoja: nomeLoja ?? this.nomeLoja,
@@ -328,6 +417,69 @@ class EmpresaConfig {
           ? caixaLimiteOrcamentosPendentes.clamp(20, 500)
           : this.caixaLimiteOrcamentosPendentes,
       pdvExigirVendedor: pdvExigirVendedor ?? this.pdvExigirVendedor,
+      pdvBloqueioVendedor: pdvBloqueioVendedor ?? this.pdvBloqueioVendedor,
+      pdvBloqueioVendedorInatividadeMinutos:
+          pdvBloqueioVendedorInatividadeMinutos != null
+              ? pdvBloqueioVendedorInatividadeMinutos.clamp(0, 480)
+              : this.pdvBloqueioVendedorInatividadeMinutos,
+      pdvBloqueioVendedorAposOrcamento: pdvBloqueioVendedorAposOrcamento ??
+          this.pdvBloqueioVendedorAposOrcamento,
+      obraCalcTijoloProdutoId:
+          obraCalcTijoloProdutoId ?? this.obraCalcTijoloProdutoId,
+      obraCalcCimentoProdutoId:
+          obraCalcCimentoProdutoId ?? this.obraCalcCimentoProdutoId,
+      obraCalcAreiaProdutoId:
+          obraCalcAreiaProdutoId ?? this.obraCalcAreiaProdutoId,
+      obraCalcPisoProdutoId:
+          obraCalcPisoProdutoId ?? this.obraCalcPisoProdutoId,
+      obraCalcPerdaPadraoPct: obraCalcPerdaPadraoPct != null
+          ? obraCalcPerdaPadraoPct.clamp(0, 50)
+          : this.obraCalcPerdaPadraoPct,
+      obraCalcPerdaRebocoPct: obraCalcPerdaRebocoPct != null
+          ? obraCalcPerdaRebocoPct.clamp(0, 50)
+          : this.obraCalcPerdaRebocoPct,
+      obraCalcPerdaPisoPct: obraCalcPerdaPisoPct != null
+          ? obraCalcPerdaPisoPct.clamp(0, 50)
+          : this.obraCalcPerdaPisoPct,
+      obraCalcEspessuraRebocoMm: obraCalcEspessuraRebocoMm != null
+          ? obraCalcEspessuraRebocoMm.clamp(5, 50)
+          : this.obraCalcEspessuraRebocoMm,
+      obraCalcEspessuraContrapisoMm: obraCalcEspessuraContrapisoMm != null
+          ? obraCalcEspessuraContrapisoMm.clamp(10, 80)
+          : this.obraCalcEspessuraContrapisoMm,
+      obraCalcM2PorCaixaPiso: obraCalcM2PorCaixaPiso != null
+          ? obraCalcM2PorCaixaPiso.clamp(0.1, 10)
+          : this.obraCalcM2PorCaixaPiso,
+      obraCalcGeminiParseAtivo:
+          obraCalcGeminiParseAtivo ?? this.obraCalcGeminiParseAtivo,
+      obraCalcTemplatesJson:
+          obraCalcTemplatesJson ?? this.obraCalcTemplatesJson,
+      obraCalcBritaProdutoId:
+          obraCalcBritaProdutoId ?? this.obraCalcBritaProdutoId,
+      obraCalcTelhaProdutoId:
+          obraCalcTelhaProdutoId ?? this.obraCalcTelhaProdutoId,
+      obraCalcFerroProdutoId:
+          obraCalcFerroProdutoId ?? this.obraCalcFerroProdutoId,
+      obraCalcEspessuraLajeMm: obraCalcEspessuraLajeMm != null
+          ? obraCalcEspessuraLajeMm.clamp(50, 200)
+          : this.obraCalcEspessuraLajeMm,
+      obraCalcPerdaLajePct: obraCalcPerdaLajePct != null
+          ? obraCalcPerdaLajePct.clamp(0, 50)
+          : this.obraCalcPerdaLajePct,
+      obraCalcPerdaFundacaoPct: obraCalcPerdaFundacaoPct != null
+          ? obraCalcPerdaFundacaoPct.clamp(0, 50)
+          : this.obraCalcPerdaFundacaoPct,
+      obraCalcPerdaTelhadoPct: obraCalcPerdaTelhadoPct != null
+          ? obraCalcPerdaTelhadoPct.clamp(0, 50)
+          : this.obraCalcPerdaTelhadoPct,
+      obraCalcTelhasPorM2: obraCalcTelhasPorM2 != null
+          ? obraCalcTelhasPorM2.clamp(8, 40)
+          : this.obraCalcTelhasPorM2,
+      obraCalcInclinacaoTelhadoPct: obraCalcInclinacaoTelhadoPct != null
+          ? obraCalcInclinacaoTelhadoPct.clamp(0, 60)
+          : this.obraCalcInclinacaoTelhadoPct,
+      obraCalcUsarSubstitutoEstoqueZero: obraCalcUsarSubstitutoEstoqueZero ??
+          this.obraCalcUsarSubstitutoEstoqueZero,
     );
   }
 }
@@ -399,6 +551,37 @@ class AppConfigRepository {
   static const _kCaixaFiscalNaoBloqueante = 'config_caixa_fiscal_nao_bloqueante_v1';
   static const _kCaixaLimiteOrcamentos = 'config_caixa_limite_orcamentos_v1';
   static const _kPdvExigirVendedor = 'config_pdv_exigir_vendedor_v1';
+  static const _kPdvBloqueioVendedor = 'config_pdv_bloqueio_vendedor_v1';
+  static const _kPdvBloqueioVendedorInatividadeMinutos =
+      'config_pdv_bloqueio_vendedor_inatividade_min_v1';
+  static const _kPdvBloqueioVendedorAposOrcamento =
+      'config_pdv_bloqueio_vendedor_apos_orcamento_v1';
+  static const _kObraCalcTijoloProdutoId = 'config_obra_calc_tijolo_produto_id_v1';
+  static const _kObraCalcCimentoProdutoId =
+      'config_obra_calc_cimento_produto_id_v1';
+  static const _kObraCalcAreiaProdutoId = 'config_obra_calc_areia_produto_id_v1';
+  static const _kObraCalcPisoProdutoId = 'config_obra_calc_piso_produto_id_v1';
+  static const _kObraCalcPerdaPadraoPct = 'config_obra_calc_perda_padrao_pct_v1';
+  static const _kObraCalcPerdaRebocoPct = 'config_obra_calc_perda_reboco_pct_v1';
+  static const _kObraCalcPerdaPisoPct = 'config_obra_calc_perda_piso_pct_v1';
+  static const _kObraCalcEspessuraRebocoMm = 'config_obra_calc_esp_reboco_mm_v1';
+  static const _kObraCalcEspessuraContrapisoMm =
+      'config_obra_calc_esp_contrapiso_mm_v1';
+  static const _kObraCalcM2PorCaixaPiso = 'config_obra_calc_m2_por_caixa_v1';
+  static const _kObraCalcGeminiParseAtivo = 'config_obra_calc_gemini_parse_v1';
+  static const _kObraCalcTemplatesJson = 'config_obra_calc_templates_json_v1';
+  static const _kObraCalcBritaProdutoId = 'config_obra_calc_brita_produto_id_v1';
+  static const _kObraCalcTelhaProdutoId = 'config_obra_calc_telha_produto_id_v1';
+  static const _kObraCalcFerroProdutoId = 'config_obra_calc_ferro_produto_id_v1';
+  static const _kObraCalcEspessuraLajeMm = 'config_obra_calc_esp_laje_mm_v1';
+  static const _kObraCalcPerdaLajePct = 'config_obra_calc_perda_laje_pct_v1';
+  static const _kObraCalcPerdaFundacaoPct = 'config_obra_calc_perda_fund_pct_v1';
+  static const _kObraCalcPerdaTelhadoPct = 'config_obra_calc_perda_telh_pct_v1';
+  static const _kObraCalcTelhasPorM2 = 'config_obra_calc_telhas_m2_v1';
+  static const _kObraCalcInclinacaoTelhadoPct =
+      'config_obra_calc_incl_telh_pct_v1';
+  static const _kObraCalcUsarSubstitutoEstoqueZero =
+      'config_obra_calc_subst_estoque_v1';
 
   Future<EmpresaConfig> carregarEmpresaConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -497,6 +680,84 @@ class AppConfigRepository {
         return n.clamp(20, 500);
       }(),
       pdvExigirVendedor: prefs.getBool(_kPdvExigirVendedor) ?? false,
+      pdvBloqueioVendedor: prefs.getBool(_kPdvBloqueioVendedor) ?? false,
+      pdvBloqueioVendedorInatividadeMinutos:
+          prefs.getInt(_kPdvBloqueioVendedorInatividadeMinutos) ?? 0,
+      pdvBloqueioVendedorAposOrcamento:
+          prefs.getBool(_kPdvBloqueioVendedorAposOrcamento) ?? false,
+      obraCalcTijoloProdutoId: prefs.getInt(_kObraCalcTijoloProdutoId) ?? 0,
+      obraCalcCimentoProdutoId: prefs.getInt(_kObraCalcCimentoProdutoId) ?? 0,
+      obraCalcAreiaProdutoId: prefs.getInt(_kObraCalcAreiaProdutoId) ?? 0,
+      obraCalcPisoProdutoId: prefs.getInt(_kObraCalcPisoProdutoId) ?? 0,
+      obraCalcPerdaPadraoPct: () {
+        final v = prefs.getDouble(_kObraCalcPerdaPadraoPct);
+        if (v == null) return 10.0;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcPerdaRebocoPct: () {
+        final v = prefs.getDouble(_kObraCalcPerdaRebocoPct);
+        if (v == null) return 15.0;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcPerdaPisoPct: () {
+        final v = prefs.getDouble(_kObraCalcPerdaPisoPct);
+        if (v == null) return 10.0;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcEspessuraRebocoMm: () {
+        final v = prefs.getDouble(_kObraCalcEspessuraRebocoMm);
+        if (v == null) return 20.0;
+        return v.clamp(5, 50).toDouble();
+      }(),
+      obraCalcEspessuraContrapisoMm: () {
+        final v = prefs.getDouble(_kObraCalcEspessuraContrapisoMm);
+        if (v == null) return 30.0;
+        return v.clamp(10, 80).toDouble();
+      }(),
+      obraCalcM2PorCaixaPiso: () {
+        final v = prefs.getDouble(_kObraCalcM2PorCaixaPiso);
+        if (v == null) return 1.44;
+        return v.clamp(0.1, 10).toDouble();
+      }(),
+      obraCalcGeminiParseAtivo:
+          prefs.getBool(_kObraCalcGeminiParseAtivo) ?? false,
+      obraCalcTemplatesJson:
+          prefs.getString(_kObraCalcTemplatesJson) ?? '[]',
+      obraCalcBritaProdutoId: prefs.getInt(_kObraCalcBritaProdutoId) ?? 0,
+      obraCalcTelhaProdutoId: prefs.getInt(_kObraCalcTelhaProdutoId) ?? 0,
+      obraCalcFerroProdutoId: prefs.getInt(_kObraCalcFerroProdutoId) ?? 0,
+      obraCalcEspessuraLajeMm: () {
+        final v = prefs.getDouble(_kObraCalcEspessuraLajeMm);
+        if (v == null) return 100.0;
+        return v.clamp(50, 200).toDouble();
+      }(),
+      obraCalcPerdaLajePct: () {
+        final v = prefs.getDouble(_kObraCalcPerdaLajePct);
+        if (v == null) return 10.0;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcPerdaFundacaoPct: () {
+        final v = prefs.getDouble(_kObraCalcPerdaFundacaoPct);
+        if (v == null) return 10.0;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcPerdaTelhadoPct: () {
+        final v = prefs.getDouble(_kObraCalcPerdaTelhadoPct);
+        if (v == null) return 10.0;
+        return v.clamp(0, 50).toDouble();
+      }(),
+      obraCalcTelhasPorM2: () {
+        final v = prefs.getDouble(_kObraCalcTelhasPorM2);
+        if (v == null) return 16.0;
+        return v.clamp(8, 40).toDouble();
+      }(),
+      obraCalcInclinacaoTelhadoPct: () {
+        final v = prefs.getDouble(_kObraCalcInclinacaoTelhadoPct);
+        if (v == null) return 30.0;
+        return v.clamp(0, 60).toDouble();
+      }(),
+      obraCalcUsarSubstitutoEstoqueZero:
+          prefs.getBool(_kObraCalcUsarSubstitutoEstoqueZero) ?? true,
     );
     return SyncLocalConfig.aplicarSobre(base);
   }
@@ -648,6 +909,105 @@ class AppConfigRepository {
       config.caixaLimiteOrcamentosPendentes.clamp(20, 500),
     );
     await prefs.setBool(_kPdvExigirVendedor, config.pdvExigirVendedor);
+    await prefs.setBool(_kPdvBloqueioVendedor, config.pdvBloqueioVendedor);
+    await prefs.setInt(
+      _kPdvBloqueioVendedorInatividadeMinutos,
+      config.pdvBloqueioVendedorInatividadeMinutos.clamp(0, 480),
+    );
+    await prefs.setBool(
+      _kPdvBloqueioVendedorAposOrcamento,
+      config.pdvBloqueioVendedorAposOrcamento,
+    );
+    await prefs.setInt(
+      _kObraCalcTijoloProdutoId,
+      config.obraCalcTijoloProdutoId < 0 ? 0 : config.obraCalcTijoloProdutoId,
+    );
+    await prefs.setInt(
+      _kObraCalcCimentoProdutoId,
+      config.obraCalcCimentoProdutoId < 0 ? 0 : config.obraCalcCimentoProdutoId,
+    );
+    await prefs.setInt(
+      _kObraCalcAreiaProdutoId,
+      config.obraCalcAreiaProdutoId < 0 ? 0 : config.obraCalcAreiaProdutoId,
+    );
+    await prefs.setInt(
+      _kObraCalcPisoProdutoId,
+      config.obraCalcPisoProdutoId < 0 ? 0 : config.obraCalcPisoProdutoId,
+    );
+    await prefs.setDouble(
+      _kObraCalcPerdaPadraoPct,
+      config.obraCalcPerdaPadraoPct.clamp(0, 50),
+    );
+    await prefs.setDouble(
+      _kObraCalcPerdaRebocoPct,
+      config.obraCalcPerdaRebocoPct.clamp(0, 50),
+    );
+    await prefs.setDouble(
+      _kObraCalcPerdaPisoPct,
+      config.obraCalcPerdaPisoPct.clamp(0, 50),
+    );
+    await prefs.setDouble(
+      _kObraCalcEspessuraRebocoMm,
+      config.obraCalcEspessuraRebocoMm.clamp(5, 50),
+    );
+    await prefs.setDouble(
+      _kObraCalcEspessuraContrapisoMm,
+      config.obraCalcEspessuraContrapisoMm.clamp(10, 80),
+    );
+    await prefs.setDouble(
+      _kObraCalcM2PorCaixaPiso,
+      config.obraCalcM2PorCaixaPiso.clamp(0.1, 10),
+    );
+    await prefs.setBool(
+      _kObraCalcGeminiParseAtivo,
+      config.obraCalcGeminiParseAtivo,
+    );
+    await prefs.setString(
+      _kObraCalcTemplatesJson,
+      config.obraCalcTemplatesJson.trim().isEmpty
+          ? '[]'
+          : config.obraCalcTemplatesJson,
+    );
+    await prefs.setInt(
+      _kObraCalcBritaProdutoId,
+      config.obraCalcBritaProdutoId < 0 ? 0 : config.obraCalcBritaProdutoId,
+    );
+    await prefs.setInt(
+      _kObraCalcTelhaProdutoId,
+      config.obraCalcTelhaProdutoId < 0 ? 0 : config.obraCalcTelhaProdutoId,
+    );
+    await prefs.setInt(
+      _kObraCalcFerroProdutoId,
+      config.obraCalcFerroProdutoId < 0 ? 0 : config.obraCalcFerroProdutoId,
+    );
+    await prefs.setDouble(
+      _kObraCalcEspessuraLajeMm,
+      config.obraCalcEspessuraLajeMm.clamp(50, 200),
+    );
+    await prefs.setDouble(
+      _kObraCalcPerdaLajePct,
+      config.obraCalcPerdaLajePct.clamp(0, 50),
+    );
+    await prefs.setDouble(
+      _kObraCalcPerdaFundacaoPct,
+      config.obraCalcPerdaFundacaoPct.clamp(0, 50),
+    );
+    await prefs.setDouble(
+      _kObraCalcPerdaTelhadoPct,
+      config.obraCalcPerdaTelhadoPct.clamp(0, 50),
+    );
+    await prefs.setDouble(
+      _kObraCalcTelhasPorM2,
+      config.obraCalcTelhasPorM2.clamp(8, 40),
+    );
+    await prefs.setDouble(
+      _kObraCalcInclinacaoTelhadoPct,
+      config.obraCalcInclinacaoTelhadoPct.clamp(0, 60),
+    );
+    await prefs.setBool(
+      _kObraCalcUsarSubstitutoEstoqueZero,
+      config.obraCalcUsarSubstitutoEstoqueZero,
+    );
     await FiscalConfigStore.aplicarRegimeEmpresa(config.regimeTributarioEmitente);
     await SyncLocalConfig.salvarCamposLocais(config);
     if (propagarRede) {

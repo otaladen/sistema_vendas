@@ -16,6 +16,9 @@ import '../domain/limite_credito_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/pdv_tabela_preco_util.dart';
 import '../domain/pdv_consulta_multi_deposito_util.dart';
+import '../domain/pdv_consulta_insights_service.dart';
+import '../domain/sugestao_venda_metrica_constantes.dart';
+import '../domain/pdv_obra_calculadora_insercao.dart';
 import '../domain/pdv_kit_orcamento_insercao.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/usuario_permissao_helper.dart';
@@ -30,6 +33,8 @@ import '../domain/lista_compra_item_constantes.dart';
 import '../data/lista_compra_repository.dart';
 import '../data/cliente_repository.dart';
 import '../data/kit_orcamento_repository.dart';
+import '../data/produto_sugestao_venda_repository.dart';
+import '../data/sugestao_venda_metrica_repository.dart';
 import '../data/promocao_repository.dart';
 import '../data/usuario_repository.dart';
 import '../domain/promocao_cadastro.dart';
@@ -60,12 +65,16 @@ import 'widgets/anotar_lista_compra_dialog.dart';
 import 'pdv_pesquisa_comando.dart';
 import 'produto_detalhe_venda_page.dart';
 import 'layout/app_layout.dart';
+import 'widgets/operacao_feedback.dart';
 import 'promocao_margem_autorizacao.dart';
 import 'pdv_desconto_autorizacao.dart';
 import 'pdv_preco_unitario_autorizacao.dart';
+import 'pdv_vendedor_bloqueio.dart';
 import 'widgets/pdv_atalhos_ajuda.dart';
 import 'widgets/pdv_calculadora_panel.dart';
+import 'widgets/pdv_obra_calculadora_panel.dart';
 import 'widgets/pdv_carrinho_linha_compacta.dart';
+import 'widgets/pdv_sugestoes_carrinho_strip.dart';
 import 'widgets/pdv_tipo_entrega_item.dart';
 import 'widgets/plano_fiado_pdv_panel.dart';
 import 'widgets/troca_com_nota_pdv_banner.dart';
@@ -120,6 +129,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         PermissaoUsuario.venderFiado,
       );
 
+  bool get _pdvAlvosTouchAmplos =>
+      MediaQuery.sizeOf(context).width < AppBreakpoints.desktop;
+
+  void _pdvErro(String mensagem) {
+    if (!mounted) return;
+    OperacaoFeedback.erro(context, mensagem);
+  }
+
   static const int _validadeOrcamentoDias = 7;
   static const int _selecaoSemClienteValor = -1;
   static const int _selecaoNovoClienteValor = -2;
@@ -166,8 +183,33 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   final GlobalKey _keySeletorClienteAppBarPdv = GlobalKey();
   OverlayEntry? _overlaySugestoesClientePdv;
   OverlayEntry? _overlayCalculadoraPdv;
+  OverlayEntry? _overlayObraCalculadoraPdv;
   Offset _calculadoraPdvOffset = Offset.zero;
+  Offset _obraCalculadoraPdvOffset = Offset.zero;
   bool _calculadoraPdvPosicionada = false;
+  bool _obraCalculadoraPdvPosicionada = false;
+  int _obraCalcTijoloProdutoId = 0;
+  int _obraCalcCimentoProdutoId = 0;
+  int _obraCalcAreiaProdutoId = 0;
+  int _obraCalcPisoProdutoId = 0;
+  double _obraCalcPerdaPadraoPct = 10;
+  double _obraCalcPerdaRebocoPct = 15;
+  double _obraCalcPerdaPisoPct = 10;
+  double _obraCalcEspessuraRebocoMm = 20;
+  double _obraCalcEspessuraContrapisoMm = 30;
+  double _obraCalcM2PorCaixaPiso = 1.44;
+  bool _obraCalcGeminiParseAtivo = false;
+  String _obraCalcTemplatesJson = '[]';
+  int _obraCalcBritaProdutoId = 0;
+  int _obraCalcTelhaProdutoId = 0;
+  int _obraCalcFerroProdutoId = 0;
+  double _obraCalcEspessuraLajeMm = 100;
+  double _obraCalcPerdaLajePct = 10;
+  double _obraCalcPerdaFundacaoPct = 10;
+  double _obraCalcPerdaTelhadoPct = 10;
+  double _obraCalcTelhasPorM2 = 16;
+  double _obraCalcInclinacaoTelhadoPct = 30;
+  bool _obraCalcUsarSubstitutoEstoqueZero = true;
 
   /// Produtos usados recentemente nesta sessao (consulta vazia).
   final List<int> _produtosRecentesPdv = [];
@@ -183,6 +225,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   late final KitOrcamentoRepository _kitOrcamentoRepo =
       KitOrcamentoRepository(widget.produtoRepository.objectBox);
+  late final ProdutoSugestaoVendaRepository _sugestaoVendaRepo =
+      ProdutoSugestaoVendaRepository(widget.produtoRepository.objectBox);
+  late final SugestaoVendaMetricaRepository _sugestaoMetricaRepo =
+      SugestaoVendaMetricaRepository(widget.produtoRepository.objectBox);
   late final PromocaoRepository _promoRepo = PromocaoRepository(
     widget.produtoRepository.objectBox,
   );
@@ -200,12 +246,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   String _precoListaAtivo = 'preco1';
   String _formaPagamentoSelecionada = 'dinheiro';
   int _parcelasSelecionadas = 1;
+  /// Painel "Mais opcoes" removido — pagamento misto fica na secao Pagamento.
   bool _pagamentoMistoPdV = false;
-  /// Painel "Mais opcoes" (vendedor, pagamento misto) no dialogo de fechamento.
-  bool _checkoutMaisOpcoesExpandido = false;
   final List<_LinhaPagamentoMistoPdV> _linhasPagamentoMisto = [];
   List<PlanoFiadoParcela> _planoFiadoParcelas = [];
   static const double _valorMinimoParcelaCreditoPdV = 5.0;
+  static const int _parcelasRapidasCheckoutPdV = 6;
+  static const int _parcelasMaximasCheckoutPdV = 12;
   int? _clienteSelecionadoId;
   int _indiceEnderecoSelecionado = 0;
   int? _vendedorSelecionadoId;
@@ -368,14 +415,129 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _carrinhoFocus.requestFocus();
   }
 
-  int _quantidadeProdutoNoCarrinho(int produtoId) {
+  double _quantidadeUnidadeVendaNoCarrinho(int produtoId) {
     return _carrinho
         .where((e) => e.produto.id == produtoId)
-        .fold(0, (s, e) => s + e.quantidadeEstoque);
+        .fold(0.0, (s, e) => s + e.quantidadeVendaEfetiva);
+  }
+
+  Set<int> _idsProdutosNoCarrinho() =>
+      _carrinho.map((l) => l.produto.id).toSet();
+
+  String _fonteMetricaDe(PdvConsultaAgregadoVenda agregado) =>
+      SugestaoVendaMetricaFonte.deAgregado(
+        historico: agregado.historico,
+        cadastrado: agregado.cadastrado,
+      );
+
+  void _registrarIgnoradosFaixaCarrinho() {
+    final origemId = _sugestoesCarrinhoOrigemId;
+    if (origemId == null || origemId <= 0) return;
+    final login = widget.usuarioLogado.login;
+    for (final s in _sugestoesCarrinhoVisiveis) {
+      if (_sugestoesCarrinhoAceitasIds.contains(s.produtoId)) continue;
+      _sugestaoMetricaRepo.registrarIgnorou(
+        produtoOrigemId: origemId,
+        produtoSugeridoId: s.produtoId,
+        canal: SugestaoVendaMetricaCanal.faixaCarrinho,
+        fonte: _fonteMetricaDe(s),
+        usuarioLogin: login,
+      );
+    }
+  }
+
+  void _registrarExibicoesFaixaCarrinho(
+    int produtoOrigemId,
+    List<PdvConsultaAgregadoVenda> sugestoes,
+  ) {
+    final login = widget.usuarioLogado.login;
+    for (final s in sugestoes) {
+      _sugestaoMetricaRepo.registrarExibiu(
+        produtoOrigemId: produtoOrigemId,
+        produtoSugeridoId: s.produtoId,
+        canal: SugestaoVendaMetricaCanal.faixaCarrinho,
+        fonte: _fonteMetricaDe(s),
+        usuarioLogin: login,
+      );
+    }
+  }
+
+  void _fecharSugestoesCarrinho() {
+    if (_sugestoesCarrinhoVisiveis.isEmpty &&
+        _sugestoesCarrinhoOrigemNome.isEmpty) {
+      return;
+    }
+    _registrarIgnoradosFaixaCarrinho();
+    setState(() {
+      _sugestoesCarrinhoVisiveis = const [];
+      _sugestoesCarrinhoOrigemNome = '';
+      _sugestoesCarrinhoOrigemId = null;
+      _sugestoesCarrinhoAceitasIds.clear();
+    });
+  }
+
+  void _atualizarSugestoesAposAdicionar(Produto produtoAdicionado) {
+    _registrarIgnoradosFaixaCarrinho();
+    final sugestoes = PdvConsultaInsightsService.listarAgregadosParaPdv(
+      referencia: produtoAdicionado,
+      sugestaoVendaRepository: _sugestaoVendaRepo,
+      vendaRepository: widget.vendaRepository,
+      produtoRepository: widget.produtoRepository,
+      precoListaAtivo: _precoListaAtivo,
+      precoUnitarioDe: (p, t) =>
+          _resolverPrecoProduto(p, precoTipoLista: t).precoFinal,
+      limite: 4,
+      excluirProdutoIds: _idsProdutosNoCarrinho(),
+    );
+    if (sugestoes.isEmpty) {
+      _fecharSugestoesCarrinho();
+      return;
+    }
+    setState(() {
+      _sugestoesCarrinhoVisiveis = sugestoes;
+      _sugestoesCarrinhoOrigemNome = produtoAdicionado.nome;
+      _sugestoesCarrinhoOrigemId = produtoAdicionado.id;
+      _sugestoesCarrinhoAceitasIds.clear();
+    });
+    _registrarExibicoesFaixaCarrinho(produtoAdicionado.id, sugestoes);
+  }
+
+  Future<void> _adicionarSugestaoAgregadaDoCarrinho(
+    PdvConsultaAgregadoVenda agregado,
+  ) async {
+    final origemId = _sugestoesCarrinhoOrigemId;
+    if (origemId != null && origemId > 0) {
+      _sugestaoMetricaRepo.registrarAceite(
+        produtoOrigemId: origemId,
+        produtoSugeridoId: agregado.produtoId,
+        canal: SugestaoVendaMetricaCanal.faixaCarrinho,
+        fonte: _fonteMetricaDe(agregado),
+        quantidade: agregado.quantidadeSugerida,
+        usuarioLogin: widget.usuarioLogado.login,
+      );
+      _sugestoesCarrinhoAceitasIds.add(agregado.produtoId);
+    }
+    final produto = widget.produtoRepository.obterPorId(agregado.produtoId);
+    if (produto == null) return;
+    await _adicionarComQuantidade(
+      produto,
+      agregado.quantidadeSugerida.toDouble(),
+      precoTipo: _precoListaAtivo,
+      mostrarSugestoesAgregadas: false,
+    );
+    if (!mounted) return;
+    final restantes = _sugestoesCarrinhoVisiveis
+        .where((s) => s.produtoId != agregado.produtoId)
+        .where((s) => !_idsProdutosNoCarrinho().contains(s.produtoId))
+        .toList();
+    setState(() {
+      _sugestoesCarrinhoVisiveis = restantes;
+      if (restantes.isEmpty) _sugestoesCarrinhoOrigemNome = '';
+    });
   }
 
   bool _produtoExcedeEstoqueNoCarrinho(Produto produto) {
-    return _quantidadeProdutoNoCarrinho(produto.id) >
+    return _quantidadeUnidadeVendaNoCarrinho(produto.id) >
         produto.estoqueLivreParaVenda;
   }
   String _prioridadeEntregaSelecionada = 'normal';
@@ -384,6 +546,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   bool _permitirVendaSemEstoque = false;
   double _maxDescontoPercentualPdv = 15;
   bool _pdvExigirVendedor = false;
+  bool _pdvBloqueioVendedor = false;
+  bool _pdvBloqueioVendedorAposOrcamento = false;
+  int _pdvBloqueioInatividadeMinutos = 0;
+  bool _solicitandoBloqueioVendedorPdv = false;
+  Timer? _timerInatividadeVendedorPdv;
   bool _pdvBalcaoRapido = true;
   bool _pdvCheckoutDireto = true;
   bool _pdvPularDialogOrcamentoSalvo = true;
@@ -400,6 +567,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   double? _ultimoOrcamentoSalvoTotal;
   bool _mostrarAjudaAtalhos = false;
   bool _trocaComNotaBannerVisivel = true;
+  List<PdvConsultaAgregadoVenda> _sugestoesCarrinhoVisiveis = const [];
+  String _sugestoesCarrinhoOrigemNome = '';
+  int? _sugestoesCarrinhoOrigemId;
+  final Set<int> _sugestoesCarrinhoAceitasIds = {};
   bool _trocaComNotaIntentAplicado = false;
   bool _trocaComNotaDescontoAplicado = false;
   double? _trocaComNotaCreditoAplicadoReais;
@@ -438,10 +609,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _aplicarFocoInicialPdv();
   }
 
-  /// Ao abrir o PDV: vendedor → preco → entrega → cliente → busca (Tab).
+  /// Ao abrir o PDV: bloqueio → busca; senao vendedor → cliente → busca (Tab).
   void _aplicarFocoInicialPdv() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      if (_pdvBloqueioVendedor && _vendedorSelecionadoPdv() == null) return;
+      if (_pdvBloqueioVendedor) {
+        _pesquisaFocus.requestFocus();
+        return;
+      }
       if (_vendedoresAtivos.isNotEmpty) {
         _focusVendedorPdV.requestFocus();
         return;
@@ -504,15 +680,143 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     setState(() {
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       _pdvExigirVendedor = config.pdvExigirVendedor;
+      _pdvBloqueioVendedor = config.pdvBloqueioVendedor;
+      _pdvBloqueioVendedorAposOrcamento =
+          config.pdvBloqueioVendedorAposOrcamento;
+      _pdvBloqueioInatividadeMinutos =
+          config.pdvBloqueioVendedorInatividadeMinutos;
       _pdvBalcaoRapido = config.pdvBalcaoRapido;
       _pdvCheckoutDireto = config.pdvCheckoutDireto;
       _pdvPularDialogOrcamentoSalvo = config.pdvPularDialogOrcamentoSalvo;
       _maxDescontoPercentualPdv = widget.usuarioLogado.tetoDescontoPercentualPdv(
         config.maxDescontoPercentualPdv,
       );
+      _obraCalcTijoloProdutoId = config.obraCalcTijoloProdutoId;
+      _obraCalcCimentoProdutoId = config.obraCalcCimentoProdutoId;
+      _obraCalcAreiaProdutoId = config.obraCalcAreiaProdutoId;
+      _obraCalcPisoProdutoId = config.obraCalcPisoProdutoId;
+      _obraCalcPerdaPadraoPct = config.obraCalcPerdaPadraoPct;
+      _obraCalcPerdaRebocoPct = config.obraCalcPerdaRebocoPct;
+      _obraCalcPerdaPisoPct = config.obraCalcPerdaPisoPct;
+      _obraCalcEspessuraRebocoMm = config.obraCalcEspessuraRebocoMm;
+      _obraCalcEspessuraContrapisoMm = config.obraCalcEspessuraContrapisoMm;
+      _obraCalcM2PorCaixaPiso = config.obraCalcM2PorCaixaPiso;
+      _obraCalcGeminiParseAtivo = config.obraCalcGeminiParseAtivo;
+      _obraCalcTemplatesJson = config.obraCalcTemplatesJson;
+      _obraCalcBritaProdutoId = config.obraCalcBritaProdutoId;
+      _obraCalcTelhaProdutoId = config.obraCalcTelhaProdutoId;
+      _obraCalcFerroProdutoId = config.obraCalcFerroProdutoId;
+      _obraCalcEspessuraLajeMm = config.obraCalcEspessuraLajeMm;
+      _obraCalcPerdaLajePct = config.obraCalcPerdaLajePct;
+      _obraCalcPerdaFundacaoPct = config.obraCalcPerdaFundacaoPct;
+      _obraCalcPerdaTelhadoPct = config.obraCalcPerdaTelhadoPct;
+      _obraCalcTelhasPorM2 = config.obraCalcTelhasPorM2;
+      _obraCalcInclinacaoTelhadoPct = config.obraCalcInclinacaoTelhadoPct;
+      _obraCalcUsarSubstitutoEstoqueZero =
+          config.obraCalcUsarSubstitutoEstoqueZero;
     });
     await _aplicarIntentTrocaComNotaSeNecessario();
     await _aplicarOrcamentoInicialSeNecessario();
+    await _aplicarBloqueioVendedorInicialSeNecessario();
+    _registrarAtividadePdvVendedor();
+  }
+
+  Future<void> _aplicarBloqueioVendedorInicialSeNecessario() async {
+    if (!_pdvBloqueioVendedor || _vendedorSelecionadoPdv() != null) return;
+    await _solicitarIdentificacaoVendedorPdvBloqueio(
+      permitirCancelar: true,
+      sairDoPdvSeCancelar: true,
+    );
+  }
+
+  Future<bool> _solicitarIdentificacaoVendedorPdvBloqueio({
+    bool permitirCancelar = true,
+    bool sairDoPdvSeCancelar = false,
+  }) async {
+    if (!_pdvBloqueioVendedor || _solicitandoBloqueioVendedorPdv) {
+      return _vendedorSelecionadoPdv() != null;
+    }
+    _solicitandoBloqueioVendedorPdv = true;
+    try {
+      final vendedor = await solicitarIdentificacaoVendedorPdv(
+        context: context,
+        vendedorRepository: widget.vendedorRepository,
+        usuarioRepository: _usuarioRepository,
+        permitirCancelar: permitirCancelar,
+      );
+      if (!mounted) return false;
+      if (vendedor == null) {
+        if (sairDoPdvSeCancelar && Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+        return false;
+      }
+      setState(() => _vendedorSelecionadoId = vendedor.id);
+      if (_checkoutDialogAberto) {
+        _checkoutDialogSetState?.call(() {});
+      }
+      _registrarAtividadePdvVendedor();
+      _aplicarFocoInicialPdv();
+      return true;
+    } finally {
+      _solicitandoBloqueioVendedorPdv = false;
+    }
+  }
+
+  Future<void> _trocarVendedorPdvBloqueio() async {
+    if (!_pdvBloqueioVendedor) return;
+    _timerInatividadeVendedorPdv?.cancel();
+    setState(() => _vendedorSelecionadoId = null);
+    await _solicitarIdentificacaoVendedorPdvBloqueio(
+      permitirCancelar: true,
+      sairDoPdvSeCancelar: false,
+    );
+  }
+
+  void _registrarAtividadePdvVendedor() {
+    if (!_pdvBloqueioVendedor ||
+        _pdvBloqueioInatividadeMinutos <= 0 ||
+        _vendedorSelecionadoPdv() == null) {
+      _timerInatividadeVendedorPdv?.cancel();
+      return;
+    }
+    _timerInatividadeVendedorPdv?.cancel();
+    _timerInatividadeVendedorPdv = Timer(
+      Duration(minutes: _pdvBloqueioInatividadeMinutos),
+      () => unawaited(_bloquearVendedorPorInatividadePdv()),
+    );
+  }
+
+  Future<void> _bloquearVendedorPorInatividadePdv() async {
+    if (!mounted || !_pdvBloqueioVendedor) return;
+    if (_vendedorSelecionadoPdv() == null) return;
+    if (_checkoutDialogAberto ||
+        _solicitandoBloqueioVendedorPdv ||
+        _dialogoOrcamentoSalvoAberto) {
+      _registrarAtividadePdvVendedor();
+      return;
+    }
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      _registrarAtividadePdvVendedor();
+      return;
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 3),
+        content: Text(
+          'Terminal ocioso por $_pdvBloqueioInatividadeMinutos min. '
+          'Identifique o vendedor novamente.',
+        ),
+      ),
+    );
+    setState(() => _vendedorSelecionadoId = null);
+    await _solicitarIdentificacaoVendedorPdvBloqueio(
+      permitirCancelar: false,
+      sairDoPdvSeCancelar: false,
+    );
   }
 
   Future<void> _aplicarOrcamentoInicialSeNecessario() async {
@@ -639,7 +943,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _pdvClienteBuscaController.dispose();
     _fecharOverlaySugestoesClientePdv();
     _fecharCalculadoraPdv();
+    _fecharObraCalculadoraPdv();
     _debounceLeitorBarrasPdv?.cancel();
+    _timerInatividadeVendedorPdv?.cancel();
     _pesquisaController.removeListener(_onPesquisaPdvTextoChanged);
     _pesquisaFocus.dispose();
     _pesquisaController.dispose();
@@ -758,6 +1064,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         produto,
         qtd.toDouble(),
         precoTipo: _precoListaAtivo,
+        quantidadeEmUnidadeCompra: produto.pdvPodeVenderEmUnidadeCompra,
       );
       _voltarFocoParaPesquisa();
     } finally {
@@ -777,6 +1084,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         qtd,
         precoTipo: _precoListaAtivo,
         tipoEntregaItem: _tipoEntregaSelecionada,
+        quantidadeEmUnidadeCompra: produto.pdvPodeVenderEmUnidadeCompra,
       );
       return;
     }
@@ -792,6 +1100,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         1,
         precoTipo: _precoListaAtivo,
         tipoEntregaItem: _tipoEntregaSelecionada,
+        quantidadeEmUnidadeCompra: produto.pdvPodeVenderEmUnidadeCompra,
       );
       return;
     }
@@ -847,9 +1156,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             dataReferencia: DateTime.now(),
             segmentoCliente: _segmentoClienteAtivo,
           ),
-          quantidadeNoOrcamentoDe: _quantidadeProdutoNoCarrinho,
+          quantidadeNoOrcamentoDe: _quantidadeUnidadeVendaNoCarrinho,
           criadoPorListaCompra: widget.usuarioLogado.login,
           kitOrcamentoRepository: _kitOrcamentoRepo,
+          sugestaoVendaRepository: _sugestaoVendaRepo,
+          produtosNoOrcamentoIdsDe: _idsProdutosNoCarrinho,
           mostrarMargemGerente: UsuarioPermissaoHelper.tem(
             widget.usuarioLogado,
             PermissaoUsuario.verCustoMargem,
@@ -885,6 +1196,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         result.produto,
         1,
         precoTipo: result.precoListaAtivo,
+        quantidadeEmUnidadeCompra: result.quantidadeEmUnidadeCompra,
       );
       return;
     }
@@ -893,6 +1205,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         result.produto,
         result.quantidadeDireta!.toDouble(),
         precoTipo: result.precoListaAtivo,
+        quantidadeEmUnidadeCompra: result.quantidadeEmUnidadeCompra,
       );
       return;
     }
@@ -922,9 +1235,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   List<FocusNode> _cadeiaFocoCheckout() {
-    final nodes = <FocusNode>[];
+    final nodes = <FocusNode>[
+      _focusClientePdV,
+      _focusVendedorPdV,
+    ];
     if (_carrinho.isNotEmpty) {
       nodes.add(_carrinhoFocus);
+      nodes.add(_focusPagamentoPdV);
+      nodes.add(_focusDescontoPdV);
     }
     nodes.add(_focusSalvarOrcamentoPdV);
     return nodes;
@@ -957,6 +1275,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   /// Teclas globais do PDV (F7 checkout; seta baixo na busca entra no carrinho).
   bool _handlerTeclasHardwarePdv(KeyEvent event) {
     if (!mounted) return false;
+    if (event is KeyDownEvent &&
+        _pdvBloqueioVendedor &&
+        _pdvBloqueioInatividadeMinutos > 0) {
+      _registrarAtividadePdvVendedor();
+    }
 
     if (_dialogoOrcamentoSalvoAberto && event is KeyDownEvent) {
       return true;
@@ -969,9 +1292,22 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       return true;
     }
 
+    if (_overlayObraCalculadoraPdv != null &&
+        event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      _fecharObraCalculadoraPdv();
+      return true;
+    }
+
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.f11) {
       _toggleCalculadoraPdv();
+      return true;
+    }
+
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.f12) {
+      _toggleObraCalculadoraPdv();
       return true;
     }
 
@@ -983,11 +1319,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         return true;
       }
       if (event.logicalKey == LogicalKeyboardKey.f6) {
-        _toggleCheckoutMaisOpcoesDialogoAberto();
+        _alternarPagamentoMistoCheckoutDialogoAberto();
         return true;
       }
       if (event.logicalKey == LogicalKeyboardKey.f3) {
         _focarDescontoCheckoutDialogoAberto();
+        return true;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.f7) {
+        _agendarCheckoutF7Microtask(_shiftPressionado());
         return true;
       }
       if (event.logicalKey == LogicalKeyboardKey.escape) {
@@ -1031,8 +1371,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
 
     if (event is! KeyDownEvent) return false;
-
-    if (_checkoutDialogAberto) return false;
 
     _agendarCheckoutF7Microtask(_shiftPressionado());
     return true;
@@ -1122,9 +1460,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   void _snackbarSemEstoqueComOpcaoCompra(Produto produto) {
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Sem estoque de ${produto.nome}.'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.orange.shade800,
+        content: Row(
+          children: [
+            const Icon(Icons.info_outline, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(child: Text('Sem estoque de ${produto.nome}.')),
+          ],
+        ),
         action: SnackBarAction(
           label: 'Anotar compra',
           onPressed: () {
@@ -1146,19 +1493,20 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
   }
 
-  Future<void> _adicionarComQuantidade(
+  Future<bool> _adicionarComQuantidade(
     Produto produtoIn,
     double quantidadeVenda, {
     String? precoTipo,
     String? tipoEntregaItem,
     bool quantidadeEmUnidadeCompra = false,
+    bool mostrarSugestoesAgregadas = true,
   }) async {
-    if (quantidadeVenda <= 0) return;
+    if (quantidadeVenda <= 0) return false;
     final produto = _produtoAtualizadoParaPdv(produtoIn);
     final fracionada = produto.permiteQuantidadeFracionada &&
         !quantidadeEmUnidadeCompra;
     if (!fracionada && quantidadeVenda != quantidadeVenda.roundToDouble()) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -1167,34 +1515,36 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           ),
         ),
       );
-      return;
+      return false;
     }
     final qArmazenada = QuantidadeVendaUtil.paraArmazenamento(
       quantidadeVenda,
       fracionada: fracionada,
     );
-    if (qArmazenada <= 0) return;
+    if (qArmazenada <= 0) return false;
     final precoLista = precoTipo ?? _precoListaAtivo;
     final emEmbalagem = quantidadeEmUnidadeCompra &&
         produto.pdvPodeVenderEmUnidadeCompra;
-    final qEstoque = ProdutoEmbalagem.quantidadeVendaParaEstoque(
-      produto: produto,
-      quantidadeDigitada: QuantidadeVendaUtil.paraEstoqueInteiro(
-        produto,
-        qArmazenada,
-      ),
-      emUnidadeCompra: emEmbalagem,
-    );
-    if (qEstoque <= 0) return;
+    final qUnidadeVenda = emEmbalagem
+        ? ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
+            produto: produto,
+            quantidadeComercial: quantidadeVenda,
+          )
+        : QuantidadeVendaUtil.valorExibicao(
+            qArmazenada,
+            fracionada: fracionada,
+          );
+    if (qUnidadeVenda <= 0) return false;
+    final qEstoquePromo = qUnidadeVenda.ceil();
     final resPreco = _resolverPrecoProduto(
       produto,
       precoTipoLista: precoLista,
-      quantidade: qEstoque,
+      quantidade: qEstoquePromo,
     );
     if (resPreco.emPromocao) {
       if (resPreco.quantidadeMaximaPorVenda > 0 &&
-          qEstoque > resPreco.quantidadeMaximaPorVenda) {
-        if (!mounted) return;
+          qEstoquePromo > resPreco.quantidadeMaximaPorVenda) {
+        if (!mounted) return false;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -1203,11 +1553,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             ),
           ),
         );
-        return;
+        return false;
       }
       if (resPreco.quantidadeRestanteGlobal > 0 &&
-          qEstoque > resPreco.quantidadeRestanteGlobal) {
-        if (!mounted) return;
+          qEstoquePromo > resPreco.quantidadeRestanteGlobal) {
+        if (!mounted) return false;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -1216,7 +1566,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             ),
           ),
         );
-        return;
+        return false;
       }
       if (resPreco.margemMinimaPercentual > 0) {
         final margem = PromocaoCadastro.margemSobrePrecoVenda(
@@ -1231,7 +1581,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             margemMinima: resPreco.margemMinimaPercentual,
             nomeProduto: produto.nome,
           );
-          if (!ok) return;
+          if (!ok) return false;
         }
       }
     }
@@ -1242,20 +1592,20 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       final disp = fresh.estoqueLivreParaVenda;
       if (disp <= 0) {
         _snackbarSemEstoqueComOpcaoCompra(produto);
-        return;
+        return false;
       }
-      final jaNoCarrinho = _quantidadeProdutoNoCarrinho(produto.id);
-      if (jaNoCarrinho + qEstoque > disp) {
+      final jaNoCarrinho = _quantidadeUnidadeVendaNoCarrinho(produto.id);
+      if (jaNoCarrinho + qUnidadeVenda > disp) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               'Estoque maximo para ${produto.nome}: $disp ${
                 ProdutoEmbalagem.normalizarUnidade(fresh.unidade)
-              } (ja ha $jaNoCarrinho no orcamento).',
+              } (ja ha ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(produto, jaNoCarrinho)} no orcamento).',
             ),
           ),
         );
-        return;
+        return false;
       }
     }
     final tipoNovo = EntregaVendaHelper.normalizarTipoItem(
@@ -1290,7 +1640,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     });
     _aplicarDescontoCreditoTrocaComNotaSePossivel();
     _registrarProdutoRecente(produto);
+    if (mostrarSugestoesAgregadas) {
+      _atualizarSugestoesAposAdicionar(produto);
+    }
     _voltarFocoParaPesquisa();
+    return true;
   }
 
   Future<void> _inserirKitPorId(int kitId, int quantidadeKits) async {
@@ -1314,7 +1668,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
 
     for (final linha in montada.linhas) {
-      await _adicionarComQuantidade(linha.produto, linha.quantidade);
+      await _adicionarComQuantidade(
+        linha.produto,
+        linha.quantidade,
+        mostrarSugestoesAgregadas: false,
+      );
     }
 
     if (!mounted) return;
@@ -1444,11 +1802,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
   }
 
-  int _passoQuantidadeCarrinho(Produto produto) {
-    if (produto.permiteQuantidadeFracionada) {
-      return QuantidadeVendaUtil.escalaFracionada ~/ 10;
+  int _passoQuantidadeCarrinho(_OrcamentoItemDraft item) {
+    if (item.quantidadeEmUnidadeCompra ||
+        !item.produto.permiteQuantidadeFracionada) {
+      return 1;
     }
-    return 1;
+    return QuantidadeVendaUtil.escalaFracionada ~/ 10;
   }
 
   void _alterarQuantidadeCarrinho(int index, int deltaArmazenado) {
@@ -1457,20 +1816,26 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       final fresh =
           widget.produtoRepository.obterPorId(item.produto.id) ?? item.produto;
       final disp = fresh.estoqueLivreParaVenda;
-      final qNova = ProdutoEmbalagem.quantidadeVendaParaEstoque(
-        produto: item.produto,
-        quantidadeDigitada: QuantidadeVendaUtil.paraEstoqueInteiro(
-          item.produto,
-          item.quantidade + deltaArmazenado,
-        ),
-        emUnidadeCompra: item.quantidadeEmUnidadeCompra,
-      );
-      if (qNova > disp) {
+      final novaArmazenada = item.quantidade + deltaArmazenado;
+      final qNova = item.quantidadeEmUnidadeCompra &&
+              item.produto.pdvPodeVenderEmUnidadeCompra
+          ? ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
+              produto: item.produto,
+              quantidadeComercial: novaArmazenada.toDouble(),
+            )
+          : QuantidadeVendaUtil.valorExibicao(
+              novaArmazenada,
+              fracionada: item.produto.permiteQuantidadeFracionada &&
+                  !item.quantidadeEmUnidadeCompra,
+            );
+      final jaOutros = _quantidadeUnidadeVendaNoCarrinho(item.produto.id) -
+          item.quantidadeVendaEfetiva;
+      if (jaOutros + qNova > disp) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               'Estoque maximo: $disp ${ProdutoEmbalagem.normalizarUnidade(fresh.unidade)} '
-              '(no orcamento: ${item.quantidadeEstoque}).',
+              '(no orcamento: ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(item.produto, jaOutros + item.quantidadeVendaEfetiva)}).',
             ),
           ),
         );
@@ -1556,14 +1921,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     if (!ctrl && event.logicalKey == LogicalKeyboardKey.numpadAdd) {
       _alterarQuantidadeCarrinho(
         idx,
-        _passoQuantidadeCarrinho(_carrinho[idx].produto),
+        _passoQuantidadeCarrinho(_carrinho[idx]),
       );
       return KeyEventResult.handled;
     }
     if (!ctrl && event.logicalKey == LogicalKeyboardKey.numpadSubtract) {
       _alterarQuantidadeCarrinho(
         idx,
-        -_passoQuantidadeCarrinho(_carrinho[idx].produto),
+        -_passoQuantidadeCarrinho(_carrinho[idx]),
       );
       return KeyEventResult.handled;
     }
@@ -1607,8 +1972,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   /// Quando [pdvExigirVendedor] esta ativo, abre dialogo para escolher vendedor.
   /// Retorna `false` se o usuario cancelar ou nao houver vendedores ativos.
   Future<bool> _garantirVendedorPdvObrigatorio() async {
-    if (!_pdvExigirVendedor) return true;
+    if (!_pdvExigirVendedor && !_pdvBloqueioVendedor) return true;
     if (_vendedorSelecionadoPdv() != null) return true;
+
+    if (_pdvBloqueioVendedor) {
+      return _solicitarIdentificacaoVendedorPdvBloqueio(
+        permitirCancelar: true,
+        sairDoPdvSeCancelar: false,
+      );
+    }
+
+    if (!_pdvExigirVendedor) return true;
 
     if (_vendedoresAtivos.isEmpty) {
       _carregarDadosIniciais();
@@ -1685,6 +2059,91 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final vendedorAtual = _vendedorSelecionadoPdv();
+    final semVendedorObrigatorio =
+        (_pdvExigirVendedor || _pdvBloqueioVendedor) && vendedorAtual == null;
+    final tooltip = vendedorAtual == null
+        ? (_pdvBloqueioVendedor
+            ? 'Identifique o vendedor com a senha'
+            : _pdvExigirVendedor
+                ? 'Vendedor (obrigatorio)'
+                : 'Vendedor da venda (opcional)')
+        : _rotuloItemVendedorPdV(vendedorAtual);
+
+    if (_pdvBloqueioVendedor) {
+      final rotulo = vendedorAtual == null
+          ? 'Vendedor *'
+          : _rotuloCurtoVendedorPdV(vendedorAtual);
+      return FocusTraversalOrder(
+        order: const NumericFocusOrder(1),
+        child: Tooltip(
+          message: tooltip,
+          waitDuration: const Duration(milliseconds: 400),
+          child: SizedBox(
+            height: 30,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surface.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: semVendedorObrigatorio
+                      ? scheme.error.withValues(alpha: 0.75)
+                      : scheme.outlineVariant.withValues(alpha: 0.45),
+                  width: semVendedorObrigatorio ? 1.5 : 1,
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8, right: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.lock_outline,
+                      size: 14,
+                      color: semVendedorObrigatorio
+                          ? scheme.error
+                          : scheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 92),
+                      child: Text(
+                        rotulo,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: semVendedorObrigatorio ? scheme.error : null,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: vendedorAtual == null
+                          ? 'Identificar vendedor'
+                          : 'Trocar vendedor',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
+                      ),
+                      onPressed: () =>
+                          unawaited(_trocarVendedorPdvBloqueio()),
+                      icon: Icon(
+                        vendedorAtual == null
+                            ? Icons.login
+                            : Icons.swap_horiz,
+                        size: 18,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final itens = <DropdownMenuItem<int?>>[
       if (!_pdvExigirVendedor)
         const DropdownMenuItem<int?>(
@@ -1701,14 +2160,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         ),
       ),
     ];
-
-    final vendedorAtual = _vendedorSelecionadoPdv();
-    final semVendedorObrigatorio = _pdvExigirVendedor && vendedorAtual == null;
-    final tooltip = vendedorAtual == null
-        ? (_pdvExigirVendedor
-            ? 'Vendedor (obrigatorio)'
-            : 'Vendedor da venda (opcional)')
-        : _rotuloItemVendedorPdV(vendedorAtual);
 
     return FocusTraversalOrder(
       order: const NumericFocusOrder(1),
@@ -1983,15 +2434,19 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   void _fecharOverlaySugestoesClientePdv() {
-    _overlaySugestoesClientePdv?.remove();
+    final entry = _overlaySugestoesClientePdv;
+    if (entry == null) return;
     _overlaySugestoesClientePdv = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) => entry.remove());
   }
 
   void _fecharCalculadoraPdv() {
-    _overlayCalculadoraPdv?.remove();
+    final entry = _overlayCalculadoraPdv;
+    if (entry == null) return;
     _overlayCalculadoraPdv = null;
     _calculadoraPdvPosicionada = false;
     _calculadoraPdvOffset = Offset.zero;
+    WidgetsBinding.instance.addPostFrameCallback((_) => entry.remove());
   }
 
   void _toggleCalculadoraPdv() {
@@ -1999,6 +2454,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       _fecharCalculadoraPdv();
       return;
     }
+    _fecharObraCalculadoraPdv();
     final overlay = Overlay.of(context);
     _overlayCalculadoraPdv = OverlayEntry(
       builder: (overlayContext) {
@@ -2025,16 +2481,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 color: Colors.transparent,
                 child: PdvCalculadoraPanel(
                   onFechar: _fecharCalculadoraPdv,
-                  onPanDelta: (delta) {
-                    final area = MediaQuery.sizeOf(overlayContext);
-                    _calculadoraPdvOffset = Offset(
-                      (_calculadoraPdvOffset.dx + delta.dx)
-                          .clamp(0.0, area.width - w),
-                      (_calculadoraPdvOffset.dy + delta.dy)
-                          .clamp(0.0, area.height - h),
-                    );
-                    _overlayCalculadoraPdv?.markNeedsBuild();
-                  },
+                onPanDelta: (delta) {
+                  if (!mounted || _overlayCalculadoraPdv == null) return;
+                  final area = MediaQuery.sizeOf(overlayContext);
+                  _calculadoraPdvOffset = Offset(
+                    (_calculadoraPdvOffset.dx + delta.dx)
+                        .clamp(0.0, area.width - w),
+                    (_calculadoraPdvOffset.dy + delta.dy)
+                        .clamp(0.0, area.height - h),
+                  );
+                  _overlayCalculadoraPdv?.markNeedsBuild();
+                },
                 ),
               ),
             ),
@@ -2043,6 +2500,133 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       },
     );
     overlay.insert(_overlayCalculadoraPdv!);
+  }
+
+  void _fecharObraCalculadoraPdv() {
+    final entry = _overlayObraCalculadoraPdv;
+    if (entry == null) return;
+    _overlayObraCalculadoraPdv = null;
+    _obraCalculadoraPdvPosicionada = false;
+    _obraCalculadoraPdvOffset = Offset.zero;
+    WidgetsBinding.instance.addPostFrameCallback((_) => entry.remove());
+  }
+
+  EmpresaConfig _empresaConfigObraCalculadora() {
+    return EmpresaConfig(
+      obraCalcTijoloProdutoId: _obraCalcTijoloProdutoId,
+      obraCalcCimentoProdutoId: _obraCalcCimentoProdutoId,
+      obraCalcAreiaProdutoId: _obraCalcAreiaProdutoId,
+      obraCalcPisoProdutoId: _obraCalcPisoProdutoId,
+      obraCalcPerdaPadraoPct: _obraCalcPerdaPadraoPct,
+      obraCalcPerdaRebocoPct: _obraCalcPerdaRebocoPct,
+      obraCalcPerdaPisoPct: _obraCalcPerdaPisoPct,
+      obraCalcEspessuraRebocoMm: _obraCalcEspessuraRebocoMm,
+      obraCalcEspessuraContrapisoMm: _obraCalcEspessuraContrapisoMm,
+      obraCalcM2PorCaixaPiso: _obraCalcM2PorCaixaPiso,
+      obraCalcGeminiParseAtivo: _obraCalcGeminiParseAtivo,
+      obraCalcTemplatesJson: _obraCalcTemplatesJson,
+      obraCalcBritaProdutoId: _obraCalcBritaProdutoId,
+      obraCalcTelhaProdutoId: _obraCalcTelhaProdutoId,
+      obraCalcFerroProdutoId: _obraCalcFerroProdutoId,
+      obraCalcEspessuraLajeMm: _obraCalcEspessuraLajeMm,
+      obraCalcPerdaLajePct: _obraCalcPerdaLajePct,
+      obraCalcPerdaFundacaoPct: _obraCalcPerdaFundacaoPct,
+      obraCalcPerdaTelhadoPct: _obraCalcPerdaTelhadoPct,
+      obraCalcTelhasPorM2: _obraCalcTelhasPorM2,
+      obraCalcInclinacaoTelhadoPct: _obraCalcInclinacaoTelhadoPct,
+      obraCalcUsarSubstitutoEstoqueZero: _obraCalcUsarSubstitutoEstoqueZero,
+    );
+  }
+
+  void _toggleObraCalculadoraPdv() {
+    if (_overlayObraCalculadoraPdv != null) {
+      _fecharObraCalculadoraPdv();
+      return;
+    }
+    _fecharCalculadoraPdv();
+    final overlay = Overlay.of(context);
+    _overlayObraCalculadoraPdv = OverlayEntry(
+      builder: (overlayContext) {
+        final size = MediaQuery.sizeOf(overlayContext);
+        const w = PdvObraCalculadoraPanel.largura;
+        const h = PdvObraCalculadoraPanel.alturaEstimada;
+        if (!_obraCalculadoraPdvPosicionada) {
+          _obraCalculadoraPdvOffset = Offset(
+            (size.width - w) / 2,
+            (size.height - h) / 2,
+          );
+          _obraCalculadoraPdvPosicionada = true;
+        }
+        final left = _obraCalculadoraPdvOffset.dx.clamp(0.0, size.width - w);
+        final top = _obraCalculadoraPdvOffset.dy.clamp(0.0, size.height - h);
+        return Stack(
+          children: [
+            Positioned(
+              left: left,
+              top: top,
+              child: PdvObraCalculadoraPanel(
+                config: _empresaConfigObraCalculadora(),
+                produtoRepository: widget.produtoRepository,
+                onFechar: _fecharObraCalculadoraPdv,
+                onAdicionarTudo: _inserirLinhasObraCalculadora,
+                onPanDelta: (delta) {
+                  if (!mounted || _overlayObraCalculadoraPdv == null) return;
+                  final area = MediaQuery.sizeOf(overlayContext);
+                  _obraCalculadoraPdvOffset = Offset(
+                    (_obraCalculadoraPdvOffset.dx + delta.dx)
+                        .clamp(0.0, area.width - w),
+                    (_obraCalculadoraPdvOffset.dy + delta.dy)
+                        .clamp(0.0, area.height - h),
+                  );
+                  _overlayObraCalculadoraPdv?.markNeedsBuild();
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    overlay.insert(_overlayObraCalculadoraPdv!);
+  }
+
+  Future<void> _inserirLinhasObraCalculadora(
+    List<PdvObraCalculadoraLinhaInsercao> linhas,
+  ) async {
+    var inseridos = 0;
+    final ignorados = <String>[];
+    for (final linha in linhas) {
+      final ok = await _adicionarComQuantidade(
+        linha.produto,
+        linha.quantidade,
+        mostrarSugestoesAgregadas: false,
+      );
+      if (ok) {
+        inseridos++;
+      } else {
+        ignorados.add(linha.produto.nome);
+      }
+    }
+    if (!mounted) return;
+    if (inseridos == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ignorados.isEmpty
+                ? 'Nenhum material foi adicionado ao orcamento.'
+                : 'Nenhum material adicionado. Verifique: '
+                    '${ignorados.join(", ")}.',
+          ),
+        ),
+      );
+      return;
+    }
+    final msg = ignorados.isEmpty
+        ? '$inseridos material(is) da obra adicionados ao orcamento.'
+        : '$inseridos material(is) adicionados. Nao incluidos: '
+            '${ignorados.join(", ")}.';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
   }
 
   void _atualizarOverlaySugestoesClientePdv() {
@@ -2797,7 +3381,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         precoTipoLista: linha.precoTipo,
         quantidade: linha.quantidadeEstoque,
       ),
-      quantidadeNoOrcamento: _quantidadeProdutoNoCarrinho(linha.produto.id),
+      quantidadeNoOrcamento: _quantidadeUnidadeVendaNoCarrinho(linha.produto.id),
       precoUnitarioLinha: linha.precoUnitario,
       precoUnitarioManual: linha.precoUnitarioManual,
       onAlterarPreco: () => unawaited(_alterarPrecoLinhaCarrinhoSelecionada()),
@@ -2872,6 +3456,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         rotuloPreco: _rotuloPreco,
         formatarMoeda: _formatarMoeda,
         onAlterarQuantidade: _alterarQuantidadeCarrinho,
+        passoQuantidadeCarrinho: _passoQuantidadeCarrinho,
         onRemoverItem: _removerItemCarrinho,
         onAlternarTipoEntrega: _alternarTipoEntregaLinhaCarrinho,
         onAlternarTabelaPreco: _alternarTabelaPrecoLinhaCarrinho,
@@ -2879,6 +3464,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         onAlterarPrecoLinha: _alterarPrecoLinhaCarrinho,
         onIrPesquisaQuandoVazio: () => unawaited(_abrirConsultaProdutos()),
         produtoExcedeEstoque: _produtoExcedeEstoqueNoCarrinho,
+        alvosTouchAmplos: _pdvAlvosTouchAmplos,
       ),
       subtotalProdutos: _totalOrcamento,
       valorFrete: _valorFreteAtual,
@@ -3238,6 +3824,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     return opcoes;
   }
 
+  /// No pagamento misto, todas as formas cadastradas no PDV ficam disponiveis
+  /// (nao restringe pela tabela de preco do carrinho).
+  List<({String id, String rotulo, IconData icone})>
+      _opcoesFormaPagamentoMistoPdV() {
+    return [
+      for (final op in _opcoesFormaPagamentoPdV)
+        if (op.id != 'fiado' || _podeVenderFiado) op,
+    ];
+  }
+
   bool _podeSelecionarMeioMistoFiado(String meioAtualLinha) {
     if (meioAtualLinha == 'fiado') return true;
     return !_linhasPagamentoMisto.any((l) => l.meio == 'fiado');
@@ -3278,37 +3874,198 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     required VoidCallback? onTap,
   }) {
     final scheme = Theme.of(context).colorScheme;
+    final destaque = selecionado || destacadoTeclado;
     return ChoiceChip(
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icone, size: 17),
+          Icon(
+            icone,
+            size: 17,
+            color: selecionado ? scheme.onPrimaryContainer : scheme.onSurface,
+          ),
           const SizedBox(width: 5),
-          Text(rotulo),
+          Text(
+            rotulo,
+            style: TextStyle(
+              fontWeight: selecionado ? FontWeight.w800 : FontWeight.w600,
+            ),
+          ),
         ],
       ),
+      showCheckmark: false,
       selected: selecionado,
-      side: destacadoTeclado && !selecionado
-          ? BorderSide(color: scheme.primary, width: 2)
-          : null,
+      selectedColor: scheme.primaryContainer.withValues(alpha: 0.72),
+      backgroundColor: scheme.surface,
+      side: BorderSide(
+        color: destaque ? scheme.primary : scheme.outlineVariant,
+        width: destaque ? 1.5 : 1,
+      ),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       onSelected: onTap == null ? null : (_) => onTap(),
     );
   }
 
-  Widget _buildChipsFormaPagamentoCheckout(StateSetter setDialogState) {
+  Widget _buildChipParcelaCreditoCheckout({
+    required int parcelas,
+    required double valorBase,
+    required bool selecionado,
+    required VoidCallback onTap,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return ChoiceChip(
+      label: Text(
+        _rotuloParcelaCreditoValor(parcelas, valorBase),
+        style: TextStyle(
+          fontFeatures: const [FontFeature.tabularFigures()],
+          fontWeight: selecionado ? FontWeight.w800 : FontWeight.w600,
+          fontSize: 12,
+        ),
+      ),
+      showCheckmark: false,
+      selected: selecionado,
+      selectedColor: scheme.primaryContainer.withValues(alpha: 0.72),
+      backgroundColor: scheme.surface,
+      side: BorderSide(
+        color: selecionado ? scheme.primary : scheme.outlineVariant,
+        width: selecionado ? 1.5 : 1,
+      ),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      onSelected: (_) => onTap(),
+    );
+  }
+
+  Widget _buildChipsParcelasCreditoCheckout(StateSetter setDialogState) {
     final theme = Theme.of(context);
-    final pagamentoComFoco = _focusPagamentoPdV.hasFocus;
-    final opcoes = _opcoesFormaPagamentoPdVAtivas();
-    final atalhos =
-        opcoes.length <= 1 ? '1' : '1-${opcoes.length}';
+    final valorBase = _totalLiquidoPagamentoPdV();
+    final parcelas = _parcelasSelecionadas.clamp(1, _parcelasMaximasCheckoutPdV);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Forma de pagamento ($atalhos ou setas) · ${_rotuloFormaPagamentoCheckoutPdV()}',
-          style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                'Parcelas no cartao',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 168,
+              child: DropdownButtonFormField<int>(
+                key: ValueKey(parcelas),
+                isExpanded: true,
+                isDense: true,
+                initialValue: parcelas,
+                decoration: const InputDecoration(
+                  labelText: 'Parcelas',
+                  isDense: true,
+                ),
+                items: List.generate(_parcelasMaximasCheckoutPdV, (i) {
+                  final n = i + 1;
+                  return DropdownMenuItem(
+                    value: n,
+                    child: Text(
+                      _rotuloParcelaCreditoValor(n, valorBase),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }),
+                onChanged: (p) {
+                  if (p == null) return;
+                  _atualizarCheckoutFechamento(
+                    setDialogState,
+                    () => _parcelasSelecionadas = p,
+                  );
+                },
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
+        Text(
+          'Atalhos 1–$_parcelasRapidasCheckoutPdV · demais parcelas no seletor',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Focus(
+          focusNode: _focusParcelasPdV,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (var n = 1; n <= _parcelasRapidasCheckoutPdV; n++)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      right: n < _parcelasRapidasCheckoutPdV ? 6 : 0,
+                    ),
+                    child: _buildChipParcelaCreditoCheckout(
+                      parcelas: n,
+                      valorBase: valorBase,
+                      selecionado: parcelas == n,
+                      onTap: () => _atualizarCheckoutFechamento(
+                        setDialogState,
+                        () => _parcelasSelecionadas = n,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _rotuloParcela(parcelas),
+          style: theme.textTheme.bodySmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildChipsFormaPagamentoCheckout(
+    StateSetter setDialogState, {
+    bool exibirTituloSecao = true,
+  }) {
+    final theme = Theme.of(context);
+    final pagamentoComFoco = _focusPagamentoPdV.hasFocus;
+    final opcoes = _opcoesFormaPagamentoPdVAtivas();
+    final atalhos = opcoes.length <= 1 ? '1' : '1-${opcoes.length}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (exibirTituloSecao) ...[
+          Text(
+            'Forma de pagamento ($atalhos ou setas) · '
+            '${_rotuloFormaPagamentoCheckoutPdV()}',
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ] else
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              'Meio da venda ($atalhos ou setas) · '
+              '${_rotuloFormaPagamentoCheckoutPdV()}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         Focus(
           focusNode: _focusPagamentoPdV,
           onFocusChange: (hasFocus) {
@@ -3354,47 +4111,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
   }
 
-  Widget _buildChipsParcelasCreditoCheckout(StateSetter setDialogState) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Parcelas no cartao',
-          style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 6),
-        Focus(
-          focusNode: _focusParcelasPdV,
-          child: Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: List.generate(12, (i) {
-            final n = i + 1;
-            return ChoiceChip(
-              label: Text(
-                _rotuloParcelaCreditoValor(n, _totalLiquidoPagamentoPdV()),
-              ),
-              selected: _parcelasSelecionadas == n,
-              onSelected: (_) {
-                _atualizarCheckoutFechamento(
-                  setDialogState,
-                  () => _parcelasSelecionadas = n,
-                );
-              },
-            );
-          }),
-        ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          _rotuloParcela(_parcelasSelecionadas),
-          style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-        ),
-      ],
-    );
-  }
-
   Widget _buildChipsMeioMistoLinha({
     required _LinhaPagamentoMistoPdV linha,
     required StateSetter setDialogState,
@@ -3403,7 +4119,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       spacing: 4,
       runSpacing: 4,
       children: [
-        for (final op in _opcoesFormaPagamentoPdVAtivas())
+        for (final op in _opcoesFormaPagamentoMistoPdV())
           _buildChipFormaPagamento(
             rotulo: op.rotulo,
             icone: op.icone,
@@ -3719,7 +4435,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   void _aplicarFocoInicialCheckoutDialog() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_checkoutDialogAberto || !mounted) return;
-      if (_pagamentoMistoPdV && _checkoutMaisOpcoesExpandido) {
+      if (_pagamentoMistoPdV) {
         _focusPagamentoMistoSwitchPdV.requestFocus();
         return;
       }
@@ -3734,18 +4450,29 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     Navigator.of(ctx).pop();
   }
 
-  void _toggleCheckoutMaisOpcoes(StateSetter setDialogState) {
+  void _alternarPagamentoMistoCheckout(
+    StateSetter setDialogState, {
+    ScrollController? scrollCheckout,
+  }) {
     _atualizarCheckoutFechamento(
       setDialogState,
-      () => _checkoutMaisOpcoesExpandido = !_checkoutMaisOpcoesExpandido,
+      () {
+        _pagamentoMistoPdV = !_pagamentoMistoPdV;
+        if (_pagamentoMistoPdV) {
+          _inicializarLinhasMistoPadrao();
+        } else {
+          _disposeLinhasPagamentoMisto();
+        }
+      },
+      scrollCheckout: scrollCheckout,
     );
     _aplicarFocoInicialCheckoutDialog();
   }
 
-  void _toggleCheckoutMaisOpcoesDialogoAberto() {
+  void _alternarPagamentoMistoCheckoutDialogoAberto() {
     final setDialogState = _checkoutDialogSetState;
     if (setDialogState == null) return;
-    _toggleCheckoutMaisOpcoes(setDialogState);
+    _alternarPagamentoMistoCheckout(setDialogState);
   }
 
   String? _mensagemErroConfirmarCheckout() {
@@ -3802,15 +4529,133 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     await _confirmarCheckoutEEnviar(fechamentoDialogContext: ctx);
   }
 
-  Widget _buildCheckoutDicaAtalhosTeclado() {
+  Widget _buildCheckoutAtalhoChip(String rotulo) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.8)),
+      ),
       child: Text(
-        'F10 enviar · 1-6 pagamento · F3 desconto · F6 misto',
+        rotulo,
         style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w700,
+          color: scheme.onSurfaceVariant,
         ),
+      ),
+    );
+  }
+
+  Widget _buildCheckoutDicaAtalhosTeclado() {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        _buildCheckoutAtalhoChip('F10 enviar'),
+        _buildCheckoutAtalhoChip('1-6 meio'),
+        _buildCheckoutAtalhoChip('F3 desconto'),
+        _buildCheckoutAtalhoChip('F6 misto'),
+        _buildCheckoutAtalhoChip('Esc fechar'),
+      ],
+    );
+  }
+
+  Widget _buildCheckoutDialogCabecalho(BuildContext dialogContext) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final titulo = _orcamentoEmEdicaoId != null
+        ? 'Concluir atualizacao da venda'
+        : 'Enviar ao caixa';
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest.withValues(alpha: 0.55),
+        border: Border(
+          bottom: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.7)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.point_of_sale_outlined, color: scheme.primary, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  'Revise pagamento e envie ao operador do caixa',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Fechar (Esc)',
+            onPressed: () => Navigator.pop(dialogContext),
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckoutDialogRodape({
+    required BuildContext dialogContext,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final confirmarLabel = _orcamentoEmEdicaoId != null
+        ? 'Confirmar atualizacao'
+        : 'Enviar ao caixa';
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest.withValues(alpha: 0.55),
+        border: Border(
+          top: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.7)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildCheckoutDicaAtalhosTeclado(),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Fechar (Esc)'),
+              ),
+              const Spacer(),
+              Focus(
+                focusNode: _focusCheckoutAcaoPrimaria,
+                child: FilledButton.icon(
+                  onPressed: () => unawaited(
+                    _confirmarCheckoutEEnviar(
+                      fechamentoDialogContext: dialogContext,
+                    ),
+                  ),
+                  icon: const Icon(Icons.point_of_sale_outlined),
+                  label: Text('$confirmarLabel (F10)'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -3849,8 +4694,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       await _salvarOrcamento();
       return;
     }
-    _checkoutMaisOpcoesExpandido =
-        _pagamentoMistoPdV || _orcamentoEmEdicaoId != null;
     final scrollCheckout = ScrollController();
     _checkoutDialogAberto = true;
     _checkoutDialogFocoInicialAplicado = false;
@@ -3875,70 +4718,67 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 _aplicarFocoInicialCheckoutDialog();
               });
             }
-            return AlertDialog(
-              title: Text(
-                _orcamentoEmEdicaoId != null
-                    ? 'Concluir atualizacao da venda'
-                    : 'Dados para enviar ao caixa',
+            final theme = Theme.of(context);
+            return Dialog(
+              backgroundColor: theme.colorScheme.surface,
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 24,
               ),
-              content: AdaptiveDialogPane(
-                desktopWidth: 560,
-                desktopHeight: (MediaQuery.sizeOf(context).height * 0.55)
-                    .clamp(380.0, 520.0),
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: AdaptiveDialogPane(
+                desktopWidth: 580,
+                desktopHeight: (MediaQuery.sizeOf(context).height * 0.58)
+                    .clamp(420.0, 560.0),
                 child: Theme(
-                  data: Theme.of(context).copyWith(
+                  data: theme.copyWith(
                     visualDensity: VisualDensity.compact,
-                    inputDecorationTheme: Theme.of(context)
-                        .inputDecorationTheme
-                        .copyWith(
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 10,
-                          ),
-                        ),
+                    inputDecorationTheme: theme.inputDecorationTheme.copyWith(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
+                      ),
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _buildCheckoutResumoFixo(
-                        setDialogState,
-                        dialogContext: dialogContext,
+                      _buildCheckoutDialogCabecalho(dialogContext),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: _buildCheckoutResumoFixo(setDialogState),
                       ),
-                      const SizedBox(height: 10),
                       Expanded(
-                        child: Scrollbar(
-                          controller: scrollCheckout,
-                          thumbVisibility: true,
-                          trackVisibility: true,
-                          interactive: true,
-                          child: SingleChildScrollView(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Scrollbar(
                             controller: scrollCheckout,
-                            primary: false,
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsets.only(
-                              right: 8,
-                              bottom: 120,
-                            ),
-                            child: FocusTraversalGroup(
-                              policy: OrderedTraversalPolicy(),
-                              child: _buildFormularioFechamentoVenda(
-                                setDialogState: setDialogState,
-                                scrollCheckout: scrollCheckout,
+                            thumbVisibility: true,
+                            interactive: true,
+                            child: SingleChildScrollView(
+                              controller: scrollCheckout,
+                              primary: false,
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.only(right: 4, bottom: 8),
+                              child: FocusTraversalGroup(
+                                policy: OrderedTraversalPolicy(),
+                                child: _buildFormularioFechamentoVenda(
+                                  setDialogState: setDialogState,
+                                  scrollCheckout: scrollCheckout,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                      _buildCheckoutDicaAtalhosTeclado(),
+                      _buildCheckoutDialogRodape(dialogContext: dialogContext),
                     ],
                   ),
                 ),
-              ),
-              actions: _buildCheckoutDialogActions(
-                dialogContext: dialogContext,
-                setDialogState: setDialogState,
-                scrollCheckout: scrollCheckout,
               ),
             );
           },
@@ -3967,9 +4807,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     ScrollController? scrollCheckout,
   }) {
     fn();
-    if (_pagamentoMistoPdV || _precisaPlanoFiadoPdV()) {
-      _checkoutMaisOpcoesExpandido = true;
-    }
     setDialogState(() {});
     if (scrollCheckout != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3980,33 +4817,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         }
       });
     }
-  }
-
-  List<Widget> _buildCheckoutDialogActions({
-    required BuildContext dialogContext,
-    required StateSetter setDialogState,
-    required ScrollController scrollCheckout,
-  }) {
-    final confirmarLabel = _orcamentoEmEdicaoId != null
-        ? 'Confirmar atualizacao'
-        : 'Enviar ao caixa';
-
-    return [
-      TextButton(
-        onPressed: () => Navigator.pop(dialogContext),
-        child: const Text('Fechar (Esc)'),
-      ),
-      Focus(
-        focusNode: _focusCheckoutAcaoPrimaria,
-        child: FilledButton.icon(
-          onPressed: () => unawaited(
-            _confirmarCheckoutEEnviar(fechamentoDialogContext: dialogContext),
-          ),
-          icon: const Icon(Icons.point_of_sale_outlined),
-          label: Text('$confirmarLabel (F10)'),
-        ),
-      ),
-    ];
   }
 
   Widget _buildCheckoutBannerEdicao(StateSetter setDialogState) {
@@ -4070,84 +4880,84 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
   }
 
-  Widget _buildCheckoutMaisOpcoes({
+  Widget _buildCheckoutSecaoPagamento({
     required StateSetter setDialogState,
     ScrollController? scrollCheckout,
   }) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return _buildSecaoCheckoutDialog(
+      titulo: 'Pagamento',
+      icone: Icons.payments_outlined,
       children: [
-        Material(
-          color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(8),
-          child: InkWell(
-            onTap: () => _toggleCheckoutMaisOpcoes(setDialogState),
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(
-                    _checkoutMaisOpcoesExpandido
-                        ? Icons.expand_less
-                        : Icons.expand_more,
-                    size: 20,
+        Text(
+          'F6 alterna pagamento misto · teclas 1-6 ou setas no meio unico',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Focus(
+          focusNode: _focusPagamentoMistoSwitchPdV,
+          child: SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            value: _pagamentoMistoPdV,
+            onChanged: (on) {
+              if (on == _pagamentoMistoPdV) return;
+              _atualizarCheckoutFechamento(
+                setDialogState,
+                () {
+                  _pagamentoMistoPdV = on;
+                  if (on) {
+                    _inicializarLinhasMistoPadrao();
+                  } else {
+                    _disposeLinhasPagamentoMisto();
+                  }
+                },
+                scrollCheckout: scrollCheckout,
+              );
+            },
+            title: Row(
+              children: [
+                const Expanded(
+                  child: Text('Dividir pagamento (misto)'),
+                ),
+                if (_pagamentoMistoPdV)
+                  Chip(
+                    label: const Text('Ativo'),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Pagamento misto (F6)',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  if (_pagamentoMistoPdV)
-                    Chip(
-                      label: const Text('Misto'),
-                      visualDensity: VisualDensity.compact,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                ],
-              ),
+              ],
+            ),
+            subtitle: const Text(
+              'Libera todos os meios (dinheiro, PIX, cartoes, fiado...)',
+              style: TextStyle(fontSize: 12),
             ),
           ),
         ),
-        if (_checkoutMaisOpcoesExpandido) ...[
-          const SizedBox(height: 8),
-          Focus(
-            focusNode: _focusPagamentoMistoSwitchPdV,
-            child: SwitchListTile.adaptive(
-              contentPadding: EdgeInsets.zero,
-              value: _pagamentoMistoPdV,
-              onChanged: (on) {
-                _atualizarCheckoutFechamento(
-                  setDialogState,
-                  () {
-                    _pagamentoMistoPdV = on;
-                    if (on) {
-                      _inicializarLinhasMistoPadrao();
-                      _checkoutMaisOpcoesExpandido = true;
-                    } else {
-                      _disposeLinhasPagamentoMisto();
-                    }
-                  },
-                  scrollCheckout: scrollCheckout,
-                );
-              },
-              title: const Text('Dividir pagamento (misto)'),
-              subtitle: const Text(
-                'Ex.: parte em dinheiro e parte em fiado',
-                style: TextStyle(fontSize: 12),
-              ),
-            ),
+        if (_pagamentoMistoPdV) ...[
+          const SizedBox(height: 4),
+          _buildPainelPagamentoMistoPdV(setDialogState),
+        ] else ...[
+          const SizedBox(height: 4),
+          _buildChipsFormaPagamentoCheckout(
+            setDialogState,
+            exibirTituloSecao: false,
           ),
-          if (_pagamentoMistoPdV) ...[
-            const SizedBox(height: 4),
-            _buildPainelPagamentoMistoPdV(setDialogState),
-          ],
         ],
+      ],
+    );
+  }
+
+  Widget _buildCheckoutSecaoDesconto(StateSetter setDialogState) {
+    if (_maxDescontoPercentualPdv <= 0) return const SizedBox.shrink();
+    return _buildSecaoCheckoutDialog(
+      titulo: 'Desconto (F3)',
+      icone: Icons.discount_outlined,
+      children: [
+        _buildCheckoutCampoDesconto(setDialogState),
       ],
     );
   }
@@ -4435,18 +5245,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
   }
 
-  Widget _buildCheckoutResumoFixo(
-    StateSetter setDialogState, {
-    required BuildContext dialogContext,
-  }) {
+  Widget _buildCheckoutResumoFixo(StateSetter setDialogState) {
     final theme = Theme.of(context);
     final total = _totalLiquidoPagamentoPdV();
     final fiado = _valorFiadoCheckoutPdV();
     final agora = _valorEntraCaixaAgoraPdV();
     final desconto = _valorDescontoReaisPdV();
-    final confirmarLabel = _orcamentoEmEdicaoId != null
-        ? 'Atualizar'
-        : 'Enviar';
 
     return Container(
       width: double.infinity,
@@ -4461,39 +5265,19 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Total a pagar (caixa)',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      _formatarMoeda(total),
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              FilledButton.icon(
-                onPressed: () => unawaited(
-                  _confirmarCheckoutEEnviar(
-                    fechamentoDialogContext: dialogContext,
-                  ),
-                ),
-                icon: const Icon(Icons.point_of_sale_outlined, size: 20),
-                label: Text('$confirmarLabel (F10)'),
-              ),
-            ],
+          Text(
+            'Total a pagar (caixa)',
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Text(
+            _formatarMoeda(total),
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: theme.colorScheme.primary,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
           const SizedBox(height: 6),
           Text(
@@ -4524,10 +5308,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               ],
             ),
           ],
-          if (_maxDescontoPercentualPdv > 0) ...[
-            const SizedBox(height: 10),
-            _buildCheckoutCampoDesconto(setDialogState),
-          ],
         ],
       ),
     );
@@ -4556,6 +5336,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             _formatarMoeda(valor),
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
         ],
@@ -4599,7 +5380,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                       ? 'Desconto %'
                       : 'Desconto R\$',
                   filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.92),
+                  fillColor: Theme.of(context)
+                      .colorScheme
+                      .surface
+                      .withValues(alpha: 0.92),
                   helperText: _descontoAcimaTetoAutorizadoPdv
                       ? 'Autorizado por $_descontoAutorizadoPorPdV'
                       : (_descontoPdVUltrapassaTetoSemAutorizacao()
@@ -4646,19 +5430,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         _buildCheckoutBannerEdicao(setDialogState),
         _buildCheckoutResumoLinhaItens(),
         const SizedBox(height: 10),
-        if (_pagamentoMistoPdV)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              'Pagamento dividido — ajuste em Pagamento misto (F6).',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          )
-        else
-          _buildChipsFormaPagamentoCheckout(setDialogState),
+        _buildCheckoutSecaoPagamento(
+          setDialogState: setDialogState,
+          scrollCheckout: scrollCheckout,
+        ),
         _buildCheckoutPainelFiado(setDialogState),
         if (_precisaPlanoFiadoPdV() &&
             (_clienteSelecionadoId == null || _clienteSelecionadoId! <= 0)) ...[
@@ -4671,18 +5446,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             ),
           ),
         ],
+        _buildCheckoutSecaoDesconto(setDialogState),
         if (_checkoutExibeSecaoEntrega) ...[
-          const SizedBox(height: 12),
           _buildCheckoutSecaoEntrega(
             setDialogState: setDialogState,
             scrollCheckout: scrollCheckout,
           ),
         ],
-        const SizedBox(height: 10),
-        _buildCheckoutMaisOpcoes(
-          setDialogState: setDialogState,
-          scrollCheckout: scrollCheckout,
-        ),
       ],
     );
   }
@@ -4802,10 +5572,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   /// Limpa a tela para a proxima venda (vendedor, cliente, carrinho, busca).
-  void _prepararNovaVendaAposEnvioCaixa({
+  Future<void> _prepararNovaVendaAposEnvioCaixa({
     int? numeroOrcamentoSalvo,
     double? totalOrcamentoSalvo,
-  }) {
+  }) async {
+    final bloquearVendedorAposEnvio =
+        _pdvBloqueioVendedor && _pdvBloqueioVendedorAposOrcamento;
+    _registrarIgnoradosFaixaCarrinho();
     setState(() {
       if (numeroOrcamentoSalvo != null && numeroOrcamentoSalvo > 0) {
         _ultimoOrcamentoSalvoNumero = numeroOrcamentoSalvo;
@@ -4813,6 +5586,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       }
       _carrinho.clear();
       _indiceLinhaCarrinho = null;
+      _sugestoesCarrinhoVisiveis = const [];
+      _sugestoesCarrinhoOrigemNome = '';
+      _sugestoesCarrinhoOrigemId = null;
+      _sugestoesCarrinhoAceitasIds.clear();
       _pagamentoMistoPdV = false;
       _disposeLinhasPagamentoMisto();
       _formaPagamentoSelecionada = 'dinheiro';
@@ -4820,7 +5597,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       _planoFiadoParcelas = [];
       _clienteSelecionadoId = null;
       _indiceEnderecoSelecionado = 0;
-      _vendedorSelecionadoId = null;
+      if (!_pdvBloqueioVendedor || bloquearVendedorAposEnvio) {
+        _vendedorSelecionadoId = null;
+      }
       _tipoEntregaSelecionada = EntregaVendaHelper.tipoRetirada;
       _prioridadeEntregaSelecionada = 'normal';
       _janelaEntregaSelecionada = 'nao_definida';
@@ -4836,7 +5615,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       _pesquisaController.clear();
     });
     _sincronizarTextoBuscaClientePdv();
+    if (bloquearVendedorAposEnvio) {
+      _timerInatividadeVendedorPdv?.cancel();
+      await _solicitarIdentificacaoVendedorPdvBloqueio(
+        permitirCancelar: false,
+        sairDoPdvSeCancelar: false,
+      );
+      return;
+    }
     _aplicarFocoInicialPdv();
+    _registrarAtividadePdvVendedor();
   }
 
   Future<void> _salvarOrcamento({BuildContext? fechamentoDialogContext}) async {
@@ -4926,7 +5714,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           .map(
             (item) => ItemVendaInput(
               produtoId: item.produto.id,
-              quantidade: item.quantidade,
+              quantidade: item.quantidadeParaPersistir,
               precoUnitario: item.precoUnitario,
               precoTipo: item.precoTipo,
               tipoEntregaItem: item.tipoEntregaItem,
@@ -4940,9 +5728,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         linhasMisto = _montarLinhasMistoParaSalvar(_totalLiquidoPagamentoPdV());
       } on StateError catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.message)));
+        _pdvErro(e.message);
         return;
       }
       var pagamento = DadosPagamentoOrcamento(
@@ -5056,16 +5842,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         await _mostrarAcoesPdfOrcamento(vendaSalva);
       }
       if (mounted) {
-        _prepararNovaVendaAposEnvioCaixa(
+        await _prepararNovaVendaAposEnvioCaixa(
           numeroOrcamentoSalvo: numeroOrcamentoSalvo,
           totalOrcamentoSalvo: vendaSalva?.total,
         );
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao salvar venda: $e')));
+      _pdvErro('Erro ao salvar venda: $e');
     } finally {
       _salvandoOrcamento = false;
     }
@@ -5291,7 +6075,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         widget.vendaRepository.obterPorId(selecionado.id) ?? selecionado;
     final drafts = <_OrcamentoItemDraft>[];
     final nomesItensSemProduto = <String>[];
-    for (final item in orcamentoCompleto.itens) {
+    final itensPersistidos = widget.vendaRepository.listarItensPorVenda(
+      orcamentoCompleto.id,
+    );
+    final itensParaCarregar = itensPersistidos.isNotEmpty
+        ? itensPersistidos
+        : orcamentoCompleto.itens;
+    for (final item in itensParaCarregar) {
       final produto = _resolverProdutoItemOrcamento(item);
       if (produto == null) {
         nomesItensSemProduto.add(item.nomeProduto);
@@ -5305,13 +6095,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           orcamentoCompleto.tipoEntrega,
         );
       }
+      final qCarrinho = ProdutoEmbalagem.quantidadeCarrinhoDeItemPersistido(
+        produto: produto,
+        quantidadeArmazenada: item.quantidade,
+      );
       drafts.add(
         _OrcamentoItemDraft(
           produto: produto,
-          quantidade: item.quantidade,
+          quantidade: qCarrinho.quantidadeDigitada,
           precoTipo: item.precoTipo,
           precoUnitario: item.precoUnitario,
           tipoEntregaItem: tipoItem,
+          quantidadeEmUnidadeCompra: qCarrinho.emUnidadeCompra,
           promocaoId: item.promocaoId,
           promocaoNome: item.promocaoNomeSnapshot,
         ),
@@ -5522,6 +6317,32 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   Future<CupomPdfGerado> _gerarOrcamentoPdfBytes(Venda venda) async {
+    var vendaId = venda.id;
+    if (vendaId <= 0 && venda.numeroOrcamento > 0) {
+      final porNumero = widget.vendaRepository.buscarOrcamentoPendentePorNumero(
+        venda.numeroOrcamento,
+      );
+      vendaId = porNumero?.id ?? vendaId;
+    }
+    var itensOrcamento = vendaId > 0
+        ? widget.vendaRepository.listarItensPorVenda(vendaId)
+        : <ItemVenda>[];
+    if (itensOrcamento.isEmpty && vendaId > 0) {
+      final recarregada = widget.vendaRepository.obterPorId(vendaId);
+      if (recarregada != null && recarregada.itens.isNotEmpty) {
+        itensOrcamento = recarregada.itens;
+      }
+    }
+    final subtotalItensOrcamento = itensOrcamento.fold<double>(
+      0,
+      (s, item) => s + item.subtotal,
+    );
+    final brutoOrcamentoPdf =
+        subtotalItensOrcamento + (venda.valorFrete > 0 ? venda.valorFrete : 0);
+    final totalOrcamentoPdf = itensOrcamento.isEmpty
+        ? venda.total
+        : (brutoOrcamentoPdf - venda.descontoImplicitoTotal)
+            .clamp(0.0, double.infinity);
     final cliente = _clienteDaVenda(venda);
     final empresa = await widget.appConfigRepository.carregarEmpresaConfig();
     final logoBytes = empresa.logoPath.trim().isNotEmpty
@@ -5543,30 +6364,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       familiaFonte: LayoutFamiliaFonte.courier,
     );
     final doc = CupomPdfLayout.criarDocumento(layout);
-    final linhasTexto = CupomPdfLayout.contarLinhasCabecalhoOrcamento(
+    final pageFormat = CupomPdfLayout.formatoPaginaOrcamentoSalvar(
+      modelo: modelo,
       layout: layout,
-      temCliente: temCliente,
-      temVendedor: temVendedor,
-      cliente: cliente,
-    );
-    final linhasExtras = CupomPdfLayout.contarLinhasExtrasOrcamento(
-      layout: layout,
-      temDesconto: descontoOrcamento > 0,
-      temFrete: temFrete,
-      textoRodape: empresa.rodapeOrcamento,
-    ) +
-        PlanoFiadoCodec.contarLinhasPdf(venda);
-    final unidadesItens = CupomPdfLayout.unidadesAlturaItensTermico(
-      venda.itens.map((i) => i.nomeProduto),
-    );
-
-    final pageFormat = CupomPdfLayout.formatoPagina(
-      modelo,
-      layout: layout,
-      linhasTexto: linhasTexto,
-      qtdItens: unidadesItens > 0 ? unidadesItens : venda.itens.length,
-      linhasExtras: linhasExtras,
-      comLogo: comLogo,
     );
 
     doc.addPage(
@@ -5628,19 +6428,23 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               CupomPdfLayout.tituloSecao('ITENS', layout),
               if (CupomPdfLayout.cabecalhoColunasItens(layout) != null)
                 CupomPdfLayout.cabecalhoColunasItens(layout)!,
-              ...venda.itens.map(
+              ...itensOrcamento.map(
                 (item) {
-                  final fracionada =
-                      item.produto.target?.permiteQuantidadeFracionada ??
-                          false;
+                  final produto = item.produto.target;
+                  final qtdEfetiva = item.quantidadeVendaEfetiva;
                   return CupomPdfLayout.itemVenda(
                     layout: layout,
                     nomeProduto: ProdutoNomeExibicao.paraImpressaoItem(item),
                     quantidade: item.quantidade,
-                    quantidadeExibicao: QuantidadeVendaUtil.formatarExibicao(
-                      item.quantidadeVendaEfetiva,
-                      fracionada: fracionada,
-                    ),
+                    quantidadeExibicao: produto != null
+                        ? ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+                            produto,
+                            qtdEfetiva,
+                          )
+                        : QuantidadeVendaUtil.formatarExibicao(
+                            qtdEfetiva,
+                            fracionada: false,
+                          ),
                     precoUnitario: item.precoUnitario,
                     subtotal: item.subtotal,
                     formatarMoeda: _formatarMoeda,
@@ -5652,7 +6456,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               CupomPdfLayout.linhaTotal(
                 layout: layout,
                 rotulo: 'Subtotal produtos:',
-                valor: _formatarMoeda(venda.somaSubtotalItens),
+                valor: _formatarMoeda(subtotalItensOrcamento),
               ),
               if (temFrete)
                 CupomPdfLayout.linhaTotal(
@@ -5669,7 +6473,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               CupomPdfLayout.linhaTotal(
                 layout: layout,
                 rotulo: 'Total:',
-                valor: _formatarMoeda(venda.total),
+                valor: _formatarMoeda(totalOrcamentoPdf),
                 destaque: layout.destacarTotal,
               ),
               CupomPdfLayout.linhaTotal(
@@ -6143,6 +6947,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             PdvFocarPesquisaProdutosIntent(),
         SingleActivator(LogicalKeyboardKey.f10): PdvSalvarOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.f11): PdvToggleCalculadoraIntent(),
+        SingleActivator(LogicalKeyboardKey.f12): PdvToggleObraCalculadoraIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, control: true):
             PdvSalvarOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.keyO, control: true):
@@ -6222,10 +7027,20 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               return null;
             },
           ),
+          PdvToggleObraCalculadoraIntent:
+              CallbackAction<PdvToggleObraCalculadoraIntent>(
+            onInvoke: (_) {
+              _toggleObraCalculadoraPdv();
+              return null;
+            },
+          ),
         },
         child: FocusTraversalGroup(
           policy: OrderedTraversalPolicy(),
-          child: Scaffold(
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (_) => _registrarAtividadePdvVendedor(),
+            child: Scaffold(
           appBar: AppBar(
             titleSpacing: 0,
             title: Row(
@@ -6248,6 +7063,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               ],
             ),
             actions: [
+              IconButton(
+                tooltip: 'Calculadora de obra (F12)',
+                onPressed: _toggleObraCalculadoraPdv,
+                icon: const Icon(Icons.construction_outlined),
+              ),
               IconButton(
                 tooltip: 'Calculadora (F11)',
                 onPressed: _toggleCalculadoraPdv,
@@ -6303,6 +7123,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                     },
                   ),
                 ),
+                if (_sugestoesCarrinhoVisiveis.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  PdvSugestoesCarrinhoStrip(
+                    produtoOrigemNome: _sugestoesCarrinhoOrigemNome,
+                    sugestoes: _sugestoesCarrinhoVisiveis,
+                    formatarMoeda: _formatarMoeda,
+                    onAdicionar: (s) =>
+                        unawaited(_adicionarSugestaoAgregadaDoCarrinho(s)),
+                    onFechar: _fecharSugestoesCarrinho,
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Expanded(
                   child: _buildAreaCarrinhoComPreviewPdv(),
@@ -6310,6 +7141,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               ],
             ),
           ),
+        ),
         ),
         ),
       ),
@@ -6480,6 +7312,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
     required this.rotuloPreco,
     required this.formatarMoeda,
     required this.onAlterarQuantidade,
+    required this.passoQuantidadeCarrinho,
     required this.onRemoverItem,
     required this.onAlternarTipoEntrega,
     required this.onAlternarTabelaPreco,
@@ -6487,6 +7320,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
     required this.onAlterarPrecoLinha,
     required this.onIrPesquisaQuandoVazio,
     required this.produtoExcedeEstoque,
+    this.alvosTouchAmplos = false,
   });
 
   final FocusNode carrinhoFocus;
@@ -6497,6 +7331,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
   final String Function(String) rotuloPreco;
   final String Function(double) formatarMoeda;
   final void Function(int index, int delta) onAlterarQuantidade;
+  final int Function(_OrcamentoItemDraft item) passoQuantidadeCarrinho;
   final void Function(int index) onRemoverItem;
   final void Function(int index) onAlternarTipoEntrega;
   final void Function(int index) onAlternarTabelaPreco;
@@ -6504,6 +7339,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
   final Future<void> Function(int index) onAlterarPrecoLinha;
   final VoidCallback onIrPesquisaQuandoVazio;
   final bool Function(Produto produto) produtoExcedeEstoque;
+  final bool alvosTouchAmplos;
 
   @override
   State<_PdvCarrinhoProdutos> createState() => _PdvCarrinhoProdutosState();
@@ -6596,10 +7432,12 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
         itemBuilder: (context, index) {
           final item = widget.itens[index];
           final selecionado = widget.indiceLinhaSelecionada == index;
+          final passo = widget.passoQuantidadeCarrinho(item);
           return Semantics(
             container: true,
             label:
-                '${item.produto.nome}, ${widget.rotuloPreco(item.precoTipo)}, quantidade ${item.quantidade}',
+                '${item.produto.nome}, ${widget.rotuloPreco(item.precoTipo)}, '
+                'quantidade ${item.quantidadeExibicaoTexto}',
             child: PdvCarrinhoLinhaCompacta(
               nomeProduto: item.produto.nome,
               emPromocao: item.promocaoId > 0,
@@ -6608,20 +7446,19 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
               rotuloPreco: widget.rotuloPreco(item.precoTipo),
               precoUnitarioFormatado: widget.formatarMoeda(item.precoUnitario),
               subtotalFormatado: widget.formatarMoeda(item.subtotal),
-              quantidade: item.quantidade,
-              rotuloUnidade: rotuloUnidadeProdutoLista(item.produto),
-              detalheQuantidade: item.quantidadeEmUnidadeCompra
-                  ? item.rotuloQuantidadeCarrinho
-                  : null,
+              quantidadeExibicao: item.quantidadeExibicaoTexto,
+              quantidadeArmazenada: item.quantidade,
+              rotuloQuantidadeLinha: item.rotuloQuantidadeCarrinho,
               tipoEntregaItem: item.tipoEntregaItem,
               precoTipo: item.precoTipo,
               selecionado: selecionado,
               linhaImpar: index.isOdd,
+              alvosTouchAmplos: widget.alvosTouchAmplos,
               onTap: () => widget.onSelecionarLinha(index),
               onAlternarTipoEntrega: () => widget.onAlternarTipoEntrega(index),
               onAlternarTabelaPreco: () => widget.onAlternarTabelaPreco(index),
-              onDiminuir: () => widget.onAlterarQuantidade(index, -1),
-              onAumentar: () => widget.onAlterarQuantidade(index, 1),
+              onDiminuir: () => widget.onAlterarQuantidade(index, -passo),
+              onAumentar: () => widget.onAlterarQuantidade(index, passo),
               onDividir: () => widget.onDividirLinha(index),
               onAlterarPreco: () => widget.onAlterarPrecoLinha(index),
               onRemover: () => widget.onRemoverItem(index),
@@ -7049,6 +7886,7 @@ class _DividirLinhaCarrinhoDialog extends StatefulWidget {
 class _DividirLinhaCarrinhoDialogState extends State<_DividirLinhaCarrinhoDialog> {
   late final TextEditingController _qtdController;
   late String _tipoNovaLinha;
+  String? _erroQtd;
 
   @override
   void initState() {
@@ -7066,13 +7904,10 @@ class _DividirLinhaCarrinhoDialogState extends State<_DividirLinhaCarrinhoDialog
   void _confirmar() {
     final q = int.tryParse(_qtdController.text.trim());
     if (q == null || q <= 0 || q >= widget.quantidadeTotal) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Informe de 1 a ${widget.quantidadeTotal - 1} unidades para o novo item.',
-          ),
-        ),
-      );
+      setState(() {
+        _erroQtd =
+            'Informe de 1 a ${widget.quantidadeTotal - 1} unidades para o novo item.';
+      });
       return;
     }
     Navigator.of(context).pop(
@@ -7113,9 +7948,10 @@ class _DividirLinhaCarrinhoDialogState extends State<_DividirLinhaCarrinhoDialog
                 labelText: 'Quantidade no novo item',
                 helperText:
                     'Este item ficara com ${restante.clamp(0, widget.quantidadeTotal)} un.',
+                errorText: _erroQtd,
               ),
               keyboardType: TextInputType.number,
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) => setState(() => _erroQtd = null),
               onFieldSubmitted: (_) => _confirmar(),
             ),
             const SizedBox(height: 8),
@@ -7194,6 +8030,8 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
   late final TextEditingController _enderecoController;
   late final TextEditingController _obsController;
   late int _indiceEnderecoSelecionado;
+  String? _erroEndereco;
+  String? _erroFrete;
 
   @override
   void initState() {
@@ -7218,18 +8056,29 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
   }
 
   void _confirmar() {
-    if (_enderecoController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Informe o endereco de entrega para continuar.'),
-        ),
-      );
+    final endereco = _enderecoController.text.trim();
+    if (endereco.isEmpty) {
+      setState(() {
+        _erroEndereco = 'Informe o endereco de entrega para continuar.';
+      });
       return;
+    }
+    final freteTxt = _freteController.text.trim();
+    if (freteTxt.isNotEmpty) {
+      final frete = double.tryParse(
+        freteTxt.replaceAll('.', '').replaceAll(',', '.'),
+      );
+      if (frete == null || frete < 0) {
+        setState(() {
+          _erroFrete = 'Valor de frete invalido.';
+        });
+        return;
+      }
     }
     Navigator.of(context).pop(
       _EntregaDialogResult(
-        valorFrete: _freteController.text.trim(),
-        endereco: _enderecoController.text.trim(),
+        valorFrete: freteTxt,
+        endereco: endereco,
         observacao: _obsController.text.trim(),
         indiceEnderecoSelecionado: _indiceEnderecoSelecionado,
       ),
@@ -7259,10 +8108,12 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Valor do frete',
                     hintText: 'Ex.: 35,00',
+                    errorText: _erroFrete,
                   ),
+                  onChanged: (_) => setState(() => _erroFrete = null),
                 ),
                 const SizedBox(height: 8),
                 if (widget.enderecosDisponiveis.isNotEmpty) ...[
@@ -7331,9 +8182,11 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
                   controller: _enderecoController,
                   maxLines: 3,
                   minLines: 1,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Endereco de entrega',
+                    errorText: _erroEndereco,
                   ),
+                  onChanged: (_) => setState(() => _erroEndereco = null),
                 ),
                 const SizedBox(height: 8),
                 TextField(
@@ -7393,6 +8246,7 @@ class _AdicionarAoOrcamentoDialogState
   late bool _quantidadeEmUnidadeCompra;
   late final TextEditingController _qtdController;
   final _qtdFocus = FocusNode(debugLabel: 'pdvDialogQtd');
+  String? _erroQtd;
 
   void _recarregarProdutoDoBanco() {
     final fresh = widget.produtoRepository.obterPorId(widget.produto.id);
@@ -7410,7 +8264,7 @@ class _AdicionarAoOrcamentoDialogState
     _tipoEntrega = EntregaVendaHelper.normalizarTipoItem(
       widget.tipoEntregaInicial,
     );
-    _quantidadeEmUnidadeCompra = false;
+    _quantidadeEmUnidadeCompra = _produto.pdvPodeVenderEmUnidadeCompra;
     _qtdController = TextEditingController(text: '1');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -7459,9 +8313,7 @@ class _AdicionarAoOrcamentoDialogState
       } else {
         msg = 'Informe uma quantidade inteira maior que zero.';
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg)),
-      );
+      setState(() => _erroQtd = msg);
       return;
     }
     Navigator.of(context).pop(
@@ -7480,7 +8332,14 @@ class _AdicionarAoOrcamentoDialogState
       fracionada: fracionada,
     );
     if (q == null) return '';
-    return ' · Subtotal: ${widget.formatarMoeda(q * precoUnit)}';
+    final qVenda = _quantidadeEmUnidadeCompra &&
+            _produto.pdvPodeVenderEmUnidadeCompra
+        ? ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
+            produto: _produto,
+            quantidadeComercial: q,
+          )
+        : q;
+    return ' · Subtotal: ${widget.formatarMoeda(qVenda * precoUnit)}';
   }
 
   String? _previewConversaoEstoque() {
@@ -7601,12 +8460,13 @@ class _AdicionarAoOrcamentoDialogState
                         ? 'Permite decimais (ex.: 4,50 ou 4.50).'
                         : 'Somente quantidade inteira. Para vender fracionado, '
                             'ative "Permite venda fracionada" no cadastro do produto.'),
+                errorText: _erroQtd,
               ),
               keyboardType: fracionada
                   ? const TextInputType.numberWithOptions(decimal: true)
                   : TextInputType.number,
               textInputAction: TextInputAction.done,
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) => setState(() => _erroQtd = null),
               onFieldSubmitted: (_) => _confirmar(),
             ),
             const SizedBox(height: 8),
@@ -7675,6 +8535,10 @@ class PdvToggleCalculadoraIntent extends Intent {
   const PdvToggleCalculadoraIntent();
 }
 
+class PdvToggleObraCalculadoraIntent extends Intent {
+  const PdvToggleObraCalculadoraIntent();
+}
+
 class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
   _OrcamentoItemDraft({
     required this.produto,
@@ -7706,15 +8570,41 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
   @override
   bool get precoManual => precoUnitarioManual;
 
-  @override
-  int get quantidadeEstoque => ProdutoEmbalagem.quantidadeVendaParaEstoque(
+  bool get usaArmazenamentoFracionado =>
+      produto.permiteQuantidadeFracionada && !quantidadeEmUnidadeCompra;
+
+  double get quantidadeVendaEfetiva {
+    if (quantidadeEmUnidadeCompra && produto.pdvPodeVenderEmUnidadeCompra) {
+      return ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
         produto: produto,
-        quantidadeDigitada: QuantidadeVendaUtil.paraEstoqueInteiro(
-          produto,
-          quantidade,
-        ),
+        quantidadeComercial: quantidade.toDouble(),
+      );
+    }
+    return QuantidadeVendaUtil.valorExibicao(
+      quantidade,
+      fracionada: usaArmazenamentoFracionado,
+    );
+  }
+
+  String get quantidadeExibicaoTexto {
+    if (quantidadeEmUnidadeCompra && produto.pdvPodeVenderEmUnidadeCompra) {
+      return quantidade.toString();
+    }
+    return QuantidadeVendaUtil.formatarExibicao(
+      quantidadeVendaEfetiva,
+      fracionada: usaArmazenamentoFracionado,
+    );
+  }
+
+  int get quantidadeParaPersistir =>
+      ProdutoEmbalagem.quantidadeArmazenadaItemVenda(
+        produto: produto,
+        quantidadeDigitada: quantidade,
         emUnidadeCompra: quantidadeEmUnidadeCompra,
       );
+
+  @override
+  int get quantidadeEstoque => quantidadeVendaEfetiva.ceil().clamp(0, 1 << 30);
 
   String get rotuloQuantidadeCarrinho =>
       ProdutoEmbalagem.rotuloQuantidadeCarrinho(
@@ -7723,12 +8613,7 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
         emUnidadeCompra: quantidadeEmUnidadeCompra,
       );
 
-  double get subtotal =>
-      QuantidadeVendaUtil.valorExibicao(
-        quantidade,
-        fracionada: produto.permiteQuantidadeFracionada,
-      ) *
-      precoUnitario;
+  double get subtotal => quantidadeVendaEfetiva * precoUnitario;
 }
 
 class _DialogoSelecionarVendedorPdv extends StatefulWidget {

@@ -228,6 +228,7 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
   static const _fechamento = <_PdvAtalhoItem>[
     (tecla: 'F10', descricao: 'salvar / checkout', destaque: true),
     (tecla: 'F11', descricao: 'calculadora', destaque: true),
+    (tecla: 'F12', descricao: 'calculadora de obra', destaque: true),
     (tecla: 'Ctrl+S', descricao: 'salvar orçamento', destaque: false),
     (tecla: 'Ctrl+O', descricao: 'ler orçamento', destaque: false),
   ];

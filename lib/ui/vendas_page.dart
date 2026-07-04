@@ -6,19 +6,16 @@ import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../data/motorista_repository.dart';
+import '../domain/main_menu_sub_destino.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../services/print_service.dart';
-import 'caixa/caixa_page.dart';
-import 'entregas_page.dart';
-import 'listagem_vendas_page.dart';
-import 'orcamentos_page.dart';
-import 'relatorios_page.dart';
+import 'layout/app_layout.dart';
+import 'shell/hub_navigation.dart';
+import 'theme/app_modulo_cores.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
-import 'layout/app_layout.dart';
-import 'theme/app_modulo_cores.dart';
 
 class VendasPage extends StatelessWidget {
   const VendasPage({
@@ -47,7 +44,6 @@ class VendasPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final u = usuarioLogado;
-    final podeCancelar = UsuarioPermissaoHelper.podeCancelarVendas(u);
     final podeRelatorios =
         UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarRelatorios);
     final podeListagem = UsuarioPermissaoHelper.tem(
@@ -56,8 +52,6 @@ class VendasPage extends StatelessWidget {
     );
     final podePdv = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarPdv);
     final podeCaixa = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarCaixa);
-    final podeGerenciarEntregas =
-        UsuarioPermissaoHelper.podeGerenciarEntregas(u);
     final podeOrcamentos = podePdv || podeCaixa || podeListagem;
 
     return Scaffold(
@@ -72,135 +66,47 @@ class VendasPage extends StatelessWidget {
       ),
       body: AdaptiveHubBody(
         children: [
-            HubNavButton(
-              icon: Icons.request_quote_outlined,
-              corDestaque: AppModuloCores.modulo(context, AppModuloId.orcamentos),
-              titulo: 'Orcamentos',
-              habilitado: podeOrcamentos,
-              onTap: () {
-                if (!podeOrcamentos) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => OrcamentosPage(
-                      vendaRepository: vendaRepository,
-                      clienteRepository: clienteRepository,
-                      produtoRepository: produtoRepository,
-                      vendedorRepository: vendedorRepository,
-                      appConfigRepository: appConfigRepository,
-                      printService: printService,
-                      usuarioLogado: u,
-                    ),
-                  ),
-                );
-              },
-            ),
-            HubNavButton(
-              icon: Icons.view_list_outlined,
-              corDestaque: AppModuloCores.modulo(context, AppModuloId.listagemVendas),
-              titulo: 'Listagem de Vendas',
-              habilitado: podeListagem,
-              onTap: () {
-                if (!podeListagem) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ListagemVendasPage(
-                      vendaRepository: vendaRepository,
-                      clienteRepository: clienteRepository,
-                      vendedorRepository: vendedorRepository,
-                      produtoRepository: produtoRepository,
-                      appConfigRepository: appConfigRepository,
-                      printService: printService,
-                      usuarioAtual: u.login,
-                      podeCancelarVendas: podeCancelar,
-                      usuarioLogado: u,
-                    ),
-                  ),
-                );
-              },
-            ),
-            HubNavButton(
-              icon: Icons.assessment_outlined,
-              corDestaque: AppModuloCores.modulo(context, AppModuloId.relatoriosVendas),
-              titulo: 'Relatorios',
-              habilitado: podeRelatorios,
-              onTap: () {
-                if (!podeRelatorios) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => RelatoriosPage(
-                      vendaRepository: vendaRepository,
-                      clienteRepository: clienteRepository,
-                      vendedorRepository: vendedorRepository,
-                      produtoRepository: produtoRepository,
-                      appConfigRepository: appConfigRepository,
-                            usuarioLogado: u,
-                            usuarioAdmin: u.admin,
-                            usuarioLogin: u.login,
-                      onAbrirModuloEntregas: podeGerenciarEntregas
-                          ? () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => EntregasPage(
-                                    vendaRepository: vendaRepository,
-                                    produtoRepository: produtoRepository,
-                                    motoristaRepository: motoristaRepository,
-                                    appConfigRepository: appConfigRepository,
-                                    usuarioAtual: u.login,
-                                    podeGerenciarStatusEntrega:
-                                        podeGerenciarEntregas,
-                                    podeRegistrarPodEntrega:
-                                        UsuarioPermissaoHelper
-                                            .podeRegistrarPodEntrega(u),
-                                    podeRegistrarDevolucaoTrocaSemSenha:
-                                        podeCancelar,
-                                  ),
-                                ),
-                              );
-                            }
-                          : null,
-                      onAbrirModuloCaixa: () {
-                        if (!podeCaixa) return;
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => CaixaPage(
-                              clienteRepository: clienteRepository,
-                              produtoRepository: produtoRepository,
-                              vendaRepository: vendaRepository,
-                              vendedorRepository: vendedorRepository,
-                              appConfigRepository: appConfigRepository,
-                              printService: printService,
-                              usuarioLogado: u,
-                              usuarioAtual: u.login,
-                              podeCancelarVendas: podeCancelar,
-                              podeLeituraParcialCaixa: UsuarioPermissaoHelper.tem(
-                                u,
-                                PermissaoUsuario.leituraParcialCaixa,
-                              ),
-                              podeVisualizarAuditoriaCaixa:
-                                  UsuarioPermissaoHelper.tem(
-                                u,
-                                PermissaoUsuario.visualizarAuditoriaCaixa,
-                              ),
-                              podeManutencaoAuditoriaCaixa:
-                                  UsuarioPermissaoHelper.tem(
-                                u,
-                                PermissaoUsuario.manutencaoAuditoriaCaixa,
-                              ),
-                              onLogout: onLogout,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                );
-              },
-            ),
+          HubNavButton(
+            icon: Icons.request_quote_outlined,
+            corDestaque: AppModuloCores.modulo(context, AppModuloId.orcamentos),
+            titulo: 'Orcamentos',
+            habilitado: podeOrcamentos,
+            onTap: () {
+              if (!podeOrcamentos) return;
+              HubNavigation.abrirSub(
+                context,
+                MainMenuSubDestino.vendasOrcamentos,
+              );
+            },
+          ),
+          HubNavButton(
+            icon: Icons.view_list_outlined,
+            corDestaque:
+                AppModuloCores.modulo(context, AppModuloId.listagemVendas),
+            titulo: 'Listagem de Vendas',
+            habilitado: podeListagem,
+            onTap: () {
+              if (!podeListagem) return;
+              HubNavigation.abrirSub(
+                context,
+                MainMenuSubDestino.vendasListagem,
+              );
+            },
+          ),
+          HubNavButton(
+            icon: Icons.assessment_outlined,
+            corDestaque:
+                AppModuloCores.modulo(context, AppModuloId.relatoriosVendas),
+            titulo: 'Relatorios',
+            habilitado: podeRelatorios,
+            onTap: () {
+              if (!podeRelatorios) return;
+              HubNavigation.abrirSub(
+                context,
+                MainMenuSubDestino.vendasRelatorios,
+              );
+            },
+          ),
         ],
       ),
     );

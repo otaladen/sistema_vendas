@@ -22,6 +22,7 @@ class Vendedor {
     /// Notas sobre area de loja que atende, cliente tipo etc.
     this.observacoesComerciais = '',
     this.ativo = true,
+    this.senhaPdv = '',
     DateTime? criadoEm,
   }) : criadoEm = criadoEm ?? DateTime.now();
 
@@ -47,6 +48,9 @@ class Vendedor {
   String observacoesComerciais;
 
   bool ativo;
+
+  /// Hash da senha/PIN para identificacao no PDV ([UsuarioSenhaCodec]).
+  String senhaPdv;
 
   @Property(type: PropertyType.dateUtc)
   DateTime criadoEm;

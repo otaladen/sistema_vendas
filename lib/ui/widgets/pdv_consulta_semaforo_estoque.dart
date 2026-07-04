@@ -13,7 +13,7 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
   });
 
   final Produto produto;
-  final int quantidadeNoOrcamento;
+  final num quantidadeNoOrcamento;
   final bool mostrarNumero;
 
   @override
@@ -28,36 +28,40 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
       produto,
       quantidadeNoOrcamento: quantidadeNoOrcamento,
     );
+    final scheme = Theme.of(context).colorScheme;
+    final rotulo = PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(disponivel);
+    final estiloNumero = Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: scheme.onSurface,
+          height: 1.1,
+        );
 
     return Tooltip(
       message: tooltip,
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
+      waitDuration: const Duration(milliseconds: 400),
+      child: Align(
         alignment: Alignment.centerRight,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-          decoration: BoxDecoration(
-            color: cor.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: cor.withValues(alpha: 0.55)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.circle, size: 9, color: cor),
-              if (mostrarNumero) ...[
-                const SizedBox(width: 4),
-                Text(
-                  '$disponivel',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: cor,
-                        fontWeight: FontWeight.w800,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                ),
-              ],
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                color: cor,
+                shape: BoxShape.circle,
+              ),
+            ),
+            if (mostrarNumero) ...[
+              const SizedBox(width: 5),
+              Text(
+                rotulo,
+                maxLines: 1,
+                style: estiloNumero,
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );

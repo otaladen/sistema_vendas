@@ -9,6 +9,7 @@ import '../domain/produto_embalagem.dart';
 import '../model/item_nota_temporario.dart';
 import '../model/produto.dart';
 import 'widgets/produto_busca_input.dart';
+import 'widgets/operacao_feedback.dart';
 import 'theme/app_semantic_helper.dart';
 
 /// Conferencia de itens da NF-e antes de gravar estoque e vinculos.
@@ -46,6 +47,7 @@ class _LinhaEdicao {
   /// Quando preenchido, substitui a sugestao automatica (ex.: vincular item "novo" a um cadastro).
   int? vinculoManualProdutoId;
   String? vinculoManualProdutoNome;
+  String? erroValidacao;
 
   int? produtoDestinoId() {
     if (vinculoManualProdutoId != null) {
@@ -61,6 +63,7 @@ class _LinhaEdicao {
 class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   List<_LinhaEdicao> _linhas = [];
   String? _initError;
+  String? _erroConfirmacaoGlobal;
   bool _confirmando = false;
   double _margemMinimaPadrao = 20;
 
@@ -767,6 +770,11 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                           flex: 2,
                           child: TextFormField(
                             controller: linha.fatorCtrl,
+                            onChanged: (_) {
+                              if (linha.erroValidacao != null) {
+                                setState(() => linha.erroValidacao = null);
+                              }
+                            },
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
@@ -780,6 +788,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                               isDense: true,
                               filled: true,
                               fillColor: cs.surface,
+                              errorText: linha.erroValidacao,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                                 borderSide: BorderSide(
@@ -961,53 +970,42 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   }
 
   Future<void> _confirmar() async {
+    for (final linha in _linhas) {
+      linha.erroValidacao = null;
+    }
+    String? erroGlobal;
     final confirmacoes = <ConferenciaNfeLinhaConfirmacao>[];
     for (final linha in _linhas) {
       final f = _lerFator(linha.fatorCtrl.text);
       if (f <= 0) {
         final d = linha.sugestao.item.descricao;
         final curto = d.length > 48 ? '${d.substring(0, 48)}…' : d;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Fator invalido no item: $curto')),
-        );
+        linha.erroValidacao = 'Fator invalido ($curto)';
+        setState(() {});
         return;
       }
       final qCom = linha.sugestao.item.quantidadeComercial;
       if (!qCom.isFinite || qCom < 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Quantidade da nota invalida em um dos itens. Verifique o XML.',
-            ),
-          ),
-        );
-        return;
+        erroGlobal =
+            'Quantidade da nota invalida em um dos itens. Verifique o XML.';
+        break;
       }
       final qtdCalc = qCom * f;
       if (!qtdCalc.isFinite) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Quantidade para estoque invalida (nao finita). Ajuste o fator.',
-            ),
-          ),
-        );
+        linha.erroValidacao =
+            'Quantidade para estoque invalida. Ajuste o fator.';
+        setState(() {});
         return;
       }
       if (qtdCalc > 2147483647) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Quantidade para estoque acima do limite suportado. Reduza o fator ou corrija a nota.',
-            ),
-          ),
-        );
+        linha.erroValidacao =
+            'Quantidade acima do limite. Reduza o fator ou corrija a nota.';
+        setState(() {});
         return;
       }
       if (!NfeEntradaRepository.unidadesInternasValidas.contains(linha.unidade)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unidade invalida: ${linha.unidade}')),
-        );
+        linha.erroValidacao = 'Unidade invalida: ${linha.unidade}';
+        setState(() {});
         return;
       }
       confirmacoes.add(
@@ -1019,6 +1017,11 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         ),
       );
     }
+    if (erroGlobal != null) {
+      setState(() => _erroConfirmacaoGlobal = erroGlobal);
+      return;
+    }
+    setState(() => _erroConfirmacaoGlobal = null);
 
     setState(() => _confirmando = true);
     try {
@@ -1029,9 +1032,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       );
       widget.produtoRepository.invalidarCacheBusca();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Entrada da NF-e registrada com sucesso.')),
-      );
+      OperacaoFeedback.sucesso(context, 'Entrada da NF-e registrada com sucesso.');
       Navigator.of(context).pop(true);
     } on StateError catch (e) {
       if (!mounted) return;
@@ -1122,10 +1123,31 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           ),
         ),
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: _linhas.length,
-        itemBuilder: (context, index) => _buildLinhaCard(context, index),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_erroConfirmacaoGlobal != null)
+            MaterialBanner(
+              content: Text(_erroConfirmacaoGlobal!),
+              leading: Icon(
+                Icons.error_outline,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => setState(() => _erroConfirmacaoGlobal = null),
+                  child: const Text('Fechar'),
+                ),
+              ],
+            ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: _linhas.length,
+              itemBuilder: (context, index) => _buildLinhaCard(context, index),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,0 +1,311 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../data/usuario_repository.dart';
+import '../data/vendedor_repository.dart';
+import '../model/vendedor.dart';
+
+enum _ModoIdentificacaoVendedorPdv { senhaVendedor, usuarioSistema }
+
+/// Identifica o vendedor no terminal PDV (senha do cadastro ou login do sistema).
+Future<Vendedor?> solicitarIdentificacaoVendedorPdv({
+  required BuildContext context,
+  required VendedorRepository vendedorRepository,
+  required UsuarioRepository usuarioRepository,
+  bool permitirCancelar = true,
+}) async {
+  final comSenha = vendedorRepository.contarAtivosComSenhaPdv();
+  final comUsuario = await usuarioRepository.contarAtivosComVendedorVinculado();
+  if (comSenha == 0 && comUsuario == 0) {
+    if (!context.mounted) return null;
+    await showDialog<void>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Bloqueio vendedor'),
+        content: const Text(
+          'Nenhum vendedor ativo tem senha do PDV cadastrada e nenhum usuario '
+          'tem vendedor vinculado.\n\n'
+          'Configure em Cadastros → Vendedores (senha do PDV) ou '
+          'Cadastros → Usuarios (vendedor vinculado), '
+          'ou desative o bloqueio em Configuracoes.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
+    return null;
+  }
+
+  return showDialog<Vendedor>(
+    context: context,
+    useRootNavigator: true,
+    barrierDismissible: false,
+    builder: (ctx) => _DialogoBloqueioVendedorPdv(
+      vendedorRepository: vendedorRepository,
+      usuarioRepository: usuarioRepository,
+      permitirCancelar: permitirCancelar,
+      permiteSenhaVendedor: comSenha > 0,
+      permiteUsuarioSistema: comUsuario > 0,
+    ),
+  );
+}
+
+class _DialogoBloqueioVendedorPdv extends StatefulWidget {
+  const _DialogoBloqueioVendedorPdv({
+    required this.vendedorRepository,
+    required this.usuarioRepository,
+    required this.permitirCancelar,
+    required this.permiteSenhaVendedor,
+    required this.permiteUsuarioSistema,
+  });
+
+  final VendedorRepository vendedorRepository;
+  final UsuarioRepository usuarioRepository;
+  final bool permitirCancelar;
+  final bool permiteSenhaVendedor;
+  final bool permiteUsuarioSistema;
+
+  @override
+  State<_DialogoBloqueioVendedorPdv> createState() =>
+      _DialogoBloqueioVendedorPdvState();
+}
+
+class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv> {
+  late final TextEditingController _senhaController;
+  late final TextEditingController _loginController;
+  late final TextEditingController _senhaUsuarioController;
+  late _ModoIdentificacaoVendedorPdv _modo;
+  final _senhaFocus = FocusNode();
+  final _loginFocus = FocusNode();
+  final _senhaUsuarioFocus = FocusNode();
+  bool _ocultarSenha = true;
+  bool _autenticando = false;
+  String _erro = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _senhaController = TextEditingController();
+    _loginController = TextEditingController();
+    _senhaUsuarioController = TextEditingController();
+    if (widget.permiteSenhaVendedor) {
+      _modo = _ModoIdentificacaoVendedorPdv.senhaVendedor;
+    } else {
+      _modo = _ModoIdentificacaoVendedorPdv.usuarioSistema;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focarCampoAtual());
+  }
+
+  @override
+  void dispose() {
+    _senhaController.dispose();
+    _loginController.dispose();
+    _senhaUsuarioController.dispose();
+    _senhaFocus.dispose();
+    _loginFocus.dispose();
+    _senhaUsuarioFocus.dispose();
+    super.dispose();
+  }
+
+  void _focarCampoAtual() {
+    if (!mounted) return;
+    switch (_modo) {
+      case _ModoIdentificacaoVendedorPdv.senhaVendedor:
+        _senhaFocus.requestFocus();
+      case _ModoIdentificacaoVendedorPdv.usuarioSistema:
+        _loginFocus.requestFocus();
+    }
+  }
+
+  void _definirModo(_ModoIdentificacaoVendedorPdv modo) {
+    if (_modo == modo) return;
+    setState(() {
+      _modo = modo;
+      _erro = '';
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focarCampoAtual());
+  }
+
+  Future<void> _confirmar() async {
+    if (_autenticando) return;
+
+    setState(() {
+      _autenticando = true;
+      _erro = '';
+    });
+
+    Vendedor? vendedor;
+    if (_modo == _ModoIdentificacaoVendedorPdv.senhaVendedor) {
+      final senha = _senhaController.text.trim();
+      if (senha.isEmpty) {
+        setState(() {
+          _autenticando = false;
+          _erro = 'Informe a senha do vendedor.';
+        });
+        return;
+      }
+      vendedor = widget.vendedorRepository.autenticarPorSenhaPdv(senha);
+      if (vendedor == null && mounted) {
+        setState(() {
+          _autenticando = false;
+          _erro = 'Senha invalida ou ambigua. Verifique o cadastro do vendedor.';
+        });
+        return;
+      }
+    } else {
+      final login = _loginController.text.trim();
+      final senha = _senhaUsuarioController.text.trim();
+      if (login.isEmpty || senha.isEmpty) {
+        setState(() {
+          _autenticando = false;
+          _erro = 'Informe usuario e senha.';
+        });
+        return;
+      }
+      final usuario = await widget.usuarioRepository.autenticarComVendedorVinculado(
+        login,
+        senha,
+        vendedorAtivo: (id) {
+          final v = widget.vendedorRepository.obterPorId(id);
+          return v != null && v.ativo;
+        },
+      );
+      if (!mounted) return;
+      if (usuario == null) {
+        setState(() {
+          _autenticando = false;
+          _erro =
+              'Login invalido, usuario inativo, sem vendedor vinculado '
+              'ou vendedor inativo.';
+        });
+        return;
+      }
+      vendedor = widget.vendedorRepository.obterPorId(usuario.vendedorId);
+    }
+
+    if (!mounted || vendedor == null) return;
+    Navigator.of(context).pop(vendedor);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mostrarSeletorModo =
+        widget.permiteSenhaVendedor && widget.permiteUsuarioSistema;
+
+    return AlertDialog(
+      title: const Text('Identificacao do vendedor'),
+      content: SizedBox(
+        width: 440,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Informe a senha do vendedor ou o login do sistema para liberar '
+              'o terminal. O PDV identifica automaticamente quem esta vendendo.',
+            ),
+            if (mostrarSeletorModo) ...[
+              const SizedBox(height: 12),
+              SegmentedButton<_ModoIdentificacaoVendedorPdv>(
+                segments: const [
+                  ButtonSegment(
+                    value: _ModoIdentificacaoVendedorPdv.senhaVendedor,
+                    label: Text('Senha PDV'),
+                    icon: Icon(Icons.pin_outlined, size: 18),
+                  ),
+                  ButtonSegment(
+                    value: _ModoIdentificacaoVendedorPdv.usuarioSistema,
+                    label: Text('Usuario'),
+                    icon: Icon(Icons.person_outline, size: 18),
+                  ),
+                ],
+                selected: {_modo},
+                onSelectionChanged: (s) => _definirModo(s.first),
+              ),
+            ],
+            const SizedBox(height: 12),
+            if (_modo == _ModoIdentificacaoVendedorPdv.senhaVendedor) ...[
+              TextField(
+                controller: _senhaController,
+                focusNode: _senhaFocus,
+                obscureText: _ocultarSenha,
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => unawaited(_confirmar()),
+                decoration: InputDecoration(
+                  labelText: 'Senha do vendedor',
+                  errorText: _erro.isEmpty ? null : _erro,
+                  suffixIcon: IconButton(
+                    tooltip: _ocultarSenha ? 'Mostrar senha' : 'Ocultar senha',
+                    onPressed: () =>
+                        setState(() => _ocultarSenha = !_ocultarSenha),
+                    icon: Icon(
+                      _ocultarSenha
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+              ),
+            ] else ...[
+              TextField(
+                controller: _loginController,
+                focusNode: _loginFocus,
+                autofocus: true,
+                textInputAction: TextInputAction.next,
+                decoration: InputDecoration(
+                  labelText: 'Usuario',
+                  errorText: _erro.isEmpty ? null : _erro,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _senhaUsuarioController,
+                focusNode: _senhaUsuarioFocus,
+                obscureText: _ocultarSenha,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => unawaited(_confirmar()),
+                decoration: InputDecoration(
+                  labelText: 'Senha',
+                  suffixIcon: IconButton(
+                    tooltip: _ocultarSenha ? 'Mostrar senha' : 'Ocultar senha',
+                    onPressed: () =>
+                        setState(() => _ocultarSenha = !_ocultarSenha),
+                    icon: Icon(
+                      _ocultarSenha
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        if (widget.permitirCancelar)
+          TextButton(
+            onPressed: _autenticando ? null : () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+        FilledButton(
+          onPressed: _autenticando ? null : () => unawaited(_confirmar()),
+          child: _autenticando
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Entrar'),
+        ),
+      ],
+    );
+  }
+}

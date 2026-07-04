@@ -55,9 +55,16 @@ class QuantidadeVendaUtil {
   static int paraEstoqueInteiro(Produto produto, int quantidadeArmazenada) {
     final q = valorExibicao(
       quantidadeArmazenada,
-      fracionada: produto.permiteQuantidadeFracionada,
+      fracionada: produto.permiteQuantidadeFracionada ||
+          _leituraEmbalagemUsaEscala(produto, quantidadeArmazenada),
     );
     if (q <= 0) return 0;
+    if (produto.permiteQuantidadeFracionada) {
+      // round(0,24) virava 0 e o PDV descartava a linha em silencio.
+      // 0,50 m³ continua 0,50 no carrinho; estoque inteiro exige >= 1 unidade.
+      if (q < 1) return 1;
+      return q.ceil().toInt();
+    }
     return q.round();
   }
 
@@ -70,5 +77,22 @@ class QuantidadeVendaUtil {
     if (ponto <= 0) return false;
     final depois = t.substring(ponto + 1);
     return depois.isNotEmpty && RegExp(r'^\d+$').hasMatch(depois);
+  }
+
+  static bool _leituraEmbalagemUsaEscala(
+    Produto produto,
+    int quantidadeArmazenada,
+  ) {
+    if (quantidadeArmazenada < escalaFracionada) return false;
+    final f = produto.quantidadePorEmbalagem;
+    if (f <= 0 || (f - 1).abs() < 0.0001) return false;
+    final uCompra = (produto.unidadeCompra ?? '').trim().toUpperCase();
+    final uVenda = produto.unidade.trim().toUpperCase();
+    if (uCompra.isEmpty || uCompra == uVenda) return false;
+    final emUnidadeVenda =
+        valorExibicao(quantidadeArmazenada, fracionada: true);
+    if (emUnidadeVenda != emUnidadeVenda.roundToDouble()) return true;
+    if (f != f.roundToDouble()) return true;
+    return false;
   }
 }

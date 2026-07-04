@@ -1,21 +1,26 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/main_menu_destino.dart';
+import '../../domain/main_menu_sub_destino.dart';
 
 /// Shell desktop ativo: navegacao lateral sem empilhar rotas na raiz.
 class AppShellScope extends InheritedWidget {
   const AppShellScope({
     super.key,
     required this.destinoAtual,
+    required this.subDestinoAtual,
     required this.favoritos,
     required this.irPara,
+    required this.irParaSub,
     required this.alternarFavorito,
     required super.child,
   });
 
   final MainMenuDestino destinoAtual;
+  final MainMenuSubDestino? subDestinoAtual;
   final List<MainMenuDestino> favoritos;
   final void Function(MainMenuDestino destino) irPara;
+  final void Function(MainMenuDestino pai, MainMenuSubDestino sub) irParaSub;
   final Future<void> Function(MainMenuDestino destino) alternarFavorito;
 
   static AppShellScope of(BuildContext context) {
@@ -35,6 +40,7 @@ class AppShellScope extends InheritedWidget {
   @override
   bool updateShouldNotify(AppShellScope oldWidget) {
     return destinoAtual != oldWidget.destinoAtual ||
+        subDestinoAtual != oldWidget.subDestinoAtual ||
         favoritos != oldWidget.favoritos;
   }
 }

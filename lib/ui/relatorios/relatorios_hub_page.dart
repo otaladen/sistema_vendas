@@ -6,6 +6,7 @@ import '../../data/cliente_repository.dart';
 import '../../data/produto_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
+import '../../data/sugestao_venda_metrica_repository.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../model/usuario_sistema.dart';
@@ -25,6 +26,7 @@ import 'relatorio_metas_vendedores_page.dart';
 import 'relatorio_log_sistema_page.dart';
 import 'relatorio_produtos_mais_vendidos_page.dart';
 import 'relatorio_saidas_produto_page.dart';
+import 'relatorio_sugestoes_venda_page.dart';
 import 'relatorio_tabela_precos_page.dart';
 import 'relatorio_vendas_promocao_page.dart';
 import '../../data/promocao_repository.dart';
@@ -484,6 +486,34 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
             ),
           );
         },
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'vendas',
+        categoriaTitulo: 'Vendas e faturamento',
+        categoriaIcone: Icons.point_of_sale_outlined,
+        icon: Icons.lightbulb_outline,
+        relatorioCor: AppRelatorioId.sugestoesVenda,
+        titulo: 'Sugestoes de venda',
+        subtitulo:
+            'Ranking de ofertas aceitas e ignoradas no PDV (cadastro e historico).',
+        palavrasChave: const [
+          'sugestao',
+          'agregado',
+          'complementar',
+          'ofereca',
+          'pdv',
+          'ranking',
+          'aceite',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioSugestoesVendaPage(
+              metricaRepository: SugestaoVendaMetricaRepository(p.objectBox),
+              produtoRepository: p,
+            ),
+          ),
+        ),
       ),
       _RelatorioHubItem(
         categoriaId: 'produtos',

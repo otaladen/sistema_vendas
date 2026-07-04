@@ -44,6 +44,7 @@ class UsuarioSistema {
     this.descontoMaximoPercentualPdv,
     this.motoristaEntregaNome = '',
     this.podeModoMotorista = false,
+    this.vendedorId = 0,
   });
 
   final String id;
@@ -129,6 +130,9 @@ class UsuarioSistema {
   /// Acesso ao painel simplificado do motorista (entregas do dia + POD).
   final bool podeModoMotorista;
 
+  /// Vendedor do PDV vinculado a este login ([Vendedor.id]).
+  final int vendedorId;
+
   UsuarioSistema copyWith({
     String? id,
     String? nome,
@@ -173,6 +177,7 @@ class UsuarioSistema {
     bool limparDescontoMaximoPdv = false,
     String? motoristaEntregaNome,
     bool? podeModoMotorista,
+    int? vendedorId,
   }) {
     final caixa = podeAcessarCaixa ?? podeCaixa ?? this.podeAcessarCaixa;
     final visualizar =
@@ -237,6 +242,7 @@ class UsuarioSistema {
       motoristaEntregaNome:
           motoristaEntregaNome ?? this.motoristaEntregaNome,
       podeModoMotorista: podeModoMotorista ?? this.podeModoMotorista,
+      vendedorId: vendedorId ?? this.vendedorId,
     );
   }
 
@@ -296,6 +302,7 @@ class UsuarioSistema {
         'descontoMaximoPercentualPdv': descontoMaximoPercentualPdv,
       'motoristaEntregaNome': motoristaEntregaNome,
       'podeModoMotorista': podeModoMotorista,
+      'vendedorId': vendedorId,
     };
   }
 
@@ -402,6 +409,7 @@ class UsuarioSistema {
       podeModoMotorista: map['podeModoMotorista'] == true ||
           perfilUsuarioFromId((map['perfil'] ?? '').toString()) ==
               PerfilUsuarioPreset.motorista,
+      vendedorId: (map['vendedorId'] as num?)?.toInt() ?? 0,
     );
   }
 }

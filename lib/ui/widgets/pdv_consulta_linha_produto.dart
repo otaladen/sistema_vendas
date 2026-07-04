@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/pdv_consulta_detalhe_linha.dart';
+import '../../domain/produto_embalagem.dart';
 import '../../domain/produto_unidade_exibicao.dart';
 import '../../model/produto.dart';
 import '../pdv_texto_destaque_busca.dart';
@@ -31,7 +32,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
   final VoidCallback onAdicionar;
   final String? tooltipAdicionar;
   final bool selecionado;
-  final int quantidadeNoOrcamento;
+  final num quantidadeNoOrcamento;
 
   static const double alturaLinha = 48;
   static const double alturaLinhaComBadges = 58;
@@ -78,7 +79,10 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                 const SizedBox(width: 4),
               ],
               if (quantidadeNoOrcamento > 0 && !selecionado) ...[
-                _BadgeOrcamento(quantidade: quantidadeNoOrcamento),
+                _BadgeOrcamento(
+                  produto: produto,
+                  quantidade: quantidadeNoOrcamento,
+                ),
                 const SizedBox(width: 4),
               ],
               Expanded(
@@ -257,15 +261,23 @@ class _BadgeCompacto extends StatelessWidget {
 }
 
 class _BadgeOrcamento extends StatelessWidget {
-  const _BadgeOrcamento({required this.quantidade});
+  const _BadgeOrcamento({
+    required this.produto,
+    required this.quantidade,
+  });
 
-  final int quantidade;
+  final Produto produto;
+  final num quantidade;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final qTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+      produto,
+      quantidade.toDouble(),
+    );
     return Tooltip(
-      message: 'Ja no orcamento: $quantidade',
+      message: 'Ja no orcamento: $qTxt',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
         decoration: BoxDecoration(
@@ -276,7 +288,7 @@ class _BadgeOrcamento extends StatelessWidget {
           ),
         ),
         child: Text(
-          'Orc.$quantidade',
+          'Orc.$qTxt',
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 fontWeight: FontWeight.w800,
                 color: scheme.onTertiaryContainer,

@@ -33,6 +33,7 @@ import 'model/motorista.dart';
 import 'model/movimento_estoque.dart';
 import 'model/nfe_importada_registro.dart';
 import 'model/produto.dart';
+import 'model/produto_sugestao_venda.dart';
 import 'model/promocao.dart';
 import 'model/promocao_combo_item.dart';
 import 'model/promocao_item.dart';
@@ -41,6 +42,7 @@ import 'model/reajuste_preco_item.dart';
 import 'model/recado_loja.dart';
 import 'model/recebimento_fiado.dart';
 import 'model/registro_devolucao.dart';
+import 'model/sugestao_venda_metrica_evento.dart';
 import 'model/titulo_receber.dart';
 import 'model/venda.dart';
 import 'model/vendedor.dart';
@@ -1132,7 +1134,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(5, 8242003091166492994),
     name: 'Vendedor',
-    lastPropertyId: const obx_int.IdUid(12, 3289138156469858386),
+    lastPropertyId: const obx_int.IdUid(13, 6982513833332676283),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -1205,6 +1207,12 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(12, 3289138156469858386),
         name: 'criadoEm',
         type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(13, 6982513833332676283),
+        name: 'senhaPdv',
+        type: 9,
         flags: 0,
       ),
     ],
@@ -3326,6 +3334,132 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(33, 909642924831154467),
+    name: 'ProdutoSugestaoVenda',
+    lastPropertyId: const obx_int.IdUid(8, 3018062728541674089),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 2546743676718615721),
+        name: 'id',
+        type: 6,
+        flags: 129,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 2167263321218484428),
+        name: 'produtoOrigemId',
+        type: 6,
+        flags: 8,
+        indexId: const obx_int.IdUid(49, 5194745050921844807),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 2965107500826941414),
+        name: 'produtoSugeridoId',
+        type: 6,
+        flags: 8,
+        indexId: const obx_int.IdUid(50, 3102320594784437203),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 2861660109649412679),
+        name: 'tipo',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 7190434173662384246),
+        name: 'quantidadeSugerida',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 1181840275140212489),
+        name: 'prioridade',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 1037232868079106746),
+        name: 'observacao',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 3018062728541674089),
+        name: 'ativo',
+        type: 1,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(34, 3947576677985920049),
+    name: 'SugestaoVendaMetricaEvento',
+    lastPropertyId: const obx_int.IdUid(9, 4496581284718317239),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 7089752786600467949),
+        name: 'id',
+        type: 6,
+        flags: 129,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 4591592391431258249),
+        name: 'produtoOrigemId',
+        type: 6,
+        flags: 8,
+        indexId: const obx_int.IdUid(51, 6689498301675181582),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 1271746924177347661),
+        name: 'produtoSugeridoId',
+        type: 6,
+        flags: 8,
+        indexId: const obx_int.IdUid(52, 4505790225737692998),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 8276151459494788217),
+        name: 'tipoEvento',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 6613300234328109789),
+        name: 'canal',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 4936547681104975847),
+        name: 'fonte',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 8125254170881287369),
+        name: 'quantidade',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 6147093284656291473),
+        name: 'usuarioLogin',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 4496581284718317239),
+        name: 'dataHora',
+        type: 10,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -3371,8 +3505,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(32, 2969408372510959620),
-    lastIndexId: const obx_int.IdUid(48, 2428882302797446316),
+    lastEntityId: const obx_int.IdUid(34, 3947576677985920049),
+    lastIndexId: const obx_int.IdUid(52, 4505790225737692998),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -4731,7 +4865,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final observacoesComerciaisOffset = fbb.writeString(
           object.observacoesComerciais,
         );
-        fbb.startTable(13);
+        final senhaPdvOffset = fbb.writeString(object.senhaPdv);
+        fbb.startTable(14);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, codigoInternoOffset);
         fbb.addOffset(2, nomeCompletoOffset);
@@ -4744,6 +4879,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(9, observacoesComerciaisOffset);
         fbb.addBool(10, object.ativo);
         fbb.addInt64(11, object.criadoEm.millisecondsSinceEpoch);
+        fbb.addOffset(12, senhaPdvOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -4795,6 +4931,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           24,
           false,
         );
+        final senhaPdvParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 28, '');
         final criadoEmParam = DateTime.fromMillisecondsSinceEpoch(
           const fb.Int64Reader().vTableGet(buffer, rootOffset, 26, 0),
           isUtc: true,
@@ -4811,6 +4950,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           metaMensalValor: metaMensalValorParam,
           observacoesComerciais: observacoesComerciaisParam,
           ativo: ativoParam,
+          senhaPdv: senhaPdvParam,
           criadoEm: criadoEmParam,
         );
 
@@ -7589,6 +7729,173 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    ProdutoSugestaoVenda: obx_int.EntityDefinition<ProdutoSugestaoVenda>(
+      model: _entities[32],
+      toOneRelations: (ProdutoSugestaoVenda object) => [],
+      toManyRelations: (ProdutoSugestaoVenda object) => {},
+      getId: (ProdutoSugestaoVenda object) => object.id,
+      setId: (ProdutoSugestaoVenda object, int id) {
+        object.id = id;
+      },
+      objectToFB: (ProdutoSugestaoVenda object, fb.Builder fbb) {
+        final tipoOffset = fbb.writeString(object.tipo);
+        final observacaoOffset = fbb.writeString(object.observacao);
+        fbb.startTable(9);
+        fbb.addInt64(0, object.id);
+        fbb.addInt64(1, object.produtoOrigemId);
+        fbb.addInt64(2, object.produtoSugeridoId);
+        fbb.addOffset(3, tipoOffset);
+        fbb.addInt64(4, object.quantidadeSugerida);
+        fbb.addInt64(5, object.prioridade);
+        fbb.addOffset(6, observacaoOffset);
+        fbb.addBool(7, object.ativo);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final produtoOrigemIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          6,
+          0,
+        );
+        final produtoSugeridoIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          8,
+          0,
+        );
+        final tipoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final quantidadeSugeridaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          12,
+          0,
+        );
+        final prioridadeParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          14,
+          0,
+        );
+        final observacaoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 16, '');
+        final ativoParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          18,
+          false,
+        );
+        final object = ProdutoSugestaoVenda(
+          id: idParam,
+          produtoOrigemId: produtoOrigemIdParam,
+          produtoSugeridoId: produtoSugeridoIdParam,
+          tipo: tipoParam,
+          quantidadeSugerida: quantidadeSugeridaParam,
+          prioridade: prioridadeParam,
+          observacao: observacaoParam,
+          ativo: ativoParam,
+        );
+
+        return object;
+      },
+    ),
+    SugestaoVendaMetricaEvento:
+        obx_int.EntityDefinition<SugestaoVendaMetricaEvento>(
+          model: _entities[33],
+          toOneRelations: (SugestaoVendaMetricaEvento object) => [],
+          toManyRelations: (SugestaoVendaMetricaEvento object) => {},
+          getId: (SugestaoVendaMetricaEvento object) => object.id,
+          setId: (SugestaoVendaMetricaEvento object, int id) {
+            object.id = id;
+          },
+          objectToFB: (SugestaoVendaMetricaEvento object, fb.Builder fbb) {
+            final tipoEventoOffset = fbb.writeString(object.tipoEvento);
+            final canalOffset = fbb.writeString(object.canal);
+            final fonteOffset = fbb.writeString(object.fonte);
+            final usuarioLoginOffset = fbb.writeString(object.usuarioLogin);
+            fbb.startTable(10);
+            fbb.addInt64(0, object.id);
+            fbb.addInt64(1, object.produtoOrigemId);
+            fbb.addInt64(2, object.produtoSugeridoId);
+            fbb.addOffset(3, tipoEventoOffset);
+            fbb.addOffset(4, canalOffset);
+            fbb.addOffset(5, fonteOffset);
+            fbb.addInt64(6, object.quantidade);
+            fbb.addOffset(7, usuarioLoginOffset);
+            fbb.addInt64(8, object.dataHora.millisecondsSinceEpoch);
+            fbb.finish(fbb.endTable());
+            return object.id;
+          },
+          objectFromFB: (obx.Store store, ByteData fbData) {
+            final buffer = fb.BufferContext(fbData);
+            final rootOffset = buffer.derefObject(0);
+            final idParam = const fb.Int64Reader().vTableGet(
+              buffer,
+              rootOffset,
+              4,
+              0,
+            );
+            final produtoOrigemIdParam = const fb.Int64Reader().vTableGet(
+              buffer,
+              rootOffset,
+              6,
+              0,
+            );
+            final produtoSugeridoIdParam = const fb.Int64Reader().vTableGet(
+              buffer,
+              rootOffset,
+              8,
+              0,
+            );
+            final tipoEventoParam = const fb.StringReader(
+              asciiOptimization: true,
+            ).vTableGet(buffer, rootOffset, 10, '');
+            final canalParam = const fb.StringReader(
+              asciiOptimization: true,
+            ).vTableGet(buffer, rootOffset, 12, '');
+            final fonteParam = const fb.StringReader(
+              asciiOptimization: true,
+            ).vTableGet(buffer, rootOffset, 14, '');
+            final quantidadeParam = const fb.Int64Reader().vTableGet(
+              buffer,
+              rootOffset,
+              16,
+              0,
+            );
+            final usuarioLoginParam = const fb.StringReader(
+              asciiOptimization: true,
+            ).vTableGet(buffer, rootOffset, 18, '');
+            final dataHoraParam = DateTime.fromMillisecondsSinceEpoch(
+              const fb.Int64Reader().vTableGet(buffer, rootOffset, 20, 0),
+              isUtc: true,
+            );
+            final object = SugestaoVendaMetricaEvento(
+              id: idParam,
+              produtoOrigemId: produtoOrigemIdParam,
+              produtoSugeridoId: produtoSugeridoIdParam,
+              tipoEvento: tipoEventoParam,
+              canal: canalParam,
+              fonte: fonteParam,
+              quantidade: quantidadeParam,
+              usuarioLogin: usuarioLoginParam,
+              dataHora: dataHoraParam,
+            );
+
+            return object;
+          },
+        ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -8507,6 +8814,11 @@ class Vendedor_ {
   /// See [Vendedor.criadoEm].
   static final criadoEm = obx.QueryDateProperty<Vendedor>(
     _entities[4].properties[11],
+  );
+
+  /// See [Vendedor.senhaPdv].
+  static final senhaPdv = obx.QueryStringProperty<Vendedor>(
+    _entities[4].properties[12],
   );
 }
 
@@ -10081,5 +10393,102 @@ class RecadoLoja_ {
   /// See [RecadoLoja.criadoEm].
   static final criadoEm = obx.QueryDateProperty<RecadoLoja>(
     _entities[31].properties[9],
+  );
+}
+
+/// [ProdutoSugestaoVenda] entity fields to define ObjectBox queries.
+class ProdutoSugestaoVenda_ {
+  /// See [ProdutoSugestaoVenda.id].
+  static final id = obx.QueryIntegerProperty<ProdutoSugestaoVenda>(
+    _entities[32].properties[0],
+  );
+
+  /// See [ProdutoSugestaoVenda.produtoOrigemId].
+  static final produtoOrigemId = obx.QueryIntegerProperty<ProdutoSugestaoVenda>(
+    _entities[32].properties[1],
+  );
+
+  /// See [ProdutoSugestaoVenda.produtoSugeridoId].
+  static final produtoSugeridoId =
+      obx.QueryIntegerProperty<ProdutoSugestaoVenda>(
+        _entities[32].properties[2],
+      );
+
+  /// See [ProdutoSugestaoVenda.tipo].
+  static final tipo = obx.QueryStringProperty<ProdutoSugestaoVenda>(
+    _entities[32].properties[3],
+  );
+
+  /// See [ProdutoSugestaoVenda.quantidadeSugerida].
+  static final quantidadeSugerida =
+      obx.QueryIntegerProperty<ProdutoSugestaoVenda>(
+        _entities[32].properties[4],
+      );
+
+  /// See [ProdutoSugestaoVenda.prioridade].
+  static final prioridade = obx.QueryIntegerProperty<ProdutoSugestaoVenda>(
+    _entities[32].properties[5],
+  );
+
+  /// See [ProdutoSugestaoVenda.observacao].
+  static final observacao = obx.QueryStringProperty<ProdutoSugestaoVenda>(
+    _entities[32].properties[6],
+  );
+
+  /// See [ProdutoSugestaoVenda.ativo].
+  static final ativo = obx.QueryBooleanProperty<ProdutoSugestaoVenda>(
+    _entities[32].properties[7],
+  );
+}
+
+/// [SugestaoVendaMetricaEvento] entity fields to define ObjectBox queries.
+class SugestaoVendaMetricaEvento_ {
+  /// See [SugestaoVendaMetricaEvento.id].
+  static final id = obx.QueryIntegerProperty<SugestaoVendaMetricaEvento>(
+    _entities[33].properties[0],
+  );
+
+  /// See [SugestaoVendaMetricaEvento.produtoOrigemId].
+  static final produtoOrigemId =
+      obx.QueryIntegerProperty<SugestaoVendaMetricaEvento>(
+        _entities[33].properties[1],
+      );
+
+  /// See [SugestaoVendaMetricaEvento.produtoSugeridoId].
+  static final produtoSugeridoId =
+      obx.QueryIntegerProperty<SugestaoVendaMetricaEvento>(
+        _entities[33].properties[2],
+      );
+
+  /// See [SugestaoVendaMetricaEvento.tipoEvento].
+  static final tipoEvento = obx.QueryStringProperty<SugestaoVendaMetricaEvento>(
+    _entities[33].properties[3],
+  );
+
+  /// See [SugestaoVendaMetricaEvento.canal].
+  static final canal = obx.QueryStringProperty<SugestaoVendaMetricaEvento>(
+    _entities[33].properties[4],
+  );
+
+  /// See [SugestaoVendaMetricaEvento.fonte].
+  static final fonte = obx.QueryStringProperty<SugestaoVendaMetricaEvento>(
+    _entities[33].properties[5],
+  );
+
+  /// See [SugestaoVendaMetricaEvento.quantidade].
+  static final quantidade =
+      obx.QueryIntegerProperty<SugestaoVendaMetricaEvento>(
+        _entities[33].properties[6],
+      );
+
+  /// See [SugestaoVendaMetricaEvento.usuarioLogin].
+  static final usuarioLogin =
+      obx.QueryStringProperty<SugestaoVendaMetricaEvento>(
+        _entities[33].properties[7],
+      );
+
+  /// See [SugestaoVendaMetricaEvento.dataHora].
+  static final dataHora = obx.QueryDateProperty<SugestaoVendaMetricaEvento>(
+    _entities[33].properties[8],
   );
 }

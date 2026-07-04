@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../data/motorista_repository.dart';
 import '../data/usuario_repository.dart';
+import '../data/vendedor_repository.dart';
 import '../domain/perfil_usuario_preset.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
@@ -20,11 +21,13 @@ class UsuariosPage extends StatefulWidget {
     super.key,
     required this.usuarioRepository,
     required this.motoristaRepository,
+    required this.vendedorRepository,
     required this.usuarioLogado,
   });
 
   final UsuarioRepository usuarioRepository;
   final MotoristaRepository motoristaRepository;
+  final VendedorRepository vendedorRepository;
   final UsuarioSistema usuarioLogado;
 
   @override
@@ -130,6 +133,19 @@ class _UsuariosPageState extends State<UsuariosPage>
         .toList();
     return ativos.contains(nome) ? nome : '';
   }
+
+  int _vendedorVinculadoValido() {
+    final id = _form.vendedorId;
+    if (id <= 0) return 0;
+    final v = widget.vendedorRepository.obterPorId(id);
+    if (v == null || !v.ativo) return 0;
+    return id;
+  }
+
+  bool get _mostrarVinculoVendedorPdv =>
+      !_form.admin &&
+      (_form.lerPermissao(PermissaoUsuario.acessarPdv) ||
+          _form.perfilSelecionado == PerfilUsuarioPreset.vendedor);
 
   void _sincronizarControllers() {
     _nomeController.text = _form.nome;
@@ -783,6 +799,36 @@ class _UsuariosPageState extends State<UsuariosPage>
             ],
             onChanged: (v) => setState(
               () => _form.definirMotoristaEntregaNome(v),
+            ),
+          ),
+        ],
+        if (_mostrarVinculoVendedorPdv) ...[
+          const SizedBox(height: 4),
+          DropdownButtonFormField<int>(
+            value: _vendedorVinculadoValido(),
+            decoration: const InputDecoration(
+              labelText: 'Vendedor vinculado (PDV)',
+              helperText:
+                  'Permite identificar este usuario no bloqueio do PDV com login e senha.',
+              border: OutlineInputBorder(),
+            ),
+            items: [
+              const DropdownMenuItem(
+                value: 0,
+                child: Text('(Nenhum)'),
+              ),
+              for (final v in widget.vendedorRepository.listarAtivos())
+                DropdownMenuItem(
+                  value: v.id,
+                  child: Text(
+                    v.apelido.trim().isNotEmpty
+                        ? v.apelido.trim()
+                        : v.nomeCompleto,
+                  ),
+                ),
+            ],
+            onChanged: (v) => setState(
+              () => _form.definirVendedorId(v),
             ),
           ),
         ],

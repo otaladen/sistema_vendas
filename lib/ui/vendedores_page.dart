@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/vendedor_repository.dart';
+import '../domain/usuario_senha_codec.dart';
 import 'theme/app_semantic_helper.dart';
 import '../model/vendedor.dart';
 
@@ -17,6 +18,7 @@ class VendedoresPage extends StatefulWidget {
 }
 
 class _VendedoresPageState extends State<VendedoresPage> {
+  final _formKey = GlobalKey<FormState>();
   static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -46,11 +48,13 @@ class _VendedoresPageState extends State<VendedoresPage> {
   final _comissaoController = TextEditingController();
   final _metaMensalController = TextEditingController();
   final _observacoesController = TextEditingController();
+  final _senhaPdvController = TextEditingController();
   final _pesquisaListaController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
   int? _vendedorEmEdicaoId;
   bool _ativo = true;
+  bool _ocultarSenhaPdv = true;
   String _status = '';
 
   late final _telefoneFormatter = _DigitosMaxFormatter(11);
@@ -74,6 +78,7 @@ class _VendedoresPageState extends State<VendedoresPage> {
     _comissaoController.dispose();
     _metaMensalController.dispose();
     _observacoesController.dispose();
+    _senhaPdvController.dispose();
     _pesquisaListaController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -100,6 +105,7 @@ class _VendedoresPageState extends State<VendedoresPage> {
       _comissaoController.clear();
       _metaMensalController.clear();
       _observacoesController.clear();
+      _senhaPdvController.clear();
       _ativo = true;
       _vendedorEmEdicaoId = null;
       _status = '';
@@ -122,6 +128,7 @@ class _VendedoresPageState extends State<VendedoresPage> {
           ? ''
           : v.metaMensalValor.toStringAsFixed(2).replaceAll('.', ',');
       _observacoesController.text = v.observacoesComerciais;
+      _senhaPdvController.clear();
       _ativo = v.ativo;
       _status = 'Editando: ${v.nomeCompleto}';
     });
@@ -156,16 +163,13 @@ class _VendedoresPageState extends State<VendedoresPage> {
   }
 
   void _salvar() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
     var codigo = _codigoController.text.trim();
     if (codigo.isEmpty) {
       codigo = '${widget.vendedorRepository.proximoCodigoInternoSequencial()}';
       _codigoController.text = codigo;
     }
     final nome = _nomeCompletoController.text.trim();
-    if (nome.isEmpty) {
-      setState(() => _status = 'Informe o nome completo.');
-      return;
-    }
     final idAtual = _vendedorEmEdicaoId ?? 0;
     if (widget.vendedorRepository.existeCodigoParaOutro(
       codigoNormalizado: codigo,
@@ -176,20 +180,18 @@ class _VendedoresPageState extends State<VendedoresPage> {
     }
 
     final comissao = _parseBrDecimal(_comissaoController.text);
-    if (comissao < 0 || comissao > 100) {
-      setState(() => _status = 'Comissao deve ser entre 0 e 100%.');
-      return;
-    }
-
     final meta = _parseBrDecimal(_metaMensalController.text);
-    if (meta < 0) {
-      setState(() => _status = 'Meta mensal nao pode ser negativa.');
-      return;
-    }
 
     final existente = _vendedorEmEdicaoId == null
         ? null
         : widget.vendedorRepository.obterPorId(_vendedorEmEdicaoId!);
+
+    final novaSenhaPdv = _senhaPdvController.text.trim();
+
+    var senhaPdv = existente?.senhaPdv ?? '';
+    if (novaSenhaPdv.isNotEmpty) {
+      senhaPdv = UsuarioSenhaCodec.gerarHash(novaSenhaPdv);
+    }
 
     final v = Vendedor(
       id: existente?.id ?? 0,
@@ -203,6 +205,7 @@ class _VendedoresPageState extends State<VendedoresPage> {
       metaMensalValor: meta,
       observacoesComerciais: _observacoesController.text.trim(),
       ativo: _ativo,
+      senhaPdv: senhaPdv,
       criadoEm: existente?.criadoEm,
     );
 
@@ -286,6 +289,11 @@ class _VendedoresPageState extends State<VendedoresPage> {
                 _buildStatusBanner(context, _status),
                 const SizedBox(height: 8),
               ],
+              Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
               _buildSectionCard(
                 context: context,
                 title: 'Identificacao',
@@ -307,12 +315,18 @@ class _VendedoresPageState extends State<VendedoresPage> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  TextField(
+                  TextFormField(
                     controller: _nomeCompletoController,
                     decoration: const InputDecoration(
                       labelText: 'Nome completo',
                       isDense: true,
                     ),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) {
+                        return 'Informe o nome completo.';
+                      }
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 6),
                   TextField(
@@ -403,7 +417,7 @@ class _VendedoresPageState extends State<VendedoresPage> {
                           children: [
                             SizedBox(
                               width: _wPct,
-                              child: TextField(
+                              child: TextFormField(
                                 controller: _comissaoController,
                                 keyboardType: const TextInputType.numberWithOptions(
                                   decimal: true,
@@ -413,11 +427,18 @@ class _VendedoresPageState extends State<VendedoresPage> {
                                   hintText: '0 a 100',
                                   isDense: true,
                                 ),
+                                validator: (v) {
+                                  final n = _parseBrDecimal(v ?? '');
+                                  if (n < 0 || n > 100) {
+                                    return 'Entre 0 e 100%.';
+                                  }
+                                  return null;
+                                },
                               ),
                             ),
                             SizedBox(
                               width: _wMeta,
-                              child: TextField(
+                              child: TextFormField(
                                 controller: _metaMensalController,
                                 keyboardType: const TextInputType.numberWithOptions(
                                   decimal: true,
@@ -427,6 +448,13 @@ class _VendedoresPageState extends State<VendedoresPage> {
                                   hintText: 'Opcional',
                                   isDense: true,
                                 ),
+                                validator: (v) {
+                                  if (v == null || v.trim().isEmpty) return null;
+                                  if (_parseBrDecimal(v) < 0) {
+                                    return 'Nao pode ser negativa.';
+                                  }
+                                  return null;
+                                },
                               ),
                             ),
                           ],
@@ -479,6 +507,48 @@ class _VendedoresPageState extends State<VendedoresPage> {
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              _buildSectionCard(
+                context: context,
+                title: 'Senha do PDV',
+                icon: Icons.lock_outline,
+                children: [
+                  TextFormField(
+                    controller: _senhaPdvController,
+                    obscureText: _ocultarSenhaPdv,
+                    decoration: InputDecoration(
+                      labelText: emEdicao
+                          ? 'Nova senha do PDV (opcional)'
+                          : 'Senha do PDV (opcional)',
+                      helperText: emEdicao
+                          ? 'Deixe em branco para manter a senha atual. '
+                              'Necessaria quando o bloqueio vendedor esta ativo.'
+                          : 'Usada no bloqueio vendedor do terminal PDV.',
+                      isDense: true,
+                      suffixIcon: IconButton(
+                        tooltip: _ocultarSenhaPdv
+                            ? 'Mostrar senha'
+                            : 'Ocultar senha',
+                        onPressed: () => setState(
+                          () => _ocultarSenhaPdv = !_ocultarSenhaPdv,
+                        ),
+                        icon: Icon(
+                          _ocultarSenhaPdv
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                      ),
+                    ),
+                    validator: (v) {
+                      final s = v?.trim() ?? '';
+                      if (s.isNotEmpty && s.length < 4) {
+                        return 'Minimo 4 caracteres.';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+              ),
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -498,6 +568,9 @@ class _VendedoresPageState extends State<VendedoresPage> {
                     label: const Text('Novo'),
                   ),
                 ],
+              ),
+                  ],
+                ),
               ),
               const SizedBox(height: 14),
               Text(

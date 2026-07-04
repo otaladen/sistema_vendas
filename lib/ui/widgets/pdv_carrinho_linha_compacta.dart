@@ -12,9 +12,9 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     required this.rotuloPreco,
     required this.precoUnitarioFormatado,
     required this.subtotalFormatado,
-    required this.quantidade,
-    this.detalheQuantidade,
-    this.rotuloUnidade,
+    required this.quantidadeExibicao,
+    required this.quantidadeArmazenada,
+    required this.rotuloQuantidadeLinha,
     required this.tipoEntregaItem,
     required this.precoTipo,
     required this.selecionado,
@@ -30,6 +30,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     this.emPromocao = false,
     this.estoqueInsuficiente = false,
     this.precoManual = false,
+    this.alvosTouchAmplos = false,
   });
 
   final String nomeProduto;
@@ -39,9 +40,9 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final String rotuloPreco;
   final String precoUnitarioFormatado;
   final String subtotalFormatado;
-  final int quantidade;
-  final String? detalheQuantidade;
-  final String? rotuloUnidade;
+  final String quantidadeExibicao;
+  final int quantidadeArmazenada;
+  final String rotuloQuantidadeLinha;
   final String tipoEntregaItem;
   final String precoTipo;
   final bool selecionado;
@@ -54,16 +55,10 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final VoidCallback onDividir;
   final VoidCallback onAlterarPreco;
   final VoidCallback onRemover;
+  final bool alvosTouchAmplos;
 
   static const double alturaLinha = 52;
-
-  String _linhaQuantidadeUnidade() {
-    final un = rotuloUnidade?.trim();
-    if (un != null && un.isNotEmpty) {
-      return '$quantidade $un × $precoUnitarioFormatado';
-    }
-    return '$quantidade × $precoUnitarioFormatado';
-  }
+  static const double alturaLinhaTouch = 56;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +70,8 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     final borda = selecionado
         ? scheme.primary.withValues(alpha: 0.4)
         : scheme.outlineVariant.withValues(alpha: 0.35);
+    final minAcao = alvosTouchAmplos ? 44.0 : 40.0;
+    final altura = alvosTouchAmplos ? alturaLinhaTouch : alturaLinha;
 
     return Material(
       color: bg,
@@ -90,7 +87,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
             ),
           ),
           child: SizedBox(
-            height: alturaLinha,
+            height: altura,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2),
               child: Row(
@@ -151,9 +148,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                           ],
                         ),
                         Text(
-                          detalheQuantidade != null
-                              ? '$detalheQuantidade · $precoUnitarioFormatado/$rotuloPreco'
-                              : '${_linhaQuantidadeUnidade()} · $rotuloPreco',
+                          '$rotuloQuantidadeLinha · $precoUnitarioFormatado/$rotuloPreco',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(
@@ -191,11 +186,12 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                     tooltip: 'Diminuir',
                     icon: Icons.remove,
                     onPressed: onDiminuir,
+                    tamanhoMinimo: minAcao,
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 2),
                     child: Text(
-                      '$quantidade',
+                      quantidadeExibicao,
                       style: theme.textTheme.labelLarge?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
@@ -205,19 +201,22 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                     tooltip: 'Aumentar',
                     icon: Icons.add,
                     onPressed: onAumentar,
+                    tamanhoMinimo: minAcao,
                   ),
                   _AcaoIcone(
-                    tooltip: quantidade > 1
+                    tooltip: quantidadeArmazenada > 1
                         ? 'Dividir item (Ctrl+D)'
                         : 'Dividir item (min. 2 un.)',
                     icon: Icons.call_split,
-                    onPressed: quantidade > 1 ? onDividir : null,
+                    onPressed: quantidadeArmazenada > 1 ? onDividir : null,
+                    tamanhoMinimo: minAcao,
                   ),
                   _AcaoIcone(
                     tooltip: 'Remover item',
                     icon: Icons.delete_outline,
                     cor: scheme.error,
                     onPressed: onRemover,
+                    tamanhoMinimo: minAcao,
                   ),
                 ],
               ),
@@ -236,12 +235,14 @@ class _AcaoIcone extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.cor,
+    this.tamanhoMinimo = 40,
   });
 
   final String tooltip;
   final IconData icon;
   final VoidCallback? onPressed;
   final Color? cor;
+  final double tamanhoMinimo;
 
   @override
   Widget build(BuildContext context) {
@@ -249,8 +250,11 @@ class _AcaoIcone extends StatelessWidget {
       tooltip: tooltip,
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-      icon: Icon(icon, size: 18, color: cor),
+      constraints: BoxConstraints(
+        minWidth: tamanhoMinimo,
+        minHeight: tamanhoMinimo,
+      ),
+      icon: Icon(icon, size: tamanhoMinimo >= 40 ? 20 : 18, color: cor),
       onPressed: onPressed,
     );
   }

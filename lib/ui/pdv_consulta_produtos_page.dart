@@ -14,6 +14,9 @@ import '../data/kit_orcamento_repository.dart';
 import '../data/lista_compra_repository.dart';
 import '../data/produto_busca_util.dart';
 import '../data/produto_repository.dart';
+import '../data/produto_sugestao_venda_repository.dart';
+import '../data/sugestao_venda_metrica_repository.dart';
+import '../domain/sugestao_venda_metrica_constantes.dart';
 import '../data/venda_repository.dart';
 import '../domain/promocao_info_vigente.dart';
 import '../domain/promocao_preco_result.dart';
@@ -22,6 +25,7 @@ import 'pdv_consulta_preview_panel.dart';
 import 'pdv_pesquisa_comando.dart';
 import 'produto_detalhe_venda_page.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
+import 'widgets/consulta_lista_vazia.dart';
 import 'widgets/pdv_atalhos_ajuda.dart';
 import 'widgets/pdv_consulta_filtros_chips.dart';
 import 'widgets/pdv_consulta_linha_produto.dart';
@@ -36,6 +40,7 @@ class PdvConsultaProdutoResult {
     this.quantidadeDireta,
     this.adicaoDireta = false,
     this.abrirDialogoAdicionar = true,
+    this.quantidadeEmUnidadeCompra = false,
     this.kitInserirId,
     this.quantidadeKitsInserir,
   });
@@ -45,6 +50,7 @@ class PdvConsultaProdutoResult {
   final int? quantidadeDireta;
   final bool adicaoDireta;
   final bool abrirDialogoAdicionar;
+  final bool quantidadeEmUnidadeCompra;
   final int? kitInserirId;
   final int? quantidadeKitsInserir;
 
@@ -70,9 +76,11 @@ class PdvConsultaProdutosPage extends StatefulWidget {
     this.quantidadeNoOrcamentoDe,
     this.criadoPorListaCompra = '',
     this.kitOrcamentoRepository,
+    this.sugestaoVendaRepository,
     this.mostrarMargemGerente = false,
     this.margemMinimaPadrao = 20,
     this.rotulosDeposito = const PdvConsultaDepositoRotulos(),
+    this.produtosNoOrcamentoIdsDe,
   });
 
   final ProdutoRepository produtoRepository;
@@ -88,12 +96,14 @@ class PdvConsultaProdutosPage extends StatefulWidget {
       resolverPromocao;
   final List<PromocaoInfoVigente> Function(Produto produto)?
       campanhasVigentesDe;
-  final int Function(int produtoId)? quantidadeNoOrcamentoDe;
+  final num Function(int produtoId)? quantidadeNoOrcamentoDe;
   final String criadoPorListaCompra;
   final KitOrcamentoRepository? kitOrcamentoRepository;
+  final ProdutoSugestaoVendaRepository? sugestaoVendaRepository;
   final bool mostrarMargemGerente;
   final double margemMinimaPadrao;
   final PdvConsultaDepositoRotulos rotulosDeposito;
+  final Set<int> Function()? produtosNoOrcamentoIdsDe;
 
   @override
   State<PdvConsultaProdutosPage> createState() =>
@@ -110,6 +120,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   late final FocusNode _listaFocus;
   late final ScrollController _scrollController;
   Timer? _debounce;
+  late final SugestaoVendaMetricaRepository _sugestaoMetricaRepo;
 
   late String _precoListaAtivo;
   int _quantidadeAdicionar = 1;
@@ -139,6 +150,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     _pesquisaFocus = FocusNode(debugLabel: 'pdvConsultaPesquisa');
     _listaFocus = FocusNode(debugLabel: 'pdvConsultaLista');
     _scrollController = ScrollController();
+    _sugestaoMetricaRepo =
+        SugestaoVendaMetricaRepository(widget.produtoRepository.objectBox);
   }
 
   @override
@@ -658,6 +671,12 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     _quantidadeAdicionar = quantidade;
   }
 
+  /// Fecha a consulta uma unica vez (Esc nao deve dar pop duplo).
+  void _fecharConsulta() {
+    if (!mounted) return;
+    Navigator.of(context).maybePop();
+  }
+
   void _adicionarSelecionadoAoOrcamento() {
     final p = _produtoSelecionado;
     if (p == null) return;
@@ -734,6 +753,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     PdvPesquisaComando? comando,
     bool adicionarDireto = true,
   }) {
+    final emUnidadeCompra = produto.pdvPodeVenderEmUnidadeCompra;
     final cmd = comando ?? PdvPesquisaComando.parse(_pesquisaController.text);
     if (cmd.adicaoDireta) {
       Navigator.of(context).pop(
@@ -742,6 +762,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           precoListaAtivo: _precoListaAtivo,
           adicaoDireta: true,
           abrirDialogoAdicionar: false,
+          quantidadeEmUnidadeCompra: emUnidadeCompra,
         ),
       );
       return;
@@ -753,6 +774,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           precoListaAtivo: _precoListaAtivo,
           quantidadeDireta: cmd.quantidadeDireta,
           abrirDialogoAdicionar: false,
+          quantidadeEmUnidadeCompra: emUnidadeCompra,
         ),
       );
       return;
@@ -766,6 +788,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
             precoListaAtivo: _precoListaAtivo,
             adicaoDireta: true,
             abrirDialogoAdicionar: false,
+            quantidadeEmUnidadeCompra: emUnidadeCompra,
           ),
         );
       } else {
@@ -775,6 +798,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
             precoListaAtivo: _precoListaAtivo,
             quantidadeDireta: qtd,
             abrirDialogoAdicionar: false,
+            quantidadeEmUnidadeCompra: emUnidadeCompra,
           ),
         );
       }
@@ -785,6 +809,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
         produto: produto,
         precoListaAtivo: _precoListaAtivo,
         abrirDialogoAdicionar: true,
+        quantidadeEmUnidadeCompra: emUnidadeCompra,
       ),
     );
   }
@@ -797,10 +822,6 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     var i = _indiceSelecionado ?? 0;
     i = i.clamp(0, n - 1);
 
-    if (event.logicalKey == LogicalKeyboardKey.escape) {
-      Navigator.of(context).pop();
-      return KeyEventResult.handled;
-    }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       setState(() => _indiceSelecionado = (i + 1).clamp(0, n - 1));
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollParaIndice());
@@ -945,6 +966,33 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     );
   }
 
+  void _adicionarAgregadoSugerido(PdvConsultaAgregadoVenda agregado) {
+    final origem = _produtoSelecionado;
+    if (origem != null && origem.id > 0) {
+      _sugestaoMetricaRepo.registrarAceite(
+        produtoOrigemId: origem.id,
+        produtoSugeridoId: agregado.produtoId,
+        canal: SugestaoVendaMetricaCanal.insights,
+        fonte: SugestaoVendaMetricaFonte.deAgregado(
+          historico: agregado.historico,
+          cadastrado: agregado.cadastrado,
+        ),
+        quantidade: agregado.quantidadeSugerida,
+        usuarioLogin: widget.criadoPorListaCompra,
+      );
+    }
+    final produto = widget.produtoRepository.obterPorId(agregado.produtoId);
+    if (produto == null) return;
+    Navigator.of(context).pop(
+      PdvConsultaProdutoResult(
+        produto: produto,
+        precoListaAtivo: _precoListaAtivo,
+        quantidadeDireta: agregado.quantidadeSugerida,
+        abrirDialogoAdicionar: false,
+      ),
+    );
+  }
+
   PdvConsultaInsightsPacote _montarInsights(Produto produto) {
     final promo = widget.resolverPromocao?.call(produto, _precoListaAtivo);
     return PdvConsultaInsightsService.montar(
@@ -952,6 +1000,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       produtoRepository: widget.produtoRepository,
       vendaRepository: widget.vendaRepository,
       kitOrcamentoRepository: widget.kitOrcamentoRepository,
+      sugestaoVendaRepository: widget.sugestaoVendaRepository,
       clienteId: widget.clienteId,
       precoListaAtivo: _precoListaAtivo,
       precoUnitarioDe: widget.precoUnitarioDe,
@@ -960,6 +1009,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       mostrarMargemGerente: widget.mostrarMargemGerente,
       termoBusca: _termoBuscaAtual,
       rotulosDeposito: widget.rotulosDeposito,
+      excluirProdutoIdsAgregados:
+          widget.produtosNoOrcamentoIdsDe?.call() ?? const {},
     );
   }
 
@@ -987,6 +1038,9 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       onSelecionarSimilar: _selecionarProdutoPorId,
       onInserirKit: widget.kitOrcamentoRepository != null
           ? _inserirKitSugerido
+          : null,
+      onAdicionarAgregado: widget.sugestaoVendaRepository != null
+          ? _adicionarAgregadoSugerido
           : null,
       rotulosDeposito: widget.rotulosDeposito,
     );
@@ -1190,7 +1244,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           ),
           _PdvConsultaFecharIntent: CallbackAction<_PdvConsultaFecharIntent>(
             onInvoke: (_) {
-              Navigator.of(context).pop();
+              _fecharConsulta();
               return null;
             },
           ),
@@ -1224,7 +1278,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
             leading: IconButton(
               tooltip: 'Voltar ao carrinho (Esc)',
               icon: const Icon(Icons.arrow_back),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: _fecharConsulta,
             ),
             title: const Text('Consulta de produtos'),
             actions: [
@@ -1253,7 +1307,12 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
               _buildCabecalhoConsulta(),
               Expanded(
                 child: _produtos.isEmpty
-                    ? const Center(child: Text('Nenhum produto encontrado.'))
+                    ? ConsultaListaVazia(
+                        mensagem: _subtituloLista,
+                        dica: _termoBuscaAtual.trim().isEmpty
+                            ? 'Digite para buscar ou use F4 no PDV.'
+                            : 'Ajuste os filtros ou o termo de busca.',
+                      )
                     : _buildAreaListaComPreview(),
               ),
             ],

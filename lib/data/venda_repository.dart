@@ -18,6 +18,7 @@ import '../domain/fiscal/venda_nfce_obrigatoria_helper.dart';
 import '../domain/estoque/tipo_movimento_estoque.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
+import '../domain/produto_coocorrencia_venda.dart';
 import '../domain/promocao_cadastro.dart';
 import '../domain/promocao_preco_service.dart';
 import '../domain/ultimas_vendas_finalizadas_ordenacao.dart';
@@ -1087,7 +1088,24 @@ class VendaRepository {
     }
   }
 
-  Venda? obterPorId(int id) => _db.vendaBox.get(id);
+  Venda? obterPorId(int id) {
+    final v = _db.vendaBox.get(id);
+    if (v == null) return null;
+    if (v.itens.isEmpty) {
+      v.itens.addAll(listarItensPorVenda(id));
+    }
+    return v;
+  }
+
+  List<ItemVenda> listarItensPorVenda(int vendaId) {
+    final query =
+        _db.itemVendaBox.query(ItemVenda_.venda.equals(vendaId)).build();
+    try {
+      return query.find();
+    } finally {
+      query.close();
+    }
+  }
 
   /// Orcamentos salvos no PDV ainda nao finalizados no caixa (consulta indexada).
   List<Venda> listarOrcamentosPendentes({
@@ -1537,6 +1555,104 @@ class VendaRepository {
       return out;
     } finally {
       query.close();
+    }
+  }
+
+  /// Produtos que apareceram na mesma venda finalizada que [produtoOrigemId].
+  List<ProdutoCoocorrenciaVenda> listarProdutosCompradosJunto(
+    int produtoOrigemId, {
+    int dias = 90,
+    int limiteVendasAnalisadas = 500,
+    int minimoVendasJuntas = 2,
+    int limiteResultado = 12,
+  }) {
+    if (produtoOrigemId <= 0 || dias <= 0 || limiteResultado <= 0) {
+      return const [];
+    }
+
+    final fim = DateTime.now().toUtc();
+    final inicio = fim.subtract(Duration(days: dias));
+
+    final qb = _db.itemVendaBox.query(
+      ItemVenda_.produto.equals(produtoOrigemId),
+    );
+    qb.link(
+      ItemVenda_.venda,
+      Venda_.status
+          .equals('finalizada')
+          .and(Venda_.cancelada.equals(false))
+          .and(Venda_.data.greaterOrEqualDate(inicio))
+          .and(Venda_.data.lessOrEqualDate(fim)),
+    );
+    final queryOrigem = qb.build();
+    try {
+      final itensOrigem = queryOrigem.find();
+      if (itensOrigem.isEmpty) return const [];
+
+      final vendasComOrigem = <int, DateTime>{};
+      for (final item in itensOrigem) {
+        final liquida = item.quantidade - item.quantidadeDevolvida;
+        if (liquida <= 0) continue;
+        final vid = item.venda.targetId;
+        if (vid <= 0) continue;
+        final venda = item.venda.target ?? _db.vendaBox.get(vid);
+        if (venda == null) continue;
+        final anterior = vendasComOrigem[vid];
+        if (anterior == null || venda.data.isAfter(anterior)) {
+          vendasComOrigem[vid] = venda.data;
+        }
+      }
+      if (vendasComOrigem.isEmpty) return const [];
+
+      final vendaIds = vendasComOrigem.keys.toList()
+        ..sort((a, b) => vendasComOrigem[b]!.compareTo(vendasComOrigem[a]!));
+      final analisar = vendaIds.take(limiteVendasAnalisadas);
+
+      final cooc = <int, ({int vendas, int qtdTotal})>{};
+      for (final vid in analisar) {
+        final qItens = _db.itemVendaBox
+            .query(ItemVenda_.venda.equals(vid))
+            .build();
+        try {
+          final qtyPorProduto = <int, int>{};
+          for (final item in qItens.find()) {
+            final pid = item.produto.targetId;
+            if (pid <= 0 || pid == produtoOrigemId) continue;
+            final liquida = item.quantidade - item.quantidadeDevolvida;
+            if (liquida <= 0) continue;
+            qtyPorProduto[pid] = (qtyPorProduto[pid] ?? 0) + liquida;
+          }
+          for (final e in qtyPorProduto.entries) {
+            final prev = cooc[e.key];
+            cooc[e.key] = (
+              vendas: (prev?.vendas ?? 0) + 1,
+              qtdTotal: (prev?.qtdTotal ?? 0) + e.value,
+            );
+          }
+        } finally {
+          qItens.close();
+        }
+      }
+
+      final ranked = cooc.entries
+          .where((e) => e.value.vendas >= minimoVendasJuntas)
+          .map(
+            (e) => ProdutoCoocorrenciaVenda(
+              produtoId: e.key,
+              vendasJuntas: e.value.vendas,
+              quantidadeMedia: e.value.qtdTotal / e.value.vendas,
+            ),
+          )
+          .toList()
+        ..sort((a, b) {
+          final cmp = b.vendasJuntas.compareTo(a.vendasJuntas);
+          if (cmp != 0) return cmp;
+          return b.quantidadeMedia.compareTo(a.quantidadeMedia);
+        });
+
+      return ranked.take(limiteResultado).toList();
+    } finally {
+      queryOrigem.close();
     }
   }
 

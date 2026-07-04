@@ -23,6 +23,7 @@ import 'theme/app_semantic_helper.dart';
 import 'widgets/cliente/cliente_cadastro_header.dart';
 import 'widgets/cliente/cliente_cadastro_rodape.dart';
 import 'widgets/extrato_fiado_cliente_card.dart';
+import 'widgets/mascaras_cadastro_input.dart';
 
 class _CadastroClienteSalvarIntent extends Intent {
   const _CadastroClienteSalvarIntent();
@@ -132,6 +133,7 @@ class _ClientesPageState extends State<ClientesPage>
   bool _ativo = true;
   List<Vendedor> _vendedoresAtivos = [];
   String _status = '';
+  String? _erroDocumento;
   late final _cpfCnpjFormatter = _CpfCnpjInputFormatter();
   late final _telefoneFormatter = _TelefoneInputFormatter();
   late final _cepFormatter = _CepInputFormatter();
@@ -546,6 +548,17 @@ class _ClientesPageState extends State<ClientesPage>
       });
       return;
     }
+    final doc = _documentoController.text.trim();
+    if (!documentoCpfCnpjValidoOuVazio(doc, tipoPessoa: _tipoPessoa)) {
+      setState(() {
+        _erroDocumento = _tipoPessoa == 'fisica'
+            ? 'CPF invalido.'
+            : 'CNPJ invalido.';
+        _status = _erroDocumento!;
+      });
+      return;
+    }
+    setState(() => _erroDocumento = null);
     final limiteCredito =
         double.tryParse(
           _limiteController.text
@@ -1414,6 +1427,7 @@ class _ClientesPageState extends State<ClientesPage>
                   decoration: InputDecoration(
                     labelText: _tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ',
                     isDense: true,
+                    errorText: _erroDocumento,
                     suffixIcon:
                         _tipoPessoa == 'juridica' && _consultaCnpjEmAndamento
                         ? const Padding(
@@ -1428,6 +1442,11 @@ class _ClientesPageState extends State<ClientesPage>
                   ),
                   keyboardType: TextInputType.number,
                   inputFormatters: [_cpfCnpjFormatter],
+                  onChanged: (_) {
+                    if (_erroDocumento != null) {
+                      setState(() => _erroDocumento = null);
+                    }
+                  },
                 ),
               ),
               if (_tipoPessoa == 'juridica')

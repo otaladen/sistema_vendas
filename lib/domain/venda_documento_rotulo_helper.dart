@@ -90,6 +90,32 @@ abstract final class VendaDocumentoRotuloHelper {
     return partes.join(' · ');
   }
 
+  /// Rotulo curto para coluna Status (sem repetir documento/controle).
+  static String statusOperacionalResumidoLista(
+    Venda venda, {
+    VendaDocumentoNfe55Resumo? nfe55,
+  }) {
+    if (venda.nfceProcessandoPendenteFocus) {
+      return venda.estoqueBaixadoCupom
+          ? 'SEFAZ pendente · Estoque OK'
+          : 'SEFAZ pendente';
+    }
+    if (venda.nfceEmissaoEmAndamento) {
+      return 'Emitindo NFC-e';
+    }
+
+    final temNfce = venda.nfceEmitida;
+    final temNfe55 = nfe55?.autorizada == true;
+    if (!temNfce && !temNfe55) {
+      if (venda.estoqueBaixadoCupom) {
+        return 'Fiscal pendente · Estoque OK';
+      }
+      return 'Aguardando documento';
+    }
+
+    return venda.estoqueBaixadoCupom ? 'Estoque OK' : 'Estoque pendente';
+  }
+
   static Color corStatusLista(Venda venda, ColorScheme scheme) {
     if (venda.nfceProcessandoPendenteFocus || venda.nfceEmissaoEmAndamento) {
       return scheme.tertiary;

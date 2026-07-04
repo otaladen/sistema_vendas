@@ -30,6 +30,13 @@ import 'cupom_venda_impressao_helper.dart';
 import 'segunda_via_cupom_autorizacao.dart';
 import '../services/venda_fiscal_service.dart';
 import 'vendas/cancelar_venda_ui.dart';
+import 'vendas/listagem_venda_item_ui.dart';
+import 'vendas/listagem_vendas_cabecalho.dart';
+import 'vendas/listagem_vendas_filtros_panel.dart';
+import 'vendas/listagem_vendas_layout.dart';
+import 'vendas/listagem_vendas_lista_cards.dart';
+import 'vendas/listagem_vendas_ordenacao.dart';
+import 'vendas/listagem_vendas_tabela.dart';
 import '../config/focus_nfe_runtime.dart';
 import '../domain/fiscal/abrir_danfe_focus.dart';
 import '../services/focus_nfe_service.dart';
@@ -94,6 +101,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   List<String> _distintosCanceladaPor = [];
   int _offsetListagem = 0;
   int _totalListagemVendas = 0;
+  ListagemVendasColuna _colunaOrdenacao = ListagemVendasColuna.data;
+  bool _ordenacaoAscendente = false;
 
   @override
   void initState() {
@@ -123,16 +132,27 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     );
   }
 
-  String _statusOperacionalLista(Venda v) {
+  VendaDocumentoNfe55Resumo? _nfe55Resumo(Venda v) {
     final nfe55 = widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id);
+    return nfe55 == null
+        ? null
+        : VendaDocumentoNfe55Resumo(
+            numero: nfe55.numero,
+            autorizada: nfe55.autorizada,
+          );
+  }
+
+  String _statusOperacionalLista(Venda v) {
     return VendaDocumentoRotuloHelper.statusOperacionalLista(
       v,
-      nfe55: nfe55 == null
-          ? null
-          : VendaDocumentoNfe55Resumo(
-              numero: nfe55.numero,
-              autorizada: nfe55.autorizada,
-            ),
+      nfe55: _nfe55Resumo(v),
+    );
+  }
+
+  String _statusOperacionalResumidoLista(Venda v) {
+    return VendaDocumentoRotuloHelper.statusOperacionalResumidoLista(
+      v,
+      nfe55: _nfe55Resumo(v),
     );
   }
 
@@ -817,6 +837,186 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     _pesquisar();
   }
 
+  int _contarFiltrosAtivos() {
+    var n = 0;
+    if (_periodoPreset != 'ultimos_30') n++;
+    if (_canceladaPorFiltro != 'todos') n++;
+    if (_formaPagamento != 'todos') n++;
+    if (_tipoEntrega != 'todos') n++;
+    if (_filtroFiscal != 'todos') n++;
+    if (_entregaPendente != 'todos') n++;
+    if (_clienteIdFiltro != null) n++;
+    if (_vendedorIdFiltro != null) n++;
+    if (_filtroCancelamento != 'ativas') n++;
+    if (_buscaController.text.trim().isNotEmpty) n++;
+    return n;
+  }
+
+  double get _valorTotalExibido =>
+      _resultados.fold(0.0, (s, v) => s + v.total);
+
+  ListagemVendaItemUi _buildItemUi(Venda v) {
+    final cliente = _clienteDaVenda(v);
+    final alertas = <String>[];
+
+    if (!v.cancelada &&
+        v.status == 'finalizada' &&
+        (widget.vendaRepository.valorReferenciaDevolvidoAcumuladoVenda(v.id) >
+                0.005 ||
+            widget.vendaRepository.valorSaidaTrocaAcumuladoVenda(v.id) >
+                0.005)) {
+      final dev = widget.vendaRepository
+          .valorReferenciaDevolvidoAcumuladoVenda(v.id);
+      final troca =
+          widget.vendaRepository.valorSaidaTrocaAcumuladoVenda(v.id);
+      final liq = troca - dev;
+      alertas.add(
+        'Dev/troca: devolvido ${_formatarMoeda(dev)} · saida '
+        '${_formatarMoeda(troca)} · liquido ${_formatarMoeda(liq)}',
+      );
+    }
+    if (v.idOrcamentoFreteRetiradaAberto != 0) {
+      final filho = widget.vendaRepository
+          .obterPorId(v.idOrcamentoFreteRetiradaAberto);
+      final n = filho?.numeroOrcamento ?? 0;
+      final rot = n > 0 ? '#$n' : '(id ${filho?.id})';
+      alertas.add('Frete carreto pendente no caixa $rot');
+    }
+    if (_temRegistroRetiradaOuEntrega(v)) {
+      alertas.add('Rastreio disponivel no historico de retiradas');
+    }
+    if (v.cancelada) {
+      alertas.add(
+        'Cancelada por: ${v.canceladaPor.isEmpty ? 'Nao informado' : v.canceladaPor}'
+        '${v.canceladaEm == null ? '' : ' · ${_dataHora.format(v.canceladaEm!.toLocal())}'}'
+        '${v.motivoCancelamento.isEmpty ? '' : ' · ${v.motivoCancelamento}'}',
+      );
+    }
+
+    var entrega = _textoEntregaLista(v);
+    if (v.entregaPendente) {
+      entrega = '$entrega · Pendente';
+      alertas.insert(0, _linhaRetiradaFutura(v));
+    }
+
+    final statusCompleto =
+        v.cancelada ? 'Venda cancelada' : _statusOperacionalLista(v);
+    final statusResumido =
+        v.cancelada ? 'Cancelada' : _statusOperacionalResumidoLista(v);
+
+    return ListagemVendaItemUi(
+      venda: v,
+      titulo: _rotuloCupomFiscalLista(v),
+      status: statusResumido,
+      statusDetalhe:
+          statusCompleto != statusResumido ? statusCompleto : null,
+      statusCor: v.cancelada
+          ? Theme.of(context).colorScheme.error
+          : _corStatusOperacionalLista(v),
+      dataHora: _dataHora.format(v.data.toLocal()),
+      cliente: cliente?.nomeRazao ?? 'Sem cliente',
+      vendedor: _rotuloVendedorUmLinha(v),
+      pagamento: _rotuloPagamentoLinhaLista(v),
+      entrega: entrega,
+      badgeNumero: _badgeNumeroVenda(v),
+      totalFormatado: _formatarMoeda(v.total),
+      cancelada: v.cancelada,
+      alertas: alertas,
+    );
+  }
+
+  void _executarAcaoMenu(String value, Venda v) {
+    switch (value) {
+      case 'historico':
+        _mostrarHistoricoRetirada(v);
+      case 'retirada':
+        _abrirRegistrarRetirada(v);
+      case 'pagar_frete':
+        _abrirPagarFreteCarreto(v);
+      case 'devolucao':
+        _abrirRegistrarDevolucaoTroca(v);
+      case 'devolucao_fiscal':
+        _abrirDevolucoesFiscais(v);
+      case 'emitir_nfce':
+        _emitirNfce(v);
+      case 'danfe_nfce':
+        _verDanfeNfce(v);
+      case 'danfe_nfe55':
+        _verNfe55(v);
+      case 'segunda_via':
+        _segundaViaCupom(v);
+      case 'cancelar':
+        _cancelarVenda(v);
+    }
+  }
+
+  List<PopupMenuEntry<String>> _menuItensVenda(Venda v) {
+    final temNfce = v.nfceEmitida;
+    final clienteVenda = EmitirNfceVendaFlow.clienteDaVenda(
+      v,
+      widget.clienteRepository,
+    );
+    final podeEmitirNfce = EmitirNfceVendaFlow.podeEmitir(
+      v,
+      cliente: clienteVenda,
+    );
+    final temNfe55 =
+        widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null;
+
+    return [
+      if (podeEmitirNfce)
+        const PopupMenuItem<String>(
+          value: 'emitir_nfce',
+          child: Text('Emitir NFC-e'),
+        ),
+      if (temNfce)
+        const PopupMenuItem<String>(
+          value: 'danfe_nfce',
+          child: Text('Ver NFC-e (DANFE)'),
+        ),
+      if (temNfe55)
+        const PopupMenuItem<String>(
+          value: 'danfe_nfe55',
+          child: Text('Ver NF-e modelo 55'),
+        ),
+      if (!v.cancelada && v.status == 'finalizada')
+        const PopupMenuItem<String>(
+          value: 'segunda_via',
+          child: Text('Controle interno (2ª via / PDF)'),
+        ),
+      if (_podePagarFreteCarreto(v))
+        const PopupMenuItem<String>(
+          value: 'pagar_frete',
+          child: Text('Pagar frete (carreto)'),
+        ),
+      if (_vendaTemRetiradaPendenteParaCliente(v))
+        const PopupMenuItem<String>(
+          value: 'retirada',
+          child: Text('Registrar retirada'),
+        ),
+      if (_temRegistroRetiradaOuEntrega(v))
+        const PopupMenuItem<String>(
+          value: 'historico',
+          child: Text('Historico de retiradas'),
+        ),
+      if (_podeRegistrarDevolucaoTroca(v))
+        const PopupMenuItem<String>(
+          value: 'devolucao',
+          child: Text('Devolucao / troca'),
+        ),
+      if (_temDevolucaoFiscal(v))
+        const PopupMenuItem<String>(
+          value: 'devolucao_fiscal',
+          child: Text('NF-e de devolucao (DANFE)'),
+        ),
+      PopupMenuItem<String>(
+        value: 'cancelar',
+        enabled: !v.cancelada,
+        child: const Text('Cancelar venda'),
+      ),
+    ];
+  }
+
   String _csvEscape(String texto) => '"${texto.replaceAll('"', '""')}"';
 
   Future<void> _exportarCancelamentosCsv() async {
@@ -1013,732 +1213,494 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         .where((c) => c.ativo)
         .toList();
     final vendedores = widget.vendedorRepository.listarAtivos();
+    final usarTabela =
+        MediaQuery.sizeOf(context).width >= ListagemVendasLayout.breakpointTabela;
+    final itensUiBrutos = _resultados.map(_buildItemUi).toList();
+    final itensUi = usarTabela
+        ? itensUiBrutos
+        : ordenarItensListagemVendas(
+            itensUiBrutos,
+            coluna: _colunaOrdenacao,
+            ascendente: _ordenacaoAscendente,
+          );
+    final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Listagem de Vendas')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Filtros',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListagemVendasCabecalho(
+            totalRegistros: _totalListagemVendas,
+            exibidos: _resultados.length,
+            valorTotalExibido: _valorTotalExibido,
+            onAtualizar: _pesquisar,
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ListagemVendasFiltrosPanel(
+                    buscaController: _buscaController,
+                    filtrosAtivos: _contarFiltrosAtivos(),
+                    onPesquisar: _pesquisar,
+                    onLimpar: _limparFiltros,
+                    onExportarCsv: _exportarCancelamentosCsv,
+                    onExportarPdf: _exportarCancelamentosPdf,
+                    periodoPersonalizado: _periodoPreset == 'personalizado'
+                        ? Wrap(
+                            spacing: 10,
+                            runSpacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: _escolherDataInicioPersonalizado,
+                                icon: const Icon(Icons.event_outlined, size: 18),
+                                label: Text(
+                                  _dataPersonalizadaInicio == null
+                                      ? 'Data inicial'
+                                      : 'De ${_dataDia.format(_dataPersonalizadaInicio!)}',
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: _escolherDataFimPersonalizado,
+                                icon: const Icon(Icons.event_outlined, size: 18),
+                                label: Text(
+                                  _dataPersonalizadaFim == null
+                                      ? 'Data final'
+                                      : 'Ate ${_dataDia.format(_dataPersonalizadaFim!)}',
+                                ),
+                              ),
+                              Text(
+                                'Inclui o dia inteiro de cada data.',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ],
+                          )
+                        : null,
+                    filtrosAvancados: (ctx, constraints) =>
+                        ListagemVendasFiltrosGrade(
                       children: [
-                        SizedBox(
-                          width: 220,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _periodoPreset,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Periodo',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'hoje',
-                                child: Text('Hoje'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'ultimos_7',
-                                child: Text('Ultimos 7 dias'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'ultimos_30',
-                                child: Text('Ultimos 30 dias'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'mes_atual',
-                                child: Text('Mes atual'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'mes_anterior',
-                                child: Text('Mes anterior'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'ano_atual',
-                                child: Text('Ano atual'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'todo',
-                                child: Text('Todo o periodo'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'personalizado',
-                                child: Text('Datas escolhidas'),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v == null) return;
-                              setState(() {
-                                _periodoPreset = v;
-                                if (v == 'personalizado' &&
-                                    (_dataPersonalizadaInicio == null ||
-                                        _dataPersonalizadaFim == null)) {
-                                  final n = DateTime.now();
-                                  _dataPersonalizadaInicio = DateTime(
-                                    n.year,
-                                    n.month,
-                                    n.day,
-                                  ).subtract(const Duration(days: 29));
-                                  _dataPersonalizadaFim = DateTime(
-                                    n.year,
-                                    n.month,
-                                    n.day,
-                                    23,
-                                    59,
-                                    59,
-                                    999,
-                                  );
-                                }
-                              });
-                            },
+                        DropdownButtonFormField<String>(
+                          initialValue: _periodoPreset,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Periodo',
+                            isDense: true,
                           ),
-                        ),
-                        SizedBox(
-                          width: 220,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _canceladaPorFiltro,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Cancelada por',
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'hoje',
+                              child: Text('Hoje'),
                             ),
-                            items: [
-                              const DropdownMenuItem(
-                                value: 'todos',
-                                child: Text('Todos'),
-                              ),
-                              ..._distintosCanceladaPor.map(
-                                (u) => DropdownMenuItem(
-                                  value: u,
-                                  child: Text(
-                                    u,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) {
-                                setState(() => _canceladaPorFiltro = v);
-                              }
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          width: 200,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _formaPagamento,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Pagamento',
+                            DropdownMenuItem(
+                              value: 'ultimos_7',
+                              child: Text('Ultimos 7 dias'),
                             ),
-                            items: [
-                              const DropdownMenuItem(
-                                value: 'todos',
-                                child: Text('Todos'),
-                              ),
-                              ...[
-                                'dinheiro',
-                                'pix',
-                                'cartao_credito',
-                                'cartao_debito',
-                                'fiado',
-                                'transferencia',
-                                'misto',
-                              ].map(
-                                (f) => DropdownMenuItem(
-                                  value: f,
-                                  child: Text(_rotuloFormaPagamento(f)),
-                                ),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) {
-                                setState(() => _formaPagamento = v);
-                              }
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          width: 200,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _tipoEntrega,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Entrega',
+                            DropdownMenuItem(
+                              value: 'ultimos_30',
+                              child: Text('Ultimos 30 dias'),
                             ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'todos',
-                                child: Text('Todos'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'retirada',
-                                child: Text('Leva Agora'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'retirada_futura',
-                                child: Text('Retirada futura'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'entrega_loja',
-                                child: Text('Carreto'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'misto',
-                                child: Text('Venda mista'),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) setState(() => _tipoEntrega = v);
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          width: 220,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _filtroFiscal,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Documento fiscal',
+                            DropdownMenuItem(
+                              value: 'mes_atual',
+                              child: Text('Mes atual'),
                             ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'todos',
-                                child: Text('Todos'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'sem_nfce_eletronico',
-                                child: Text('Sem NFC-e (PIX/cartao)'),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) setState(() => _filtroFiscal = v);
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          width: 200,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _entregaPendente,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Retirada futura',
+                            DropdownMenuItem(
+                              value: 'mes_anterior',
+                              child: Text('Mes anterior'),
                             ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'todos',
-                                child: Text('Todos'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'nao',
-                                child: Text('Entregue (normal)'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'sim',
-                                child: Text('Pendente'),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) {
-                                setState(() => _entregaPendente = v);
-                              }
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          width: 240,
-                          child: DropdownButtonFormField<int?>(
-                            initialValue: _clienteIdFiltro,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Cliente',
+                            DropdownMenuItem(
+                              value: 'ano_atual',
+                              child: Text('Ano atual'),
                             ),
-                            items: [
-                              const DropdownMenuItem<int?>(
-                                value: null,
-                                child: Text('Todos'),
-                              ),
-                              ...clientes.map(
-                                (c) => DropdownMenuItem<int?>(
-                                  value: c.id,
-                                  child: Text(
-                                    c.nomeRazao,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                            ],
-                            onChanged: (v) =>
-                                setState(() => _clienteIdFiltro = v),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 220,
-                          child: DropdownButtonFormField<int?>(
-                            initialValue: _vendedorIdFiltro,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Vendedor',
+                            DropdownMenuItem(
+                              value: 'todo',
+                              child: Text('Todo o periodo'),
                             ),
-                            items: [
-                              const DropdownMenuItem<int?>(
-                                value: null,
-                                child: Text('Todos'),
-                              ),
-                              ...vendedores.map(
-                                (vd) => DropdownMenuItem<int?>(
-                                  value: vd.id,
-                                  child: Text(
-                                    vd.apelido.trim().isNotEmpty
-                                        ? vd.apelido
-                                        : vd.nomeCompleto,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                            ],
-                            onChanged: (v) =>
-                                setState(() => _vendedorIdFiltro = v),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 220,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _filtroCancelamento,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Cancelamento',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'ativas',
-                                child: Text('Nao canceladas'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'canceladas',
-                                child: Text('Somente canceladas'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'todas',
-                                child: Text('Todas'),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) {
-                                setState(() => _filtroCancelamento = v);
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_periodoPreset == 'personalizado') ...[
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: _escolherDataInicioPersonalizado,
-                            icon: const Icon(Icons.event_outlined, size: 18),
-                            label: Text(
-                              _dataPersonalizadaInicio == null
-                                  ? 'Data inicial'
-                                  : 'De ${_dataDia.format(_dataPersonalizadaInicio!)}',
-                            ),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _escolherDataFimPersonalizado,
-                            icon: const Icon(Icons.event_outlined, size: 18),
-                            label: Text(
-                              _dataPersonalizadaFim == null
-                                  ? 'Data final'
-                                  : 'Ate ${_dataDia.format(_dataPersonalizadaFim!)}',
-                            ),
-                          ),
-                          Text(
-                            'Inclui o dia inteiro de cada data. Depois use Pesquisar.',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: 860,
-                          child: TextField(
-                            controller: _buscaController,
-                            decoration: const InputDecoration(
-                              labelText: 'Pesquisar venda',
-                              hintText:
-                                  'Venda, NFC-e, NF-e 55, chave, cliente, vendedor ou produto',
-                              prefixIcon: Icon(Icons.search),
-                            ),
-                            textInputAction: TextInputAction.search,
-                            onSubmitted: (_) => _pesquisar(),
-                          ),
-                        ),
-                        FilledButton.icon(
-                          onPressed: _pesquisar,
-                          icon: const Icon(Icons.filter_alt_outlined),
-                          label: const Text('Pesquisar'),
-                        ),
-                        OutlinedButton(
-                          onPressed: _limparFiltros,
-                          child: const Text('Limpar'),
-                        ),
-                        PopupMenuButton<String>(
-                          onSelected: (value) {
-                            if (value == 'csv') {
-                              _exportarCancelamentosCsv();
-                            } else if (value == 'pdf') {
-                              _exportarCancelamentosPdf();
-                            }
-                          },
-                          itemBuilder: (context) => const [
-                            PopupMenuItem<String>(
-                              value: 'csv',
-                              child: Text('Exportar CSV'),
-                            ),
-                            PopupMenuItem<String>(
-                              value: 'pdf',
-                              child: Text('Exportar/Imprimir PDF'),
+                            DropdownMenuItem(
+                              value: 'personalizado',
+                              child: Text('Datas escolhidas'),
                             ),
                           ],
-                          child: OutlinedButton.icon(
-                            onPressed: null,
-                            icon: const Icon(Icons.download_outlined),
-                            label: const Text('Exportar'),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            setState(() {
+                              _periodoPreset = v;
+                              if (v == 'personalizado' &&
+                                  (_dataPersonalizadaInicio == null ||
+                                      _dataPersonalizadaFim == null)) {
+                                final n = DateTime.now();
+                                _dataPersonalizadaInicio = DateTime(
+                                  n.year,
+                                  n.month,
+                                  n.day,
+                                ).subtract(const Duration(days: 29));
+                                _dataPersonalizadaFim = DateTime(
+                                  n.year,
+                                  n.month,
+                                  n.day,
+                                  23,
+                                  59,
+                                  59,
+                                  999,
+                                );
+                              }
+                            });
+                          },
+                        ),
+                        DropdownButtonFormField<String>(
+                          initialValue: _canceladaPorFiltro,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Cancelada por',
+                            isDense: true,
                           ),
+                          items: [
+                            const DropdownMenuItem(
+                              value: 'todos',
+                              child: Text('Todos'),
+                            ),
+                            ..._distintosCanceladaPor.map(
+                              (u) => DropdownMenuItem(
+                                value: u,
+                                child: Text(
+                                  u,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(() => _canceladaPorFiltro = v);
+                            }
+                          },
+                        ),
+                        DropdownButtonFormField<String>(
+                          initialValue: _formaPagamento,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Pagamento',
+                            isDense: true,
+                          ),
+                          items: [
+                            const DropdownMenuItem(
+                              value: 'todos',
+                              child: Text('Todos'),
+                            ),
+                            ...[
+                              'dinheiro',
+                              'pix',
+                              'cartao_credito',
+                              'cartao_debito',
+                              'fiado',
+                              'transferencia',
+                              'misto',
+                            ].map(
+                              (f) => DropdownMenuItem(
+                                value: f,
+                                child: Text(_rotuloFormaPagamento(f)),
+                              ),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(() => _formaPagamento = v);
+                            }
+                          },
+                        ),
+                        DropdownButtonFormField<String>(
+                          initialValue: _tipoEntrega,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Entrega',
+                            isDense: true,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'todos',
+                              child: Text('Todos'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'retirada',
+                              child: Text('Leva Agora'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'retirada_futura',
+                              child: Text('Retirada futura'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'entrega_loja',
+                              child: Text('Carreto'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'misto',
+                              child: Text('Venda mista'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) setState(() => _tipoEntrega = v);
+                          },
+                        ),
+                        DropdownButtonFormField<String>(
+                          initialValue: _filtroFiscal,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Documento fiscal',
+                            isDense: true,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'todos',
+                              child: Text('Todos'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'sem_nfce_eletronico',
+                              child: Text('Sem NFC-e (PIX/cartao)'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) setState(() => _filtroFiscal = v);
+                          },
+                        ),
+                        DropdownButtonFormField<String>(
+                          initialValue: _entregaPendente,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Retirada futura',
+                            isDense: true,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'todos',
+                              child: Text('Todos'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'nao',
+                              child: Text('Entregue (normal)'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'sim',
+                              child: Text('Pendente'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(() => _entregaPendente = v);
+                            }
+                          },
+                        ),
+                        DropdownButtonFormField<int?>(
+                          initialValue: _clienteIdFiltro,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Cliente',
+                            isDense: true,
+                          ),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text('Todos'),
+                            ),
+                            ...clientes.map(
+                              (c) => DropdownMenuItem<int?>(
+                                value: c.id,
+                                child: Text(
+                                  c.nomeRazao,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (v) =>
+                              setState(() => _clienteIdFiltro = v),
+                        ),
+                        DropdownButtonFormField<int?>(
+                          initialValue: _vendedorIdFiltro,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Vendedor',
+                            isDense: true,
+                          ),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text('Todos'),
+                            ),
+                            ...vendedores.map(
+                              (vd) => DropdownMenuItem<int?>(
+                                value: vd.id,
+                                child: Text(
+                                  vd.apelido.trim().isNotEmpty
+                                      ? vd.apelido
+                                      : vd.nomeCompleto,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (v) =>
+                              setState(() => _vendedorIdFiltro = v),
+                        ),
+                        DropdownButtonFormField<String>(
+                          initialValue: _filtroCancelamento,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Cancelamento',
+                            isDense: true,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'ativas',
+                              child: Text('Nao canceladas'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'canceladas',
+                              child: Text('Somente canceladas'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'todas',
+                              child: Text('Todas'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(() => _filtroCancelamento = v);
+                            }
+                          },
                         ),
                       ],
                     ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 720),
-                  child: Text(
-                    _totalListagemVendas == 0
-                        ? 'Nenhuma venda encontrada com os filtros.'
-                        : 'Mostrando ${_resultados.length} de $_totalListagemVendas venda(s). '
-                            'Paginas de $_tamPaginaListagem.',
-                    style: Theme.of(context).textTheme.titleSmall,
                   ),
-                ),
-                if (_resultados.length < _totalListagemVendas)
-                  FilledButton.tonal(
-                    onPressed: _carregarMaisVendas,
-                    child: const Text('Carregar mais 20'),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: _resultados.isEmpty
-                  ? Center(
-                      child: Text(
-                        'Nenhuma venda finalizada com os filtros atuais.',
-                        style: Theme.of(context).textTheme.bodyLarge,
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _totalListagemVendas == 0
+                              ? 'Nenhuma venda encontrada com os filtros.'
+                              : 'Exibindo ${_resultados.length} de $_totalListagemVendas · '
+                                  'lotes de $_tamPaginaListagem',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ),
-                    )
-                  : ListView.separated(
-                      itemCount: _resultados.length,
-                      separatorBuilder: (_, index) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final v = _resultados[index];
-                        final cliente = _clienteDaVenda(v);
-                        final rotuloVend = _rotuloVendedorUmLinha(v);
-                        return Card(
-                          child: ListTile(
-                            onTap: () => _mostrarModalItensVenda(v),
-                            isThreeLine: true,
-                            leading: CircleAvatar(
-                              child: Text(
-                                _badgeNumeroVenda(v),
-                                style: const TextStyle(fontSize: 11),
+                      if (!usarTabela && _resultados.isNotEmpty) ...[
+                        PopupMenuButton<ListagemVendasColuna>(
+                          tooltip: 'Ordenar lista',
+                          onSelected: (coluna) {
+                            setState(() {
+                              if (_colunaOrdenacao == coluna) {
+                                _ordenacaoAscendente = !_ordenacaoAscendente;
+                              } else {
+                                _colunaOrdenacao = coluna;
+                                _ordenacaoAscendente =
+                                    colunaOrdenacaoPadraoAscendente(coluna);
+                              }
+                            });
+                          },
+                          itemBuilder: (context) => [
+                            for (final coluna in ListagemVendasColuna.values)
+                              PopupMenuItem(
+                                value: coluna,
+                                child: Row(
+                                  children: [
+                                    if (_colunaOrdenacao == coluna)
+                                      Icon(
+                                        _ordenacaoAscendente
+                                            ? Icons.arrow_upward_rounded
+                                            : Icons.arrow_downward_rounded,
+                                        size: 16,
+                                        color: theme.colorScheme.primary,
+                                      )
+                                    else
+                                      const SizedBox(width: 16),
+                                    const SizedBox(width: 8),
+                                    Text(coluna.rotulo),
+                                  ],
+                                ),
                               ),
+                          ],
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
                             ),
-                            title: Text(
-                              _rotuloCupomFiscalLista(v) +
-                                  (v.cancelada ? ' (cancelada)' : ''),
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: v.cancelada
-                                    ? Theme.of(context).colorScheme.error
-                                    : null,
-                              ),
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
+                                const Icon(Icons.sort_rounded, size: 18),
+                                const SizedBox(width: 6),
                                 Text(
-                                  _statusOperacionalLista(v),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelMedium
-                                      ?.copyWith(
-                                        color: _corStatusOperacionalLista(v),
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                  _colunaOrdenacao.rotulo,
+                                  style: theme.textTheme.labelMedium,
                                 ),
-                                Text(_dataHora.format(v.data.toLocal())),
-                                Text(
-                                  'Cliente: ${cliente?.nomeRazao ?? 'Sem cliente'} | '
-                                  'Vendedor: $rotuloVend | '
-                                  '${_rotuloPagamentoLinhaLista(v)}',
-                                ),
-                                Text(
-                                  '${_textoEntregaLista(v)} | '
-                                  '${_linhaRetiradaFutura(v)} | '
-                                  '${v.itens.length} itens',
-                                ),
-                                if (v.itens.isNotEmpty)
-                                  Text(
-                                    'Toque para ver os produtos',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .outline,
-                                        ),
-                                  ),
-                                if (!v.cancelada &&
-                                    v.status == 'finalizada' &&
-                                    (widget.vendaRepository
-                                                .valorReferenciaDevolvidoAcumuladoVenda(
-                                                  v.id,
-                                                ) >
-                                                0.005 ||
-                                        widget.vendaRepository
-                                                .valorSaidaTrocaAcumuladoVenda(
-                                                  v.id,
-                                                ) >
-                                                0.005))
-                                  Text(
-                                    () {
-                                      final dev = widget.vendaRepository
-                                          .valorReferenciaDevolvidoAcumuladoVenda(
-                                            v.id,
-                                          );
-                                      final troca = widget.vendaRepository
-                                          .valorSaidaTrocaAcumuladoVenda(v.id);
-                                      final liq = troca - dev;
-                                      return 'Devolucao/troca acum.: devolvido '
-                                          '${_formatarMoeda(dev)} · saida troca '
-                                          '${_formatarMoeda(troca)} · liquido '
-                                          '${_formatarMoeda(liq)}';
-                                    }(),
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                  ),
-                                if (v.idOrcamentoFreteRetiradaAberto != 0)
-                                  Text(
-                                    () {
-                                      final filho = widget.vendaRepository
-                                          .obterPorId(
-                                        v.idOrcamentoFreteRetiradaAberto,
-                                      );
-                                      final n = filho?.numeroOrcamento ?? 0;
-                                      final rot =
-                                          n > 0 ? '#$n' : '(id ${filho?.id})';
-                                      return 'Frete carreto: orcamento pendente no caixa $rot.';
-                                    }(),
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .tertiary,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                  ),
-                                if (_temRegistroRetiradaOuEntrega(v))
-                                  Text(
-                                    'Rastreio: data e operador no log — menu Historico de retiradas.',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
-                                        ),
-                                  ),
-                                if (v.cancelada)
-                                  Text(
-                                    'Cancelada por: ${v.canceladaPor.isEmpty ? 'Nao informado' : v.canceladaPor}'
-                                    '${v.canceladaEm == null ? '' : ' | Em: ${_dataHora.format(v.canceladaEm!.toLocal())}'}'
-                                    '${v.motivoCancelamento.isEmpty ? '' : ' | Motivo: ${v.motivoCancelamento}'}',
-                                  ),
                               ],
                             ),
-                            trailing: SizedBox(
-                              width: 154,
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      _formatarMoeda(v.total),
-                                      textAlign: TextAlign.right,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                  ),
-                                  PopupMenuButton<String>(
-                                    tooltip: 'Acoes',
-                                    onSelected: (value) {
-                                      if (value == 'historico') {
-                                        _mostrarHistoricoRetirada(v);
-                                      } else if (value == 'retirada') {
-                                        _abrirRegistrarRetirada(v);
-                                      } else if (value == 'pagar_frete') {
-                                        _abrirPagarFreteCarreto(v);
-                                      } else if (value == 'devolucao') {
-                                        _abrirRegistrarDevolucaoTroca(v);
-                                      } else if (value == 'devolucao_fiscal') {
-                                        _abrirDevolucoesFiscais(v);
-                                      } else if (value == 'emitir_nfce') {
-                                        _emitirNfce(v);
-                                      } else if (value == 'danfe_nfce') {
-                                        _verDanfeNfce(v);
-                                      } else if (value == 'danfe_nfe55') {
-                                        _verNfe55(v);
-                                      } else if (value == 'segunda_via') {
-                                        _segundaViaCupom(v);
-                                      } else if (value == 'cancelar') {
-                                        _cancelarVenda(v);
-                                      }
-                                    },
-                                    itemBuilder: (context) {
-                                      final temNfce = v.nfceEmitida;
-                                      final clienteVenda =
-                                          EmitirNfceVendaFlow.clienteDaVenda(
-                                        v,
-                                        widget.clienteRepository,
-                                      );
-                                      final podeEmitirNfce =
-                                          EmitirNfceVendaFlow.podeEmitir(
-                                        v,
-                                        cliente: clienteVenda,
-                                      );
-                                      final temNfe55 = widget.vendaRepository
-                                              .obterNfe55AutorizadaPorVenda(
-                                            v.id,
-                                          ) !=
-                                          null;
-                                      return [
-                                      if (podeEmitirNfce)
-                                        const PopupMenuItem<String>(
-                                          value: 'emitir_nfce',
-                                          child: Text('Emitir NFC-e'),
-                                        ),
-                                      if (temNfce)
-                                        const PopupMenuItem<String>(
-                                          value: 'danfe_nfce',
-                                          child: Text('Ver NFC-e (DANFE)'),
-                                        ),
-                                      if (temNfe55)
-                                        const PopupMenuItem<String>(
-                                          value: 'danfe_nfe55',
-                                          child: Text('Ver NF-e modelo 55'),
-                                        ),
-                                      if (!v.cancelada && v.status == 'finalizada')
-                                        const PopupMenuItem<String>(
-                                          value: 'segunda_via',
-                                          child: Text(
-                                            'Controle interno (2ª via / PDF)',
-                                          ),
-                                        ),
-                                      if (_podePagarFreteCarreto(v))
-                                        const PopupMenuItem<String>(
-                                          value: 'pagar_frete',
-                                          child: Text('Pagar frete (carreto)'),
-                                        ),
-                                      if (_vendaTemRetiradaPendenteParaCliente(v))
-                                        const PopupMenuItem<String>(
-                                          value: 'retirada',
-                                          child: Text('Registrar retirada'),
-                                        ),
-                                      if (_temRegistroRetiradaOuEntrega(v))
-                                        const PopupMenuItem<String>(
-                                          value: 'historico',
-                                          child: Text(
-                                            'Historico de retiradas',
-                                          ),
-                                        ),
-                                      if (_podeRegistrarDevolucaoTroca(v))
-                                        const PopupMenuItem<String>(
-                                          value: 'devolucao',
-                                          child: Text('Devolucao / troca'),
-                                        ),
-                                      if (_temDevolucaoFiscal(v))
-                                        const PopupMenuItem<String>(
-                                          value: 'devolucao_fiscal',
-                                          child: Text('NF-e de devolucao (DANFE)'),
-                                        ),
-                                      PopupMenuItem<String>(
-                                        value: 'cancelar',
-                                        enabled: !v.cancelada,
-                                        child: const Text('Cancelar venda'),
-                                      ),
-                                    ];
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
                           ),
-                        );
-                      },
-                    ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      if (_resultados.length < _totalListagemVendas)
+                        FilledButton.tonal(
+                          onPressed: _carregarMaisVendas,
+                          child: Text('Carregar mais $_tamPaginaListagem'),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: _resultados.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.receipt_long_outlined,
+                                  size: 48,
+                                  color: theme.colorScheme.outline,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Nenhuma venda finalizada com os filtros atuais.',
+                                  style: theme.textTheme.bodyLarge?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : usarTabela
+                            ? ListagemVendasTabela(
+                                itens: itensUiBrutos,
+                                onTapItem: (item) =>
+                                    _mostrarModalItensVenda(item.venda),
+                                onAcaoMenu: (acao, item) =>
+                                    _executarAcaoMenu(acao, item.venda),
+                                menuBuilder: (item) =>
+                                    _menuItensVenda(item.venda),
+                              )
+                            : ListagemVendasListaCards(
+                                itens: itensUi,
+                                onTapItem: (item) =>
+                                    _mostrarModalItensVenda(item.venda),
+                                onAcaoMenu: (acao, item) =>
+                                    _executarAcaoMenu(acao, item.venda),
+                                menuBuilder: (item) =>
+                                    _menuItensVenda(item.venda),
+                              ),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+
 }
 
 class _DialogoFreteCarretoRetiradaFutura extends StatefulWidget {

@@ -1,4 +1,5 @@
 import '../model/produto.dart';
+import 'produto_embalagem.dart';
 
 /// Texto da segunda linha (item selecionado) na consulta PDV.
 abstract final class PdvConsultaDetalheLinhaUtil {
@@ -6,7 +7,7 @@ abstract final class PdvConsultaDetalheLinhaUtil {
 
   static String montar(
     Produto produto, {
-    int quantidadeNoOrcamento = 0,
+    num quantidadeNoOrcamento = 0,
   }) {
     final partes = <String>[];
     final sku = produto.codigoInterno.trim();
@@ -21,7 +22,9 @@ abstract final class PdvConsultaDetalheLinhaUtil {
       partes.add(produto.rotuloConversaoEmbalagem);
     }
     if (quantidadeNoOrcamento > 0) {
-      partes.add('Orc. $quantidadeNoOrcamento');
+      partes.add(
+        'Orc. ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(produto, quantidadeNoOrcamento.toDouble())}',
+      );
     }
     return partes.join(' · ');
   }

@@ -6,6 +6,7 @@ export 'relatorios/relatorio_comissao_vendedores_page.dart';
 export 'relatorios/relatorio_top_clientes_page.dart';
 export 'relatorios/relatorio_estoque_minimo_page.dart';
 export 'relatorios/relatorio_orcamentos_abertos_page.dart';
+export 'relatorios/relatorio_sugestoes_venda_page.dart';
 export 'relatorios/relatorio_tabela_precos_page.dart';
 export 'relatorios/relatorio_saidas_produto_page.dart';
 export 'relatorios/relatorio_vendas_promocao_page.dart';

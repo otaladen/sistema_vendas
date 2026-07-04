@@ -236,6 +236,7 @@ class MainMenuRouter {
           lanSyncScheduler: deps.lanSyncScheduler,
           appConfigRepository: deps.appConfigRepository,
           printService: deps.printService,
+          produtoRepository: deps.produtoRepository,
         );
       case MainMenuDestino.motorista:
         return MotoristaEntregasPage(

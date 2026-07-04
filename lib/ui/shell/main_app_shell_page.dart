@@ -16,6 +16,7 @@ import '../../data/vendedor_repository.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
 import '../../domain/main_menu_destino.dart';
+import '../../domain/main_menu_sub_destino.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../model/usuario_sistema.dart';
@@ -28,6 +29,7 @@ import 'app_menu_lateral.dart';
 import 'app_shell_scope.dart';
 import 'main_menu_deps.dart';
 import 'main_menu_router.dart';
+import 'main_menu_sub_router.dart';
 
 /// Shell principal: rail lateral no desktop + favoritos por usuario.
 class MainAppShellPage extends StatefulWidget {
@@ -67,6 +69,8 @@ class MainAppShellPage extends StatefulWidget {
 class _MainAppShellPageState extends State<MainAppShellPage> {
   final _navKey = GlobalKey<NavigatorState>();
   MainMenuDestino _destino = MainMenuDestino.inicio;
+  MainMenuSubDestino? _subDestino;
+  final Set<MainMenuDestino> _gruposExpandidos = {};
   List<MainMenuDestino> _favoritos = const [];
   bool _railEstendido = true;
   bool _syncIniciado = false;
@@ -158,7 +162,20 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
 
   void _irPara(MainMenuDestino destino) {
     if (!destino.podeAcessar(widget.usuarioLogado)) return;
-    setState(() => _destino = destino);
+    if (MainMenuSubDestinoHelper.moduloTemSubmenu(destino)) {
+      final sub = MainMenuSubDestinoHelper.primeiroPermitido(
+        destino,
+        widget.usuarioLogado,
+      );
+      if (sub != null) {
+        _irParaSub(destino, sub);
+      }
+      return;
+    }
+    setState(() {
+      _destino = destino;
+      _subDestino = null;
+    });
     unawaited(_atualizarBadgesMenu());
     _navKey.currentState?.pushAndRemoveUntil<void>(
       MaterialPageRoute<void>(
@@ -167,6 +184,40 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       ),
       (_) => false,
     );
+  }
+
+  void _irParaSub(MainMenuDestino pai, MainMenuSubDestino sub) {
+    if (!sub.podeAcessar(widget.usuarioLogado)) return;
+    setState(() {
+      _destino = pai;
+      _subDestino = sub;
+      _gruposExpandidos.add(pai);
+    });
+    unawaited(_atualizarBadgesMenu());
+    final deps = _valoresDeps();
+    _navKey.currentState?.pushAndRemoveUntil<void>(
+      MaterialPageRoute<void>(
+        settings: RouteSettings(name: '${pai.name}/${sub.name}'),
+        builder: (ctx) => _valoresDeps(
+          child: MainMenuSubRouter.pagina(
+            sub,
+            deps,
+            navigatorContext: ctx,
+          ),
+        ),
+      ),
+      (_) => false,
+    );
+  }
+
+  void _alternarGrupoMenu(MainMenuDestino grupo) {
+    setState(() {
+      if (_gruposExpandidos.contains(grupo)) {
+        _gruposExpandidos.remove(grupo);
+      } else {
+        _gruposExpandidos.add(grupo);
+      }
+    });
   }
 
   /// Valores para montar paginas sem depender do [BuildContext] do State
@@ -222,8 +273,10 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
         }
         return AppShellScope(
           destinoAtual: _destino,
+          subDestinoAtual: _subDestino,
           favoritos: _favoritos,
           irPara: _irPara,
+          irParaSub: _irParaSub,
           alternarFavorito: _alternarFavorito,
           child: Scaffold(
             body: Column(
@@ -234,11 +287,17 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
                       AppMenuLateral(
                         itens: _itensRail,
                         destinoAtual: _destino,
+                        subDestinoAtual: _subDestino,
+                        usuarioLogado: widget.usuarioLogado,
                         onSelecionar: _irPara,
+                        onSelecionarSub: _irParaSub,
+                        gruposExpandidos: _gruposExpandidos,
+                        onAlternarGrupo: _alternarGrupoMenu,
                         estendido: _railEstendido,
                         onAlternarEstendido: () =>
                             setState(() => _railEstendido = !_railEstendido),
                         badgeDe: _badgeRail,
+                        badgeSubDe: _badgeSub,
                         quantidadeFavoritos: _favoritos.length,
                         larguraTela: constraints.maxWidth,
                       ),
@@ -273,6 +332,11 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   int _badgeRail(MainMenuDestino d) {
     if (d == MainMenuDestino.notasFiscais) return _fiscalPendencias;
     if (d == MainMenuDestino.configuracoes && _backupAlerta) return 1;
+    return 0;
+  }
+
+  int _badgeSub(MainMenuSubDestino sub) {
+    if (sub == MainMenuSubDestino.fiscalPendencias) return _fiscalPendencias;
     return 0;
   }
 }

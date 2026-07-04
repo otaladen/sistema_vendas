@@ -24,6 +24,7 @@ enum AppRelatorioId {
   logSistema,
   fechamentoHist,
   entregasResumo,
+  sugestoesVenda,
 }
 
 /// Cores de destaque dos relatorios derivadas do tema ativo.
@@ -68,6 +69,8 @@ abstract final class AppRelatorioCores {
         return scheme.primary;
       case AppRelatorioId.entregasResumo:
         return AppModuloCores.destino(context, MainMenuDestino.entregas);
+      case AppRelatorioId.sugestoesVenda:
+        return AppModuloCores.harmonizar(scheme, 165);
     }
   }
 }

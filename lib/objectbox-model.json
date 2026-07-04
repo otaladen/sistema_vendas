@@ -913,7 +913,7 @@
     },
     {
       "id": "5:8242003091166492994",
-      "lastPropertyId": "12:3289138156469858386",
+      "lastPropertyId": "13:6982513833332676283",
       "name": "Vendedor",
       "properties": [
         {
@@ -976,6 +976,11 @@
           "id": "12:3289138156469858386",
           "name": "criadoEm",
           "type": 10
+        },
+        {
+          "id": "13:6982513833332676283",
+          "name": "senhaPdv",
+          "type": 9
         }
       ],
       "relations": []
@@ -2751,10 +2756,121 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "33:909642924831154467",
+      "lastPropertyId": "8:3018062728541674089",
+      "name": "ProdutoSugestaoVenda",
+      "properties": [
+        {
+          "id": "1:2546743676718615721",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:2167263321218484428",
+          "name": "produtoOrigemId",
+          "indexId": "49:5194745050921844807",
+          "type": 6,
+          "flags": 8
+        },
+        {
+          "id": "3:2965107500826941414",
+          "name": "produtoSugeridoId",
+          "indexId": "50:3102320594784437203",
+          "type": 6,
+          "flags": 8
+        },
+        {
+          "id": "4:2861660109649412679",
+          "name": "tipo",
+          "type": 9
+        },
+        {
+          "id": "5:7190434173662384246",
+          "name": "quantidadeSugerida",
+          "type": 6
+        },
+        {
+          "id": "6:1181840275140212489",
+          "name": "prioridade",
+          "type": 6
+        },
+        {
+          "id": "7:1037232868079106746",
+          "name": "observacao",
+          "type": 9
+        },
+        {
+          "id": "8:3018062728541674089",
+          "name": "ativo",
+          "type": 1
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "34:3947576677985920049",
+      "lastPropertyId": "9:4496581284718317239",
+      "name": "SugestaoVendaMetricaEvento",
+      "properties": [
+        {
+          "id": "1:7089752786600467949",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:4591592391431258249",
+          "name": "produtoOrigemId",
+          "indexId": "51:6689498301675181582",
+          "type": 6,
+          "flags": 8
+        },
+        {
+          "id": "3:1271746924177347661",
+          "name": "produtoSugeridoId",
+          "indexId": "52:4505790225737692998",
+          "type": 6,
+          "flags": 8
+        },
+        {
+          "id": "4:8276151459494788217",
+          "name": "tipoEvento",
+          "type": 9
+        },
+        {
+          "id": "5:6613300234328109789",
+          "name": "canal",
+          "type": 9
+        },
+        {
+          "id": "6:4936547681104975847",
+          "name": "fonte",
+          "type": 9
+        },
+        {
+          "id": "7:8125254170881287369",
+          "name": "quantidade",
+          "type": 6
+        },
+        {
+          "id": "8:6147093284656291473",
+          "name": "usuarioLogin",
+          "type": 9
+        },
+        {
+          "id": "9:4496581284718317239",
+          "name": "dataHora",
+          "type": 10
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "32:2969408372510959620",
-  "lastIndexId": "48:2428882302797446316",
+  "lastEntityId": "34:3947576677985920049",
+  "lastIndexId": "52:4505790225737692998",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

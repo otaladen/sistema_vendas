@@ -201,10 +201,6 @@ class _PdvCalculadoraPanelState extends State<PdvCalculadoraPanel> {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
 
-    if (key == LogicalKeyboardKey.escape) {
-      widget.onFechar();
-      return KeyEventResult.handled;
-    }
     if (key == LogicalKeyboardKey.backspace) {
       _backspace();
       return KeyEventResult.handled;

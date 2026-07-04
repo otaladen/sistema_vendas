@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -16,7 +18,6 @@ import 'theme/app_semantic_helper.dart';
 import '../domain/estoque/estoque_diagnostico_models.dart';
 import '../domain/estoque/filtro_estoque_operacional.dart';
 import '../domain/permissao_usuario.dart';
-import '../domain/produto_unidade_exibicao.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/produto.dart';
 import '../model/usuario_sistema.dart';
@@ -28,7 +29,14 @@ import 'reajuste_preco_autorizacao.dart';
 import 'reajuste_preco_historico_page.dart';
 import 'reajuste_preco_lote_page.dart';
 import 'estoque/ajuste_estoque_dialog.dart';
+import 'estoque/estoque_alerta_strip.dart';
 import 'estoque/estoque_diagnostico_sheet.dart';
+import 'estoque/estoque_card_linha.dart';
+import 'estoque/estoque_layout.dart';
+import 'estoque/estoque_stat_tile.dart';
+import 'estoque/estoque_tabela_cabecalho.dart';
+import 'estoque/estoque_tabela_colunas.dart';
+import 'estoque/estoque_tabela_linha.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'lista_compra_page.dart';
 import 'sugestao_compra_page.dart';
@@ -37,6 +45,8 @@ import 'widgets/anotar_lista_compra_dialog.dart';
 import 'widgets/produto_busca_input.dart';
 
 final NumberFormat _moedaBRL = NumberFormat('#,##0.00', 'pt_BR');
+const int _estoqueLoteScroll = 80;
+const double _estoqueScrollAntecipacaoPx = 360;
 
 class EstoquePage extends StatefulWidget {
   const EstoquePage({
@@ -70,14 +80,34 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       );
 
   final TextEditingController _buscaController = TextEditingController();
+  Timer? _debounceBusca;
   String _filtroBusca = '';
   FiltroEstoqueOperacional _filtroOperacional = FiltroEstoqueOperacional.todos;
   String? _filtroCategoria;
   String? _filtroFornecedor;
   List<Produto> _produtos = [];
+  List<Produto> _produtosFiltrados = [];
+  List<String> _categoriasDisponiveis = [];
+  List<String> _fornecedoresDisponiveis = [];
   Map<int, bool> _criticoPpPorProdutoId = {};
   Map<int, int> _consumo60dPorProdutoId = {};
   int _qtdCriticosPp = 0;
+  int _produtosAtivosCount = 0;
+  int _totalAbaixoMinimo = 0;
+  double _valorEstoqueTotalCache = 0;
+  int _totalReservadoCache = 0;
+  int _limiteExibicaoLista = _estoqueLoteScroll;
+  bool _carregandoMaisItens = false;
+  bool _carregandoProdutos = false;
+  bool _alertaStripOculto = false;
+  bool _filtrosExpandidos = false;
+  final ScrollController _listaVerticalScrollController = ScrollController();
+  final ScrollController _listaHorizontalScrollController = ScrollController();
+
+  bool get _temFiltrosAvancadosAtivos =>
+      _filtroOperacional != FiltroEstoqueOperacional.todos ||
+      _filtroCategoria != null ||
+      _filtroFornecedor != null;
 
   ComprasPreditivasService get _comprasSvc =>
       ComprasPreditivasService(widget.produtoRepository.objectBox);
@@ -85,6 +115,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   @override
   void initState() {
     super.initState();
+    _listaVerticalScrollController.addListener(_onScrollListaVertical);
     _recarregarProdutos();
     _carregarDiagnosticoInicial();
     initSafeSyncRefresh(
@@ -136,17 +167,139 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   @override
   void dispose() {
     disposeSafeSyncRefresh();
+    _debounceBusca?.cancel();
+    _listaVerticalScrollController.dispose();
+    _listaHorizontalScrollController.dispose();
     _buscaController.dispose();
     super.dispose();
   }
 
-  void _recarregarProdutos() {
-    if (!mounted) return;
-    final produtos = widget.produtoRepository.listarTodos();
-    final consumo = _comprasSvc.montarConsumoPorProdutoNoPeriodo(dias: 60);
-    final criticos = _comprasSvc.mapaProdutosAtivosCriticos(
-      consumoPrecalculado: consumo,
+  void _rolarListaParaTopo() {
+    if (!_listaVerticalScrollController.hasClients) return;
+    _listaVerticalScrollController.jumpTo(0);
+  }
+
+  void _onScrollListaVertical() {
+    if (!_listaVerticalScrollController.hasClients || _carregandoMaisItens) {
+      return;
+    }
+    final total = _produtosFiltrados.length;
+    if (_limiteExibicaoLista >= total) return;
+
+    final pos = _listaVerticalScrollController.position;
+    if (pos.pixels < pos.maxScrollExtent - _estoqueScrollAntecipacaoPx) {
+      return;
+    }
+
+    _carregandoMaisItens = true;
+    final novoLimite = math.min(
+      _limiteExibicaoLista + _estoqueLoteScroll,
+      total,
     );
+    if (novoLimite != _limiteExibicaoLista) {
+      setState(() => _limiteExibicaoLista = novoLimite);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _carregandoMaisItens = false;
+    });
+  }
+
+  void _resetarJanelaScroll() {
+    _limiteExibicaoLista = math.min(
+      _estoqueLoteScroll,
+      _produtosFiltrados.length,
+    );
+    if (_limiteExibicaoLista == 0 && _produtosFiltrados.isNotEmpty) {
+      _limiteExibicaoLista = _produtosFiltrados.length;
+    }
+    _rolarListaParaTopo();
+  }
+
+  void _atualizarResumosProdutos(List<Produto> produtos) {
+    var ativos = 0;
+    var abaixoMinimo = 0;
+    var reservado = 0;
+    var valorEstoque = 0.0;
+    final categorias = <String>{};
+    final fornecedores = <String>{};
+
+    for (final p in produtos) {
+      if (p.ativo) {
+        ativos++;
+        if (p.estoque <= p.quantidadeMinima) abaixoMinimo++;
+        valorEstoque += _contribuicaoValorEstoque(p);
+      }
+      reservado += p.estoqueReservado;
+      final categoria = p.categoria.trim();
+      if (categoria.isNotEmpty) categorias.add(categoria);
+      final fornecedor = p.fornecedor.trim();
+      if (fornecedor.isNotEmpty) fornecedores.add(fornecedor);
+    }
+
+    _produtosAtivosCount = ativos;
+    _totalAbaixoMinimo = abaixoMinimo;
+    _valorEstoqueTotalCache = valorEstoque;
+    _totalReservadoCache = reservado;
+    _categoriasDisponiveis = categorias.toList()..sort();
+    _fornecedoresDisponiveis = fornecedores.toList()..sort();
+  }
+
+  double _contribuicaoValorEstoque(Produto produto) {
+    final custo =
+        produto.custoMedio > 0 ? produto.custoMedio : produto.precoCusto;
+    if (!custo.isFinite || custo < 0 || custo > 1e9) return 0;
+    if (produto.estoqueReal <= 0) return 0;
+    final total = produto.estoqueReal * custo;
+    return total.isFinite ? total : 0;
+  }
+
+  void _atualizarListaFiltrada({bool resetarScroll = false}) {
+    _produtosFiltrados = _aplicarFiltrosLista(_produtos);
+    if (resetarScroll) {
+      _resetarJanelaScroll();
+    } else {
+      _limiteExibicaoLista = math.min(
+        _limiteExibicaoLista,
+        _produtosFiltrados.length,
+      );
+      if (_limiteExibicaoLista == 0 && _produtosFiltrados.isNotEmpty) {
+        _limiteExibicaoLista = math.min(
+          _estoqueLoteScroll,
+          _produtosFiltrados.length,
+        );
+      }
+    }
+  }
+
+  void _onBuscaChanged(String value) {
+    _debounceBusca?.cancel();
+    _debounceBusca = Timer(const Duration(milliseconds: 220), () {
+      if (!mounted) return;
+      setState(() {
+        _filtroBusca = value;
+        _atualizarListaFiltrada(resetarScroll: true);
+      });
+    });
+  }
+
+  Future<void> _recarregarProdutos() async {
+    if (!mounted) return;
+    setState(() => _carregandoProdutos = true);
+
+    final resultado = await Future(() {
+      final produtos = widget.produtoRepository.listarTodos();
+      final consumo = _comprasSvc.montarConsumoPorProdutoNoPeriodo(dias: 60);
+      final criticos = _comprasSvc.mapaProdutosAtivosCriticos(
+        consumoPrecalculado: consumo,
+      );
+      return (produtos, consumo, criticos);
+    });
+
+    if (!mounted) return;
+
+    final (produtos, consumo, criticos) = resultado;
+    _atualizarResumosProdutos(produtos);
+
     setState(() {
       _produtos = produtos;
       _consumo60dPorProdutoId = consumo;
@@ -156,27 +309,9 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           _qtdCriticosPp == 0) {
         _filtroOperacional = FiltroEstoqueOperacional.todos;
       }
+      _atualizarListaFiltrada(resetarScroll: true);
+      _carregandoProdutos = false;
     });
-  }
-
-  List<String> _categoriasDisponiveis() {
-    final set = <String>{};
-    for (final p in _produtos) {
-      final c = p.categoria.trim();
-      if (c.isNotEmpty) set.add(c);
-    }
-    final lista = set.toList()..sort();
-    return lista;
-  }
-
-  List<String> _fornecedoresDisponiveis() {
-    final set = <String>{};
-    for (final p in _produtos) {
-      final f = p.fornecedor.trim();
-      if (f.isNotEmpty) set.add(f);
-    }
-    final lista = set.toList()..sort();
-    return lista;
   }
 
   bool _produtoSemGiro(Produto p, int dias) {
@@ -185,16 +320,6 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     final ref = p.ultimaVendaEm ?? p.criadoEm;
     return DateTime.now().difference(ref.toLocal()).inDays >= dias;
   }
-
-  double _valorEstoqueTotal(Iterable<Produto> produtos) {
-    return produtos.where((p) => p.ativo).fold<double>(0, (s, p) {
-      final custo = p.custoMedio > 0 ? p.custoMedio : p.precoCusto;
-      return s + p.estoqueReal * custo;
-    });
-  }
-
-  int _totalReservado(Iterable<Produto> produtos) =>
-      produtos.fold<int>(0, (s, p) => s + p.estoqueReservado);
 
   Future<void> _abrirAjusteEstoque(Produto produto) async {
     final resultado = await showAjusteEstoqueDialog(
@@ -238,53 +363,228 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     );
   }
 
-  Widget _kpiCard({
-    required String titulo,
-    required String valor,
-    required Color bg,
-    required Color border,
-    required Color fg,
-    VoidCallback? onTap,
-  }) {
-    final tile = Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: bg,
-        border: Border.all(color: border),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            titulo,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: fg.withValues(alpha: 0.9),
+  void _onAcaoProdutoTabela(String acao, Produto produto) {
+    switch (acao) {
+      case 'ajustar':
+        _abrirAjusteEstoque(produto);
+      case 'extrato':
+        _abrirExtratoEstoque(produto);
+      case 'comprar':
+        _anotarProdutoListaCompra(produto);
+    }
+  }
+
+  String _subtituloAppBar({required bool verCusto}) {
+    final partes = <String>[
+      '$_produtosAtivosCount SKUs',
+      '$_totalAbaixoMinimo abaixo do minimo',
+    ];
+    if (verCusto) {
+      partes.add(_formatarMoedaBRL(_valorEstoqueTotalCache));
+    }
+    return partes.join(' · ');
+  }
+
+  List<Widget> _acoesAppBarEstoque({required bool verCusto}) {
+    final largo =
+        MediaQuery.sizeOf(context).width >= EstoqueLayout.breakpointDesktopLargo;
+    final acoes = <Widget>[
+      if (largo)
+        TextButton.icon(
+          onPressed: _abrirListaCompra,
+          icon: const Icon(Icons.playlist_add_check_outlined, size: 20),
+          label: const Text('Lista de compras'),
+        )
+      else
+        IconButton(
+          tooltip: 'Lista de compras',
+          icon: const Icon(Icons.playlist_add_check_outlined),
+          onPressed: _abrirListaCompra,
+        ),
+      if (largo)
+        FilledButton.tonalIcon(
+          onPressed: _abrirSugestaoCompra,
+          icon: const Icon(Icons.shopping_cart_outlined, size: 20),
+          label: const Text('Sugestao de compra'),
+        )
+      else
+        IconButton(
+          tooltip: 'Sugestao de compra',
+          icon: const Icon(Icons.shopping_cart_outlined),
+          onPressed: _abrirSugestaoCompra,
+        ),
+      PopupMenuButton<String>(
+        tooltip: 'Mais acoes',
+        icon: const Icon(Icons.more_vert),
+        onSelected: (value) async {
+          switch (value) {
+            case 'diagnostico':
+              await _abrirDiagnosticoEstoque();
+            case 'historico':
+              _abrirHistoricoReajustes();
+            case 'reajuste':
+              _abrirReajustePrecos(_produtosFiltrados);
+            case 'export_precos':
+              await _exportarTabelaProdutos(context, incluirCustos: false);
+            case 'export_custo':
+              await _exportarTabelaProdutos(context, incluirCustos: true);
+            case 'export_precos_pdf':
+              await _exportarTabelaProdutosPdf(context, incluirCustos: false);
+            case 'export_custo_pdf':
+              await _exportarTabelaProdutosPdf(context, incluirCustos: true);
+          }
+        },
+        itemBuilder: (context) {
+          final diag = _diagnosticoResultado;
+          final badgeDiag = diag != null && diag.temProblema
+              ? ' (${diag.quantidadeCriticos + diag.quantidadeAlertas})'
+              : '';
+          return [
+            PopupMenuItem<String>(
+              value: 'diagnostico',
+              child: ListTile(
+                dense: true,
+                leading: const Icon(Icons.health_and_safety_outlined),
+                title: Text('Diagnostico de estoque$badgeDiag'),
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            valor,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: fg,
+            if (usuarioPodeReajustePrecoLote(widget.usuarioLogado)) ...[
+              const PopupMenuItem<String>(
+                value: 'historico',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.history),
+                  title: Text('Historico de reajustes'),
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'reajuste',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.price_change_outlined),
+                  title: Text('Reajuste de precos em lote'),
+                ),
+              ),
+              const PopupMenuDivider(),
+            ],
+            const PopupMenuItem<String>(
+              value: 'export_precos',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.sell_outlined),
+                title: Text('Exportar tabela de precos'),
+              ),
             ),
-          ),
-        ],
+            if (verCusto) ...[
+              const PopupMenuItem<String>(
+                value: 'export_custo',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.price_change_outlined),
+                  title: Text('Exportar tabela de preco e custo'),
+                ),
+              ),
+              const PopupMenuDivider(),
+            ],
+            const PopupMenuItem<String>(
+              value: 'export_precos_pdf',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.picture_as_pdf_outlined),
+                title: Text('Exportar precos (PDF)'),
+              ),
+            ),
+            if (verCusto)
+              const PopupMenuItem<String>(
+                value: 'export_custo_pdf',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.request_quote_outlined),
+                  title: Text('Exportar preco e custo (PDF)'),
+                ),
+              ),
+          ];
+        },
       ),
-    );
-    if (onTap == null) return tile;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: tile,
+      const SizedBox(width: 8),
+    ];
+    return acoes;
+  }
+
+  Widget _painelKpisEstoque({required bool verCusto}) {
+    final semantic = context.semanticColors;
+    final kpis = <Widget>[
+      EstoqueStatTile(
+        icon: Icons.inventory_2_outlined,
+        titulo: 'SKUs ativos',
+        valor: '$_produtosAtivosCount',
       ),
+      EstoqueStatTile(
+        icon: Icons.trending_down,
+        titulo: 'Abaixo minimo',
+        valor: '$_totalAbaixoMinimo',
+        destaqueCor: semantic.errorFg,
+        onTap: () => setState(() {
+          _filtroOperacional = FiltroEstoqueOperacional.abaixoMinimo;
+          _filtrosExpandidos = true;
+          _atualizarListaFiltrada(resetarScroll: true);
+        }),
+      ),
+      EstoqueStatTile(
+        icon: Icons.shopping_bag_outlined,
+        titulo: 'PP critico',
+        valor: '$_qtdCriticosPp',
+        destaqueCor: semantic.warningFg,
+        onTap: _qtdCriticosPp > 0
+            ? () => setState(() {
+                  _filtroOperacional = FiltroEstoqueOperacional.ppCritico;
+                  _filtrosExpandidos = true;
+                  _atualizarListaFiltrada(resetarScroll: true);
+                })
+            : null,
+      ),
+      if (verCusto)
+        EstoqueStatTile(
+          icon: Icons.payments_outlined,
+          titulo: 'Valor em estoque',
+          valor: _formatarMoedaBRL(_valorEstoqueTotalCache),
+        ),
+      EstoqueStatTile(
+        icon: Icons.lock_outline,
+        titulo: 'Total reservado',
+        valor: '$_totalReservadoCache un.',
+        destaqueCor: semantic.warningFg,
+        onTap: () => setState(() {
+          _filtroOperacional = FiltroEstoqueOperacional.comReserva;
+          _filtrosExpandidos = true;
+          _atualizarListaFiltrada(resetarScroll: true);
+        }),
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, c) {
+        final estreito = c.maxWidth < 900;
+        if (estreito) {
+          return Column(
+            children: [
+              for (var i = 0; i < kpis.length; i++) ...[
+                if (i > 0) const SizedBox(height: 8),
+                kpis[i],
+              ],
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < kpis.length; i++) ...[
+              if (i > 0) const SizedBox(width: 10),
+              Expanded(child: kpis[i]),
+            ],
+          ],
+        );
+      },
     );
   }
 
@@ -585,535 +885,482 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     }).toList();
   }
 
+  String _montarResumoCardMobile(Produto produto, double ppExibicao) {
+    final sku = produto.codigoInterno.trim();
+    final skuRotulo = sku.isEmpty ? 'Sem SKU' : sku;
+    return '$skuRotulo · Fis ${produto.estoqueReal} · '
+        'Min ${produto.quantidadeMinima} · PP ${ppExibicao.toStringAsFixed(1)}';
+  }
+
+  Widget _rodapeStatusLista({
+    required int totalItens,
+    required int exibidos,
+    required TextStyle? estiloRodape,
+    required Color corMuted,
+  }) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            totalItens == 0
+                ? 'Nenhum item'
+                : exibidos >= totalItens
+                    ? 'Mostrando todos os $totalItens itens'
+                    : 'Mostrando $exibidos de $totalItens · role para ver mais',
+            style: estiloRodape?.copyWith(color: corMuted),
+          ),
+        ),
+        if (exibidos < totalItens && _carregandoMaisItens)
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: corMuted,
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final produtos = _produtos;
-    final produtosFiltrados = _aplicarFiltrosLista(produtos);
-    final produtosAtivos = produtos.where((p) => p.ativo).length;
-    final totalAbaixoMinimo = produtos
-        .where((p) => p.ativo && p.estoque <= p.quantidadeMinima)
-        .length;
-    final valorEstoque = _valorEstoqueTotal(produtos);
-    final totalReservado = _totalReservado(produtos);
+    final produtosFiltrados = _produtosFiltrados;
+    final totalFiltrados = produtosFiltrados.length;
+    final itensExibidos = math.min(_limiteExibicaoLista, totalFiltrados);
+    final temMaisItens = itensExibidos < totalFiltrados;
     final verCusto = UsuarioPermissaoHelper.tem(
       widget.usuarioLogado,
       PermissaoUsuario.verCustoMargem,
     );
-    final categorias = _categoriasDisponiveis();
-    final fornecedores = _fornecedoresDisponiveis();
+    final categorias = _categoriasDisponiveis;
+    final fornecedores = _fornecedoresDisponiveis;
     final theme = Theme.of(context);
-    final semantic = context.semanticColors;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Estoque'),
-        actions: [
-          IconButton(
-            tooltip: 'Diagnostico de estoque',
-            icon: Badge(
-              isLabelVisible:
-                  (_diagnosticoResultado?.temProblema ?? false),
-              label: Text(
-                '${(_diagnosticoResultado?.quantidadeCriticos ?? 0) + (_diagnosticoResultado?.quantidadeAlertas ?? 0)}',
+        toolbarHeight: 64,
+        titleSpacing: 16,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('Estoque', style: theme.textTheme.titleLarge),
+            Text(
+              _subtituloAppBar(verCusto: verCusto),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
-              child: const Icon(Icons.health_and_safety_outlined),
-            ),
-            onPressed: _abrirDiagnosticoEstoque,
-          ),
-          if (usuarioPodeReajustePrecoLote(widget.usuarioLogado)) ...[
-            IconButton(
-              tooltip: 'Historico de reajustes',
-              icon: const Icon(Icons.history),
-              onPressed: _abrirHistoricoReajustes,
-            ),
-            IconButton(
-              tooltip: 'Reajuste de precos em lote',
-              icon: const Icon(Icons.price_change_outlined),
-              onPressed: () {
-                final escopo = _aplicarFiltrosLista(_produtos);
-                _abrirReajustePrecos(escopo);
-              },
             ),
           ],
-          IconButton(
-            tooltip: 'Lista de compras',
-            icon: const Icon(Icons.playlist_add_check_outlined),
-            onPressed: _abrirListaCompra,
-          ),
-          IconButton(
-            tooltip: 'Sugestao de compra',
-            icon: const Icon(Icons.shopping_cart_outlined),
-            onPressed: _abrirSugestaoCompra,
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'Exportar tabelas',
-            icon: const Icon(Icons.file_download_outlined),
-            onSelected: (value) async {
-              if (value == 'precos') {
-                await _exportarTabelaProdutos(context, incluirCustos: false);
-              } else if (value == 'preco_custo') {
-                await _exportarTabelaProdutos(context, incluirCustos: true);
-              } else if (value == 'precos_pdf') {
-                await _exportarTabelaProdutosPdf(context, incluirCustos: false);
-              } else if (value == 'preco_custo_pdf') {
-                await _exportarTabelaProdutosPdf(context, incluirCustos: true);
-              }
-            },
-            itemBuilder: (context) {
-              final verCusto = UsuarioPermissaoHelper.tem(
-                widget.usuarioLogado,
-                PermissaoUsuario.verCustoMargem,
-              );
-              return [
-                const PopupMenuItem<String>(
-                  value: 'precos',
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.sell_outlined),
-                    title: Text('Exportar tabela de precos'),
-                  ),
-                ),
-                if (verCusto) ...[
-                  const PopupMenuItem<String>(
-                    value: 'preco_custo',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.price_change_outlined),
-                      title: Text('Exportar tabela de preco e custo'),
-                    ),
-                  ),
-                  const PopupMenuDivider(),
-                ],
-                const PopupMenuItem<String>(
-                  value: 'precos_pdf',
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.picture_as_pdf_outlined),
-                    title: Text('Exportar tabela de precos (PDF)'),
-                  ),
-                ),
-                if (verCusto)
-                  const PopupMenuItem<String>(
-                    value: 'preco_custo_pdf',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.request_quote_outlined),
-                      title: Text('Exportar tabela de preco e custo (PDF)'),
-                    ),
-                  ),
-              ];
-            },
-          ),
-        ],
+        ),
+        actions: _acoesAppBarEstoque(verCusto: verCusto),
       ),
       body: Column(
         children: [
-          if (_diagnosticoResultado?.temProblema == true)
-            MaterialBanner(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              leading: Icon(
-                Icons.health_and_safety_outlined,
-                color: (_diagnosticoResultado!.quantidadeCriticos > 0)
-                    ? semantic.errorFg
-                    : semantic.warningFg,
-              ),
-              content: Text(
-                '${_diagnosticoResultado!.quantidadeCriticos} critico(s) e '
-                '${_diagnosticoResultado!.quantidadeAlertas} alerta(s) '
-                'no estoque. Revise vendas pendentes e saldos divergentes.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: _abrirDiagnosticoEstoque,
-                  child: const Text('Ver diagnostico'),
-                ),
-              ],
+          if (_carregandoProdutos)
+            const LinearProgressIndicator(minHeight: 2),
+          if (!_alertaStripOculto)
+            EstoqueAlertaStrip(
+              criticosDiagnostico:
+                  _diagnosticoResultado?.quantidadeCriticos ?? 0,
+              alertasDiagnostico:
+                  _diagnosticoResultado?.quantidadeAlertas ?? 0,
+              qtdCriticosPp: _qtdCriticosPp,
+              onVerDiagnostico: _abrirDiagnosticoEstoque,
+              onFiltrarPp: _qtdCriticosPp > 0
+                  ? () => setState(() {
+                        _filtroOperacional =
+                            FiltroEstoqueOperacional.ppCritico;
+                        _atualizarListaFiltrada(resetarScroll: true);
+                      })
+                  : null,
+              onListaCompra: _qtdCriticosPp > 0 ? _abrirListaCompra : null,
+              onDismiss: () => setState(() => _alertaStripOculto = true),
             ),
-          if (_qtdCriticosPp > 0)
-            MaterialBanner(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              leading: Icon(
-                Icons.shopping_bag_outlined,
-                color: semantic.warningFg,
-              ),
-              content: Text(
-                '$_qtdCriticosPp produto(s) no ou abaixo do ponto de pedido. '
-                'Abra a sugestao de compra para repor.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: _abrirListaCompra,
-                  child: const Text('Lista de compras'),
-                ),
-                TextButton(
-                  onPressed: _abrirSugestaoCompra,
-                  child: const Text('Ver sugestao'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      _filtroOperacional = FiltroEstoqueOperacional.ppCritico;
-                    });
-                  },
-                  child: const Text('Filtrar lista'),
-                ),
-              ],
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: LayoutBuilder(
-              builder: (context, c) {
-                final estreito = c.maxWidth < 900;
-                final kpiSemantic = context.semanticColors;
-                final infoBg = kpiSemantic.infoBg;
-                final infoBorder = kpiSemantic.infoBorder;
-                final infoFg = kpiSemantic.infoFg;
-                final errBg = kpiSemantic.errorBg;
-                final errBorder = kpiSemantic.errorBorder;
-                final errFg = kpiSemantic.errorFg;
-                final warnBg = kpiSemantic.warningBg;
-                final warnBorder = kpiSemantic.warningBorder;
-                final warnFg = kpiSemantic.warningFg;
-                final kpis = [
-                  _kpiCard(
-                    titulo: 'SKUs ativos',
-                    valor: '$produtosAtivos',
-                    bg: infoBg,
-                    border: infoBorder,
-                    fg: infoFg,
-                  ),
-                  _kpiCard(
-                    titulo: 'Abaixo minimo',
-                    valor: '$totalAbaixoMinimo',
-                    bg: errBg,
-                    border: errBorder,
-                    fg: errFg,
-                    onTap: () => setState(
-                      () => _filtroOperacional =
-                          FiltroEstoqueOperacional.abaixoMinimo,
-                    ),
-                  ),
-                  _kpiCard(
-                    titulo: 'PP critico',
-                    valor: '$_qtdCriticosPp',
-                    bg: warnBg,
-                    border: warnBorder,
-                    fg: warnFg,
-                    onTap: _qtdCriticosPp > 0
-                        ? () => setState(
-                              () => _filtroOperacional =
-                                  FiltroEstoqueOperacional.ppCritico,
-                            )
-                        : null,
-                  ),
-                  if (verCusto)
-                    _kpiCard(
-                      titulo: 'Valor em estoque',
-                      valor: _formatarMoedaBRL(valorEstoque),
-                      bg: infoBg,
-                      border: infoBorder,
-                      fg: infoFg,
-                    ),
-                  _kpiCard(
-                    titulo: 'Total reservado',
-                    valor: '$totalReservado un.',
-                    bg: warnBg,
-                    border: warnBorder,
-                    fg: warnFg,
-                    onTap: () => setState(
-                      () => _filtroOperacional =
-                          FiltroEstoqueOperacional.comReserva,
-                    ),
-                  ),
-                ];
-                if (estreito) {
-                  return Column(
-                    children: [
-                      for (var i = 0; i < kpis.length; i++) ...[
-                        if (i > 0) const SizedBox(height: 8),
-                        kpis[i],
-                      ],
-                    ],
-                  );
-                }
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final k in kpis)
-                      SizedBox(
-                        width: ((c.maxWidth - 8 * (kpis.length - 1)) / kpis.length)
-                            .clamp(120.0, 280.0),
-                        child: k,
-                      ),
-                  ],
-                );
-              },
-            ),
-          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Column(
-              children: [
-                TextField(
-                  controller: _buscaController,
-                  decoration: produtoBuscaInputDecoration(
-                    suffixIcon: _filtroBusca.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: 'Limpar pesquisa',
-                            onPressed: () {
-                              _buscaController.clear();
-                              setState(() => _filtroBusca = '');
-                            },
-                            icon: const Icon(Icons.close),
-                          ),
-                  ),
-                  onChanged: (value) => setState(() => _filtroBusca = value),
-                ),
-                const SizedBox(height: 8),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: FiltroEstoqueOperacional.values.map((f) {
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          label: Text(f.rotulo),
-                          selected: _filtroOperacional == f,
-                          onSelected: (_) {
-                            setState(() => _filtroOperacional = f);
-                          },
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-                if (categorias.isNotEmpty || fornecedores.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      if (categorias.isNotEmpty)
-                        DropdownMenu<String?>(
-                          label: const Text('Categoria'),
-                          initialSelection: _filtroCategoria,
-                          dropdownMenuEntries: [
-                            const DropdownMenuEntry<String?>(
-                              value: null,
-                              label: 'Todas',
-                            ),
-                            for (final c in categorias)
-                              DropdownMenuEntry<String?>(
-                                value: c,
-                                label: c,
-                              ),
-                          ],
-                          onSelected: (v) =>
-                              setState(() => _filtroCategoria = v),
-                        ),
-                      if (fornecedores.isNotEmpty)
-                        DropdownMenu<String?>(
-                          label: const Text('Fornecedor'),
-                          initialSelection: _filtroFornecedor,
-                          dropdownMenuEntries: [
-                            const DropdownMenuEntry<String?>(
-                              value: null,
-                              label: 'Todos',
-                            ),
-                            for (final f in fornecedores)
-                              DropdownMenuEntry<String?>(
-                                value: f,
-                                label: f,
-                              ),
-                          ],
-                          onSelected: (v) =>
-                              setState(() => _filtroFornecedor = v),
-                        ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    Chip(
-                      label: Text(
-                        'Itens: ${produtosFiltrados.length}/${produtos.length}',
-                      ),
-                    ),
-                    if (_filtroOperacional != FiltroEstoqueOperacional.todos)
-                      ActionChip(
-                        avatar: const Icon(Icons.filter_alt_off, size: 18),
-                        label: const Text('Limpar filtro'),
-                        onPressed: () => setState(
-                          () => _filtroOperacional =
-                              FiltroEstoqueOperacional.todos,
-                        ),
-                      ),
-                  ],
-                ),
-              ],
+            child: _painelKpisEstoque(verCusto: verCusto),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: _painelFiltrosEstoque(
+              produtos: produtos,
+              produtosFiltrados: produtosFiltrados,
+              categorias: categorias,
+              fornecedores: fornecedores,
             ),
           ),
-          const Divider(height: 1),
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(12),
-              itemCount: produtosFiltrados.length,
-              cacheExtent: 800,
-              separatorBuilder: (context, index) => const SizedBox(height: 6),
-              itemBuilder: (context, index) {
-                final produto = produtosFiltrados[index];
-                final abaixoMinimo =
-                    produto.estoque <= produto.quantidadeMinima;
-                final criticoPp =
-                    _criticoPpPorProdutoId[produto.id] ?? false;
-                final ppExibicao =
-                    _comprasSvc.calcularPontoPedidoExibicao(produto);
-                final statusCor = criticoPp
-                    ? semantic.errorFg
-                    : abaixoMinimo
-                        ? semantic.warningFg
-                        : semantic.successFg;
-                final statusTexto = criticoPp
-                    ? 'PP'
-                    : abaixoMinimo
-                        ? 'Min'
-                        : 'OK';
-
-                return Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: criticoPp
-                          ? semantic.errorFg.withValues(alpha: 0.45)
-                          : theme.colorScheme.outlineVariant,
-                    ),
-                    color: criticoPp
-                        ? semantic.errorBg.withValues(alpha: 0.2)
-                        : null,
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              produto.nome,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleSmall,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Un: ${rotuloUnidadeProdutoLista(produto)}',
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: theme.colorScheme.secondary,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'SKU: ${produto.codigoInterno} | Livre: ${produto.estoqueLivreParaVenda} · '
-                              'Fis: ${produto.estoqueReal} · Res: ${produto.estoqueReservado} | '
-                              'Min: ${produto.quantidadeMinima}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'PP/limiar: ${ppExibicao.toStringAsFixed(1)} · '
-                              'Atual: ${produto.estoqueAtual} · '
-                              'Media: ${produto.vendaMediaDiaria.toStringAsFixed(2)}/dia',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall,
-                            ),
-                            const SizedBox(height: 2),
-                            if (produto.localizacao.trim().isNotEmpty)
-                              Text(
-                                'Local: ${produto.localizacao}',
-                                style: theme.textTheme.bodySmall,
-                              ),
-                            Text(
-                              verCusto
-                                  ? 'Custo: ${_formatarMoedaBRL(produto.precoCusto)} | '
-                                        'Medio: ${_formatarMoedaBRL(produto.custoMedio)} | '
-                                        'Venda: ${_formatarMoedaBRL(produto.precoVenda)}'
-                                  : 'Venda: ${_formatarMoedaBRL(produto.precoVenda)}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            statusTexto,
-                            style: TextStyle(
-                              color: statusCor,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          PopupMenuButton<String>(
-                            tooltip: 'Acoes',
-                            onSelected: (v) {
-                              if (v == 'ajustar') {
-                                _abrirAjusteEstoque(produto);
-                              } else if (v == 'extrato') {
-                                _abrirExtratoEstoque(produto);
-                              } else if (v == 'comprar') {
-                                _anotarProdutoListaCompra(produto);
-                              }
-                            },
-                            itemBuilder: (ctx) => [
-                              const PopupMenuItem(
-                                value: 'comprar',
-                                child: ListTile(
-                                  dense: true,
-                                  leading: Icon(Icons.playlist_add_outlined),
-                                  title: Text('Anotar para comprar'),
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'ajustar',
-                                child: ListTile(
-                                  dense: true,
-                                  leading: Icon(Icons.edit_outlined),
-                                  title: Text('Ajustar estoque'),
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'extrato',
-                                child: ListTile(
-                                  dense: true,
-                                  leading: Icon(Icons.receipt_long_outlined),
-                                  title: Text('Ver movimentacoes'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              },
+            child: _conteudoListaProdutos(
+              produtosFiltrados: produtosFiltrados,
+              itensExibidos: itensExibidos,
+              temMaisItens: temMaisItens,
+              verCusto: verCusto,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _painelFiltrosEstoque({
+    required List<Produto> produtos,
+    required List<Produto> produtosFiltrados,
+    required List<String> categorias,
+    required List<String> fornecedores,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final estiloRodape = theme.textTheme.bodySmall;
+    final corMuted = scheme.onSurfaceVariant;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.75),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _buscaController,
+            decoration: produtoBuscaInputDecoration(
+              suffixIcon: _filtroBusca.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Limpar pesquisa',
+                      onPressed: () {
+                        _debounceBusca?.cancel();
+                        _buscaController.clear();
+                        setState(() {
+                          _filtroBusca = '';
+                          _atualizarListaFiltrada(resetarScroll: true);
+                        });
+                      },
+                      icon: const Icon(Icons.close),
+                    ),
+            ),
+            onChanged: _onBuscaChanged,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: () => setState(
+                  () => _filtrosExpandidos = !_filtrosExpandidos,
+                ),
+                icon: Icon(
+                  _filtrosExpandidos ? Icons.expand_less : Icons.tune,
+                  size: 18,
+                ),
+                label: Text(
+                  _filtrosExpandidos ? 'Ocultar filtros' : 'Filtros',
+                ),
+              ),
+              if (!_filtrosExpandidos && _temFiltrosAvancadosAtivos)
+                Padding(
+                  padding: const EdgeInsets.only(left: 2),
+                  child: Icon(
+                    Icons.filter_alt,
+                    size: 16,
+                    color: scheme.primary,
+                  ),
+                ),
+              const Spacer(),
+              Text(
+                'Itens: ${produtosFiltrados.length}/${produtos.length}',
+                style: estiloRodape?.copyWith(
+                  color: corMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          if (_filtrosExpandidos) ...[
+            const SizedBox(height: 6),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: FiltroEstoqueOperacional.values.map((f) {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: FilterChip(
+                      label: Text(f.rotulo),
+                      selected: _filtroOperacional == f,
+                      onSelected: (_) {
+                        setState(() {
+                          _filtroOperacional = f;
+                          _atualizarListaFiltrada(resetarScroll: true);
+                        });
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            if (categorias.isNotEmpty || fornecedores.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (categorias.isNotEmpty)
+                    DropdownMenu<String?>(
+                      label: const Text('Categoria'),
+                      initialSelection: _filtroCategoria,
+                      dropdownMenuEntries: [
+                        const DropdownMenuEntry<String?>(
+                          value: null,
+                          label: 'Todas',
+                        ),
+                        for (final c in categorias)
+                          DropdownMenuEntry<String?>(
+                            value: c,
+                            label: c,
+                          ),
+                      ],
+                      onSelected: (v) => setState(() {
+                        _filtroCategoria = v;
+                        _atualizarListaFiltrada(resetarScroll: true);
+                      }),
+                    ),
+                  if (fornecedores.isNotEmpty)
+                    DropdownMenu<String?>(
+                      label: const Text('Fornecedor'),
+                      initialSelection: _filtroFornecedor,
+                      dropdownMenuEntries: [
+                        const DropdownMenuEntry<String?>(
+                          value: null,
+                          label: 'Todos',
+                        ),
+                        for (final f in fornecedores)
+                          DropdownMenuEntry<String?>(
+                            value: f,
+                            label: f,
+                          ),
+                      ],
+                      onSelected: (v) => setState(() {
+                        _filtroFornecedor = v;
+                        _atualizarListaFiltrada(resetarScroll: true);
+                      }),
+                    ),
+                ],
+              ),
+            ],
+            if (_temFiltrosAvancadosAtivos) ...[
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => setState(() {
+                    _filtroOperacional = FiltroEstoqueOperacional.todos;
+                    _filtroCategoria = null;
+                    _filtroFornecedor = null;
+                    _atualizarListaFiltrada(resetarScroll: true);
+                  }),
+                  icon: const Icon(Icons.filter_alt_off, size: 18),
+                  label: const Text('Limpar filtros'),
+                ),
+              ),
+            ],
+          ],
+          const SizedBox(height: 8),
+          Divider(
+            height: 1,
+            color: scheme.outlineVariant.withValues(alpha: 0.5),
+          ),
+          const SizedBox(height: 6),
+          _rodapeStatusLista(
+            totalItens: produtosFiltrados.length,
+            exibidos: math.min(_limiteExibicaoLista, produtosFiltrados.length),
+            estiloRodape: estiloRodape,
+            corMuted: corMuted,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _conteudoListaProdutos({
+    required List<Produto> produtosFiltrados,
+    required int itensExibidos,
+    required bool temMaisItens,
+    required bool verCusto,
+  }) {
+    if (itensExibidos == 0) {
+      return Center(
+        child: Text(
+          produtosFiltrados.isEmpty && _produtos.isNotEmpty
+              ? 'Nenhum produto corresponde aos filtros.'
+              : 'Nenhum produto cadastrado.',
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < EstoqueLayout.breakpointMobile) {
+          return _listaCardsMobile(
+            produtosFiltrados: produtosFiltrados,
+            itensExibidos: itensExibidos,
+            temMaisItens: temMaisItens,
+            verCusto: verCusto,
+          );
+        }
+        return _tabelaProdutosEstoque(
+          produtosFiltrados: produtosFiltrados,
+          itensExibidos: itensExibidos,
+          temMaisItens: temMaisItens,
+          verCusto: verCusto,
+          alturaMaxima: constraints.maxHeight,
+        );
+      },
+    );
+  }
+
+  Widget _listaCardsMobile({
+    required List<Produto> produtosFiltrados,
+    required int itensExibidos,
+    required bool temMaisItens,
+    required bool verCusto,
+  }) {
+    final itemCount = itensExibidos + (temMaisItens ? 1 : 0);
+    return Scrollbar(
+      controller: _listaVerticalScrollController,
+      thumbVisibility: true,
+      interactive: true,
+      child: ListView.builder(
+        controller: _listaVerticalScrollController,
+        primary: false,
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        itemCount: itemCount,
+        itemBuilder: (context, index) {
+          if (index >= itensExibidos) {
+            return _rodapeCarregandoMaisLista();
+          }
+        final produto = produtosFiltrados[index];
+        final criticoPp = _criticoPpPorProdutoId[produto.id] ?? false;
+        final ppExibicao = _comprasSvc.calcularPontoPedidoExibicao(produto);
+        var resumo = _montarResumoCardMobile(produto, ppExibicao);
+        if (verCusto) {
+          final custo = produto.custoMedio > 0
+              ? produto.custoMedio
+              : produto.precoCusto;
+          resumo = '$resumo · Custo ${_formatarMoedaBRL(custo)}';
+        }
+        return EstoqueCardLinha(
+          produto: produto,
+          indice: index,
+          criticoPp: criticoPp,
+          resumoLinha: resumo,
+          vendaFormatada: _formatarMoedaBRL(_precoAVista(produto)),
+          onAcao: _onAcaoProdutoTabela,
+        );
+      },
+      ),
+    );
+  }
+
+  Widget _rodapeCarregandoMaisLista() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Center(
+        child: Text(
+          'Carregando mais produtos...',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tabelaProdutosEstoque({
+    required List<Produto> produtosFiltrados,
+    required int itensExibidos,
+    required bool temMaisItens,
+    required bool verCusto,
+    required double alturaMaxima,
+  }) {
+    final viewportWidth = MediaQuery.sizeOf(context).width;
+    final larguraTabela = math.max(
+      viewportWidth,
+      EstoqueTabelaColunas.larguraMinima(verCusto: verCusto),
+    );
+    final precisaScrollHorizontal = larguraTabela > viewportWidth + 0.5;
+
+    Widget buildListaVertical() {
+      final itemCount = itensExibidos + (temMaisItens ? 1 : 0);
+      return Scrollbar(
+        controller: _listaVerticalScrollController,
+        thumbVisibility: true,
+        interactive: true,
+        child: ListView.builder(
+          controller: _listaVerticalScrollController,
+          primary: false,
+          padding: EdgeInsets.zero,
+          itemCount: itemCount,
+          itemBuilder: (context, index) {
+            if (index >= itensExibidos) {
+              return _rodapeCarregandoMaisLista();
+            }
+            final produto = produtosFiltrados[index];
+            final criticoPp = _criticoPpPorProdutoId[produto.id] ?? false;
+            return EstoqueTabelaLinha(
+              produto: produto,
+              indice: index,
+              criticoPp: criticoPp,
+              ppExibicao: _comprasSvc.calcularPontoPedidoExibicao(produto),
+              verCusto: verCusto,
+              vendaFormatada: _formatarMoedaBRL(_precoAVista(produto)),
+              custoFormatado: _formatarMoedaBRL(
+                produto.custoMedio > 0
+                    ? produto.custoMedio
+                    : produto.precoCusto,
+              ),
+              onAcao: _onAcaoProdutoTabela,
+            );
+          },
+        ),
+      );
+    }
+
+    final tabela = SizedBox(
+      width: larguraTabela,
+      height: alturaMaxima,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          EstoqueTabelaCabecalho(verCusto: verCusto),
+          Expanded(child: buildListaVertical()),
+        ],
+      ),
+    );
+
+    if (!precisaScrollHorizontal) return tabela;
+
+    return Scrollbar(
+      controller: _listaHorizontalScrollController,
+      thumbVisibility: true,
+      interactive: true,
+      notificationPredicate: (notification) =>
+          notification.metrics.axis == Axis.horizontal,
+      child: SingleChildScrollView(
+        controller: _listaHorizontalScrollController,
+        scrollDirection: Axis.horizontal,
+        primary: false,
+        child: tabela,
       ),
     );
   }
