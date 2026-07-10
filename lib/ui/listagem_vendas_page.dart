@@ -703,14 +703,15 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   Future<void> _mostrarModalItensVenda(Venda v) async {
     if (!mounted) return;
+    final venda = widget.vendaRepository.obterPorId(v.id) ?? v;
     await showDialog<void>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: Text('Produtos — ${_rotuloVendaUsuario(v)}'),
+          title: Text('Produtos — ${_rotuloVendaUsuario(venda)}'),
           content: SizedBox(
             width: 440,
-            child: v.itens.isEmpty
+            child: venda.itens.isEmpty
                 ? const Text('Nenhum item registrado nesta venda.')
                 : ConstrainedBox(
                     constraints: const BoxConstraints(maxHeight: 420),
@@ -718,7 +719,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          for (final item in v.itens)
+                          for (final item in venda.itens)
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 6),
                               child: Row(
@@ -738,7 +739,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                   ),
                                   Expanded(
                                     child: Text(
-                                      '${item.quantidade}x ${item.nomeProduto}',
+                                      '${item.quantidadeExibicaoVenda} x ${item.nomeProduto}',
                                     ),
                                   ),
                                   const SizedBox(width: 12),

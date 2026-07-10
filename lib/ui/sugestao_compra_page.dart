@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import '../data/produto_repository.dart';
 import '../data/sugestao_compra_repository.dart';
+import '../domain/produto_embalagem.dart';
 import '../main.dart';
 import '../services/compras_preditivas_service.dart';
 
@@ -64,8 +65,12 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
         _csvSeguro(pr.codigoInterno),
         _csvSeguro(pr.nome),
         _csvSeguro(pr.unidade),
-        '${pr.estoqueAtual}',
-        '${pr.estoqueLivreParaVenda}',
+        ProdutoEmbalagem.formatarEstoque(pr, pr.estoqueAtual, comUnidade: true),
+        ProdutoEmbalagem.formatarEstoque(
+          pr,
+          pr.estoqueLivreParaVenda,
+          comUnidade: true,
+        ),
         '${pr.quantidadeMinima}',
         _dec1.format(l.pontoPedido).replaceAll('.', ','),
         l.estoqueCritico ? 'SIM' : 'NAO',
@@ -251,7 +256,7 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                     itemBuilder: (context, i) {
                       final l = linhas[i];
                       final pr = l.produto;
-                      final livre = pr.estoqueLivreParaVenda;
+                      final livre = pr.estoqueLivreExibicao;
                       final abaixoMin = livre <= pr.quantidadeMinima;
                       final dias = l.diasCoberturaComEstoqueAtual;
                       final giroBaixo =
@@ -316,7 +321,9 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                               const SizedBox(height: 4),
                               Text(
                                 'SKU ${pr.codigoInterno} · ${pr.unidade} · '
-                                'Atual ${pr.estoqueAtual} · Livre $livre · Min ${pr.quantidadeMinima}',
+                                'Atual ${ProdutoEmbalagem.formatarEstoque(pr, pr.estoqueAtual, comUnidade: true)} · '
+                                'Livre ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(pr, livre)} ${pr.unidade} · '
+                                'Min ${pr.quantidadeMinima}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                               const SizedBox(height: 6),

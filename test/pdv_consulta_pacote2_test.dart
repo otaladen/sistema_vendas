@@ -64,9 +64,13 @@ void main() {
   });
 
   test('rotulo quantidade lista padroniza grandes numeros', () {
-    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(49), '49');
-    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(420), '420');
-    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(12500), '12,5k');
-    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(99746991), '99,7M');
+    final p = _produto();
+    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(p, 49), '49');
+    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(p, 420), '420');
+    expect(PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(p, 12500), '12,5k');
+    expect(
+      PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(p, 99746991),
+      '99,7M',
+    );
   });
 }

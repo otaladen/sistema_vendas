@@ -13,16 +13,17 @@ abstract final class PdvEstoqueSemaforoUtil {
     Produto produto, {
     num quantidadeNoOrcamento = 0,
   }) {
-    final disponivel = produto.estoqueLivreParaVenda;
+    final disponivel = produto.estoqueLivreExibicao;
+    final fisico = produto.estoqueExibicao;
+    final minimo = produto.quantidadeMinima.toDouble();
     final noOrc = quantidadeNoOrcamento.clamp(0, 1 << 30).toDouble();
     final restante = disponivel - noOrc;
 
-    if (produto.estoqueReal <= 0 || disponivel <= 0 || restante < 0) {
+    if (fisico <= 0 || disponivel <= 0 || restante < 0) {
       return PdvEstoqueSemaforoNivel.vermelho;
     }
-    if (produto.estoqueReal < produto.quantidadeMinima ||
-        disponivel <= produto.quantidadeMinima ||
-        restante <= produto.quantidadeMinima) {
+    if (minimo > 0 &&
+        (fisico < minimo || disponivel <= minimo || restante <= minimo)) {
       return PdvEstoqueSemaforoNivel.amarelo;
     }
     return PdvEstoqueSemaforoNivel.verde;
@@ -55,9 +56,23 @@ abstract final class PdvEstoqueSemaforoUtil {
     Produto produto, {
     num quantidadeNoOrcamento = 0,
   }) {
-    final disponivel = produto.estoqueLivreParaVenda;
+    final disponivelTxt = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      produto.estoqueLivreParaVenda,
+      comUnidade: true,
+    );
+    final fisicoTxt = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      produto.estoqueReal,
+      comUnidade: true,
+    );
+    final reservadoTxt = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      produto.estoqueReservado,
+      comUnidade: true,
+    );
     final noOrc = quantidadeNoOrcamento.clamp(0, 1 << 30).toDouble();
-    final restante = disponivel - noOrc;
+    final restante = produto.estoqueLivreExibicao - noOrc;
     final noOrcTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
       produto,
       noOrc,
@@ -68,8 +83,8 @@ abstract final class PdvEstoqueSemaforoUtil {
     );
     final nivel = nivelDe(produto, quantidadeNoOrcamento: noOrc);
     final buf = StringBuffer(
-      '${rotuloNivel(nivel)} · Disp. $disponivel · '
-      'Fis. ${produto.estoqueReal} · Res. ${produto.estoqueReservado}',
+      '${rotuloNivel(nivel)} · Disp. $disponivelTxt · '
+      'Fis. $fisicoTxt · Res. $reservadoTxt',
     );
     if (noOrc > 0) {
       buf.write(' · Orc. $noOrcTxt · Rest. $restanteTxt');
@@ -77,8 +92,12 @@ abstract final class PdvEstoqueSemaforoUtil {
     return buf.toString();
   }
 
-  /// Texto fixo na coluna Est. da lista (ate 4 digitos inteiros; acima compacta).
-  static String rotuloQuantidadeLista(int quantidade) {
+  /// Texto fixo na coluna Est. da lista (m² fracionado ou inteiro).
+  static String rotuloQuantidadeLista(Produto produto, int estoqueArmazenado) {
+    if (ProdutoEmbalagem.estoqueUsaEscalaFracionada(produto)) {
+      return ProdutoEmbalagem.formatarEstoque(produto, estoqueArmazenado);
+    }
+    final quantidade = estoqueArmazenado;
     final abs = quantidade.abs();
     if (abs < 10000) return '$quantidade';
     if (abs < 1000000) {

@@ -64,6 +64,53 @@ void main() {
     });
   });
 
+  group('sku numerico zeros a esquerda', () {
+    test('remove zeros para indexacao', () {
+      expect(skuNumericoSemZerosEsquerda('008858'), '8858');
+      expect(skuNumericoSemZerosEsquerda('8858'), '8858');
+      expect(skuNumericoSemZerosEsquerda('000'), '0');
+    });
+
+    test('match exato ignora zeros a esquerda', () {
+      expect(skuBuscaCorrespondeExato('8858', '008858'), isTrue);
+      expect(skuBuscaCorrespondeExato('008858', '8858'), isTrue);
+      expect(skuBuscaCorrespondeExato('8858', '8858'), isTrue);
+      expect(skuBuscaCorrespondeExato('8859', '008858'), isFalse);
+    });
+
+    test('pontuacao parcial para prefixo do sku', () {
+      expect(skuBuscaPontuacaoParcial('8858', '008858'), 1000);
+      expect(skuBuscaPontuacaoParcial('885', '008858'), 880);
+      expect(skuBuscaPontuacaoParcial('858', '008858'), 720);
+    });
+
+    test('nao confunde sku alfanumerico', () {
+      expect(skuNumericoSemZerosEsquerda('SKU-123'), isNull);
+      expect(skuBuscaCorrespondeExato('123', 'SKU-123'), isFalse);
+    });
+
+    test('normaliza sku numerico para gravacao', () {
+      expect(normalizarCodigoInternoPersistido('008858'), '8858');
+      expect(normalizarCodigoInternoPersistido('8858'), '8858');
+      expect(normalizarCodigoInternoPersistido('SKU-123'), 'SKU-123');
+      expect(
+        normalizarCodigoInternoPersistido('__FRETE_RET_FUTURA__'),
+        '__FRETE_RET_FUTURA__',
+      );
+    });
+
+    test('sequencia numerica curta ignora SKU- legado', () {
+      expect(skuEhNumericoSequencial('8858'), isTrue);
+      expect(skuEhNumericoSequencial('SKU-1783274764271'), isFalse);
+      expect(skuComoInteiroSequencial('008858'), 8858);
+      expect(
+        proximoSkuNumericoSequencial(['8858', '1650', 'SKU-1783274764271']),
+        '8859',
+      );
+      expect(proximoSkuNumericoSequencial(const []), '1');
+    });
+  });
+
   group('tokenizar consulta obra', () {
     test('agrupa 1 1/2x13 sem token 1 solto', () {
       final p = tokenizarConsultaObra('prego 1 1/2x13');

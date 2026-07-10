@@ -25,6 +25,10 @@ void main() {
         .firstWhere((m) => m.papel == ObraMaterialPapel.tijolo);
     expect(tijolos.quantidade, greaterThan(300));
     expect(tijolos.quantidade, lessThan(350));
+    final cimento = res.materiais
+        .firstWhere((m) => m.papel == ObraMaterialPapel.cimento);
+    expect(cimento.quantidade, greaterThanOrEqualTo(3));
+    expect(cimento.quantidade, lessThanOrEqualTo(5));
   });
 
   test('parede desconta 1 porta padrao', () {
@@ -67,15 +71,25 @@ void main() {
     expect(e?.areaCalculadaM2, 40);
   });
 
+  test('calcularLaje 1 m3 traço 1:2:3 ≈ 7 sacos', () {
+    final res = ObraCalculadora.calcularLaje(
+      const ObraLajeEntrada(areaM2: 10, espessuraMm: 100, perdaPct: 0),
+    )!;
+    final cimento = res.materiais
+        .firstWhere((m) => m.papel == ObraMaterialPapel.cimento);
+    expect(cimento.quantidade, greaterThanOrEqualTo(6));
+    expect(cimento.quantidade, lessThanOrEqualTo(8));
+    expect(
+      res.materiais.any((m) => m.papel == ObraMaterialPapel.brita),
+      isTrue,
+    );
+  });
+
   test('calcularLaje gera cimento areia brita', () {
     final res = ObraCalculadora.calcularLaje(
       const ObraLajeEntrada(areaM2: 10, espessuraMm: 100, perdaPct: 0),
     )!;
     expect(res.materiais.length, 3);
-    expect(
-      res.materiais.any((m) => m.papel == ObraMaterialPapel.brita),
-      isTrue,
-    );
   });
 
   test('calcularTelhado estima telhas', () {
@@ -117,6 +131,19 @@ void main() {
     )!;
     expect(res.volumeM3, closeTo(2, 0.01));
     expect(res.materiais.any((m) => m.papel == ObraMaterialPapel.ferro), isTrue);
+  });
+
+  test('telhado inclinacao usa fator geometrico', () {
+    final res = ObraCalculadora.calcularTelhado(
+      const ObraTelhadoEntrada(
+        areaM2: 10,
+        perdaPct: 0,
+        inclinacaoPct: 30,
+        telhasPorM2: 16,
+      ),
+    )!;
+    final areaIncl = 10 * ObraCalculadora.fatorInclinacaoTelhado(30);
+    expect(res.materiais.first.quantidade, closeTo(areaIncl * 16, 1));
   });
 
   test('telhado inclinacao aumenta quantidade de telhas', () {

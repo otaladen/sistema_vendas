@@ -24,6 +24,7 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   static const _nomeMarca = 'Sistema de Vendas';
   static const _sloganMarca = 'Gestao inteligente para vendas e entregas';
+  static const _creditoDesenvolvedor = 'Desenvolvido por Otavio Filho · 2026';
 
   final _nomeController = TextEditingController();
   final _loginController = TextEditingController();
@@ -468,6 +469,18 @@ class _LoginPageState extends State<LoginPage> {
                                         'Versao 1.0.0',
                                         textAlign: TextAlign.center,
                                         style: Theme.of(context).textTheme.bodySmall,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _creditoDesenvolvedor,
+                                        textAlign: TextAlign.center,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                              color: scheme.onSurfaceVariant,
+                                              fontWeight: FontWeight.w500,
+                                            ),
                                       ),
                                     ],
                                   ),

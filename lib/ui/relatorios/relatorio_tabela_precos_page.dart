@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../../data/produto_busca_util.dart';
 import '../../data/produto_repository.dart';
 import '../widgets/produto_busca_input.dart';
+import '../../domain/produto_embalagem.dart';
 import '../../model/produto.dart';
 import '../../services/pdf_tabela_produtos_texto.dart';
 import 'relatorio_cores.dart';
@@ -120,7 +121,7 @@ class _RelatorioTabelaPrecosPageState extends State<RelatorioTabelaPrecosPage> {
         (p) => [
           p.codigoInterno,
           p.nome,
-          '${p.estoqueReal}',
+          ProdutoEmbalagem.formatarEstoque(p, p.estoqueReal, comUnidade: true),
           moeda.format(p.precoVenda),
           moeda.format(_precoAVista(p)),
           moeda.format(p.precoCusto),
@@ -142,7 +143,7 @@ class _RelatorioTabelaPrecosPageState extends State<RelatorioTabelaPrecosPage> {
             (p) => [
               p.codigoInterno,
               p.nome,
-              '${p.estoqueReal}',
+              ProdutoEmbalagem.formatarEstoque(p, p.estoqueReal, comUnidade: true),
               moeda.format(p.precoVenda),
               moeda.format(_precoAVista(p)),
             ],
@@ -231,7 +232,7 @@ class _RelatorioTabelaPrecosPageState extends State<RelatorioTabelaPrecosPage> {
                         dense: true,
                         title: Text(p.nome),
                         subtitle: Text(
-                          '${p.codigoInterno} · Est: ${p.estoqueReal} ${p.unidade}',
+                          '${p.codigoInterno} · Est: ${ProdutoEmbalagem.formatarEstoque(p, p.estoqueReal, comUnidade: true)}',
                         ),
                         trailing: Text(
                           'R\$ ${moeda.format(p.precoVenda)}',

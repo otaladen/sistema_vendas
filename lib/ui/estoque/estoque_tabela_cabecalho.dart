@@ -1,14 +1,23 @@
 import 'package:flutter/material.dart';
 
+import 'estoque_lista_metricas.dart';
 import 'estoque_tabela_colunas.dart';
+
+typedef EstoqueOrdenarColuna = void Function(EstoqueColunaOrdenacao coluna);
 
 class EstoqueTabelaCabecalho extends StatelessWidget {
   const EstoqueTabelaCabecalho({
     super.key,
     required this.verCusto,
+    required this.colunaOrdenacao,
+    required this.ordenacaoAscendente,
+    required this.onOrdenar,
   });
 
   final bool verCusto;
+  final EstoqueColunaOrdenacao colunaOrdenacao;
+  final bool ordenacaoAscendente;
+  final EstoqueOrdenarColuna onOrdenar;
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +56,14 @@ class EstoqueTabelaCabecalho extends StatelessWidget {
               ),
               _coluna('Un.', EstoqueTabelaColunas.larguraUn, estilo,
                   tooltip: 'Unidade de venda', align: TextAlign.center),
+              _colunaOrdenavel(
+                'Disp.',
+                EstoqueTabelaColunas.larguraNum,
+                estilo,
+                corAtiva: scheme.primary,
+                coluna: EstoqueColunaOrdenacao.disponivel,
+                tooltip: 'Estoque livre (fisico - reservado)',
+              ),
               _coluna('Fis.', EstoqueTabelaColunas.larguraNum, estilo,
                   tooltip: 'Estoque fisico', align: TextAlign.end),
               _coluna('Res.', EstoqueTabelaColunas.larguraNum, estilo,
@@ -55,13 +72,42 @@ class EstoqueTabelaCabecalho extends StatelessWidget {
                   tooltip: 'Quantidade minima', align: TextAlign.end),
               _coluna('PP', EstoqueTabelaColunas.larguraNum, estilo,
                   tooltip: 'Ponto de pedido', align: TextAlign.end),
-              _coluna('Media', EstoqueTabelaColunas.larguraMedia, estilo,
-                  tooltip: 'Media diaria de vendas', align: TextAlign.end),
-              _coluna('Venda', EstoqueTabelaColunas.larguraPreco, estilo,
-                  tooltip: 'Preco de venda a vista', align: TextAlign.end),
+              _colunaOrdenavel(
+                'Media',
+                EstoqueTabelaColunas.larguraMedia,
+                estilo,
+                corAtiva: scheme.primary,
+                coluna: EstoqueColunaOrdenacao.media,
+                tooltip: 'Media diaria de vendas',
+              ),
+              _colunaOrdenavel(
+                'Venda',
+                EstoqueTabelaColunas.larguraPreco,
+                estilo,
+                corAtiva: scheme.primary,
+                coluna: EstoqueColunaOrdenacao.venda,
+                tooltip: 'Preco de venda a vista',
+              ),
               if (verCusto)
                 _coluna('Custo', EstoqueTabelaColunas.larguraPreco, estilo,
                     tooltip: 'Custo medio ou cadastrado', align: TextAlign.end),
+              if (verCusto)
+                _colunaOrdenavel(
+                  'Marg%',
+                  EstoqueTabelaColunas.larguraMargem,
+                  estilo,
+                  corAtiva: scheme.primary,
+                  coluna: EstoqueColunaOrdenacao.margem,
+                  tooltip: 'Margem sobre o preco de venda',
+                ),
+              _colunaOrdenavel(
+                'Cob.',
+                EstoqueTabelaColunas.larguraCobertura,
+                estilo,
+                corAtiva: scheme.primary,
+                coluna: EstoqueColunaOrdenacao.cobertura,
+                tooltip: 'Dias de estoque livre (media diaria)',
+              ),
               SizedBox(width: EstoqueTabelaColunas.larguraAcao),
             ],
           ),
@@ -83,6 +129,56 @@ class EstoqueTabelaCabecalho extends StatelessWidget {
       child: tooltip == null
           ? texto
           : Tooltip(message: tooltip, child: texto),
+    );
+  }
+
+  Widget _colunaOrdenavel(
+    String rotulo,
+    double largura,
+    TextStyle? estilo, {
+    required Color corAtiva,
+    required EstoqueColunaOrdenacao coluna,
+    required String tooltip,
+  }) {
+    final ativa = colunaOrdenacao == coluna;
+    final icone = !ativa
+        ? Icons.unfold_more_rounded
+        : ordenacaoAscendente
+            ? Icons.arrow_drop_up_rounded
+            : Icons.arrow_drop_down_rounded;
+
+    return SizedBox(
+      width: largura,
+      child: Tooltip(
+        message: '$tooltip · clique para ordenar',
+        child: InkWell(
+          onTap: () => onOrdenar(coluna),
+          borderRadius: BorderRadius.circular(4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Flexible(
+                child: Text(
+                  rotulo,
+                  style: estilo?.copyWith(
+                    color: ativa ? corAtiva : estilo.color,
+                    decoration: ativa ? TextDecoration.underline : null,
+                  ),
+                  textAlign: TextAlign.end,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(
+                icone,
+                size: 16,
+                color: ativa
+                    ? corAtiva
+                    : estilo?.color?.withValues(alpha: 0.45),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

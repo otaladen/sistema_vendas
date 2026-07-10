@@ -27,10 +27,14 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final disponivel = produto.estoqueLivreParaVenda;
-    final fisico = produto.estoqueReal;
-    final reservado = produto.estoqueReservado;
+    final disponivelExib = produto.estoqueLivreExibicao;
+    final fisicoExib = produto.estoqueExibicao;
+    final reservadoExib = ProdutoEmbalagem.valorEstoqueExibicao(
+      produto,
+      produto.estoqueReservado,
+    );
     final noOrcamento = quantidadeNoOrcamento.clamp(0, 1 << 30).toDouble();
-    final restanteAposOrcamento = disponivel - noOrcamento;
+    final restanteAposOrcamento = disponivelExib - noOrcamento;
     final noOrcTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
       produto,
       noOrcamento,
@@ -44,6 +48,22 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
       quantidadeNoOrcamento: noOrcamento,
     );
     final corDisponivel = PdvEstoqueSemaforoUtil.corDe(context, nivel);
+    final dispTxt = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      disponivel,
+      comUnidade: true,
+    );
+    final fisTxt = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      produto.estoqueReal,
+      comUnidade: true,
+    );
+    final resTxt = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      produto.estoqueReservado,
+      comUnidade: true,
+    );
+    final unidade = ProdutoEmbalagem.normalizarUnidade(produto.unidade);
     final rotuloNivel = PdvEstoqueSemaforoUtil.rotuloNivel(nivel);
 
     if (compacto) {
@@ -59,7 +79,7 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
           quantidadeNoOrcamento: noOrcamento,
         ),
         child: Text(
-          'Disp. $disponivel · Fis. $fisico · Res. $reservado$linhaCd$linhaOrcamento',
+          'Disp. $dispTxt · Fis. $fisTxt · Res. $resTxt$linhaCd$linhaOrcamento',
           style: theme.textTheme.labelSmall?.copyWith(
             color: corDisponivel,
             fontWeight: FontWeight.w700,
@@ -105,7 +125,7 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
                 child: _celula(
                   context,
                   rotulo: 'Disponivel',
-                  valor: '$disponivel',
+                  valor: dispTxt,
                   destaque: true,
                   cor: corDisponivel,
                 ),
@@ -115,7 +135,7 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
                 child: _celula(
                   context,
                   rotulo: 'Fisico',
-                  valor: '$fisico',
+                  valor: fisTxt,
                 ),
               ),
               const SizedBox(width: 8),
@@ -123,7 +143,7 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
                 child: _celula(
                   context,
                   rotulo: 'Reservado',
-                  valor: '$reservado',
+                  valor: resTxt,
                 ),
               ),
             ],
@@ -131,14 +151,14 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
           if (PdvConsultaMultiDepositoUtil.exibirCd(produto)) ...[
             const SizedBox(height: 6),
             Text(
-              '${rotulosDeposito.cd}: ${produto.estoqueCd} ${produto.unidade}',
+              '${rotulosDeposito.cd}: ${produto.estoqueCd} $unidade',
               style: theme.textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.w700,
                 color: scheme.secondary,
               ),
             ),
           ],
-          if (reservado > 0) ...[
+          if (reservadoExib > 0) ...[
             const SizedBox(height: 4),
             Text(
               'Reservado = retirada futura / carreto pendente.',

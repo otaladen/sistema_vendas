@@ -750,6 +750,44 @@ class _PdvObraCalculadoraPanelState extends State<PdvObraCalculadoraPanel> {
                     _buildFormulario(theme),
                     if (res != null) ...[
                       const SizedBox(height: 10),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.tertiaryContainer
+                              .withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: theme.colorScheme.tertiary
+                                .withValues(alpha: 0.35),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.info_outline,
+                                size: 18,
+                                color: theme.colorScheme.onTertiaryContainer,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  ObraCalculadora.avisoEstimativa,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: theme.colorScheme.onTertiaryContainer,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
                       Text(
                         switch (res.tipo) {
                           ObraReceitaTipo.parede =>
@@ -880,9 +918,10 @@ class _PdvObraCalculadoraPanelState extends State<PdvObraCalculadoraPanel> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Estimativa de balcao. Confira antes de fechar a venda.',
+                      ObraCalculadora.avisoEstimativa,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],

@@ -486,7 +486,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       precoListaAtivo: _precoListaAtivo,
       precoUnitarioDe: (p, t) =>
           _resolverPrecoProduto(p, precoTipoLista: t).precoFinal,
-      limite: 4,
+      limite: 3,
       excluirProdutoIds: _idsProdutosNoCarrinho(),
     );
     if (sugestoes.isEmpty) {
@@ -538,7 +538,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   bool _produtoExcedeEstoqueNoCarrinho(Produto produto) {
     return _quantidadeUnidadeVendaNoCarrinho(produto.id) >
-        produto.estoqueLivreParaVenda;
+        produto.estoqueLivreExibicao;
   }
   String _prioridadeEntregaSelecionada = 'normal';
   String _janelaEntregaSelecionada = 'nao_definida';
@@ -1036,6 +1036,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   void _onPesquisaPdvTextoChanged() {
+    if (_sugestoesCarrinhoVisiveis.isNotEmpty &&
+        _pesquisaController.text.trim().isNotEmpty) {
+      _fecharSugestoesCarrinho();
+    }
     if (!_pesquisaFocus.hasFocus || _processandoLeitorBarrasPdv) return;
     final texto = _pesquisaController.text;
     if (!consultaEanProvavelCompleto(texto)) return;
@@ -1589,17 +1593,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final unit = resPreco.precoFinal;
     if (!_permitirVendaSemEstoque) {
       final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
-      final disp = fresh.estoqueLivreParaVenda;
+      final disp = fresh.estoqueLivreExibicao;
       if (disp <= 0) {
         _snackbarSemEstoqueComOpcaoCompra(produto);
         return false;
       }
       final jaNoCarrinho = _quantidadeUnidadeVendaNoCarrinho(produto.id);
       if (jaNoCarrinho + qUnidadeVenda > disp) {
+        final dispTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+          fresh,
+          disp,
+        );
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Estoque maximo para ${produto.nome}: $disp ${
+              'Estoque maximo para ${produto.nome}: $dispTxt ${
                 ProdutoEmbalagem.normalizarUnidade(fresh.unidade)
               } (ja ha ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(produto, jaNoCarrinho)} no orcamento).',
             ),
@@ -1815,7 +1823,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       final item = _carrinho[index];
       final fresh =
           widget.produtoRepository.obterPorId(item.produto.id) ?? item.produto;
-      final disp = fresh.estoqueLivreParaVenda;
+      final disp = fresh.estoqueLivreExibicao;
       final novaArmazenada = item.quantidade + deltaArmazenado;
       final qNova = item.quantidadeEmUnidadeCompra &&
               item.produto.pdvPodeVenderEmUnidadeCompra
@@ -1831,10 +1839,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       final jaOutros = _quantidadeUnidadeVendaNoCarrinho(item.produto.id) -
           item.quantidadeVendaEfetiva;
       if (jaOutros + qNova > disp) {
+        final dispTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+          fresh,
+          disp,
+        );
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Estoque maximo: $disp ${ProdutoEmbalagem.normalizarUnidade(fresh.unidade)} '
+              'Estoque maximo: $dispTxt ${ProdutoEmbalagem.normalizarUnidade(fresh.unidade)} '
               '(no orcamento: ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(item.produto, jaOutros + item.quantidadeVendaEfetiva)}).',
             ),
           ),
@@ -7126,7 +7138,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 if (_sugestoesCarrinhoVisiveis.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   PdvSugestoesCarrinhoStrip(
-                    produtoOrigemNome: _sugestoesCarrinhoOrigemNome,
                     sugestoes: _sugestoesCarrinhoVisiveis,
                     formatarMoeda: _formatarMoeda,
                     onAdicionar: (s) =>

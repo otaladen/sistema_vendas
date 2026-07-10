@@ -27,6 +27,7 @@ import '../../domain/entrega_venda_helper.dart';
 import '../../domain/promocao_cadastro.dart';
 import '../../domain/promocao_preco_result.dart';
 import '../../domain/promocao_preco_service.dart';
+import '../../domain/produto_embalagem.dart';
 import '../../domain/produto_limite_desconto_pdv.dart';
 import '../../domain/fiscal/caixa_fiscal_acao_helper.dart';
 import '../../domain/fiscal/cliente_fiscal_helper.dart';
@@ -736,7 +737,9 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
     _importarOrcamentoController.clear();
-    _selecionarOrcamentoParaConferencia(venda);
+    final completo =
+        widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    _selecionarOrcamentoParaConferencia(completo);
   }
 
   void _voltarParaFila() {
@@ -2752,7 +2755,11 @@ class _CaixaPageState extends State<CaixaPage> {
     int delta,
   ) async {
     if (_etapaCaixa != CaixaEtapa.conferencia) return;
-    final novaQtd = item.quantidade + delta;
+    final passo = ProdutoEmbalagem.passoQuantidadeArmazenada(
+      produto: item.produto.target,
+      quantidadeArmazenada: item.quantidade,
+    );
+    final novaQtd = item.quantidade + delta * passo;
     if (novaQtd <= 0) {
       await _removerItemConferencia(venda, item);
       return;
@@ -2779,7 +2786,8 @@ class _CaixaPageState extends State<CaixaPage> {
       _recarregarOrcamentoSelecionadoAposAjusteItens();
       CaixaFeedback.sucesso(
         context,
-        'Quantidade atualizada: ${item.nomeProduto} ($novaQtd).',
+        'Quantidade atualizada: ${item.nomeProduto} '
+        '(${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: item.produto.target, quantidadeArmazenada: novaQtd)}).',
       );
     } catch (e) {
       if (!mounted) return;
@@ -2804,7 +2812,7 @@ class _CaixaPageState extends State<CaixaPage> {
         title: const Text('Remover item do orcamento?'),
         content: Text(
           '${item.nomeProduto}\n\n'
-          'Quantidade: ${item.quantidade}\n'
+          'Quantidade: ${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: item.produto.target, quantidadeArmazenada: item.quantidade)}\n'
           'Valor da linha: ${_formatarMoeda(item.subtotal)}\n\n'
           'O total sera recalculado automaticamente.',
         ),
@@ -2893,13 +2901,13 @@ class _CaixaPageState extends State<CaixaPage> {
         .precoFinal;
   }
 
-  int _quantidadeProdutoNoOrcamentoSelecionado(int produtoId) {
+  double _quantidadeProdutoNoOrcamentoSelecionado(int produtoId) {
     final v = _selecionado;
     if (v == null) return 0;
-    var soma = 0;
+    var soma = 0.0;
     for (final item in v.itens) {
       if (item.produto.targetId == produtoId) {
-        soma += item.quantidade;
+        soma += item.quantidadeVendaEfetiva;
       }
     }
     return soma;
@@ -5247,6 +5255,16 @@ class _CaixaPageState extends State<CaixaPage> {
                 itemCount: selecionado.itens.length,
                 itemBuilder: (context, index) {
                   final item = selecionado.itens[index];
+                  final produto = item.produto.target;
+                  final passoQtd = ProdutoEmbalagem.passoQuantidadeArmazenada(
+                    produto: produto,
+                    quantidadeArmazenada: item.quantidade,
+                  );
+                  final qtdTexto = ProdutoEmbalagem.textoQuantidadeArmazenada(
+                    produto: produto,
+                    quantidadeArmazenada: item.quantidade,
+                  );
+                  final noMinimo = item.quantidade <= passoQtd;
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                     child: Row(
@@ -5262,7 +5280,7 @@ class _CaixaPageState extends State<CaixaPage> {
                           ),
                         ),
                         SizedBox(
-                          width: 132,
+                          width: 168,
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -5273,11 +5291,11 @@ class _CaixaPageState extends State<CaixaPage> {
                                   minWidth: 36,
                                   minHeight: 36,
                                 ),
-                                tooltip: item.quantidade <= 1
+                                tooltip: noMinimo
                                     ? 'Remover item'
                                     : 'Diminuir quantidade',
                                 icon: const Icon(Icons.remove_circle_outline),
-                                onPressed: item.quantidade <= 1
+                                onPressed: noMinimo
                                     ? (podeRemover
                                         ? () => unawaited(
                                               _removerItemConferencia(
@@ -5294,12 +5312,17 @@ class _CaixaPageState extends State<CaixaPage> {
                                           ),
                                         ),
                               ),
-                              Text(
-                                '${item.quantidade}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleSmall
-                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              Flexible(
+                                child: Text(
+                                  qtdTexto,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                ),
                               ),
                               IconButton(
                                 visualDensity: VisualDensity.compact,

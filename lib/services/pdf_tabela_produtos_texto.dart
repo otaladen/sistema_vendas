@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../domain/produto_embalagem.dart';
 import '../model/produto.dart';
 
 String _fmtMoeda(num valor) =>
@@ -50,7 +51,7 @@ String _linha(
   if (incluirEstoque) {
     const wNome = 34;
     final n = _trunc(p.nome, wNome).padRight(wNome);
-    final e = p.estoqueReal.toString().padLeft(7);
+    final e = ProdutoEmbalagem.formatarEstoque(p, p.estoqueReal).padLeft(7);
     final pr = _fmtMoeda(p.precoVenda).padLeft(10);
     final pv = _fmtMoeda(_precoAVista(p)).padLeft(10);
     if (!incluirCustos) return '$c $n $e $pr $pv';

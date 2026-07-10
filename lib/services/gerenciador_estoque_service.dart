@@ -3,6 +3,7 @@ import '../data/objectbox.dart';
 import '../data/produto_busca_util.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/produto_embalagem.dart';
 import '../domain/estoque/tipo_movimento_estoque.dart';
 import '../domain/produto_estoque_sync.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
@@ -28,6 +29,10 @@ class GerenciadorEstoqueService {
   final MovimentoEstoqueRepository _movimentos;
   EstoqueAntes _snap(Produto p) =>
       (fisico: p.estoqueReal, reserva: p.estoqueReservado);
+
+  void _garantirEscalaEstoque(Produto produto) {
+    ProdutoEmbalagem.garantirEstoqueEmEscalaNoProduto(produto);
+  }
 
   // --- Persistencia e politica ---
 
@@ -97,6 +102,7 @@ class GerenciadorEstoqueService {
     if (atual == null) {
       throw StateError('Produto id ${produto.id} nao encontrado.');
     }
+    _garantirEscalaEstoque(atual);
     final antes = _snap(atual);
     atual.estoqueReal += qtd;
     atual.estoqueAtual = atual.estoqueReal;
@@ -172,6 +178,7 @@ class GerenciadorEstoqueService {
     if (atual == null) {
       throw StateError('Produto id ${produto.id} nao encontrado.');
     }
+    _garantirEscalaEstoque(atual);
     final antes = _snap(atual);
     prepararAjusteManualInventario(atual, novaQuantidadeFisica, motivo);
     persistirProduto(
@@ -228,7 +235,7 @@ class GerenciadorEstoqueService {
     if (tipo == EntregaVendaHelper.tipoRetirada) return 0;
     if (tipo == EntregaVendaHelper.tipoRetiradaFutura ||
         tipo == EntregaVendaHelper.tipoEntregaLoja) {
-      return item.quantidade;
+      return item.quantidadeUnidadeEstoque;
     }
     return 0;
   }
@@ -297,8 +304,9 @@ class GerenciadorEstoqueService {
     if (produto == null) {
       throw StateError('Produto do item "${item.nomeProduto}" nao encontrado.');
     }
-    final q = item.quantidade;
-    if (q <= 0) return;
+    final qReserva = item.quantidadeUnidadeEstoque;
+    final qArmazenado = item.quantidade;
+    if (qArmazenado <= 0) return;
 
     final tipo = EntregaVendaHelper.tipoEfetivoItem(item);
     if (tipo == EntregaVendaHelper.tipoRetirada) {
@@ -307,8 +315,8 @@ class GerenciadorEstoqueService {
 
     switch (tipo) {
       case EntregaVendaHelper.tipoRetiradaFutura:
-        if (produto.estoqueReservado < q) {
-          final falta = q - produto.estoqueReservado;
+        if (produto.estoqueReservado < qReserva) {
+          final falta = qReserva - produto.estoqueReservado;
           final antes = _snap(produto);
           produto.estoqueReservado += falta;
           persistirProduto(
@@ -320,11 +328,11 @@ class GerenciadorEstoqueService {
         }
         break;
       case EntregaVendaHelper.tipoEntregaLoja:
-        if (produto.estoqueReservado < q) {
-          final falta = q - produto.estoqueReservado;
+        if (produto.estoqueReservado < qReserva) {
+          final falta = qReserva - produto.estoqueReservado;
           final antes = _snap(produto);
           produto.estoqueReservado += falta;
-          item.quantidadeNoCarreto = q;
+          item.quantidadeNoCarreto = qArmazenado;
           _db.itemVendaBox.put(item);
           persistirProduto(
             produto,
@@ -333,7 +341,7 @@ class GerenciadorEstoqueService {
             documentoReferencia: _refItemVenda(item),
           );
         } else {
-          item.quantidadeNoCarreto = q;
+          item.quantidadeNoCarreto = qArmazenado;
           _db.itemVendaBox.put(item);
         }
         break;
@@ -357,14 +365,16 @@ class GerenciadorEstoqueService {
     if (produto == null) {
       throw StateError('Produto do item "${item.nomeProduto}" nao encontrado.');
     }
-    final q = item.quantidade;
-    if (q <= 0) return;
-    if (item.quantidadeJaRetirada >= q) return;
+    _garantirEscalaEstoque(produto);
+    final qArmazenado = item.quantidade;
+    final qEstoque = item.quantidadeUnidadeEstoque;
+    if (qArmazenado <= 0) return;
+    if (item.quantidadeJaRetirada >= qArmazenado) return;
 
-    if (!permitirVendaSemEstoque && produto.estoqueReal < q) {
+    if (!permitirVendaSemEstoque && produto.estoqueReal < qEstoque) {
       throw StateError(
         'Estoque insuficiente para "${produto.nome}": '
-        'disponivel ${produto.estoqueReal}, necessario $q.',
+        'disponivel ${produto.estoqueReal}, necessario $qEstoque.',
       );
     }
 
@@ -372,8 +382,8 @@ class GerenciadorEstoqueService {
       TipoMovimentoEstoque.cupomNaoFiscalVenda,
     );
     final antes = _snap(produto);
-    produto.estoqueReal -= q;
-    item.quantidadeJaRetirada = q;
+    produto.estoqueReal -= qEstoque;
+    item.quantidadeJaRetirada = qArmazenado;
     _db.itemVendaBox.put(item);
     persistirProduto(
       produto,
@@ -383,7 +393,7 @@ class GerenciadorEstoqueService {
     );
     ComprasPreditivasService(_db).atualizarAposVendaRegistrada(
       produto: produto,
-      quantidadeVendida: q,
+      quantidadeVendida: qEstoque,
       estoqueRealJaAbatido: true,
       consumoPrecalculado: consumoVendasPrecalculado,
     );
@@ -479,12 +489,13 @@ class GerenciadorEstoqueService {
 
   void migrarEstoqueRetiradaFuturaParaCarretoItens(Iterable<ItemVenda> itens) {
     for (final item in itens) {
-      final q = item.quantidadePendenteRetirada;
-      item.quantidadeNoCarreto = q;
-      if (q <= 0) {
+      final qArmazenado = item.quantidadePendenteRetirada;
+      item.quantidadeNoCarreto = qArmazenado;
+      if (qArmazenado <= 0) {
         _db.itemVendaBox.put(item);
         continue;
       }
+      final qEstoque = item.quantidadeUnidadeEstoqueDe(qArmazenado);
       final produto = item.produto.target;
       if (produto == null) {
         throw StateError(
@@ -492,22 +503,22 @@ class GerenciadorEstoqueService {
           'baixar estoque na migracao.',
         );
       }
-      if (produto.estoqueReservado < q || produto.estoqueReal < q) {
+      if (produto.estoqueReservado < qEstoque || produto.estoqueReal < qEstoque) {
         throw StateError(
           'Estoque insuficiente para ${produto.nome}: reservado '
-          '${produto.estoqueReservado}, precisa $q (fisico ${produto.estoqueReal}).',
+          '${produto.estoqueReservado}, precisa $qEstoque (fisico ${produto.estoqueReal}).',
         );
       }
       final antes = _snap(produto);
-      produto.estoqueReservado -= q;
-      produto.estoqueReal -= q;
+      produto.estoqueReservado -= qEstoque;
+      produto.estoqueReal -= qEstoque;
       persistirProduto(
         produto,
         TipoMovimentoEstoque.carretoSaida,
         antes: antes,
         documentoReferencia: _refItemVenda(item),
       );
-      item.quantidadeJaRetirada += q;
+      item.quantidadeJaRetirada += qArmazenado;
       _db.itemVendaBox.put(item);
     }
   }
@@ -515,14 +526,19 @@ class GerenciadorEstoqueService {
   // --- Carreto ---
 
   static int quantidadeItemParaEstoqueCarreto(ItemVenda item) {
+    int armazenado;
     if (EntregaVendaHelper.itemMigradoRetiradaFuturaParaCarreto(item)) {
-      return item.quantidadeNoCarreto;
-    }
-    if (EntregaVendaHelper.tipoEfetivoItem(item) !=
+      armazenado = item.quantidadeNoCarreto;
+    } else if (EntregaVendaHelper.tipoEfetivoItem(item) !=
         EntregaVendaHelper.tipoEntregaLoja) {
       return 0;
+    } else {
+      armazenado = item.quantidadeAindaNoCarretoAntesSaida;
     }
-    return item.quantidadeAindaNoCarretoAntesSaida;
+    return ProdutoEmbalagem.unidadeEstoqueDeQuantidadeArmazenada(
+      produto: item.produto.target,
+      quantidadeArmazenada: armazenado,
+    );
   }
 
   void validarEstoqueAntesDespachoCarreto(Venda venda) {
@@ -772,8 +788,9 @@ class GerenciadorEstoqueService {
         throw StateError('Produto do item ${item.id} nao encontrado.');
       }
       final antes = _snap(produto);
-      produto.estoqueReal += item.quantidade;
-      produto.estoqueReservado += item.quantidade;
+      final qEstoque = item.quantidadeUnidadeEstoque;
+      produto.estoqueReal += qEstoque;
+      produto.estoqueReservado += qEstoque;
       persistirProduto(
         produto,
         TipoMovimentoEstoque.retiradaTotalImediata,
@@ -830,7 +847,8 @@ class GerenciadorEstoqueService {
 
       if (venda.entregaPendente) {
         final reservadoAtual = produto.estoqueReservado;
-        final novo = (reservadoAtual - item.quantidade)
+        final qEstorno = item.quantidadeUnidadeEstoque;
+        final novo = (reservadoAtual - qEstorno)
             .clamp(0, reservadoAtual)
             .toInt();
         if (novo != reservadoAtual) {
@@ -840,7 +858,7 @@ class GerenciadorEstoqueService {
       } else if (EntregaVendaHelper.vendaTemItensCarreto(venda) &&
           venda.carretoReservaAteSaida) {
         if (venda.cargaSaiu) {
-          produto.estoqueReal += item.quantidade;
+          produto.estoqueReal += item.quantidadeUnidadeEstoque;
           alterou = true;
         } else {
           final qReserva = quantidadeItemParaEstoqueCarreto(item);
@@ -856,7 +874,7 @@ class GerenciadorEstoqueService {
       } else if (venda.estoqueBaixadoCupom ||
           EntregaVendaHelper.tipoEfetivoItem(item) !=
               EntregaVendaHelper.tipoRetirada) {
-        produto.estoqueReal += item.quantidade;
+        produto.estoqueReal += item.quantidadeUnidadeEstoque;
         alterou = true;
       }
       if (alterou) {

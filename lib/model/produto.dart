@@ -202,6 +202,14 @@ class Produto {
   /// Pode ser negativo quando a loja vende com estoque negativo.
   int get estoqueLivreParaVenda => estoqueReal - estoqueReservado;
 
+  /// Estoque fisico em unidade de venda para exibicao (ex.: 144,62 m²).
+  double get estoqueExibicao =>
+      ProdutoEmbalagem.valorEstoqueExibicao(this, estoqueReal);
+
+  /// Estoque livre em unidade de venda para exibicao e comparacao com o carrinho.
+  double get estoqueLivreExibicao =>
+      ProdutoEmbalagem.valorEstoqueExibicao(this, estoqueLivreParaVenda);
+
   String get unidadeCompraEfetiva {
     final u = unidadeCompra.trim();
     return u.isEmpty ? unidade : u;

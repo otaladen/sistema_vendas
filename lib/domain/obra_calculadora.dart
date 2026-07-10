@@ -262,8 +262,8 @@ class ObraTelhadoEntrada {
   final double telhasPorM2;
 
   double get areaInclinadaM2 {
-    final fator = 1 + (inclinacaoPct.clamp(0, 60) / 100);
-    return areaM2 * fator;
+    final i = inclinacaoPct.clamp(0, 60) / 100;
+    return areaM2 * math.sqrt(1 + i * i);
   }
 
   bool get valida => areaM2 > 0 && telhasPorM2 > 0 && perdaPct >= 0;
@@ -387,6 +387,85 @@ class ObraCalculadoraResultado {
 abstract final class ObraCalculadora {
   ObraCalculadora._();
 
+  /// Exibido no PDV ao montar materiais.
+  static const avisoEstimativa =
+      'Quantidades estimadas — confira com o responsavel tecnico da obra.';
+
+  /// Fator de correcao da area do telhado pela inclinacao (% = cm por 100 cm).
+  static double fatorInclinacaoTelhado(double inclinacaoPct) {
+    final i = inclinacaoPct.clamp(0, 60) / 100;
+    return math.sqrt(1 + i * i);
+  }
+
+  /// Consumo de referencia por m³ de concreto estrutural (traço 1:2:3, mercado BR).
+  static const double _kgCimentoM3Traco123 = 350;
+  static const double _areiaM3Traco123 = 0.50;
+  static const double _britaM3Traco123 = 0.80;
+  static const int _partesTraco123 = 6;
+
+  static double _kgCimentoAssentamentoM2(
+    TipoTijoloObra tipo,
+    int tracoCimento,
+    int tracoAreia,
+  ) {
+    final baseKg = switch (tipo) {
+      TipoTijoloObra.ceramico8f_9x19x19 => 15.0,
+      TipoTijoloObra.ceramico6f_9x14x19 => 18.0,
+      TipoTijoloObra.ceramico8f_9x19x29 => 12.0,
+    };
+    return baseKg *
+        (tracoCimento / 1.0) *
+        (4.0 / math.max(1, tracoAreia));
+  }
+
+  static double _areiaAssentamentoM3PorM2(
+    TipoTijoloObra tipo,
+    int tracoAreia,
+  ) {
+    final base = switch (tipo) {
+      TipoTijoloObra.ceramico8f_9x19x19 => 0.040,
+      TipoTijoloObra.ceramico6f_9x14x19 => 0.048,
+      TipoTijoloObra.ceramico8f_9x19x29 => 0.032,
+    };
+    return base * (tracoAreia / 4.0);
+  }
+
+  static List<ObraCalculadoraMaterialCalculado> _materiaisAssentamentoParede({
+    required double areaM2,
+    required double fatorPerda,
+    required TipoTijoloObra tipoTijolo,
+    required int tracoCimento,
+    required int tracoAreia,
+    required double pesoSacoCimentoKg,
+  }) {
+    final kgCimento =
+        areaM2 *
+        _kgCimentoAssentamentoM2(tipoTijolo, tracoCimento, tracoAreia) *
+        fatorPerda;
+    final volAreia =
+        areaM2 * _areiaAssentamentoM3PorM2(tipoTijolo, tracoAreia) * fatorPerda;
+    final sacos = pesoSacoCimentoKg > 0
+        ? (kgCimento / pesoSacoCimentoKg).ceilToDouble()
+        : 0.0;
+    return [
+      ObraCalculadoraMaterialCalculado(
+        papel: ObraMaterialPapel.cimento,
+        quantidade: sacos,
+        unidadeRotulo: 'SC',
+        rotulo: 'Cimento (assentamento $tracoCimento:$tracoAreia)',
+        detalhe:
+            '${kgCimento.toStringAsFixed(0)} kg · ~${_kgCimentoAssentamentoM2(tipoTijolo, tracoCimento, tracoAreia).toStringAsFixed(0)} kg/m²',
+      ),
+      ObraCalculadoraMaterialCalculado(
+        papel: ObraMaterialPapel.areia,
+        quantidade: _arredondarAreiaM3(volAreia),
+        unidadeRotulo: 'M³',
+        rotulo: 'Areia media',
+        detalhe: 'Assentamento de alvenaria',
+      ),
+    ];
+  }
+
   static double tijolosPorMetroQuadrado(
     TipoTijoloObra tipo, {
     double juntaM = 0.01,
@@ -410,20 +489,13 @@ abstract final class ObraCalculadora {
     );
     final tijolos = (area * nPorM2 * fatorPerda).ceilToDouble();
 
-    final (_, _, espessura) = entrada.tipoTijolo.dimensoesM;
-    final (lFace, hFace, _) = entrada.tipoTijolo.dimensoesM;
-    final ocupacaoTijolos = nPorM2 * lFace * hFace;
-    final volArgamassaM3PorM2 =
-        math.max(0, (1 - ocupacaoTijolos).clamp(0, 1)) * espessura;
-    final volArgamassaTotal = area * volArgamassaM3PorM2 * fatorPerda;
-
-    final materiaisArg = _materiaisArgamassa(
-      volArgamassaTotal: volArgamassaTotal,
+    final materiaisArg = _materiaisAssentamentoParede(
+      areaM2: area,
+      fatorPerda: fatorPerda,
+      tipoTijolo: entrada.tipoTijolo,
       tracoCimento: entrada.tracoCimento,
       tracoAreia: entrada.tracoAreia,
       pesoSacoCimentoKg: entrada.pesoSacoCimentoKg,
-      densidadeCimentoKgM3: entrada.densidadeCimentoKgM3,
-      rotuloCimento: 'Cimento (assentamento ${entrada.tracoCimento}:${entrada.tracoAreia})',
     );
 
     return ObraCalculadoraResultado(
@@ -586,10 +658,16 @@ abstract final class ObraCalculadora {
     final fator = 1 + (perdaPct.clamp(0, 50) / 100);
     final vol = volumeM3 * fator;
     final partes = tracoCimento + tracoAreia + tracoBrita;
-    final volCimento = vol * (tracoCimento / partes);
-    final volAreia = vol * (tracoAreia / partes);
-    final volBrita = vol * (tracoBrita / partes);
-    final kgCimento = volCimento * densidadeCimentoKgM3;
+    final escalaTraco = _partesTraco123 / partes;
+
+    final kgCimento = vol *
+        _kgCimentoM3Traco123 *
+        (tracoCimento / 1.0) *
+        escalaTraco;
+    final volAreia =
+        vol * _areiaM3Traco123 * (tracoAreia / 2.0) * escalaTraco;
+    final volBrita =
+        vol * _britaM3Traco123 * (tracoBrita / 3.0) * escalaTraco;
     final sacos = pesoSacoCimentoKg > 0
         ? (kgCimento / pesoSacoCimentoKg).ceilToDouble()
         : 0.0;
@@ -607,14 +685,14 @@ abstract final class ObraCalculadora {
         quantidade: _arredondarAreiaM3(volAreia),
         unidadeRotulo: 'M³',
         rotulo: 'Areia',
-        detalhe: 'Traço ${tracoCimento}:${tracoAreia}:${tracoBrita}',
+        detalhe: 'Traço $tracoCimento:$tracoAreia:$tracoBrita',
       ),
       ObraCalculadoraMaterialCalculado(
         papel: ObraMaterialPapel.brita,
         quantidade: _arredondarAreiaM3(volBrita),
         unidadeRotulo: 'M³',
         rotulo: 'Brita',
-        detalhe: 'Traço ${tracoCimento}:${tracoAreia}:${tracoBrita}',
+        detalhe: 'Traço $tracoCimento:$tracoAreia:$tracoBrita',
       ),
     ];
   }

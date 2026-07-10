@@ -91,6 +91,10 @@ Future<void> main(List<String> args) async {
         objectBox: objectBox,
         configRepository: appConfigRepository,
       );
+      await _executarMigracaoSkuZerosEsquerda(
+        objectBox: objectBox,
+        configRepository: appConfigRepository,
+      );
       final syncService = SyncService(
         objectBox: objectBox,
         configRepository: appConfigRepository,
@@ -119,6 +123,16 @@ Future<void> _executarMigracaoMotoristaEntrega({
   final vendaRepository = VendaRepository(objectBox);
   vendaRepository.migrarMotoristaEntregaLegado();
   await configRepository.marcarMigracaoMotoristaEntregaConcluida();
+}
+
+Future<void> _executarMigracaoSkuZerosEsquerda({
+  required ObjectBox objectBox,
+  required AppConfigRepository configRepository,
+}) async {
+  final jaConcluida = await configRepository.migracaoSkuZerosEsquerdaConcluida();
+  if (jaConcluida) return;
+  ProdutoRepository(objectBox).migrarSkuZerosEsquerdaLegado();
+  await configRepository.marcarMigracaoSkuZerosEsquerdaConcluida();
 }
 
 Future<void> _tentarSincronizarHorarioSistemaNoInicio() async {

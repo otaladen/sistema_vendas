@@ -39,6 +39,89 @@ const Map<String, List<String>> kProdutoBuscaMedidasSinonimos = {
 String somenteDigitosBusca(String texto) =>
     texto.replaceAll(RegExp(r'\D'), '');
 
+/// Texto e somente digitos (ignora espacos).
+bool textoSomenteDigitosBusca(String texto) {
+  final t = texto.trim().replaceAll(RegExp(r'\s'), '');
+  return t.isNotEmpty && RegExp(r'^\d+$').hasMatch(t);
+}
+
+/// SKU numerico sem zeros a esquerda (008858 -> 8858). Null se nao for so digitos.
+String? skuNumericoSemZerosEsquerda(String texto) {
+  if (!textoSomenteDigitosBusca(texto)) return null;
+  final digits = somenteDigitosBusca(texto);
+  if (digits.isEmpty) return null;
+  final stripped = digits.replaceFirst(RegExp(r'^0+'), '');
+  return stripped.isEmpty ? '0' : stripped;
+}
+
+/// SKU composto so por digitos (8858, 12). Ignora SKU-, NFE-, __...__.
+bool skuEhNumericoSequencial(String codigoInterno) {
+  final t = codigoInterno.trim();
+  if (t.isEmpty) return false;
+  final lower = t.toLowerCase();
+  if (lower.startsWith('__') && lower.endsWith('__')) return false;
+  return textoSomenteDigitosBusca(t);
+}
+
+/// Valor inteiro de SKU numerico puro; null se alfanumerico ou reservado.
+int? skuComoInteiroSequencial(String codigoInterno) {
+  if (!skuEhNumericoSequencial(codigoInterno)) return null;
+  return int.tryParse(somenteDigitosBusca(codigoInterno));
+}
+
+/// Proximo SKU numerico curto (1, 2, 3...) com base no maior ja usado.
+String proximoSkuNumericoSequencial(Iterable<String> codigosExistentes) {
+  var maxN = 0;
+  final ocupados = <String>{};
+  for (final raw in codigosExistentes) {
+    final t = raw.trim();
+    if (t.isEmpty) continue;
+    final canon = normalizarCodigoInternoPersistido(t).toLowerCase();
+    if (canon.isNotEmpty) ocupados.add(canon);
+    final n = skuComoInteiroSequencial(t);
+    if (n != null && n > maxN) maxN = n;
+  }
+  var candidato = maxN + 1;
+  while (ocupados.contains('$candidato')) {
+    candidato++;
+  }
+  return '$candidato';
+}
+
+/// SKU canonico para gravacao: remove zeros a esquerda em codigos so numericos.
+/// Codigos internos do sistema (`__...__`) e alfanumericos permanecem inalterados.
+String normalizarCodigoInternoPersistido(String codigo) {
+  final t = codigo.trim();
+  if (t.isEmpty) return t;
+  final lower = t.toLowerCase();
+  if (lower.startsWith('__') && lower.endsWith('__')) return t;
+  final canon = skuNumericoSemZerosEsquerda(t);
+  return canon ?? t;
+}
+
+/// Match exato de codigo interno: literal ou numerico sem zeros a esquerda.
+bool skuBuscaCorrespondeExato(String consulta, String codigoInterno) {
+  final c = consulta.trim().toLowerCase();
+  final sku = codigoInterno.trim().toLowerCase();
+  if (c.isEmpty || sku.isEmpty) return false;
+  if (c == sku) return true;
+  final cNum = skuNumericoSemZerosEsquerda(c);
+  final sNum = skuNumericoSemZerosEsquerda(sku);
+  if (cNum != null && sNum != null && cNum == sNum) return true;
+  return false;
+}
+
+/// Pontos extras quando a consulta e prefixo/sufixo de SKU numerico (885 -> 008858).
+int? skuBuscaPontuacaoParcial(String consulta, String codigoInterno) {
+  final cNum = skuNumericoSemZerosEsquerda(consulta);
+  final sNum = skuNumericoSemZerosEsquerda(codigoInterno);
+  if (cNum == null || sNum == null || cNum.isEmpty) return null;
+  if (cNum == sNum) return 1000;
+  if (sNum.startsWith(cNum)) return 880;
+  if (cNum.length >= 3 && sNum.endsWith(cNum)) return 720;
+  return null;
+}
+
 /// Consulta tipica de leitor (8 a 14 digitos, opcionalmente com espacos).
 bool consultaPareceCodigoBarras(String termo) {
   final dig = somenteDigitosBusca(termo.trim());

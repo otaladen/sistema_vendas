@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../domain/main_menu_destino.dart';
 import '../../domain/main_menu_sub_destino.dart';
 
-/// Shell desktop ativo: navegacao lateral sem empilhar rotas na raiz.
+/// Shell desktop ativo: navegacao lateral com abas persistentes.
 class AppShellScope extends InheritedWidget {
   const AppShellScope({
     super.key,
@@ -13,6 +13,7 @@ class AppShellScope extends InheritedWidget {
     required this.irPara,
     required this.irParaSub,
     required this.alternarFavorito,
+    required this.fecharAbaAtual,
     required super.child,
   });
 
@@ -22,6 +23,7 @@ class AppShellScope extends InheritedWidget {
   final void Function(MainMenuDestino destino) irPara;
   final void Function(MainMenuDestino pai, MainMenuSubDestino sub) irParaSub;
   final Future<void> Function(MainMenuDestino destino) alternarFavorito;
+  final VoidCallback fecharAbaAtual;
 
   static AppShellScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppShellScope>();

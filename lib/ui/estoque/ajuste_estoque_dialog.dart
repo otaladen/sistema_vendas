@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../domain/produto_embalagem.dart';
+import '../../domain/quantidade_venda_util.dart';
 import '../../model/produto.dart';
 
 enum ModoAjusteEstoque { quantidadeFinal, delta }
@@ -41,10 +43,16 @@ class _AjusteEstoqueDialogState extends State<_AjusteEstoqueDialog> {
   final _motivoController = TextEditingController();
   ModoAjusteEstoque _modo = ModoAjusteEstoque.quantidadeFinal;
 
+  bool get _fracionada =>
+      ProdutoEmbalagem.estoqueUsaEscalaFracionada(widget.produto);
+
   @override
   void initState() {
     super.initState();
-    _valorController.text = '${widget.produto.estoqueReal}';
+    _valorController.text = ProdutoEmbalagem.formatarEstoque(
+      widget.produto,
+      widget.produto.estoqueReal,
+    );
   }
 
   @override
@@ -54,17 +62,55 @@ class _AjusteEstoqueDialogState extends State<_AjusteEstoqueDialog> {
     super.dispose();
   }
 
-  int? _parseInt(String raw) {
-    final t = raw.trim();
+  String _formatarArmazenado(int armazenado) {
+    return ProdutoEmbalagem.formatarEstoque(
+      widget.produto,
+      armazenado,
+      comUnidade: true,
+    );
+  }
+
+  int? _parseArmazenadoEntrada(
+    String raw, {
+    required bool permiteNegativo,
+  }) {
+    var t = raw.trim();
     if (t.isEmpty) return null;
-    return int.tryParse(t);
+    var negativo = false;
+    if (t.startsWith('-')) {
+      if (!permiteNegativo) return null;
+      negativo = true;
+      t = t.substring(1).trim();
+      if (t.isEmpty) return null;
+    }
+    int? val;
+    if (_fracionada) {
+      final v = QuantidadeVendaUtil.parseEntradaPdv(t, fracionada: true);
+      if (v != null) {
+        val = QuantidadeVendaUtil.paraArmazenamento(v, fracionada: true);
+      } else {
+        val = int.tryParse(t);
+      }
+    } else {
+      val = int.tryParse(t);
+    }
+    if (val == null) return null;
+    return negativo ? -val : val;
   }
 
   int? _quantidadeFinalCalculada() {
-    final parsed = _parseInt(_valorController.text);
-    if (parsed == null) return null;
-    if (_modo == ModoAjusteEstoque.quantidadeFinal) return parsed;
-    return widget.produto.estoqueReal + parsed;
+    if (_modo == ModoAjusteEstoque.quantidadeFinal) {
+      return _parseArmazenadoEntrada(
+        _valorController.text,
+        permiteNegativo: false,
+      );
+    }
+    final delta = _parseArmazenadoEntrada(
+      _valorController.text,
+      permiteNegativo: true,
+    );
+    if (delta == null) return null;
+    return widget.produto.estoqueReal + delta;
   }
 
   void _confirmar() {
@@ -81,8 +127,9 @@ class _AjusteEstoqueDialogState extends State<_AjusteEstoqueDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Novo fisico ($finalQtd) menor que o reservado '
-            '(${widget.produto.estoqueReservado}). Libere reservas antes.',
+            'Novo fisico (${_formatarArmazenado(finalQtd)}) menor que o reservado '
+            '(${_formatarArmazenado(widget.produto.estoqueReservado)}). '
+            'Libere reservas antes.',
           ),
         ),
       );
@@ -100,6 +147,7 @@ class _AjusteEstoqueDialogState extends State<_AjusteEstoqueDialog> {
   @override
   Widget build(BuildContext context) {
     final preview = _quantidadeFinalCalculada();
+    final unidade = ProdutoEmbalagem.normalizarUnidade(widget.produto.unidade);
     return AlertDialog(
       title: const Text('Ajustar estoque'),
       content: SizedBox(
@@ -118,9 +166,9 @@ class _AjusteEstoqueDialogState extends State<_AjusteEstoqueDialog> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Fisico atual: ${widget.produto.estoqueReal} · '
-                'Reservado: ${widget.produto.estoqueReservado} · '
-                'Livre: ${widget.produto.estoqueLivreParaVenda}',
+                'Fisico atual: ${_formatarArmazenado(widget.produto.estoqueReal)} · '
+                'Reservado: ${_formatarArmazenado(widget.produto.estoqueReservado)} · '
+                'Livre: ${_formatarArmazenado(widget.produto.estoqueLivreParaVenda)}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 12),
@@ -140,7 +188,10 @@ class _AjusteEstoqueDialogState extends State<_AjusteEstoqueDialog> {
                   setState(() {
                     _modo = s.first;
                     if (_modo == ModoAjusteEstoque.quantidadeFinal) {
-                      _valorController.text = '${widget.produto.estoqueReal}';
+                      _valorController.text = ProdutoEmbalagem.formatarEstoque(
+                        widget.produto,
+                        widget.produto.estoqueReal,
+                      );
                     } else {
                       _valorController.text = '0';
                     }
@@ -152,17 +203,30 @@ class _AjusteEstoqueDialogState extends State<_AjusteEstoqueDialog> {
                 controller: _valorController,
                 decoration: InputDecoration(
                   labelText: _modo == ModoAjusteEstoque.quantidadeFinal
-                      ? 'Nova quantidade fisica'
+                      ? 'Nova quantidade fisica ($unidade)'
                       : 'Variacao (+ entrada / - saida)',
+                  hintText: _fracionada ? 'Ex.: 144,62 ou -2,63' : null,
                   border: const OutlineInputBorder(),
                 ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  signed: true,
+                keyboardType: TextInputType.numberWithOptions(
+                  signed: _modo == ModoAjusteEstoque.delta,
+                  decimal: _fracionada,
                 ),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'-?\d+'))],
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(
+                    RegExp(_fracionada ? r'-?[\d.,]+' : r'-?\d+'),
+                  ),
+                ],
                 validator: (v) {
-                  if (_parseInt(v ?? '') == null) {
-                    return 'Informe um numero valido';
+                  if (_parseArmazenadoEntrada(
+                        v ?? '',
+                        permiteNegativo:
+                            _modo == ModoAjusteEstoque.delta,
+                      ) ==
+                      null) {
+                    return _fracionada
+                        ? 'Informe um numero valido (ex.: 144,62)'
+                        : 'Informe um numero valido';
                   }
                   return null;
                 },
@@ -171,7 +235,7 @@ class _AjusteEstoqueDialogState extends State<_AjusteEstoqueDialog> {
               if (preview != null) ...[
                 const SizedBox(height: 8),
                 Text(
-                  'Resultado: $preview un. fisicas',
+                  'Resultado: ${_formatarArmazenado(preview)}',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),

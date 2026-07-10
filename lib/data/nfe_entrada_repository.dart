@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:intl/intl.dart';
 
+import '../domain/conferencia_nfe_opcoes.dart';
 import '../domain/lista_compra_entrada_nfe_linha.dart';
+import '../domain/custo_medio_entrada_util.dart';
 import '../domain/produto_embalagem.dart';
 import '../data/models/conta_pagar.dart';
 import '../model/fornecedor_nfe.dart';
@@ -16,7 +18,6 @@ import '../services/gerenciador_estoque_service.dart';
 import 'lista_compra_repository.dart';
 import 'nfe_entrada_xml_store.dart';
 import 'objectbox.dart';
-import 'produto_repository.dart' show calcularCustoMedioPonderadoEntradasNfe;
 import 'sync/sync_dirty_outbox.dart';
 import 'sync/sync_write_trigger.dart';
 
@@ -40,6 +41,7 @@ class SugestaoLinhaConferencia {
     this.produtoExistenteId,
     required this.fatorInicial,
     required this.unidadeInternaInicial,
+    required this.embalagemMultiplicaInicial,
     required this.tipoMatch,
   });
 
@@ -48,6 +50,9 @@ class SugestaoLinhaConferencia {
   final int? produtoExistenteId;
   final double fatorInicial;
   final String unidadeInternaInicial;
+
+  /// Modo inicial da conversao (x ou /) conforme cadastro ou padrao.
+  final bool embalagemMultiplicaInicial;
 
   /// Como o sistema casou o item do XML ao cadastro (para cores na UI).
   final ConferenciaNfeMatchTipo tipoMatch;
@@ -59,11 +64,15 @@ class LinhaPreviaEstornoNfe {
     required this.nomeProduto,
     required this.quantidadeEstorno,
     required this.estoqueAtual,
+    required this.rotuloEstorno,
+    required this.rotuloEstoqueAtual,
   });
 
   final String nomeProduto;
   final int quantidadeEstorno;
   final int estoqueAtual;
+  final String rotuloEstorno;
+  final String rotuloEstoqueAtual;
 }
 
 /// Resultado da validacao antes de estornar uma NF-e importada.
@@ -85,12 +94,14 @@ class ConferenciaNfeLinhaConfirmacao {
     required this.item,
     required this.fatorConversao,
     required this.unidadeInterna,
+    required this.embalagemMultiplica,
     this.produtoExistenteId,
   });
 
   final ItemNotaTemporario item;
   final double fatorConversao;
   final String unidadeInterna;
+  final bool embalagemMultiplica;
   final int? produtoExistenteId;
 }
 
@@ -191,6 +202,7 @@ class NfeEntradaRepository {
             unidadeInternaInicial: produtoResolvido.unidade.trim().isEmpty
                 ? 'UN'
                 : produtoResolvido.unidade.trim(),
+            embalagemMultiplicaInicial: produtoResolvido.embalagemMultiplica,
             tipoMatch: tipo,
           ),
         );
@@ -202,6 +214,7 @@ class NfeEntradaRepository {
             produtoExistenteId: null,
             fatorInicial: fatorInicial,
             unidadeInternaInicial: 'UN',
+            embalagemMultiplicaInicial: true,
             tipoMatch: ConferenciaNfeMatchTipo.produtoNovo,
           ),
         );
@@ -299,6 +312,16 @@ class NfeEntradaRepository {
           nomeProduto: nome,
           quantidadeEstorno: qtd,
           estoqueAtual: produto.estoqueReal,
+          rotuloEstorno: ProdutoEmbalagem.formatarEstoque(
+            produto,
+            qtd,
+            comUnidade: true,
+          ),
+          rotuloEstoqueAtual: ProdutoEmbalagem.formatarEstoque(
+            produto,
+            produto.estoqueReal,
+            comUnidade: true,
+          ),
         ),
       );
 
@@ -306,8 +329,11 @@ class NfeEntradaRepository {
         return ValidacaoEstornoNfe(
           podeEstornar: false,
           motivoBloqueio:
-              'Estoque insuficiente em "$nome": fisico ${produto.estoqueReal}, '
-              'entrada da nota $qtd. Provavelmente houve venda ou outra saida.',
+              'Estoque insuficiente em "$nome": fisico '
+              '${ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReal, comUnidade: true)}, '
+              'entrada da nota '
+              '${ProdutoEmbalagem.formatarEstoque(produto, qtd, comUnidade: true)}. '
+              'Provavelmente houve venda ou outra saida.',
           linhas: linhas,
         );
       }
@@ -316,8 +342,11 @@ class NfeEntradaRepository {
         return ValidacaoEstornoNfe(
           podeEstornar: false,
           motivoBloqueio:
-              'Em "$nome" ha ${produto.estoqueReservado} un. reservadas; '
-              'apos o estorno restariam $estoqueApos no fisico.',
+              'Em "$nome" ha '
+              '${ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReservado, comUnidade: true)} '
+              'reservadas; apos o estorno restariam '
+              '${ProdutoEmbalagem.formatarEstoque(produto, estoqueApos, comUnidade: true)} '
+              'no fisico.',
           linhas: linhas,
         );
       }
@@ -341,11 +370,6 @@ class NfeEntradaRepository {
     }
     final chaveNorm = registro.chaveAcesso.replaceAll(RegExp(r'\D'), '');
     final historico = listarHistoricoPorChaveNfe(chaveNorm);
-    final idsProdutosParaRecalcularCusto = <int>{};
-    for (final h in historico) {
-      final pid = h.produto.targetId;
-      if (pid != 0) idsProdutosParaRecalcularCusto.add(pid);
-    }
 
     _db.store.runInTransaction(TxMode.write, () {
       final produtosParaRemover = <int>{};
@@ -354,6 +378,7 @@ class NfeEntradaRepository {
         final produto = h.produto.target;
         if (produto == null) continue;
         final qtd = h.quantidadeEntradaEstoque;
+        final custoEntrada = h.precoCustoUnitarioNota;
         if (qtd > 0) {
           _estoque.estornarEntradaPorNotaFiscal(
             produto,
@@ -361,6 +386,22 @@ class NfeEntradaRepository {
             documentoReferencia: 'NF-e $chaveNorm',
           );
         }
+        final estoqueApos = produto.estoqueReal;
+        final cmRevertido = CustoMedioEntradaUtil.custoMedioAntesEntrada(
+          estoqueAposEstorno: estoqueApos,
+          quantidadeEntradaEstornada: qtd,
+          custoMedioAtual: produto.custoMedio,
+          custoUnitarioEntrada: custoEntrada,
+        );
+        if (cmRevertido != null) {
+          produto.custoMedio = cmRevertido;
+        } else {
+          produto.custoMedio = CustoMedioEntradaUtil.custoReferenciaSaldo(
+            custoMedio: 0,
+            precoCusto: produto.precoCusto,
+          );
+        }
+        _estoque.persistirProdutoMetadados(produto);
         _db.historicoEntradaBox.remove(h.id);
 
         if (_podeRemoverProdutoCriadoNaNfe(produto)) {
@@ -374,19 +415,6 @@ class NfeEntradaRepository {
       }
 
       _db.nfeImportadaRegistroBox.remove(registro.id);
-
-      for (final pid in idsProdutosParaRecalcularCusto) {
-        if (produtosParaRemover.contains(pid)) continue;
-        final p = _db.produtoBox.get(pid);
-        if (p == null) continue;
-        final cm = calcularCustoMedioPonderadoEntradasNfe(_db, pid);
-        if (cm != null) {
-          p.custoMedio = cm;
-        } else {
-          p.custoMedio = p.precoCusto < 0 ? 0 : p.precoCusto;
-        }
-        _estoque.persistirProdutoMetadados(p);
-      }
     });
 
     _notificarMutacaoNfeEntrada();
@@ -452,6 +480,8 @@ class NfeEntradaRepository {
   void confirmarEntrada({
     required NfeXmlParseResult nfe,
     required List<ConferenciaNfeLinhaConfirmacao> linhas,
+    ConferenciaNfeOpcoes opcoes = const ConferenciaNfeOpcoes(),
+    double margemMinimaVendaPercentual = 20,
     String? xmlOriginal,
   }) {
     final chaveNorm = nfe.chaveAcesso.replaceAll(RegExp(r'\D'), '');
@@ -487,13 +517,11 @@ class NfeEntradaRepository {
       final fornecedorId = _db.fornecedorNfeBox.put(fornecedor);
       fornecedor.id = fornecedorId;
 
-      final produtosAfetadosCustoMedio = <int>{};
-
       for (final linha in linhas) {
         final fator = linha.fatorConversao;
         if (fator <= 0) {
           throw StateError(
-            'Fator de conversao invalido (${linha.item.codigo}).',
+            'Qtd. na embalagem invalida (${linha.item.codigo}).',
           );
         }
         final unidade = linha.unidadeInterna.trim().toUpperCase();
@@ -501,19 +529,19 @@ class NfeEntradaRepository {
           throw StateError('Unidade interna invalida: $unidade');
         }
 
-        var embalagemMultiplica = true;
+        final embalagemMultiplica = linha.embalagemMultiplica;
         Produto? produtoEmbalagemRef;
         if (linha.produtoExistenteId != null) {
           produtoEmbalagemRef = _db.produtoBox.get(linha.produtoExistenteId!);
-          if (produtoEmbalagemRef != null) {
-            embalagemMultiplica = produtoEmbalagemRef.embalagemMultiplica;
-          }
         }
 
         final qtdInterna = ProdutoEmbalagem.quantidadeNotaParaEstoque(
           quantidadeComercial: linha.item.quantidadeComercial,
           fator: fator,
           embalagemMultiplica: embalagemMultiplica,
+          produto: produtoEmbalagemRef,
+          unidadeComercial: linha.item.unidadeComercial,
+          unidadeInterna: unidade,
         );
         if (qtdInterna < 0) {
           throw StateError(
@@ -541,7 +569,23 @@ class NfeEntradaRepository {
             );
           }
           produto = existente;
-          produto.precoCusto = custoUnitInterno;
+          final estoqueAntes = produto.estoqueReal;
+          final custoCadastroAntes = produto.precoCusto;
+          final custoAntes = CustoMedioEntradaUtil.custoReferenciaSaldo(
+            custoMedio: produto.custoMedio,
+            precoCusto: produto.precoCusto,
+          );
+          if (opcoes.atualizarPrecoCusto && custoUnitInterno > 0) {
+            produto.precoCusto = custoUnitInterno;
+          }
+          if (opcoes.atualizarPrecosVenda && custoUnitInterno > 0) {
+            _aplicarPrecosVendaPeloCustoXml(
+              produto,
+              custoXml: custoUnitInterno,
+              custoCadastroAntes: custoCadastroAntes,
+              margemMinimaPercentual: margemMinimaVendaPercentual,
+            );
+          }
           produto.unidade = unidade;
           _sincronizarEmbalagemProdutoComNota(
             produto,
@@ -558,12 +602,27 @@ class NfeEntradaRepository {
             produto.codigoBarras = linha.item.codigoBarras;
           }
           _estoque.persistirProdutoMetadados(produto);
-          if (qtdInterna > 0) {
+          final qtdEntrada = opcoes.lancarEstoque ? qtdInterna : 0;
+          if (qtdEntrada > 0) {
             _estoque.registrarEntradaPorNotaFiscal(
               produto,
-              qtdInterna,
+              qtdEntrada,
               documentoReferencia: 'NF-e $chaveNorm',
             );
+          }
+          if (opcoes.lancarEstoque &&
+              qtdEntrada > 0 &&
+              custoUnitInterno > 0) {
+            final cm = CustoMedioEntradaUtil.custoMedioAposEntrada(
+              estoqueAntes: estoqueAntes,
+              custoMedioAntes: custoAntes,
+              quantidadeEntrada: qtdEntrada,
+              custoUnitarioEntrada: custoUnitInterno,
+            );
+            if (cm != null) {
+              produto.custoMedio = cm;
+              _estoque.persistirProdutoMetadados(produto);
+            }
           }
         } else {
           final codigoInterno = _gerarCodigoInterno(nfe, linha.item);
@@ -591,12 +650,14 @@ class NfeEntradaRepository {
             quantidadeMinima: 0,
             estoqueReal: 0,
             estoqueReservado: 0,
+            custoMedio: custoUnitInterno > 0 ? custoUnitInterno : 0,
           );
           produto.id = _db.produtoBox.put(produto);
-          if (qtdInterna > 0) {
+          final qtdEntradaNovo = opcoes.lancarEstoque ? qtdInterna : 0;
+          if (qtdEntradaNovo > 0) {
             _estoque.registrarEntradaPorNotaFiscal(
               produto,
-              qtdInterna,
+              qtdEntradaNovo,
               documentoReferencia: 'NF-e $chaveNorm',
             );
           }
@@ -623,14 +684,13 @@ class NfeEntradaRepository {
           unidadeFornecedor: linha.item.unidadeComercial,
           quantidadeFornecedor: linha.item.quantidadeComercial,
           fatorConversaoUtilizado: fator,
-          quantidadeEntradaEstoque: qtdInterna,
+          quantidadeEntradaEstoque: opcoes.lancarEstoque ? qtdInterna : 0,
           precoCustoUnitarioNota: custoUnitInterno,
         );
         hist.produto.target = produto;
         _db.historicoEntradaBox.put(hist);
-        produtosAfetadosCustoMedio.add(produto.id);
 
-        if (produto.id > 0 && qtdInterna > 0) {
+        if (produto.id > 0 && opcoes.lancarEstoque && qtdInterna > 0) {
           linhasResolucaoListaCompra.add(
             ListaCompraEntradaNfeLinha(
               produtoId: produto.id,
@@ -642,23 +702,13 @@ class NfeEntradaRepository {
         }
       }
 
-      for (final pid in produtosAfetadosCustoMedio) {
-        final p = _db.produtoBox.get(pid);
-        if (p == null) continue;
-        final cm = calcularCustoMedioPonderadoEntradasNfe(_db, pid);
-        if (cm != null) {
-          p.custoMedio = cm;
-        } else {
-          p.custoMedio = p.precoCusto < 0 ? 0 : p.precoCusto;
-        }
-        _estoque.persistirProdutoMetadados(p);
+      if (opcoes.gerarContasPagar) {
+        _persistirContasPagarNfeImportada(
+          fornecedorPersistido: fornecedor,
+          chave44: chaveNorm,
+          nfe: nfe,
+        );
       }
-
-      _persistirContasPagarNfeImportada(
-        fornecedorPersistido: fornecedor,
-        chave44: chaveNorm,
-        nfe: nfe,
-      );
 
       final nomeReg = fornecedor.nomeFantasia.trim().isNotEmpty
           ? fornecedor.nomeFantasia.trim()
@@ -686,6 +736,34 @@ class NfeEntradaRepository {
     }
 
     _notificarMutacaoNfeEntrada();
+  }
+
+  static void _aplicarPrecosVendaPeloCustoXml(
+    Produto produto, {
+    required double custoXml,
+    required double custoCadastroAntes,
+    required double margemMinimaPercentual,
+  }) {
+    void escala(double custoBase) {
+      if (custoBase <= 0 || custoXml <= 0) return;
+      final ratio = custoXml / custoBase;
+      if (produto.precoVenda > 0) {
+        produto.precoVenda = produto.precoVenda * ratio;
+      }
+      if (produto.preco1 > 0) produto.preco1 = produto.preco1 * ratio;
+      if (produto.preco2 > 0) produto.preco2 = produto.preco2 * ratio;
+      if (produto.preco3 > 0) produto.preco3 = produto.preco3 * ratio;
+    }
+
+    if (custoCadastroAntes > 0) {
+      escala(custoCadastroAntes);
+      return;
+    }
+    if (custoXml <= 0) return;
+    final margem = margemMinimaPercentual.clamp(0.1, 98);
+    final sugerido = custoXml / (1 - margem / 100);
+    if (produto.precoVenda <= 0) produto.precoVenda = sugerido;
+    if (produto.preco1 <= 0) produto.preco1 = sugerido;
   }
 
   /// Lança [ContaPagar] para a NF-e: parcelas do XML ou uma linha à vista (paga).

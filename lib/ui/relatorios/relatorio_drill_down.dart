@@ -63,7 +63,7 @@ Future<void> mostrarDetalheVendaRelatorio(
                   (i) => Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
-                      '${i.quantidade}x ${i.nomeProduto} · '
+                      '${i.quantidadeExibicaoVenda} x ${i.nomeProduto} · '
                       '${_fmtMoeda(i.subtotal)}',
                     ),
                   ),

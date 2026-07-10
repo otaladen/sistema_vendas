@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/produto_embalagem.dart';
 import '../../domain/produto_unidade_exibicao.dart';
 import '../../model/produto.dart';
 import '../theme/app_semantic_helper.dart';
 import '../widgets/pdv_consulta_semaforo_estoque.dart';
+import 'estoque_lista_metricas.dart';
 import 'estoque_tabela_colunas.dart';
 
 typedef EstoqueAcaoProduto = void Function(String acao, Produto produto);
@@ -19,6 +21,8 @@ class EstoqueTabelaLinha extends StatelessWidget {
     required this.verCusto,
     required this.vendaFormatada,
     required this.custoFormatado,
+    required this.margemFormatada,
+    required this.coberturaFormatada,
     required this.onAcao,
   });
 
@@ -29,7 +33,17 @@ class EstoqueTabelaLinha extends StatelessWidget {
   final bool verCusto;
   final String vendaFormatada;
   final String custoFormatado;
+  final String margemFormatada;
+  final String coberturaFormatada;
   final EstoqueAcaoProduto onAcao;
+
+  static Color? _corMargem(BuildContext context, Produto produto) {
+    if (EstoqueListaMetricas.precoVendaExibicao(produto) <= 0) return null;
+    final margem = EstoqueListaMetricas.margemPercentual(produto);
+    if (margem < 15) return context.semanticColors.errorFg;
+    if (margem > 30) return Colors.green.shade700;
+    return null;
+  }
 
   static TextStyle? _estiloNumero(BuildContext context) {
     return Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -145,12 +159,29 @@ class EstoqueTabelaLinha extends StatelessWidget {
                   ),
                 ),
                 _celulaNum(
-                  '${produto.estoqueReal}',
+                  ProdutoEmbalagem.formatarEstoque(
+                    produto,
+                    produto.estoqueLivreParaVenda,
+                    comUnidade: true,
+                  ),
+                  estiloNum,
+                  tooltip: 'Estoque livre (fisico - reservado)',
+                ),
+                _celulaNum(
+                  ProdutoEmbalagem.formatarEstoque(
+                    produto,
+                    produto.estoqueReal,
+                    comUnidade: true,
+                  ),
                   estiloNum,
                   tooltip: 'Estoque fisico',
                 ),
                 _celulaNum(
-                  '${produto.estoqueReservado}',
+                  ProdutoEmbalagem.formatarEstoque(
+                    produto,
+                    produto.estoqueReservado,
+                    comUnidade: true,
+                  ),
                   estiloNum,
                   tooltip: 'Quantidade reservada',
                 ),
@@ -173,6 +204,18 @@ class EstoqueTabelaLinha extends StatelessWidget {
                 _celulaPreco(vendaFormatada, tooltip: 'Preco de venda a vista'),
                 if (verCusto)
                   _celulaPreco(custoFormatado, tooltip: 'Custo medio ou custo cadastrado'),
+                if (verCusto)
+                  _celulaMargem(
+                    margemFormatada,
+                    cor: _corMargem(context, produto),
+                    tooltip: 'Margem sobre o preco de venda',
+                  ),
+                _celulaNum(
+                  coberturaFormatada,
+                  estiloNum,
+                  largura: EstoqueTabelaColunas.larguraCobertura,
+                  tooltip: 'Dias de estoque livre (media diaria)',
+                ),
                 SizedBox(
                   width: EstoqueTabelaColunas.larguraAcao,
                   child: PopupMenuButton<String>(
@@ -248,6 +291,30 @@ class EstoqueTabelaLinha extends StatelessWidget {
           fontFeatures: [FontFeature.tabularFigures()],
           fontWeight: FontWeight.w700,
           fontSize: 12,
+        ),
+      ),
+    );
+    if (tooltip == null) return celula;
+    return Tooltip(message: tooltip, child: celula);
+  }
+
+  Widget _celulaMargem(
+    String valor, {
+    Color? cor,
+    String? tooltip,
+  }) {
+    final celula = SizedBox(
+      width: EstoqueTabelaColunas.larguraMargem,
+      child: Text(
+        valor,
+        textAlign: TextAlign.end,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontFeatures: const [FontFeature.tabularFigures()],
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+          color: cor,
         ),
       ),
     );

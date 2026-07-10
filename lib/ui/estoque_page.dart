@@ -19,6 +19,7 @@ import '../domain/estoque/estoque_diagnostico_models.dart';
 import '../domain/estoque/filtro_estoque_operacional.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
+import '../domain/produto_embalagem.dart';
 import '../model/produto.dart';
 import '../model/usuario_sistema.dart';
 import '../services/compras_preditivas_service.dart';
@@ -34,6 +35,7 @@ import 'estoque/estoque_diagnostico_sheet.dart';
 import 'estoque/estoque_card_linha.dart';
 import 'estoque/estoque_layout.dart';
 import 'estoque/estoque_stat_tile.dart';
+import 'estoque/estoque_lista_metricas.dart';
 import 'estoque/estoque_tabela_cabecalho.dart';
 import 'estoque/estoque_tabela_colunas.dart';
 import 'estoque/estoque_tabela_linha.dart';
@@ -101,6 +103,8 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   bool _carregandoProdutos = false;
   bool _alertaStripOculto = false;
   bool _filtrosExpandidos = false;
+  EstoqueColunaOrdenacao _colunaOrdenacao = EstoqueColunaOrdenacao.nenhuma;
+  bool _ordenacaoAscendente = true;
   final ScrollController _listaVerticalScrollController = ScrollController();
   final ScrollController _listaHorizontalScrollController = ScrollController();
 
@@ -253,8 +257,60 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     return total.isFinite ? total : 0;
   }
 
+  void _onOrdenarColuna(EstoqueColunaOrdenacao coluna) {
+    setState(() {
+      if (_colunaOrdenacao == coluna) {
+        _ordenacaoAscendente = !_ordenacaoAscendente;
+      } else {
+        _colunaOrdenacao = coluna;
+        _ordenacaoAscendente = coluna == EstoqueColunaOrdenacao.cobertura;
+      }
+      _aplicarOrdenacaoLista(_produtosFiltrados);
+      _resetarJanelaScroll();
+    });
+  }
+
+  int _compararProdutosOrdenacao(Produto a, Produto b) {
+    int cmp;
+    switch (_colunaOrdenacao) {
+      case EstoqueColunaOrdenacao.nenhuma:
+        return 0;
+      case EstoqueColunaOrdenacao.disponivel:
+        cmp = a.estoqueLivreParaVenda.compareTo(b.estoqueLivreParaVenda);
+      case EstoqueColunaOrdenacao.margem:
+        cmp = EstoqueListaMetricas.margemPercentual(a)
+            .compareTo(EstoqueListaMetricas.margemPercentual(b));
+      case EstoqueColunaOrdenacao.cobertura:
+        cmp = _valorOrdenacaoCobertura(a).compareTo(_valorOrdenacaoCobertura(b));
+      case EstoqueColunaOrdenacao.media:
+        cmp = a.vendaMediaDiaria.compareTo(b.vendaMediaDiaria);
+      case EstoqueColunaOrdenacao.venda:
+        cmp = EstoqueListaMetricas.precoVendaExibicao(a)
+            .compareTo(EstoqueListaMetricas.precoVendaExibicao(b));
+    }
+    if (cmp != 0) return cmp;
+    return a.nome.toLowerCase().compareTo(b.nome.toLowerCase());
+  }
+
+  double _valorOrdenacaoCobertura(Produto produto) {
+    final dias = EstoqueListaMetricas.coberturaDias(produto);
+    if (dias == null) {
+      return produto.estoqueLivreParaVenda > 0 ? 99999 : -1;
+    }
+    return dias;
+  }
+
+  void _aplicarOrdenacaoLista(List<Produto> lista) {
+    if (_colunaOrdenacao == EstoqueColunaOrdenacao.nenhuma) return;
+    lista.sort((a, b) {
+      final cmp = _compararProdutosOrdenacao(a, b);
+      return _ordenacaoAscendente ? cmp : -cmp;
+    });
+  }
+
   void _atualizarListaFiltrada({bool resetarScroll = false}) {
     _produtosFiltrados = _aplicarFiltrosLista(_produtos);
+    _aplicarOrdenacaoLista(_produtosFiltrados);
     if (resetarScroll) {
       _resetarJanelaScroll();
     } else {
@@ -757,7 +813,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             _csvSeguro(produto.nome),
             _csvSeguro(produto.unidade),
             _csvSeguro(produto.categoria),
-            '${produto.estoqueReal}',
+            ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReal),
             '${produto.quantidadeMinima}',
             _formatarNumeroCsv(produto.precoCusto),
             _formatarNumeroCsv(produto.custoMedio),
@@ -770,7 +826,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             _csvSeguro(produto.nome),
             _csvSeguro(produto.unidade),
             _csvSeguro(produto.categoria),
-            '${produto.estoqueReal}',
+            ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReal),
             '${produto.quantidadeMinima}',
             _formatarNumeroCsv(produto.precoVenda),
             _formatarNumeroCsv(_precoAVista(produto)),
@@ -885,11 +941,23 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     }).toList();
   }
 
-  String _montarResumoCardMobile(Produto produto, double ppExibicao) {
+  String _montarResumoCardMobile(
+    Produto produto,
+    double ppExibicao, {
+    required bool verCusto,
+  }) {
     final sku = produto.codigoInterno.trim();
     final skuRotulo = sku.isEmpty ? 'Sem SKU' : sku;
-    return '$skuRotulo · Fis ${produto.estoqueReal} · '
-        'Min ${produto.quantidadeMinima} · PP ${ppExibicao.toStringAsFixed(1)}';
+    final disp = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      produto.estoqueLivreParaVenda,
+      comUnidade: true,
+    );
+    final cobertura = EstoqueListaMetricas.formatarCobertura(produto);
+    final base =
+        '$skuRotulo · Disp $disp · Min ${produto.quantidadeMinima} · PP ${ppExibicao.toStringAsFixed(1)} · Cob $cobertura';
+    if (!verCusto) return base;
+    return '$base · Marg ${EstoqueListaMetricas.formatarMargem(produto)}';
   }
 
   Widget _rodapeStatusLista({
@@ -1252,12 +1320,14 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
         final produto = produtosFiltrados[index];
         final criticoPp = _criticoPpPorProdutoId[produto.id] ?? false;
         final ppExibicao = _comprasSvc.calcularPontoPedidoExibicao(produto);
-        var resumo = _montarResumoCardMobile(produto, ppExibicao);
+        var resumo = _montarResumoCardMobile(
+          produto,
+          ppExibicao,
+          verCusto: verCusto,
+        );
         if (verCusto) {
-          final custo = produto.custoMedio > 0
-              ? produto.custoMedio
-              : produto.precoCusto;
-          resumo = '$resumo · Custo ${_formatarMoedaBRL(custo)}';
+          resumo =
+              '$resumo · Custo ${_formatarMoedaBRL(EstoqueListaMetricas.custoExibicao(produto))}';
         }
         return EstoqueCardLinha(
           produto: produto,
@@ -1323,12 +1393,15 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
               criticoPp: criticoPp,
               ppExibicao: _comprasSvc.calcularPontoPedidoExibicao(produto),
               verCusto: verCusto,
-              vendaFormatada: _formatarMoedaBRL(_precoAVista(produto)),
-              custoFormatado: _formatarMoedaBRL(
-                produto.custoMedio > 0
-                    ? produto.custoMedio
-                    : produto.precoCusto,
+              vendaFormatada: _formatarMoedaBRL(
+                EstoqueListaMetricas.precoVendaExibicao(produto),
               ),
+              custoFormatado: _formatarMoedaBRL(
+                EstoqueListaMetricas.custoExibicao(produto),
+              ),
+              margemFormatada: EstoqueListaMetricas.formatarMargem(produto),
+              coberturaFormatada:
+                  EstoqueListaMetricas.formatarCobertura(produto),
               onAcao: _onAcaoProdutoTabela,
             );
           },
@@ -1342,7 +1415,12 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          EstoqueTabelaCabecalho(verCusto: verCusto),
+          EstoqueTabelaCabecalho(
+            verCusto: verCusto,
+            colunaOrdenacao: _colunaOrdenacao,
+            ordenacaoAscendente: _ordenacaoAscendente,
+            onOrdenar: _onOrdenarColuna,
+          ),
           Expanded(child: buildListaVertical()),
         ],
       ),

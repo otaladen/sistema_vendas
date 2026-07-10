@@ -27,6 +27,9 @@ import '../main_menu_dashboard.dart';
 import '../widgets/app_rodape_status_bar.dart';
 import 'app_menu_lateral.dart';
 import 'app_shell_scope.dart';
+import 'app_shell_tab.dart';
+import 'app_shell_tab_bar.dart';
+import 'app_shell_tab_navigator.dart';
 import 'main_menu_deps.dart';
 import 'main_menu_router.dart';
 import 'main_menu_sub_router.dart';
@@ -67,7 +70,6 @@ class MainAppShellPage extends StatefulWidget {
 }
 
 class _MainAppShellPageState extends State<MainAppShellPage> {
-  final _navKey = GlobalKey<NavigatorState>();
   MainMenuDestino _destino = MainMenuDestino.inicio;
   MainMenuSubDestino? _subDestino;
   final Set<MainMenuDestino> _gruposExpandidos = {};
@@ -78,9 +80,17 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   bool _backupAlerta = false;
   Timer? _fiscalPendenciasTimer;
 
+  final List<AppShellTab> _abas = [];
+  int _indiceAbaAtiva = 0;
+  int _seqAba = 0;
+
   @override
   void initState() {
     super.initState();
+    _abas.add(_criarAba(
+      destino: MainMenuDestino.inicio,
+      forcarNovaInstancia: true,
+    ));
     _carregarFavoritos();
     unawaited(_atualizarBadgesMenu());
     _fiscalPendenciasTimer = Timer.periodic(
@@ -160,6 +170,16 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     setState(() => _favoritos = atual);
   }
 
+  void _sincronizarGrupoExpandidoComDestino(MainMenuDestino destino) {
+    if (MainMenuSubDestinoHelper.moduloTemSubmenu(destino)) {
+      _gruposExpandidos
+        ..clear()
+        ..add(destino);
+    } else {
+      _gruposExpandidos.clear();
+    }
+  }
+
   void _irPara(MainMenuDestino destino) {
     if (!destino.podeAcessar(widget.usuarioLogado)) return;
     if (MainMenuSubDestinoHelper.moduloTemSubmenu(destino)) {
@@ -172,42 +192,118 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       }
       return;
     }
-    setState(() {
-      _destino = destino;
-      _subDestino = null;
-    });
-    unawaited(_atualizarBadgesMenu());
-    _navKey.currentState?.pushAndRemoveUntil<void>(
-      MaterialPageRoute<void>(
-        settings: RouteSettings(name: destino.name),
-        builder: (_) => _conteudoDestino(destino),
-      ),
-      (_) => false,
-    );
+    _abrirOuAtivarAba(destino: destino);
   }
 
   void _irParaSub(MainMenuDestino pai, MainMenuSubDestino sub) {
     if (!sub.podeAcessar(widget.usuarioLogado)) return;
+    setState(() => _sincronizarGrupoExpandidoComDestino(pai));
+    _abrirOuAtivarAba(destino: pai, sub: sub);
+  }
+
+  void _abrirOuAtivarAba({
+    required MainMenuDestino destino,
+    MainMenuSubDestino? sub,
+    bool forcarNovaInstancia = false,
+  }) {
+    final id = forcarNovaInstancia
+        ? 'inst:${_seqAba++}'
+        : AppShellTab.idDe(destino: destino, sub: sub);
+
+    if (!forcarNovaInstancia) {
+      final existente = _abas.indexWhere((a) => a.id == id);
+      if (existente >= 0) {
+        _ativarAba(existente);
+        return;
+      }
+    }
+
     setState(() {
-      _destino = pai;
-      _subDestino = sub;
-      _gruposExpandidos.add(pai);
+      _abas.add(_criarAba(
+        destino: destino,
+        sub: sub,
+        id: id,
+      ));
+      _ativarAba(_abas.length - 1, notificar: false);
     });
     unawaited(_atualizarBadgesMenu());
-    final deps = _valoresDeps();
-    _navKey.currentState?.pushAndRemoveUntil<void>(
-      MaterialPageRoute<void>(
-        settings: RouteSettings(name: '${pai.name}/${sub.name}'),
-        builder: (ctx) => _valoresDeps(
-          child: MainMenuSubRouter.pagina(
+  }
+
+  AppShellTab _criarAba({
+    required MainMenuDestino destino,
+    MainMenuSubDestino? sub,
+    String? id,
+    bool forcarNovaInstancia = false,
+  }) {
+    final tabId = id ??
+        (forcarNovaInstancia
+            ? 'inst:${_seqAba++}'
+            : AppShellTab.idDe(destino: destino, sub: sub));
+    return AppShellTab(
+      id: tabId,
+      titulo: AppShellTab.tituloDe(destino: destino, sub: sub),
+      destino: destino,
+      subDestino: sub,
+      navigatorKey: GlobalKey<NavigatorState>(),
+      paginaInicial: _conteudoAba(destino: destino, sub: sub),
+    );
+  }
+
+  void _ativarAba(int indice, {bool notificar = true}) {
+    if (indice < 0 || indice >= _abas.length) return;
+    final aba = _abas[indice];
+    void aplicar() {
+      _indiceAbaAtiva = indice;
+      _destino = aba.destino;
+      _subDestino = aba.subDestino;
+      _sincronizarGrupoExpandidoComDestino(aba.destino);
+    }
+
+    if (notificar) {
+      setState(aplicar);
+      unawaited(_atualizarBadgesMenu());
+    } else {
+      aplicar();
+    }
+  }
+
+  void _selecionarAba(int indice) => _ativarAba(indice);
+
+  void _fecharAba(int indice) {
+    if (_abas.length <= 1) return;
+    setState(() {
+      _abas.removeAt(indice);
+      if (_indiceAbaAtiva >= _abas.length) {
+        _indiceAbaAtiva = _abas.length - 1;
+      } else if (indice < _indiceAbaAtiva) {
+        _indiceAbaAtiva--;
+      }
+      final aba = _abas[_indiceAbaAtiva];
+      _destino = aba.destino;
+      _subDestino = aba.subDestino;
+      _sincronizarGrupoExpandidoComDestino(aba.destino);
+    });
+  }
+
+  void _fecharAbaAtual() => _fecharAba(_indiceAbaAtiva);
+
+  Widget _conteudoAba({
+    required MainMenuDestino destino,
+    MainMenuSubDestino? sub,
+  }) {
+    if (sub != null) {
+      final deps = _valoresDeps();
+      return _valoresDeps(
+        child: Builder(
+          builder: (ctx) => MainMenuSubRouter.pagina(
             sub,
             deps,
             navigatorContext: ctx,
           ),
         ),
-      ),
-      (_) => false,
-    );
+      );
+    }
+    return _conteudoDestino(destino);
   }
 
   void _alternarGrupoMenu(MainMenuDestino grupo) {
@@ -215,7 +311,9 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       if (_gruposExpandidos.contains(grupo)) {
         _gruposExpandidos.remove(grupo);
       } else {
-        _gruposExpandidos.add(grupo);
+        _gruposExpandidos
+          ..clear()
+          ..add(grupo);
       }
     });
   }
@@ -278,6 +376,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
           irPara: _irPara,
           irParaSub: _irParaSub,
           alternarFavorito: _alternarFavorito,
+          fecharAbaAtual: _fecharAbaAtual,
           child: Scaffold(
             body: Column(
               children: [
@@ -303,15 +402,29 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
                       ),
                       const VerticalDivider(width: 1, thickness: 1),
                       Expanded(
-                        child: Navigator(
-                          key: _navKey,
-                          onGenerateRoute: (settings) {
-                            return MaterialPageRoute<void>(
-                              builder: (_) => _conteudoDestino(
-                                MainMenuDestino.inicio,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            AppShellTabBar(
+                              tabs: _abas,
+                              indiceAtivo: _indiceAbaAtiva,
+                              onSelecionar: _selecionarAba,
+                              onFecharAtiva: _fecharAbaAtual,
+                            ),
+                            Expanded(
+                              child: IndexedStack(
+                                index: _indiceAbaAtiva,
+                                children: [
+                                  for (final aba in _abas)
+                                    AppShellTabNavigator(
+                                      key: ValueKey<String>(aba.id),
+                                      navigatorKey: aba.navigatorKey,
+                                      paginaInicial: aba.paginaInicial,
+                                    ),
+                                ],
                               ),
-                            );
-                          },
+                            ),
+                          ],
                         ),
                       ),
                     ],

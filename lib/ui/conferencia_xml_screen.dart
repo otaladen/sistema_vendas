@@ -1,16 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../data/app_config_repository.dart';
 import '../data/nfe_entrada_repository.dart';
 import '../data/produto_repository.dart';
+import '../domain/conferencia_nfe_opcoes.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../domain/produto_embalagem.dart';
 import '../model/item_nota_temporario.dart';
 import '../model/produto.dart';
+import 'layout/app_layout.dart';
+import 'fiscal/widgets/conferencia_nfe_cabecalho.dart';
+import 'fiscal/widgets/conferencia_nfe_financeiro_painel.dart';
+import 'fiscal/widgets/conferencia_nfe_opcoes_painel.dart';
+import 'fiscal/widgets/conferencia_nfe_rodape.dart';
+import 'fiscal/widgets/conferencia_nfe_tabela_itens.dart';
 import 'widgets/produto_busca_input.dart';
 import 'widgets/operacao_feedback.dart';
 import 'theme/app_semantic_helper.dart';
+
+enum _ConferenciaNfeFiltro { todos, vinculados, novos, atencao }
+
+enum _ConferenciaNfeModoExibicao { cards, tabela }
 
 /// Conferencia de itens da NF-e antes de gravar estoque e vinculos.
 class ConferenciaXmlScreen extends StatefulWidget {
@@ -38,26 +50,36 @@ class _LinhaEdicao {
     required this.sugestao,
     required this.fatorCtrl,
     required this.unidade,
+    required this.embalagemMultiplica,
   });
 
   final SugestaoLinhaConferencia sugestao;
   final TextEditingController fatorCtrl;
   String unidade;
+  bool embalagemMultiplica;
 
   /// Quando preenchido, substitui a sugestao automatica (ex.: vincular item "novo" a um cadastro).
   int? vinculoManualProdutoId;
   String? vinculoManualProdutoNome;
+
+  /// Usuario rejeitou o casamento automatico (EAN / fornecedor); item fica como novo cadastro.
+  bool vinculoAutomaticoIgnorado = false;
   String? erroValidacao;
 
   int? produtoDestinoId() {
     if (vinculoManualProdutoId != null) {
       return vinculoManualProdutoId;
     }
+    if (vinculoAutomaticoIgnorado) {
+      return null;
+    }
     if (!sugestao.produtoNovo) {
       return sugestao.produtoExistenteId;
     }
     return null;
   }
+
+  bool get temVinculoAtivo => produtoDestinoId() != null;
 }
 
 class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
@@ -66,6 +88,28 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   String? _erroConfirmacaoGlobal;
   bool _confirmando = false;
   double _margemMinimaPadrao = 20;
+  _ConferenciaNfeFiltro _filtro = _ConferenciaNfeFiltro.todos;
+  _ConferenciaNfeModoExibicao _modoExibicao = _ConferenciaNfeModoExibicao.cards;
+  ConferenciaNfeOpcoes _opcoes = const ConferenciaNfeOpcoes();
+  final Set<int> _custoExpandido = {};
+  bool _rebuildAgendado = false;
+
+  void _agendarRebuild() {
+    if (!mounted || _rebuildAgendado) return;
+    _rebuildAgendado = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _rebuildAgendado = false;
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _atualizarUi({VoidCallback? aoAtualizar}) {
+    if (aoAtualizar != null) {
+      aoAtualizar();
+    } else {
+      _agendarRebuild();
+    }
+  }
 
   static final NumberFormat _nfQtd = NumberFormat('#,##0.###', 'pt_BR');
   static final NumberFormat _nfMoeda = NumberFormat('#,##0.00', 'pt_BR');
@@ -85,13 +129,11 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           widget.nfeRepository.prepararSugestoesConferencia(widget.nfe);
       _linhas = sugestoes.map((s) {
         final c = TextEditingController(text: _formatarFator(s.fatorInicial));
-        c.addListener(() {
-          if (mounted) setState(() {});
-        });
         return _LinhaEdicao(
           sugestao: s,
           fatorCtrl: c,
           unidade: s.unidadeInternaInicial,
+          embalagemMultiplica: s.embalagemMultiplicaInicial,
         );
       }).toList();
     } catch (e, st) {
@@ -104,6 +146,20 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       }());
     }
     _carregarMargemMinima();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (context.isDesktopLayout) {
+        setState(() => _modoExibicao = _ConferenciaNfeModoExibicao.tabela);
+      }
+    });
+  }
+
+  void _alterarOpcoes(ConferenciaNfeOpcoes opcoes) {
+    setState(() {
+      _opcoes = opcoes.atualizarPrecoCusto
+          ? opcoes
+          : opcoes.copyWith(atualizarPrecosVenda: false);
+    });
   }
 
   Future<void> _carregarMargemMinima() async {
@@ -186,24 +242,56 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     return v;
   }
 
-  double _quantidadeCalculada(_LinhaEdicao linha) {
-    final f = _lerFator(linha.fatorCtrl.text);
-    if (f <= 0) return 0;
-    final q = linha.sugestao.item.quantidadeComercial;
-    if (!q.isFinite || q < 0) return 0;
-    var multiplica = true;
+  Produto? _produtoDestinoLinha(_LinhaEdicao linha) {
     final id = linha.produtoDestinoId();
-    if (id != null) {
-      final p = widget.produtoRepository.obterPorId(id);
-      if (p != null) multiplica = p.embalagemMultiplica;
-    }
-    return ProdutoEmbalagem.quantidadeNotaParaEstoque(
+    if (id == null) return null;
+    return widget.produtoRepository.obterPorId(id);
+  }
+
+  ({int armazenado, double unidadeVenda}) _entradaNotaCalculada(
+    _LinhaEdicao linha,
+  ) {
+    final f = _lerFator(linha.fatorCtrl.text);
+    final q = linha.sugestao.item.quantidadeComercial;
+    final multiplica = linha.embalagemMultiplica;
+    final produto = _produtoDestinoLinha(linha);
+    final unidadeVenda = ProdutoEmbalagem.quantidadeNotaParaUnidadeVenda(
       quantidadeComercial: q,
       fator: f,
       embalagemMultiplica: multiplica,
-    ).toDouble();
+    );
+    final armazenado = ProdutoEmbalagem.quantidadeNotaParaEstoque(
+      quantidadeComercial: q,
+      fator: f,
+      embalagemMultiplica: multiplica,
+      produto: produto,
+      unidadeComercial: linha.sugestao.item.unidadeComercial,
+      unidadeInterna: linha.unidade,
+    );
+    return (armazenado: armazenado, unidadeVenda: unidadeVenda);
   }
 
+  double _quantidadeEntrada(_LinhaEdicao linha) {
+    return _entradaNotaCalculada(linha).unidadeVenda;
+  }
+
+  double? _estoqueTotalAposConfirmar(_LinhaEdicao linha) {
+    final produto = _produtoDestinoLinha(linha);
+    if (produto == null) return null;
+    return produto.estoqueExibicao + _quantidadeEntrada(linha);
+  }
+
+  String _rotuloEntradaEstoque(_LinhaEdicao linha) {
+    final calc = _entradaNotaCalculada(linha);
+    final produto = _produtoDestinoLinha(linha);
+    return ProdutoEmbalagem.formatarQuantidadeNotaEstoque(
+      estoqueArmazenado: calc.armazenado,
+      quantidadeUnidadeVenda: calc.unidadeVenda,
+      produto: produto,
+      unidadeInterna: linha.unidade,
+      comUnidade: true,
+    );
+  }
   /// Custo unitario na [unidade interna] do cadastro (mesma formula de [NfeEntradaRepository.confirmarEntrada]).
   double? _custoUnitarioXmlConvertidoInterno(_LinhaEdicao linha) {
     final f = _lerFator(linha.fatorCtrl.text);
@@ -211,12 +299,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     if (f <= 0 || !vUn.isFinite || vUn < 0) {
       return null;
     }
-    var multiplica = true;
-    final id = linha.produtoDestinoId();
-    if (id != null) {
-      final p = widget.produtoRepository.obterPorId(id);
-      if (p != null) multiplica = p.embalagemMultiplica;
-    }
+    var multiplica = linha.embalagemMultiplica;
     final unit = multiplica ? vUn / f : vUn * f;
     if (!unit.isFinite || unit < 0) {
       return null;
@@ -224,7 +307,239 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     return unit;
   }
 
+  void _aplicarPadraoNovoProduto(_LinhaEdicao linha) {
+    if (linha.sugestao.produtoNovo && !linha.vinculoAutomaticoIgnorado) {
+      linha.unidade = linha.sugestao.unidadeInternaInicial;
+      linha.fatorCtrl.text = _formatarFator(linha.sugestao.fatorInicial);
+      linha.embalagemMultiplica = true;
+      return;
+    }
+    linha.unidade = 'UN';
+    linha.fatorCtrl.text = _formatarFator(1);
+    linha.embalagemMultiplica = true;
+  }
+
+  void _restaurarSugestaoAutomatica(_LinhaEdicao linha) {
+    linha.unidade = linha.sugestao.unidadeInternaInicial;
+    linha.fatorCtrl.text = _formatarFator(linha.sugestao.fatorInicial);
+    linha.embalagemMultiplica = linha.sugestao.embalagemMultiplicaInicial;
+  }
+
+  void _desfazerVinculoLinha(_LinhaEdicao linha) {
+    if (linha.vinculoManualProdutoId != null) {
+      linha.vinculoManualProdutoId = null;
+      linha.vinculoManualProdutoNome = null;
+      if (linha.vinculoAutomaticoIgnorado || linha.sugestao.produtoNovo) {
+        _aplicarPadraoNovoProduto(linha);
+      } else {
+        _restaurarSugestaoAutomatica(linha);
+      }
+      return;
+    }
+    if (!linha.sugestao.produtoNovo && linha.sugestao.produtoExistenteId != null) {
+      linha.vinculoAutomaticoIgnorado = true;
+      _aplicarPadraoNovoProduto(linha);
+    }
+  }
+
+
   static String _formatarReais(double v) => 'R\$ ${_nfMoeda.format(v)}';
+
+  bool _linhaEhNovo(_LinhaEdicao linha) => linha.produtoDestinoId() == null;
+
+  bool _linhaEhVinculada(_LinhaEdicao linha) => linha.produtoDestinoId() != null;
+
+  bool _linhaFatorValido(_LinhaEdicao linha) =>
+      _lerFator(linha.fatorCtrl.text) > 0;
+
+  bool _linhaMargemAbaixoMinimo(_LinhaEdicao linha) {
+    final id = linha.produtoDestinoId();
+    if (id == null) return false;
+    final p = widget.produtoRepository.obterPorId(id);
+    final custoXml = _custoUnitarioXmlConvertidoInterno(linha);
+    if (p == null || custoXml == null || p.precoVenda <= 1e-9) return false;
+    final margemApos = _margemSobreVenda(p.precoVenda, custoXml);
+    return margemApos + 0.05 < _margemMinimaPadrao;
+  }
+
+  bool _linhaCustoAumentou(_LinhaEdicao linha) {
+    final id = linha.produtoDestinoId();
+    if (id == null) return false;
+    final p = widget.produtoRepository.obterPorId(id);
+    final custoXml = _custoUnitarioXmlConvertidoInterno(linha);
+    if (p == null || custoXml == null || p.precoCusto <= 1e-9) return false;
+    return (custoXml - p.precoCusto) / p.precoCusto > 0.05;
+  }
+
+  bool _linhaPrecisaAtencao(_LinhaEdicao linha) =>
+      _linhaEhNovo(linha) ||
+      !_linhaFatorValido(linha) ||
+      _linhaMargemAbaixoMinimo(linha) ||
+      _linhaCustoAumentou(linha);
+
+  bool _linhaPronta(_LinhaEdicao linha) =>
+      _linhaFatorValido(linha) &&
+      NfeEntradaRepository.unidadesInternasValidas.contains(linha.unidade);
+
+  int get _countVinculados =>
+      _linhas.where(_linhaEhVinculada).length;
+
+  int get _countNovos => _linhas.where(_linhaEhNovo).length;
+
+  int get _countAtencao => _linhas.where(_linhaPrecisaAtencao).length;
+
+  int get _countProntos => _linhas.where(_linhaPronta).length;
+
+  List<int> get _indicesFiltrados {
+    final out = <int>[];
+    for (var i = 0; i < _linhas.length; i++) {
+      final linha = _linhas[i];
+      final ok = switch (_filtro) {
+        _ConferenciaNfeFiltro.todos => true,
+        _ConferenciaNfeFiltro.vinculados => _linhaEhVinculada(linha),
+        _ConferenciaNfeFiltro.novos => _linhaEhNovo(linha),
+        _ConferenciaNfeFiltro.atencao => _linhaPrecisaAtencao(linha),
+      };
+      if (ok) out.add(i);
+    }
+    return out;
+  }
+
+  Widget _buildPassoConferencia(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    Widget passo(String n, String rotulo, bool ativo) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircleAvatar(
+            radius: 11,
+            backgroundColor: ativo ? cs.primary : cs.surfaceContainerHighest,
+            child: Text(
+              n,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: ativo ? cs.onPrimary : cs.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            rotulo,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: ativo ? FontWeight.w700 : FontWeight.w500,
+              color: ativo ? cs.primary : cs.onSurfaceVariant,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          passo('1', 'XML lido', false),
+          Icon(Icons.chevron_right, size: 18, color: cs.outline),
+          passo('2', 'Conferir itens', true),
+          Icon(Icons.chevron_right, size: 18, color: cs.outline),
+          passo('3', 'Lançar estoque', false),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFiltros(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    ChoiceChip chip(
+      _ConferenciaNfeFiltro f,
+      String label,
+      int? count,
+    ) {
+      final sel = _filtro == f;
+      return ChoiceChip(
+        label: Text(count == null ? label : '$label ($count)'),
+        selected: sel,
+        onSelected: (_) => setState(() => _filtro = f),
+        selectedColor: cs.primaryContainer,
+        labelStyle: TextStyle(
+          fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+          fontSize: 12.5,
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        children: [
+          Text(
+            'Filtrar:',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          chip(_ConferenciaNfeFiltro.todos, 'Todos', _linhas.length),
+          chip(_ConferenciaNfeFiltro.vinculados, 'Vinculados', _countVinculados),
+          chip(_ConferenciaNfeFiltro.novos, 'Novos', _countNovos),
+          if (_countAtencao > 0)
+            chip(_ConferenciaNfeFiltro.atencao, 'Atenção', _countAtencao),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetaCelula(
+    BuildContext context, {
+    required String rotulo,
+    required String valor,
+    IconData? icon,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 14, color: cs.onSurfaceVariant),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                rotulo,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            valor,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// Painel custo cadastro vs XML; so quando ja existe produto destino.
   Widget _buildComparativoCustoPainel(BuildContext context, _LinhaEdicao linha) {
@@ -244,7 +559,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(
-          'Informe um fator valido para comparar o custo unitario do XML com o cadastro.',
+          'Informe uma qtd. na embalagem valida para comparar o custo unitario do XML com o cadastro.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontStyle: FontStyle.italic,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -502,6 +817,18 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               ),
             ],
           ],
+          const SizedBox(height: 4),
+          Text(
+            _opcoes.atualizarPrecoCusto
+                ? 'Ao confirmar, o preco de custo sera atualizado conforme as opcoes. '
+                  'Use o botao abaixo para aplicar antes, se preferir.'
+                : 'O preco de custo do cadastro nao sera alterado ao confirmar. '
+                  'O custo medio so muda se "Lancar estoque" estiver marcado.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                  fontStyle: FontStyle.italic,
+                ),
+          ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -535,27 +862,59 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     final uComLabel = uCom.isEmpty ? '(unid. na nota)' : uCom;
     final uIntLabel = uInt.isEmpty ? '?' : uInt;
     if (f <= 0) {
-      return 'Informe um fator maior que zero. Ex.: se a nota usa CX e voce controla '
-          'em UN, digite quantas UN existem em 1 CX.';
+      return 'Informe a qtd. na embalagem maior que zero. Ex.: se a nota vem em CX '
+          'e voce controla em UN, digite quantas UN existem em 1 CX.';
     }
     if (!q.isFinite || q < 0) {
       return 'Quantidade da nota invalida; confira o XML.';
     }
-    var multiplica = true;
-    final id = linha.produtoDestinoId();
-    if (id != null) {
-      final p = widget.produtoRepository.obterPorId(id);
-      if (p != null) multiplica = p.embalagemMultiplica;
-    }
-    final qtd = ProdutoEmbalagem.quantidadeNotaParaEstoque(
-      quantidadeComercial: q,
-      fator: f,
-      embalagemMultiplica: multiplica,
+    final multiplica = linha.embalagemMultiplica;
+    final calc = _entradaNotaCalculada(linha);
+    final produto = _produtoDestinoLinha(linha);
+    final qtdTxt = ProdutoEmbalagem.formatarQuantidadeNotaEstoque(
+      estoqueArmazenado: calc.armazenado,
+      quantidadeUnidadeVenda: calc.unidadeVenda,
+      produto: produto,
+      unidadeInterna: uIntLabel,
+      comUnidade: true,
     );
     final qFmt = _nfQtd.format(q);
-    final modo = multiplica ? 'multiplica' : 'divide';
-    return 'Na nota: $qFmt $uComLabel. Fator $f ($modo) -> '
-        '$qtd $uIntLabel no estoque.';
+    final fFmt = _formatarFator(f);
+    final op = multiplica ? '×' : '÷';
+    return '$qFmt $uComLabel $op $fFmt = $qtdTxt';
+  }
+
+  Widget _buildToggleEmbalagemModo(
+    _LinhaEdicao linha, {
+    VoidCallback? aoAtualizar,
+    bool compacto = false,
+  }) {
+    return SegmentedButton<bool>(
+      style: SegmentedButton.styleFrom(
+        visualDensity:
+            compacto ? VisualDensity.compact : VisualDensity.standard,
+        padding: compacto
+            ? const EdgeInsets.symmetric(horizontal: 2)
+            : const EdgeInsets.symmetric(horizontal: 8),
+        minimumSize: compacto ? const Size(28, 32) : null,
+      ),
+      segments: const [
+        ButtonSegment(
+          value: true,
+          label: Text('×', style: TextStyle(fontWeight: FontWeight.w800)),
+        ),
+        ButtonSegment(
+          value: false,
+          label: Text('÷', style: TextStyle(fontWeight: FontWeight.w800)),
+        ),
+      ],
+      selected: {linha.embalagemMultiplica},
+      onSelectionChanged: (s) {
+        if (s.isEmpty) return;
+        linha.embalagemMultiplica = s.first;
+        _atualizarUi(aoAtualizar: aoAtualizar);
+      },
+    );
   }
 
   ({Color bg, Color fg, String label}) _coresStatusChip(
@@ -564,13 +923,32 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   ) {
     final scheme = Theme.of(context).colorScheme;
     final semantic = context.semanticColors;
+    if (linha.produtoDestinoId() == null) {
+      final desfeito = linha.vinculoAutomaticoIgnorado;
+      return (
+        bg: semantic.warningBg,
+        fg: semantic.warningFg,
+        label: desfeito
+            ? 'Novo produto (vinculo automatico desfeito)'
+            : 'Novo produto (sera cadastrado)',
+      );
+    }
     final manual = linha.vinculoManualProdutoId != null;
     final tipo = linha.sugestao.tipoMatch;
-    if (manual && tipo == ConferenciaNfeMatchTipo.produtoNovo) {
+    if (manual &&
+        (tipo == ConferenciaNfeMatchTipo.produtoNovo ||
+            linha.vinculoAutomaticoIgnorado)) {
       return (
         bg: scheme.secondaryContainer,
         fg: scheme.onSecondaryContainer,
         label: 'Vinculo manual - produto cadastrado',
+      );
+    }
+    if (manual) {
+      return (
+        bg: scheme.secondaryContainer,
+        fg: scheme.onSecondaryContainer,
+        label: 'Vinculo manual - produto trocado',
       );
     }
     switch (tipo) {
@@ -616,238 +994,646 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     );
   }
 
-  Widget _buildLinhaCard(BuildContext context, int index) {
+  Widget _buildModoExibicaoToggle(BuildContext context) {
+    if (!context.isDesktopLayout) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: SegmentedButton<_ConferenciaNfeModoExibicao>(
+          segments: const [
+            ButtonSegment(
+              value: _ConferenciaNfeModoExibicao.tabela,
+              icon: Icon(Icons.table_rows_outlined, size: 18),
+              label: Text('Tabela'),
+            ),
+            ButtonSegment(
+              value: _ConferenciaNfeModoExibicao.cards,
+              icon: Icon(Icons.view_agenda_outlined, size: 18),
+              label: Text('Cards'),
+            ),
+          ],
+          selected: {_modoExibicao},
+          onSelectionChanged: (s) =>
+              setState(() => _modoExibicao = s.first),
+        ),
+      ),
+    );
+  }
+
+  List<ConferenciaNfeTabelaLinha> _montarLinhasTabela(BuildContext context) {
+    return [
+      for (final index in _indicesFiltrados)
+        _linhaParaTabela(context, index),
+    ];
+  }
+
+  ConferenciaNfeTabelaLinha _linhaParaTabela(BuildContext context, int index) {
+    final linha = _linhas[index];
+    final item = linha.sugestao.item;
+    final status = _coresStatusChip(context, linha);
+    return ConferenciaNfeTabelaLinha(
+      indice: index,
+      numeroItem: item.numeroItem,
+      descricao: item.descricao,
+      unidadeXml: item.unidadeComercial.isEmpty ? '—' : item.unidadeComercial,
+      quantidadeXml: item.quantidadeComercial,
+      valorUnitarioXml: item.valorUnitarioComercial,
+      destinoRotulo: _rotuloProdutoVinculado(linha),
+      statusRotulo: status.label,
+      statusCor: status.bg,
+      statusCorTexto: status.fg,
+      entradaRotulo: _rotuloEntradaEstoque(linha),
+      unidadeInterna: linha.unidade,
+      fatorController: linha.fatorCtrl,
+      embalagemMultiplica: linha.embalagemMultiplica,
+      erroFator: linha.erroValidacao,
+      precisaAtencao: _linhaPrecisaAtencao(linha),
+      temDestino: linha.produtoDestinoId() != null,
+      temVinculoAtivo: linha.temVinculoAtivo,
+    );
+  }
+
+  Future<void> _abrirDetalheItem(int index) async {
+    if (!mounted) return;
+    // Adia a navegacao para fora do evento de clique do mouse (evita mouse_tracker no Windows).
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => _ConferenciaItemDetalhePage(
+          screenState: this,
+          index: index,
+        ),
+      ),
+    );
+    _agendarRebuild();
+  }
+
+  Widget _buildListaItens(BuildContext context) {
+    if (_indicesFiltrados.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        child: Center(
+          child: Text(
+            'Nenhum item neste filtro.',
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+        ),
+      );
+    }
+    if (_modoExibicao == _ConferenciaNfeModoExibicao.tabela &&
+        context.isDesktopLayout) {
+      return ConferenciaNfeTabelaItens(
+        linhas: _montarLinhasTabela(context),
+        onUnidadeChanged: (i, u) {
+          _linhas[i].unidade = u;
+          _agendarRebuild();
+        },
+        onFatorChanged: (i) {
+          if (_linhas[i].erroValidacao != null) {
+            _linhas[i].erroValidacao = null;
+          }
+          _agendarRebuild();
+        },
+        onEmbalagemModoChanged: (i, multiplica) {
+          _linhas[i].embalagemMultiplica = multiplica;
+          _agendarRebuild();
+        },
+        onVincular: (i) => _abrirDialogVincularProduto(_linhas[i]),
+        onDesfazerVinculo: (i) {
+          _desfazerVinculoLinha(_linhas[i]);
+          _agendarRebuild();
+        },
+        onAbrirDetalhe: _abrirDetalheItem,
+      );
+    }
+    return Column(
+      children: [
+        for (final index in _indicesFiltrados)
+          _buildLinhaCard(context, index),
+      ],
+    );
+  }
+
+  Widget _buildLinhaCard(
+    BuildContext context,
+    int index, {
+    VoidCallback? aoAtualizar,
+    bool modoDetalhe = false,
+  }) {
     final linha = _linhas[index];
     final s = linha.sugestao;
     final item = s.item;
-    final qCalc = _quantidadeCalculada(linha);
     final destinoId = linha.produtoDestinoId();
     final rotuloVinculo = _rotuloProdutoVinculado(linha);
     final cs = Theme.of(context).colorScheme;
     final avisoConversao = _mensagemFatorConversao(linha);
+    final status = _coresStatusChip(context, linha);
+    final atencao = _linhaPrecisaAtencao(linha);
+    final custoAberto = _custoExpandido.contains(index) || atencao;
 
-    return Card(
-      elevation: 1,
-      margin: const EdgeInsets.only(bottom: 14),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Flexible(child: _buildStatusChip(context, linha)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    item.descricao,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
+    int colsMetaGrid(double largura) {
+      if (largura >= 520) return 3;
+      if (largura >= 280) return 2;
+      return 1;
+    }
+
+    Widget secaoDestino() {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Produto no sistema',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 8),
+          if (rotuloVinculo != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: cs.primaryContainer.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: cs.primary.withValues(alpha: 0.35),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.inventory_2_outlined, size: 20, color: cs.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      rotuloVinculo,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
                   ),
+                ],
+              ),
+            )
+          else
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: cs.tertiaryContainer.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: cs.tertiary.withValues(alpha: 0.35),
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                if (rotuloVinculo != null)
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 300),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.fiber_new_outlined, size: 20, color: cs.tertiary),
+                  const SizedBox(width: 8),
+                  Expanded(
                     child: Text(
-                      'Destino: $rotuloVinculo',
+                      'Novo cadastro sera criado ao confirmar a entrada.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
                     ),
                   ),
-                OutlinedButton.icon(
-                  onPressed: () => _abrirDialogVincularProduto(linha),
-                  icon: const Icon(Icons.link, size: 18),
-                  label: Text(
-                    destinoId == null
-                        ? 'Vincular a produto existente'
-                        : 'Trocar vinculo',
-                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _abrirDialogVincularProduto(linha),
+                icon: const Icon(Icons.link, size: 18),
+                label: Text(
+                  destinoId == null
+                      ? 'Vincular produto'
+                      : 'Trocar vinculo',
                 ),
-                if (linha.vinculoManualProdutoId != null)
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        linha.vinculoManualProdutoId = null;
-                        linha.vinculoManualProdutoNome = null;
-                      });
-                    },
-                    child: const Text('Desfazer vinculo manual'),
+              ),
+              if (linha.temVinculoAtivo)
+                TextButton.icon(
+                  onPressed: () {
+                    _desfazerVinculoLinha(linha);
+                    _atualizarUi(aoAtualizar: aoAtualizar);
+                  },
+                  icon: const Icon(Icons.link_off, size: 18),
+                  label: const Text('Desvincular produto'),
+                ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    Widget secaoXml() {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Dados do XML',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 8),
+          LayoutBuilder(
+            builder: (context, c) {
+              final cols = colsMetaGrid(c.maxWidth);
+              final gap = 8.0;
+              final cellW =
+                  ((c.maxWidth - gap * (cols - 1)) / cols).floorToDouble();
+              final cells = <Widget>[
+                _buildMetaCelula(
+                  context,
+                  rotulo: 'Unidade nota',
+                  valor: item.unidadeComercial.isEmpty ? '—' : item.unidadeComercial,
+                  icon: Icons.straighten,
+                ),
+                _buildMetaCelula(
+                  context,
+                  rotulo: 'Quantidade',
+                  valor: _nfQtd.format(item.quantidadeComercial),
+                  icon: Icons.numbers,
+                ),
+                _buildMetaCelula(
+                  context,
+                  rotulo: 'cProd',
+                  valor: item.codigo.isEmpty ? '—' : item.codigo,
+                  icon: Icons.tag,
+                ),
+                _buildMetaCelula(
+                  context,
+                  rotulo: 'Valor unit.',
+                  valor: _formatarReais(item.valorUnitarioComercial),
+                  icon: Icons.payments_outlined,
+                ),
+                if (item.ncm.isNotEmpty)
+                  _buildMetaCelula(
+                    context,
+                    rotulo: 'NCM',
+                    valor: item.ncm,
+                    icon: Icons.category_outlined,
                   ),
+                if (item.codigoBarras.isNotEmpty)
+                  _buildMetaCelula(
+                    context,
+                    rotulo: 'EAN',
+                    valor: item.codigoBarras,
+                    icon: Icons.qr_code_2,
+                  ),
+              ];
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: [
+                  for (final cell in cells)
+                    SizedBox(width: cellW, child: cell),
+                ],
+              );
+            },
+          ),
+        ],
+      );
+    }
+
+    Widget secaoConversao() {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.swap_horiz, size: 20, color: cs.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Conversao para estoque',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Text(
-              'XML: ${item.unidadeComercial} · Qtd na nota: ${_nfQtd.format(item.quantidadeComercial)} · cProd ${item.codigo}',
-              style: Theme.of(context).textTheme.bodySmall,
+              'Ajuste unidade, qtd. na embalagem e o modo x ou / quando a nota difere do cadastro.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
             ),
-            if (item.codigoBarras.isNotEmpty)
-              Text(
-                'EAN: ${item.codigoBarras}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            _buildComparativoCustoPainel(context, linha),
             const SizedBox(height: 12),
-            Material(
-              color: cs.primaryContainer.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: cs.primary.withValues(alpha: 0.45),
-                    width: 1.4,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('${index}_${linha.unidade}'),
+                    decoration: const InputDecoration(
+                      labelText: 'Unidade cadastro',
+                      isDense: true,
+                    ),
+                    initialValue: linha.unidade,
+                    items: NfeEntradaRepository.unidadesInternasValidas
+                        .map(
+                          (u) => DropdownMenuItem(
+                            value: u,
+                            child: Text(u),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      linha.unidade = v;
+                      _atualizarUi(aoAtualizar: aoAtualizar);
+                    },
                   ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.straighten, size: 22, color: cs.primary),
-                        const SizedBox(width: 8),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: TextFormField(
+                    controller: linha.fatorCtrl,
+                    onChanged: (_) {
+                      if (linha.erroValidacao != null) {
+                        linha.erroValidacao = null;
+                      }
+                      _atualizarUi(aoAtualizar: aoAtualizar);
+                    },
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 17,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Qtd. na embalagem',
+                      hintText: 'Ex.: 6',
+                      isDense: true,
+                      errorText: linha.erroValidacao,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: _buildToggleEmbalagemModo(
+                    linha,
+                    aoAtualizar: aoAtualizar,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: cs.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                child: Text(
+                  avisoConversao,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.login, size: 18, color: cs.primary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Entrada: ${_rotuloEntradaEstoque(linha)}',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: cs.primary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      if (_estoqueTotalAposConfirmar(linha) case final total?)
                         Text(
-                          'Fator de conversao',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: cs.onSurface,
+                          'Estoque apos confirmar: ${_nfQtd.format(total)} ${linha.unidade.trim()} '
+                          '(atual ${_nfQtd.format(_produtoDestinoLinha(linha)!.estoqueExibicao)})',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
                               ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Evite erro: a unidade da nota e a unidade do cadastro podem ser diferentes.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: cs.onSurface.withValues(alpha: 0.75),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget secaoCusto() {
+      if (destinoId == null) return const SizedBox.shrink();
+      final painel = _buildComparativoCustoPainel(context, linha);
+      if (modoDetalhe) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  atencao
+                      ? Icons.warning_amber_rounded
+                      : Icons.price_change_outlined,
+                  color: atencao ? cs.error : cs.onSurfaceVariant,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Custo e margem',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ],
+            ),
+            if (atencao) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Revise custo ou margem antes de confirmar.',
+                style: TextStyle(color: cs.error, fontSize: 12),
+              ),
+            ],
+            const SizedBox(height: 8),
+            painel,
+          ],
+        );
+      }
+      return Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: ValueKey('custo_$index'),
+          initiallyExpanded: custoAberto,
+          onExpansionChanged: (aberto) {
+            if (aberto) {
+              _custoExpandido.add(index);
+            } else {
+              _custoExpandido.remove(index);
+            }
+            _atualizarUi(aoAtualizar: aoAtualizar);
+          },
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 4),
+          leading: Icon(
+            atencao ? Icons.warning_amber_rounded : Icons.price_change_outlined,
+            color: atencao ? cs.error : cs.onSurfaceVariant,
+            size: 20,
+          ),
+          title: Text(
+            'Custo e margem',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          subtitle: atencao
+              ? Text(
+                  'Revise custo ou margem antes de confirmar.',
+                  style: TextStyle(color: cs.error, fontSize: 12),
+                )
+              : null,
+          children: [
+            _buildComparativoCustoPainel(context, linha),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 0,
+      margin: modoDetalhe ? EdgeInsets.zero : const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: atencao
+              ? cs.error.withValues(alpha: 0.45)
+              : cs.outlineVariant.withValues(alpha: 0.65),
+        ),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: status.fg, width: 4),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final duasColunas = constraints.maxWidth >= 700;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: cs.surfaceContainerHighest,
+                        child: Text(
+                          '${item.numeroItem}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
                           ),
-                    ),
-                    const SizedBox(height: 12),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              item.descricao,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    height: 1.25,
+                                  ),
+                            ),
+                            const SizedBox(height: 6),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: _buildStatusChip(context, linha),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  if (duasColunas)
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          flex: 2,
-                          child: DropdownButtonFormField<String>(
-                            key: ValueKey('${index}_${linha.unidade}'),
-                            decoration: InputDecoration(
-                              labelText: 'Unidade no cadastro',
-                              isDense: true,
-                              filled: true,
-                              fillColor: cs.surface,
-                            ),
-                            initialValue: linha.unidade,
-                            items: NfeEntradaRepository.unidadesInternasValidas
-                                .map(
-                                  (u) => DropdownMenuItem(
-                                    value: u,
-                                    child: Text(u),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (v) {
-                              if (v == null) return;
-                              setState(() => linha.unidade = v);
-                            },
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              secaoXml(),
+                              const SizedBox(height: 14),
+                              secaoDestino(),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 16),
                         Expanded(
-                          flex: 2,
-                          child: TextFormField(
-                            controller: linha.fatorCtrl,
-                            onChanged: (_) {
-                              if (linha.erroValidacao != null) {
-                                setState(() => linha.erroValidacao = null);
-                              }
-                            },
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 18,
-                            ),
-                            decoration: InputDecoration(
-                              labelText: 'Fator (destaque)',
-                              hintText: 'Ex.: 12',
-                              isDense: true,
-                              filled: true,
-                              fillColor: cs.surface,
-                              errorText: linha.erroValidacao,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(
-                                  color: cs.primary,
-                                  width: 1.8,
-                                ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(
-                                  color: cs.primary.withValues(alpha: 0.55),
-                                  width: 1.4,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(
-                                  color: cs.primary,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              secaoConversao(),
+                              const SizedBox(height: 8),
+                              secaoCusto(),
+                            ],
                           ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 10),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: cs.surface.withValues(alpha: 0.92),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 10,
-                        ),
-                        child: Text(
-                          avisoConversao,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                height: 1.35,
-                              ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Total no estoque apos confirmar: ${_nfQtd.format(qCalc)} ${linha.unidade}',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            color: cs.primary,
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
+                    )
+                  else ...[
+                    secaoXml(),
+                    const SizedBox(height: 14),
+                    secaoDestino(),
+                    const SizedBox(height: 14),
+                    secaoConversao(),
+                    secaoCusto(),
                   ],
-                ),
-              ),
-            ),
-          ],
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -922,23 +1708,24 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                                   subtitle: Text(
                                     '${p.codigoInterno} · Un ${rotuloUnidadeProdutoLista(p)} · '
                                     'EAN ${p.codigoBarras.isEmpty ? "—" : p.codigoBarras} · '
-                                    'Fisico ${p.estoqueReal}',
+                                    'Fisico ${ProdutoEmbalagem.formatarEstoque(p, p.estoqueReal, comUnidade: true)}',
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   onTap: () {
                                     final u = p.unidade.trim().toUpperCase();
-                                    setState(() {
-                                      linha.vinculoManualProdutoId = p.id;
-                                      linha.vinculoManualProdutoNome =
-                                          '${p.codigoInterno} · ${p.nome}';
-                                      if (NfeEntradaRepository
-                                          .unidadesInternasValidas
-                                          .contains(u)) {
-                                        linha.unidade = u;
-                                      }
-                                    });
+                                    linha.vinculoManualProdutoId = p.id;
+                                    linha.vinculoManualProdutoNome =
+                                        '${p.codigoInterno} · ${p.nome}';
+                                    linha.embalagemMultiplica =
+                                        p.embalagemMultiplica;
+                                    if (NfeEntradaRepository
+                                        .unidadesInternasValidas
+                                        .contains(u)) {
+                                      linha.unidade = u;
+                                    }
                                     Navigator.pop(ctx);
+                                    _agendarRebuild();
                                   },
                                 );
                               },
@@ -980,7 +1767,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       if (f <= 0) {
         final d = linha.sugestao.item.descricao;
         final curto = d.length > 48 ? '${d.substring(0, 48)}…' : d;
-        linha.erroValidacao = 'Fator invalido ($curto)';
+        linha.erroValidacao = 'Qtd. embalagem invalida ($curto)';
         setState(() {});
         return;
       }
@@ -990,16 +1777,17 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
             'Quantidade da nota invalida em um dos itens. Verifique o XML.';
         break;
       }
-      final qtdCalc = qCom * f;
-      if (!qtdCalc.isFinite) {
+      final calc = _entradaNotaCalculada(linha);
+      final qtdCalc = calc.unidadeVenda;
+      if (!qtdCalc.isFinite || qtdCalc <= 0) {
         linha.erroValidacao =
-            'Quantidade para estoque invalida. Ajuste o fator.';
+            'Quantidade para estoque invalida. Ajuste a qtd. na embalagem ou o modo x/.';
         setState(() {});
         return;
       }
-      if (qtdCalc > 2147483647) {
+      if (calc.armazenado > 2147483647) {
         linha.erroValidacao =
-            'Quantidade acima do limite. Reduza o fator ou corrija a nota.';
+            'Quantidade acima do limite. Reduza a qtd. na embalagem ou corrija a nota.';
         setState(() {});
         return;
       }
@@ -1013,6 +1801,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           item: linha.sugestao.item,
           fatorConversao: f,
           unidadeInterna: linha.unidade,
+          embalagemMultiplica: linha.embalagemMultiplica,
           produtoExistenteId: linha.produtoDestinoId(),
         ),
       );
@@ -1028,6 +1817,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       widget.nfeRepository.confirmarEntrada(
         nfe: widget.nfe,
         linhas: confirmacoes,
+        opcoes: _opcoes,
+        margemMinimaVendaPercentual: _margemMinimaPadrao,
         xmlOriginal: widget.xmlOriginal,
       );
       widget.produtoRepository.invalidarCacheBusca();
@@ -1076,76 +1867,140 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       );
     }
 
-    final emit = widget.nfe.emitente;
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.f10): () {
+          if (!_confirmando) _confirmar();
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          Navigator.of(context).maybePop(false);
+        },
+      },
+      child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Entrada de NF-e'),
+            centerTitle: false,
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Center(
+                  child: Text(
+                    'F10 confirmar · Esc voltar',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
+                        ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          bottomNavigationBar: ConferenciaNfeRodape(
+            totalItens: _linhas.length,
+            itensProntos: _countProntos,
+            valorTotalNota: widget.nfe.valorTotalNota,
+            confirmando: _confirmando,
+            onConfirmar: _confirmar,
+          ),
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_erroConfirmacaoGlobal != null)
+                MaterialBanner(
+                  content: Text(_erroConfirmacaoGlobal!),
+                  leading: Icon(
+                    Icons.error_outline,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () =>
+                          setState(() => _erroConfirmacaoGlobal = null),
+                      child: const Text('Fechar'),
+                    ),
+                  ],
+                ),
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.fromLTRB(
+                    context.isCompactLayout ? 12 : 20,
+                    12,
+                    context.isCompactLayout ? 12 : 20,
+                    24,
+                  ),
+                  children: [
+                    _buildPassoConferencia(context),
+                    ConferenciaNfeCabecalho(
+                      nfe: widget.nfe,
+                      totalItens: _linhas.length,
+                      itensVinculados: _countVinculados,
+                      itensNovos: _countNovos,
+                      itensAtencao: _countAtencao,
+                    ),
+                    const SizedBox(height: 12),
+                    ConferenciaNfeOpcoesPainel(
+                      opcoes: _opcoes,
+                      onChanged: _alterarOpcoes,
+                    ),
+                    const SizedBox(height: 12),
+                    ConferenciaNfeFinanceiroPainel(nfe: widget.nfe),
+                    const SizedBox(height: 16),
+                    _buildModoExibicaoToggle(context),
+                    _buildFiltros(context),
+                    _buildListaItens(context),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+    );
+  }
+}
+
+/// Tela de detalhe do item (rota em vez de dialog para evitar conflito com mouse no Windows).
+class _ConferenciaItemDetalhePage extends StatefulWidget {
+  const _ConferenciaItemDetalhePage({
+    required this.screenState,
+    required this.index,
+  });
+
+  final _ConferenciaXmlScreenState screenState;
+  final int index;
+
+  @override
+  State<_ConferenciaItemDetalhePage> createState() =>
+      _ConferenciaItemDetalhePageState();
+}
+
+class _ConferenciaItemDetalhePageState extends State<_ConferenciaItemDetalhePage> {
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.screenState._linhas[widget.index].sugestao.item;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Conferencia NF-e (XML)'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    emit.razaoSocial,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  Text(
-                    'CNPJ ${emit.cnpj} · Chave ${widget.nfe.chaveAcesso}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-          ),
+        title: Text('Item ${item.numeroItem}'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: FilledButton.icon(
-            onPressed: _confirmando ? null : _confirmar,
-            icon: _confirmando
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.check_circle_outline),
-            label: Text(_confirmando ? 'Gravando...' : 'Confirmar entrada'),
-          ),
-        ),
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          if (_erroConfirmacaoGlobal != null)
-            MaterialBanner(
-              content: Text(_erroConfirmacaoGlobal!),
-              leading: Icon(
-                Icons.error_outline,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => setState(() => _erroConfirmacaoGlobal = null),
-                  child: const Text('Fechar'),
+          Text(
+            item.descricao,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
                 ),
-              ],
-            ),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: _linhas.length,
-              itemBuilder: (context, index) => _buildLinhaCard(context, index),
-            ),
+          ),
+          const SizedBox(height: 12),
+          widget.screenState._buildLinhaCard(
+            context,
+            widget.index,
+            aoAtualizar: () => setState(() {}),
+            modoDetalhe: true,
           ),
         ],
       ),

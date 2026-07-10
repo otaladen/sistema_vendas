@@ -209,4 +209,153 @@ void main() {
       armazenado,
     );
   });
+
+  test('unidadeEstoqueDeQuantidadeArmazenada 4 CX baixa m2 exato', () {
+    final produto = Produto(
+      id: 8,
+      codigoInterno: '008858',
+      nome: 'Piso Arielle',
+      unidade: 'M2',
+      unidadeCompra: 'CX',
+      quantidadePorEmbalagem: 2.63,
+      embalagemMultiplica: true,
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 32.99,
+      preco1: 32.99,
+      permiteQuantidadeFracionada: false,
+    );
+    expect(
+      ProdutoEmbalagem.unidadeEstoqueDeQuantidadeArmazenada(
+        produto: produto,
+        quantidadeArmazenada: 10520,
+      ),
+      10520,
+    );
+    expect(
+      ProdutoEmbalagem.unidadeEstoqueDeQuantidadeArmazenada(
+        produto: produto,
+        quantidadeArmazenada: 2630,
+      ),
+      2630,
+    );
+  });
+
+  test('formatarEstoque exibe m2 fracionado no cadastro e PDV', () {
+    final produto = pisoCx()..estoqueReal = 144620;
+    expect(
+      ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReal),
+      '144,62',
+    );
+    expect(
+      ProdutoEmbalagem.formatarEstoqueDetalhado(produto, produto.estoqueReal),
+      contains('144,62'),
+    );
+    expect(produto.estoqueExibicao, closeTo(144.62, 0.001));
+  });
+
+  test('estoque legado inteiro migra na leitura para escala', () {
+    final produto = pisoCx()..estoqueReal = 145;
+    expect(produto.estoqueExibicao, 145);
+    ProdutoEmbalagem.garantirEstoqueEmEscalaNoProduto(produto);
+    expect(produto.estoqueReal, 145000);
+    expect(produto.estoqueExibicao, 145);
+  });
+
+  test('parseEstoqueEntrada grava milésimos para piso CX', () {
+    final produto = pisoCx();
+    expect(
+      ProdutoEmbalagem.parseEstoqueEntrada('144,62', produto),
+      144620,
+    );
+  });
+
+  test('quantidadeNotaParaEstoque NF-e 10 CX grava m2 exato', () {
+    final produto = pisoCx();
+    expect(
+      ProdutoEmbalagem.quantidadeNotaParaUnidadeVenda(
+        quantidadeComercial: 10,
+        fator: 2.63,
+        embalagemMultiplica: true,
+      ),
+      closeTo(26.3, 0.001),
+    );
+    expect(
+      ProdutoEmbalagem.quantidadeNotaParaEstoque(
+        quantidadeComercial: 10,
+        fator: 2.63,
+        embalagemMultiplica: true,
+        produto: produto,
+        unidadeComercial: 'CX',
+        unidadeInterna: 'M2',
+      ),
+      26300,
+    );
+    expect(
+      ProdutoEmbalagem.quantidadeNotaParaEstoque(
+        quantidadeComercial: 1,
+        fator: 2.63,
+        embalagemMultiplica: true,
+        produto: produto,
+      ),
+      2630,
+    );
+  });
+
+  test('quantidadeNotaParaEstoque NF-e produto novo CX/M2 sem cadastro', () {
+    expect(
+      ProdutoEmbalagem.quantidadeNotaParaEstoque(
+        quantidadeComercial: 4,
+        fator: 2.63,
+        embalagemMultiplica: true,
+        unidadeComercial: 'CX',
+        unidadeInterna: 'M2',
+      ),
+      10520,
+    );
+  });
+
+  test('quantidadeNotaParaEstoque NF-e unidade inteira continua arredondando', () {
+    expect(
+      ProdutoEmbalagem.quantidadeNotaParaEstoque(
+        quantidadeComercial: 10,
+        fator: 1,
+        embalagemMultiplica: true,
+        unidadeComercial: 'SC',
+        unidadeInterna: 'SC',
+      ),
+      10,
+    );
+  });
+
+  test('textoQuantidadeArmazenada exibe m2 e nao escala bruta no caixa', () {
+    final produto = Produto(
+      id: 7,
+      codigoInterno: '008858',
+      nome: 'Piso Arielle',
+      unidade: 'M2',
+      unidadeCompra: 'CX',
+      quantidadePorEmbalagem: 2.63,
+      embalagemMultiplica: true,
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 32.99,
+      preco1: 32.99,
+      permiteQuantidadeFracionada: false,
+    );
+    expect(
+      ProdutoEmbalagem.textoQuantidadeArmazenada(
+        produto: produto,
+        quantidadeArmazenada: 10520,
+      ),
+      '4 CX (= 10,52 M2)',
+    );
+    expect(
+      ProdutoEmbalagem.passoQuantidadeArmazenada(
+        produto: produto,
+        quantidadeArmazenada: 10520,
+      ),
+      QuantidadeVendaUtil.paraArmazenamento(2.63, fracionada: true),
+    );
+  });
 }

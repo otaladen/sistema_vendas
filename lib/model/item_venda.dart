@@ -60,6 +60,26 @@ class ItemVenda {
         quantidadeArmazenada: quantidade,
       );
 
+  /// Quantidade em unidades de estoque ([Produto.unidade]) para baixa/reserva.
+  int get quantidadeUnidadeEstoque =>
+      ProdutoEmbalagem.unidadeEstoqueDeQuantidadeArmazenada(
+        produto: produto.target,
+        quantidadeArmazenada: quantidade,
+      );
+
+  int quantidadeUnidadeEstoqueDe(int quantidadeArmazenada) =>
+      ProdutoEmbalagem.unidadeEstoqueDeQuantidadeArmazenada(
+        produto: produto.target,
+        quantidadeArmazenada: quantidadeArmazenada,
+      );
+
+  /// Quantidade formatada para listagens, cupom e detalhe da venda.
+  String get quantidadeExibicaoVenda =>
+      ProdutoEmbalagem.textoQuantidadeArmazenada(
+        produto: produto.target,
+        quantidadeArmazenada: quantidade,
+      );
+
   double get subtotal => quantidadeVendaEfetiva * precoUnitario;
   double get subtotalCusto => quantidadeVendaEfetiva * precoCustoUnitario;
   double get lucro => subtotal - subtotalCusto;

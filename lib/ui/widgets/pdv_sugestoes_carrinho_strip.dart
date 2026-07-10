@@ -6,14 +6,12 @@ import '../../domain/pdv_consulta_insights_service.dart';
 class PdvSugestoesCarrinhoStrip extends StatelessWidget {
   const PdvSugestoesCarrinhoStrip({
     super.key,
-    required this.produtoOrigemNome,
     required this.sugestoes,
     required this.formatarMoeda,
     required this.onAdicionar,
     required this.onFechar,
   });
 
-  final String produtoOrigemNome;
   final List<PdvConsultaAgregadoVenda> sugestoes;
   final String Function(double) formatarMoeda;
   final ValueChanged<PdvConsultaAgregadoVenda> onAdicionar;
@@ -42,9 +40,7 @@ class PdvSugestoesCarrinhoStrip extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'Ofereca tambem — $produtoOrigemNome',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    'Ofereca tambem',
                     style: theme.textTheme.labelMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: scheme.onSurface,
@@ -94,7 +90,8 @@ class _LinhaSugestao extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final detalhe = agregado.detalheLinha(formatarMoeda);
+    final badge = agregado.badgeFaixaCarrinho();
+    final subtitulo = agregado.subtituloFaixaCarrinho(formatarMoeda);
 
     return Material(
       color: Colors.transparent,
@@ -102,40 +99,81 @@ class _LinhaSugestao extends StatelessWidget {
         onTap: onAdicionar,
         borderRadius: BorderRadius.circular(4),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+          padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
-                child: RichText(
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  text: TextSpan(
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSurface,
-                    ),
-                    children: [
-                      TextSpan(text: agregado.nome),
-                      TextSpan(
-                        text: ' · $detalhe',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.w500,
-                          color: agregado.semEstoque
-                              ? scheme.error
-                              : scheme.onSurfaceVariant,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        if (badge != null) ...[
+                          _BadgeOrigem(rotulo: badge),
+                          const SizedBox(width: 5),
+                        ],
+                        Expanded(
+                          child: Text(
+                            agregado.nome,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
+                      ],
+                    ),
+                    Text(
+                      subtitulo,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: agregado.semEstoque
+                            ? scheme.error
+                            : scheme.onSurfaceVariant,
+                        fontWeight:
+                            agregado.semEstoque ? FontWeight.w700 : FontWeight.w500,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
               Icon(
                 Icons.add,
-                size: 16,
+                size: 18,
                 color: scheme.primary.withValues(alpha: 0.9),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BadgeOrigem extends StatelessWidget {
+  const _BadgeOrigem({required this.rotulo});
+
+  final String rotulo;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: scheme.secondaryContainer.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        rotulo,
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w800,
+          fontSize: 10,
         ),
       ),
     );

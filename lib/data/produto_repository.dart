@@ -43,6 +43,23 @@ double? calcularCustoMedioPonderadoEntradasNfe(ObjectBox db, int produtoId) {
   }
 }
 
+/// Lancada ao gravar produto com SKU ja usado por outro cadastro.
+class ProdutoSkuDuplicadoException implements Exception {
+  ProdutoSkuDuplicadoException({
+    required this.sku,
+    required this.produtoExistenteNome,
+    this.produtoExistenteId,
+  });
+
+  final String sku;
+  final String produtoExistenteNome;
+  final int? produtoExistenteId;
+
+  @override
+  String toString() =>
+      'SKU "$sku" ja cadastrado no produto "$produtoExistenteNome".';
+}
+
 class ProdutoRepository extends ChangeNotifier {
   ProdutoRepository(this._db) : _estoque = GerenciadorEstoqueService(_db);
 
@@ -279,6 +296,7 @@ class ProdutoRepository extends ChangeNotifier {
   List<Produto> pesquisar(
     String termo, {
     int? clienteId,
+    int offset = 0,
     int limite = 50,
     bool somenteAtivos = true,
     bool somenteInativos = false,
@@ -299,6 +317,7 @@ class ProdutoRepository extends ChangeNotifier {
         return _pesquisarModoCuringa(
           segmentos: curinga.segmentos,
           clienteId: clienteId,
+          offset: offset,
           limite: limite,
           somenteAtivos: somenteAtivos,
           somenteInativos: somenteInativos,
@@ -326,7 +345,7 @@ class ProdutoRepository extends ChangeNotifier {
           excluirProdutosInternos: excluirProdutosInternos,
         ),
       );
-      return docs.map((d) => d.produto).take(limite).toList();
+      return docs.map((d) => d.produto).skip(offset).take(limite).toList();
     }
 
     final scorePorProduto = <int, double>{};
@@ -373,7 +392,24 @@ class ProdutoRepository extends ChangeNotifier {
             return a.nomeNormalizado.compareTo(b.nomeNormalizado);
           });
 
-    return resultados.map((d) => d.produto).take(limite).toList();
+    return resultados.map((d) => d.produto).skip(offset).take(limite).toList();
+  }
+
+  /// Pagina de busca para listas longas (cadastro, estoque).
+  List<Produto> pesquisarPaginaCadastro(
+    String termo, {
+    int offset = 0,
+    int limite = 40,
+    bool somenteAtivos = true,
+    bool somenteInativos = false,
+  }) {
+    return pesquisarPadraoPdv(
+      termo,
+      offset: offset,
+      limite: limite,
+      somenteAtivos: somenteAtivos,
+      somenteInativos: somenteInativos,
+    );
   }
 
   bool _incluirDocNaPesquisa(
@@ -394,6 +430,7 @@ class ProdutoRepository extends ChangeNotifier {
   List<Produto> _pesquisarModoCuringa({
     required List<String> segmentos,
     int? clienteId,
+    int offset = 0,
     required int limite,
     required bool somenteAtivos,
     required bool somenteInativos,
@@ -436,7 +473,7 @@ class ProdutoRepository extends ChangeNotifier {
             return a.nomeNormalizado.compareTo(b.nomeNormalizado);
           });
 
-    return resultados.map((d) => d.produto).take(limite).toList();
+    return resultados.map((d) => d.produto).skip(offset).take(limite).toList();
   }
 
   double _scoreProdutoCuringa(
@@ -514,6 +551,7 @@ class ProdutoRepository extends ChangeNotifier {
   List<Produto> pesquisarPadraoPdv(
     String termo, {
     int? clienteId,
+    int offset = 0,
     int limite = 50,
     bool somenteAtivos = true,
     bool somenteInativos = false,
@@ -521,6 +559,7 @@ class ProdutoRepository extends ChangeNotifier {
     return pesquisar(
       termo,
       clienteId: clienteId,
+      offset: offset,
       limite: limite,
       somenteAtivos: somenteAtivos,
       somenteInativos: somenteInativos,
@@ -615,7 +654,7 @@ class ProdutoRepository extends ChangeNotifier {
       )) {
         continue;
       }
-      if (doc.codigoInternoNormalizado == norm) {
+      if (doc.correspondeCodigoInterno(norm)) {
         return doc.produto;
       }
     }
@@ -717,6 +756,12 @@ class ProdutoRepository extends ChangeNotifier {
     final codigosBarrasAlternativos = codigosBarrasAlternativosDeApelidos(
       apelidosBrutos,
     );
+    final skuSemZeros = skuNumericoSemZerosEsquerda(produto.codigoInterno);
+    final palavrasExtrasSku = <String>[];
+    if (skuSemZeros != null &&
+        skuSemZeros != somenteDigitosBusca(codigoInterno)) {
+      palavrasExtrasSku.add(skuSemZeros);
+    }
     final textoMedidas = [
       nome,
       descricao,
@@ -738,6 +783,7 @@ class ProdutoRepository extends ChangeNotifier {
       fornecedor,
       fabricante,
       ...apelidosNormalizados,
+      ...palavrasExtrasSku,
       ...tokensMedidas,
     ].join(' ');
     final palavras = textoCompleto
@@ -890,6 +936,14 @@ class ProdutoRepository extends ChangeNotifier {
     }
     if (consultaNormalizada == codigoInterno && codigoInterno.isNotEmpty) {
       score += 1000;
+    } else if (skuBuscaCorrespondeExato(consultaNormalizada, codigoInterno)) {
+      score += 1000;
+    } else {
+      final skuParcial =
+          skuBuscaPontuacaoParcial(consultaNormalizada, codigoInterno);
+      if (skuParcial != null) {
+        score += skuParcial;
+      }
     }
     for (final apelido in doc.apelidosNormalizados) {
       if (apelido == consultaNormalizada) {
@@ -964,6 +1018,9 @@ class ProdutoRepository extends ChangeNotifier {
       final tokenDigitos = somenteDigitosBusca(token);
       if (doc.correspondeCodigoBarras(tokenDigitos) && tokenDigitos.isNotEmpty) {
         score += 380;
+        tokenMatched = true;
+      } else if (skuBuscaCorrespondeExato(token, codigoInterno)) {
+        score += 320;
         tokenMatched = true;
       } else if (codigoInterno == token) {
         score += 320;
@@ -1095,10 +1152,14 @@ class ProdutoRepository extends ChangeNotifier {
     String motivoAjusteEstoque = 'Ajuste manual cadastro produto',
     String usuarioAjusteEstoque = '',
   }) {
+    produto.codigoInterno = normalizarCodigoInternoPersistido(
+      produto.codigoInterno,
+    );
     produto.nomeImpressao = ProdutoNomeExibicao.normalizarNomeImpressaoPersistido(
       nome: produto.nome,
       nomeImpressao: produto.nomeImpressao,
     );
+    _garantirSkuUnico(produto);
     final id = _db.store.runInTransaction(TxMode.write, () {
       if (produto.id > 0) {
         final existente = _db.produtoBox.get(produto.id);
@@ -1107,16 +1168,19 @@ class ProdutoRepository extends ChangeNotifier {
         }
         final novoEstoque = produto.estoqueReal;
         _copiarCamposCadastro(existente, produto);
-        if (novoEstoque != existente.estoqueReal) {
+        final estoqueMudou = novoEstoque != existente.estoqueReal;
+        if (!estoqueMudou) {
+          existente.estoqueAtual = existente.estoqueReal;
+        }
+        // Cadastro antes do ajuste de estoque: o gerenciador recarrega o produto do banco.
+        _db.produtoBox.put(existente);
+        if (estoqueMudou) {
           _estoque.executarAjusteManualInventario(
             existente,
             novoEstoque,
             motivoAjusteEstoque,
             usuarioLogin: usuarioAjusteEstoque,
           );
-        } else {
-          existente.estoqueAtual = existente.estoqueReal;
-          _db.produtoBox.put(existente);
         }
         return existente.id;
       }
@@ -1188,6 +1252,47 @@ class ProdutoRepository extends ChangeNotifier {
     destino.ativo = origem.ativo;
   }
 
+  /// Remove zeros a esquerda de SKUs numericos legados (ex.: 008858 -> 8858).
+  /// Pula produtos cujo SKU canonico ja pertence a outro cadastro.
+  int migrarSkuZerosEsquerdaLegado() {
+    final todos = _db.produtoBox.getAll();
+    if (todos.isEmpty) return 0;
+
+    var alterados = 0;
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final p in todos) {
+        final atual = p.codigoInterno.trim();
+        if (atual.isEmpty) continue;
+        final novo = normalizarCodigoInternoPersistido(atual);
+        if (novo == atual) continue;
+
+        final novoLower = novo.toLowerCase();
+        final conflito = todos.any(
+          (outro) =>
+              outro.id != p.id &&
+              outro.codigoInterno.trim().toLowerCase() == novoLower,
+        );
+        if (conflito) {
+          debugPrint(
+            'Migracao SKU: pulando produto ${p.id} ($atual -> $novo) — SKU ja em uso.',
+          );
+          continue;
+        }
+
+        p.codigoInterno = novo;
+        _db.produtoBox.put(p);
+        alterados++;
+      }
+    });
+
+    if (alterados > 0) {
+      invalidarCacheBusca();
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+      debugPrint('Migracao SKU: $alterados produto(s) normalizado(s).');
+    }
+    return alterados;
+  }
+
   bool remover(int id) {
     final ok = _db.produtoBox.remove(id);
     if (ok) {
@@ -1198,6 +1303,55 @@ class ProdutoRepository extends ChangeNotifier {
   }
 
   Produto? obterPorId(int id) => _db.produtoBox.get(id);
+
+  /// Busca por codigo interno (literal ou numerico sem zeros a esquerda).
+  Produto? obterPorCodigoInterno(String codigo, {int? ignorarProdutoId}) {
+    final alvo = codigo.trim();
+    if (alvo.isEmpty) return null;
+    _garantirCachesAtualizados();
+    final norm = _normalizarTexto(alvo);
+    for (final doc in _cacheDocs) {
+      final p = doc.produto;
+      if (ignorarProdutoId != null && p.id == ignorarProdutoId) continue;
+      if (doc.correspondeCodigoInterno(norm)) return p;
+    }
+    return null;
+  }
+
+  /// SKU automatico curto para PDV: 1, 2, 3… apos o maior numerico ja cadastrado.
+  String proximoSkuAutomatico({int? ignorarProdutoId}) {
+    final codigos = <String>[];
+    for (final p in listarTodos()) {
+      if (ignorarProdutoId != null && p.id == ignorarProdutoId) continue;
+      codigos.add(p.codigoInterno);
+    }
+    var sku = proximoSkuNumericoSequencial(codigos);
+    var tentativas = 0;
+    while (obterPorCodigoInterno(sku, ignorarProdutoId: ignorarProdutoId) !=
+            null &&
+        tentativas < 1000) {
+      final n = int.tryParse(sku) ?? 0;
+      sku = '${n + 1}';
+      tentativas++;
+    }
+    return sku;
+  }
+
+  void _garantirSkuUnico(Produto produto) {
+    final sku = produto.codigoInterno.trim();
+    if (sku.isEmpty) return;
+    final conflito = obterPorCodigoInterno(
+      sku,
+      ignorarProdutoId: produto.id > 0 ? produto.id : null,
+    );
+    if (conflito != null) {
+      throw ProdutoSkuDuplicadoException(
+        sku: sku,
+        produtoExistenteNome: conflito.nome,
+        produtoExistenteId: conflito.id,
+      );
+    }
+  }
 
   /// Entradas por importacao de NF-e, mais recentes primeiro.
   List<HistoricoEntrada> listarHistoricoEntradaPorProduto(int produtoId) {
@@ -1355,6 +1509,17 @@ class _ProdutoBuscaDoc {
   final List<String> apelidosNormalizados;
   final List<String> codigosBarrasAlternativos;
   final List<String> palavrasBusca;
+
+  bool correspondeCodigoInterno(String consultaNormalizada) {
+    if (codigoInternoNormalizado.isEmpty || consultaNormalizada.isEmpty) {
+      return false;
+    }
+    if (consultaNormalizada == codigoInternoNormalizado) return true;
+    return skuBuscaCorrespondeExato(
+      consultaNormalizada,
+      codigoInternoNormalizado,
+    );
+  }
 
   bool correspondeCodigoBarras(String digitos) {
     if (digitos.isEmpty) return false;

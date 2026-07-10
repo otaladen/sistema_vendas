@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 
 import '../../data/produto_repository.dart';
+import '../../domain/produto_embalagem.dart';
 import '../../model/produto.dart';
 import 'relatorio_drill_down.dart';
 import 'relatorio_export_util.dart';
@@ -27,10 +28,12 @@ class _RelatorioEstoqueMinimoPageState extends State<RelatorioEstoqueMinimoPage>
 
   void _carregar() {
     final todos = widget.produtoRepository.listarTodos();
-    final critico = todos.where((p) => p.estoqueReal < p.quantidadeMinima).toList()
+    final critico = todos
+        .where((p) => p.estoqueExibicao < p.quantidadeMinima)
+        .toList()
       ..sort((a, b) {
-        final da = a.quantidadeMinima - a.estoqueReal;
-        final db = b.quantidadeMinima - b.estoqueReal;
+        final da = a.quantidadeMinima - a.estoqueExibicao;
+        final db = b.quantidadeMinima - b.estoqueExibicao;
         return db.compareTo(da);
       });
     setState(() => _lista = critico);
@@ -47,15 +50,28 @@ class _RelatorioEstoqueMinimoPageState extends State<RelatorioEstoqueMinimoPage>
           'Unidade',
         ],
         ..._lista.map(
-          (p) => [
-            p.codigoInterno,
-            p.nome,
-            p.categoria,
-            '${p.quantidadeMinima}',
-            '${p.estoqueReal}',
-            '${p.quantidadeMinima - p.estoqueReal}',
-            p.unidade,
-          ],
+          (p) {
+            final estoqueTxt = ProdutoEmbalagem.formatarEstoque(
+              p,
+              p.estoqueReal,
+              comUnidade: true,
+            );
+            final falta = (p.quantidadeMinima - p.estoqueExibicao)
+                .clamp(0.0, double.infinity);
+            final faltaTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+              p,
+              falta,
+            );
+            return [
+              p.codigoInterno,
+              p.nome,
+              p.categoria,
+              '${p.quantidadeMinima}',
+              estoqueTxt,
+              '$faltaTxt ${p.unidade}',
+              p.unidade,
+            ];
+          },
         ),
       ];
 
@@ -66,13 +82,25 @@ class _RelatorioEstoqueMinimoPageState extends State<RelatorioEstoqueMinimoPage>
       cabecalho: ['Codigo', 'Produto', 'Min', 'Atual', 'Falta'],
       linhas: _lista
           .map(
-            (p) => [
-              p.codigoInterno,
-              p.nome,
-              '${p.quantidadeMinima}',
-              '${p.estoqueReal}',
-              '${p.quantidadeMinima - p.estoqueReal}',
-            ],
+            (p) {
+              final estoqueTxt = ProdutoEmbalagem.formatarEstoque(
+                p,
+                p.estoqueReal,
+              );
+              final falta =
+                  (p.quantidadeMinima - p.estoqueExibicao).clamp(0.0, double.infinity);
+              final faltaTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+                p,
+                falta,
+              );
+              return [
+                p.codigoInterno,
+                p.nome,
+                '${p.quantidadeMinima}',
+                estoqueTxt,
+                faltaTxt,
+              ];
+            },
           )
           .toList(),
     );
@@ -102,15 +130,25 @@ class _RelatorioEstoqueMinimoPageState extends State<RelatorioEstoqueMinimoPage>
               itemCount: _lista.length,
               itemBuilder: (context, i) {
                 final p = _lista[i];
-                final falta = p.quantidadeMinima - p.estoqueReal;
+                final falta =
+                    (p.quantidadeMinima - p.estoqueExibicao).clamp(0.0, double.infinity);
+                final estoqueTxt = ProdutoEmbalagem.formatarEstoque(
+                  p,
+                  p.estoqueReal,
+                  comUnidade: true,
+                );
+                final faltaTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+                  p,
+                  falta,
+                );
                 final critico = falta >= p.quantidadeMinima * 0.5;
                 return ListTile(
                   title: Text(p.nome),
                   subtitle: Text(
                     '${p.categoria.isNotEmpty ? '${p.categoria} · ' : ''}'
                     'Min: ${p.quantidadeMinima} ${p.unidade} · '
-                    'Atual: ${p.estoqueReal} ${p.unidade} · '
-                    'Falta: $falta',
+                    'Atual: $estoqueTxt · '
+                    'Falta: $faltaTxt ${p.unidade}',
                   ),
                   trailing: critico
                       ? Icon(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../data/app_config_repository.dart';
 import '../../data/produto_repository.dart';
@@ -18,45 +19,79 @@ class FiscalImportarNfePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Importar NF-e (XML)'),
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Icon(
-                  Icons.receipt_long_outlined,
-                  size: 56,
-                  color: HubNavColors.menuNotasFiscais(context),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Leia o XML da nota, confira os itens e lance a entrada no estoque.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-                const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: () => NfeImportacaoXmlFlow.executar(
-                    context,
-                    produtoRepository: produtoRepository,
-                    appConfigRepository: appConfigRepository,
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.f1): () =>
+            NfeImportacaoXmlFlow.executar(
+              context,
+              produtoRepository: produtoRepository,
+              appConfigRepository: appConfigRepository,
+            ),
+        const SingleActivator(
+          LogicalKeyboardKey.keyO,
+          control: true,
+        ): () =>
+            NfeImportacaoXmlFlow.executar(
+              context,
+              produtoRepository: produtoRepository,
+              appConfigRepository: appConfigRepository,
+            ),
+      },
+      child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Importar NF-e (XML)'),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Center(
+                  child: Text(
+                    'F1 ou Ctrl+O',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
+                        ),
                   ),
-                  icon: const Icon(Icons.upload_file_outlined),
-                  label: const Text('Selecionar XML'),
                 ),
-              ],
+              ),
+            ],
+          ),
+          body: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Icon(
+                      Icons.receipt_long_outlined,
+                      size: 56,
+                      color: HubNavColors.menuNotasFiscais(context),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Leia o XML da nota, confira os itens e lance a entrada no estoque.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton.icon(
+                      onPressed: () => NfeImportacaoXmlFlow.executar(
+                        context,
+                        produtoRepository: produtoRepository,
+                        appConfigRepository: appConfigRepository,
+                      ),
+                      icon: const Icon(Icons.upload_file_outlined),
+                      label: const Text('Selecionar XML (F1)'),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
-      ),
     );
   }
 }

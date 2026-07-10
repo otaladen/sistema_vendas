@@ -308,8 +308,8 @@ class _NfeImportadasPageState extends State<NfeImportadasPage> {
                     (l) => Padding(
                       padding: const EdgeInsets.only(bottom: 4),
                       child: Text(
-                        '• ${l.nomeProduto}: −${l.quantidadeEstorno} un. '
-                        '(fisico atual ${l.estoqueAtual})',
+                        '• ${l.nomeProduto}: −${l.rotuloEstorno} '
+                        '(fisico atual ${l.rotuloEstoqueAtual})',
                       ),
                     ),
                   ),

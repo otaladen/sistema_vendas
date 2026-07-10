@@ -132,6 +132,21 @@ class PdvConsultaAgregadoVenda {
     }
     return '${tipo.rotulo} · $precoQtd';
   }
+
+  /// Texto enxuto para a faixa do carrinho (PDV rapido).
+  String subtituloFaixaCarrinho(String Function(double) formatarMoeda) {
+    final precoQtd =
+        '${formatarMoeda(precoReferencia)} · $quantidadeSugerida un.';
+    if (semEstoque) return 'Sem estoque · $precoQtd';
+    return precoQtd;
+  }
+
+  /// Badge opcional na faixa do carrinho.
+  String? badgeFaixaCarrinho() {
+    if (historico) return 'Historico';
+    if (cadastrado) return 'Cadastro';
+    return null;
+  }
 }
 
 /// Pacote de insights premium (consulta PDV pacote 3).

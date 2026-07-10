@@ -7,6 +7,8 @@ abstract final class EstoqueTabelaColunas {
   static const double larguraNum = 46;
   static const double larguraMedia = 54;
   static const double larguraPreco = 78;
+  static const double larguraMargem = 48;
+  static const double larguraCobertura = 40;
   static const double larguraAcao = 44;
   static const double larguraProdutoMin = 240;
   static const double alturaCabecalho = 30;
@@ -19,7 +21,8 @@ abstract final class EstoqueTabelaColunas {
         (larguraNum * 5) +
         larguraMedia +
         larguraPreco +
-        (verCusto ? larguraPreco : 0) +
+        (verCusto ? larguraPreco + larguraMargem : 0) +
+        larguraCobertura +
         larguraAcao;
   }
 }

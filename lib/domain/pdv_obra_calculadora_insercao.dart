@@ -48,7 +48,7 @@ abstract final class PdvObraCalculadoraInsercaoUtil {
     required ProdutoRepository produtoRepository,
   }) {
     final erros = <String>[];
-    final avisos = <String>[];
+    final avisos = <String>[ObraCalculadora.avisoEstimativa];
     final linhas = <PdvObraCalculadoraLinhaInsercao>[];
 
     for (final mat in resultado.materiais) {

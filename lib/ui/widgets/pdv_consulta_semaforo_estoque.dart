@@ -29,7 +29,10 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
       quantidadeNoOrcamento: quantidadeNoOrcamento,
     );
     final scheme = Theme.of(context).colorScheme;
-    final rotulo = PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(disponivel);
+    final rotulo = PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(
+      produto,
+      disponivel,
+    );
     final estiloNumero = Theme.of(context).textTheme.labelSmall?.copyWith(
           fontWeight: FontWeight.w600,
           color: scheme.onSurface,

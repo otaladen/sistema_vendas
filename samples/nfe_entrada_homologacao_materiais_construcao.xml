@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+    <infNFe Id="NFe35260612345678000190550010000123451876543219" versao="4.00">
+      <ide>
+        <cUF>35</cUF>
+        <cNF>87654321</cNF>
+        <natOp>VENDA DE MERCADORIA ADQUIRIDA DE TERCEIROS</natOp>
+        <mod>55</mod>
+        <serie>1</serie>
+        <nNF>12345</nNF>
+        <dhEmi>2026-06-02T10:30:00-03:00</dhEmi>
+        <dhSaiEnt>2026-06-02T14:00:00-03:00</dhSaiEnt>
+        <tpNF>1</tpNF>
+        <idDest>1</idDest>
+        <cMunFG>3550308</cMunFG>
+        <tpImp>1</tpImp>
+        <tpEmis>1</tpEmis>
+        <cDV>9</cDV>
+        <tpAmb>2</tpAmb>
+        <finNFe>1</finNFe>
+        <indFinal>0</indFinal>
+        <indPres>9</indPres>
+        <procEmi>0</procEmi>
+        <verProc>SistemaVendas-Homologacao-1.0</verProc>
+      </ide>
+      <emit>
+        <CNPJ>12345678000190</CNPJ>
+        <xNome>MATERIAIS BRASIL CONSTRUCAO LTDA</xNome>
+        <xFant>Construbrasil Deposito</xFant>
+        <enderEmit>
+          <xLgr>Rua das Ferragens</xLgr>
+          <nro>1500</nro>
+          <xBairro>Distrito Industrial</xBairro>
+          <cMun>3550308</cMun>
+          <xMun>Sao Paulo</xMun>
+          <UF>SP</UF>
+          <CEP>01153000</CEP>
+          <cPais>1058</cPais>
+          <xPais>Brasil</xPais>
+          <fone>1133334444</fone>
+        </enderEmit>
+        <IE>123456789112</IE>
+        <CRT>3</CRT>
+      </emit>
+      <dest>
+        <CNPJ>11222333000181</CNPJ>
+        <xNome>NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL</xNome>
+        <enderDest>
+          <xLgr>Av. Exemplo Comprador</xLgr>
+          <nro>200</nro>
+          <xBairro>Centro</xBairro>
+          <cMun>3550308</cMun>
+          <xMun>Sao Paulo</xMun>
+          <UF>SP</UF>
+          <CEP>01001000</CEP>
+          <cPais>1058</cPais>
+          <xPais>Brasil</xPais>
+        </enderDest>
+        <indIEDest>9</indIEDest>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>CIM-CP2-50</cProd>
+          <cEAN>7891033725025</cEAN>
+          <xProd>CIMENTO PORTLAND CP II-E-32 SACO 50KG</xProd>
+          <NCM>25232910</NCM>
+          <CFOP>5102</CFOP>
+          <uCom>SC</uCom>
+          <qCom>100.0000</qCom>
+          <vUnCom>32.5000000000</vUnCom>
+          <vProd>3250.00</vProd>
+          <cEANTrib>7891033725025</cEANTrib>
+          <uTrib>SC</uTrib>
+          <qTrib>100.0000</qTrib>
+          <vUnTrib>32.5000000000</vUnTrib>
+          <indTot>1</indTot>
+        </prod>
+        <imposto>
+          <ICMS>
+            <ICMS00>
+              <orig>0</orig>
+              <CST>00</CST>
+              <modBC>3</modBC>
+              <vBC>3250.00</vBC>
+              <pICMS>18.0000</pICMS>
+              <vICMS>585.00</vICMS>
+            </ICMS00>
+          </ICMS>
+          <PIS>
+            <PISAliq>
+              <CST>01</CST>
+              <vBC>3250.00</vBC>
+              <pPIS>1.6500</pPIS>
+              <vPIS>53.63</vPIS>
+            </PISAliq>
+          </PIS>
+          <COFINS>
+            <COFINSAliq>
+              <CST>01</CST>
+              <vBC>3250.00</vBC>
+              <pCOFINS>7.6000</pCOFINS>
+              <vCOFINS>247.00</vCOFINS>
+            </COFINSAliq>
+          </COFINS>
+        </imposto>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>PVC-TUB-50-6M</cProd>
+          <cEAN>7898068830508</cEAN>
+          <xProd>TUBO PVC SOLDAVEL 50MM COMPRIMENTO 6 METROS</xProd>
+          <NCM>39172300</NCM>
+          <CFOP>5102</CFOP>
+          <uCom>UN</uCom>
+          <qCom>50.0000</qCom>
+          <vUnCom>18.9000000000</vUnCom>
+          <vProd>945.00</vProd>
+          <cEANTrib>7898068830508</cEANTrib>
+          <uTrib>UN</uTrib>
+          <qTrib>50.0000</qTrib>
+          <vUnTrib>18.9000000000</vUnTrib>
+          <indTot>1</indTot>
+        </prod>
+        <imposto>
+          <ICMS>
+            <ICMS00>
+              <orig>0</orig>
+              <CST>00</CST>
+              <modBC>3</modBC>
+              <vBC>945.00</vBC>
+              <pICMS>18.0000</pICMS>
+              <vICMS>170.10</vICMS>
+            </ICMS00>
+          </ICMS>
+          <PIS>
+            <PISAliq>
+              <CST>01</CST>
+              <vBC>945.00</vBC>
+              <pPIS>1.6500</pPIS>
+              <vPIS>15.59</vPIS>
+            </PISAliq>
+          </PIS>
+          <COFINS>
+            <COFINSAliq>
+              <CST>01</CST>
+              <vBC>945.00</vBC>
+              <pCOFINS>7.6000</pCOFINS>
+              <vCOFINS>71.82</vCOFINS>
+            </COFINSAliq>
+          </COFINS>
+        </imposto>
+      </det>
+      <total>
+        <ICMSTot>
+          <vBC>4195.00</vBC>
+          <vICMS>755.10</vICMS>
+          <vICMSDeson>0.00</vICMSDeson>
+          <vFCP>0.00</vFCP>
+          <vBCST>0.00</vBCST>
+          <vST>0.00</vST>
+          <vFCPST>0.00</vFCPST>
+          <vFCPSTRet>0.00</vFCPSTRet>
+          <vProd>4195.00</vProd>
+          <vFrete>0.00</vFrete>
+          <vSeg>0.00</vSeg>
+          <vDesc>0.00</vDesc>
+          <vII>0.00</vII>
+          <vIPI>0.00</vIPI>
+          <vIPIDevol>0.00</vIPIDevol>
+          <vPIS>69.22</vPIS>
+          <vCOFINS>318.82</vCOFINS>
+          <vOutro>0.00</vOutro>
+          <vNF>4195.00</vNF>
+        </ICMSTot>
+      </total>
+      <transp>
+        <modFrete>9</modFrete>
+      </transp>
+      <cobr>
+        <fat>
+          <nFat>12345</nFat>
+          <vOrig>4195.00</vOrig>
+          <vDesc>0.00</vDesc>
+          <vLiq>4195.00</vLiq>
+        </fat>
+        <dup>
+          <nDup>001/002</nDup>
+          <dVenc>2026-07-02</dVenc>
+          <vDup>2097.50</vDup>
+        </dup>
+        <dup>
+          <nDup>002/002</nDup>
+          <dVenc>2026-08-01</dVenc>
+          <vDup>2097.50</vDup>
+        </dup>
+      </cobr>
+      <pag>
+        <detPag>
+          <indPag>1</indPag>
+          <tPag>15</tPag>
+          <vPag>4195.00</vPag>
+        </detPag>
+      </pag>
+      <infAdic>
+        <infCpl>NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL. Arquivo gerado para teste de importacao de entrada no Sistema Vendas.</infCpl>
+      </infAdic>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00">
+    <infProt Id="ID135260612345678000190550010000123451876543219">
+      <tpAmb>2</tpAmb>
+      <verAplic>SVRS-HOMOLOGACAO</verAplic>
+      <chNFe>35260612345678000190550010000123451876543219</chNFe>
+      <dhRecbto>2026-06-02T10:35:12-03:00</dhRecbto>
+      <nProt>135260600000123</nProt>
+      <digVal>abcdefghijklmnopqrstuvwxyz1234567890AB=</digVal>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>

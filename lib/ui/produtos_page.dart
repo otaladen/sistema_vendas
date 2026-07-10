@@ -14,8 +14,9 @@ import '../data/lista_compra_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/produto_sugestao_venda_repository.dart';
 import '../domain/permissao_usuario.dart';
+import '../domain/produto_embalagem.dart';
+import '../data/produto_busca_util.dart';
 import '../domain/produto_substitutos_util.dart';
-import '../domain/produto_unidade_exibicao.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
@@ -38,7 +39,7 @@ import 'layout/app_layout.dart';
 import 'widgets/abas_historico_produto_widget.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
-import 'widgets/produto_busca_input.dart';
+import 'produtos/produto_pesquisa_dialog.dart';
 import 'produtos/produtos_sugestoes_venda_section.dart';
 
 class _CadastroProdutoSalvarIntent extends Intent {
@@ -498,15 +499,14 @@ class _ProdutosPageState extends State<ProdutosPage>
     super.dispose();
   }
 
-  String _gerarSkuAutomaticamente() {
-    return 'SKU-${DateTime.now().millisecondsSinceEpoch}';
-  }
-
   bool _skuJaExiste(String skuNormalizado) {
+    final alvo = normalizarCodigoInternoPersistido(skuNormalizado).toLowerCase();
     final produtos = widget.produtoRepository.listarTodos();
     for (final produto in produtos) {
-      final mesmoSku =
-          produto.codigoInterno.trim().toLowerCase() == skuNormalizado;
+      final mesmoSku = normalizarCodigoInternoPersistido(
+            produto.codigoInterno,
+          ).toLowerCase() ==
+          alvo;
       final emEdicao =
           _produtoEmEdicaoId != null && produto.id == _produtoEmEdicaoId;
       if (mesmoSku && !emEdicao) {
@@ -1012,17 +1012,27 @@ class _ProdutosPageState extends State<ProdutosPage>
     final nomeExibir = nome.isEmpty ? 'Novo produto' : nome;
     final sku = _codigoInternoController.text.trim();
     final skuRotulo = _gerarSkuAutomatico
-        ? 'SKU auto'
+        ? 'SKU ${widget.produtoRepository.proximoSkuAutomatico(ignorarProdutoId: _produtoEmEdicaoId)} (auto)'
         : (sku.isEmpty ? 'Sem SKU' : sku);
     final ean = _codigoBarrasController.text.trim();
     final preco1 = _parseValorMonetario(_preco1Controller.text);
-    final estoque = int.tryParse(_estoqueController.text.trim()) ?? 0;
+    final estoque = _lerEstoqueDoFormulario();
     final minimo = int.tryParse(_quantidadeMinimaController.text.trim()) ?? 0;
     final unidade = _normalizarUnidade(_unidadeSelecionada);
+    final estoqueExib = ProdutoEmbalagem.formatarEstoque(
+      _produtoEmbalagemContexto(),
+      estoque,
+      comUnidade: true,
+    );
     final ncmDigits = _ncmController.text.replaceAll(RegExp(r'\D'), '');
     final semNcm = ncmDigits.length != 8;
-    final estoqueBaixo =
-        minimo > 0 ? estoque <= minimo : estoque <= 0 && _produtoEmEdicaoId != null;
+    final estoqueBaixo = minimo > 0
+        ? ProdutoEmbalagem.valorEstoqueExibicao(
+                _produtoEmbalagemContexto(),
+                estoque,
+              ) <=
+              minimo
+        : estoque <= 0 && _produtoEmEdicaoId != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: _erpGap8),
@@ -1129,7 +1139,7 @@ class _ProdutosPageState extends State<ProdutosPage>
               ),
               const SizedBox(height: 4),
               Text(
-                'Estoque: $estoque $unidade',
+                'Estoque: $estoqueExib',
                 style: theme.textTheme.bodySmall?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
@@ -2158,16 +2168,15 @@ class _ProdutosPageState extends State<ProdutosPage>
     _definirStatus('Produto excluido com sucesso.', erro: false);
   }
 
-  /// Custo medio para exibicao: ponderado pelas entradas de NF-e; senao acompanha o preco de custo.
+  /// Custo medio para exibicao: valor persistido no produto (media ponderada das entradas).
   double _custoMedioInteligenteParaExibicao() {
     final precoDigitado =
         _parseValorMonetario(_precoCustoController.text) ?? 0.0;
     final id = _produtoEmEdicaoId;
     if (id != null && id > 0) {
-      final cm = widget.produtoRepository
-          .calcularCustoMedioPonderadoPorEntradasNfe(id);
-      if (cm != null) {
-        return cm;
+      final p = widget.produtoRepository.obterPorId(id);
+      if (p != null) {
+        return p.custoMedio >= 0 ? p.custoMedio : 0;
       }
     }
     return precoDigitado < 0 ? 0 : precoDigitado;
@@ -2895,6 +2904,36 @@ class _ProdutosPageState extends State<ProdutosPage>
   String _unidadeCompraNoFormulario() {
     return _normalizarUnidadeCompraOpcional(_unidadeCompraController.text) ??
         '';
+  }
+
+  Produto _produtoEmbalagemContexto() {
+    return Produto(
+      codigoInterno: _codigoInternoController.text.trim().isEmpty
+          ? 'rascunho'
+          : _codigoInternoController.text.trim(),
+      nome: _nomeController.text.trim().isEmpty
+          ? 'Novo'
+          : _nomeController.text.trim(),
+      unidade: _normalizarUnidade(_unidadeSelecionada),
+      unidadeCompra: _unidadeCompraNoFormulario(),
+      quantidadePorEmbalagem: _lerQuantidadeEmbalagem(),
+      embalagemMultiplica: _embalagemMultiplica,
+      permiteQuantidadeFracionada: _permiteQuantidadeFracionada,
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 0,
+    );
+  }
+
+  bool get _estoqueFormularioAceitaDecimal =>
+      ProdutoEmbalagem.estoqueUsaEscalaFracionada(_produtoEmbalagemContexto());
+
+  int _lerEstoqueDoFormulario() {
+    return ProdutoEmbalagem.parseEstoqueEntrada(
+          _estoqueController.text.trim(),
+          _produtoEmbalagemContexto(),
+        ) ??
+        0;
   }
 
   List<String> _opcoesDropdownUnidadeCompra(String uVenda) {
@@ -3635,6 +3674,15 @@ class _ProdutosPageState extends State<ProdutosPage>
     return _moedaBrFormatter.format(valor);
   }
 
+  String _resolverCodigoInternoAoSalvar() {
+    if (_gerarSkuAutomatico) {
+      return widget.produtoRepository.proximoSkuAutomatico(
+        ignorarProdutoId: _produtoEmEdicaoId,
+      );
+    }
+    return _codigoInternoController.text.trim();
+  }
+
   String? _validarSku(String? value) {
     if (_gerarSkuAutomatico) {
       return null;
@@ -3859,7 +3907,6 @@ class _ProdutosPageState extends State<ProdutosPage>
       return;
     }
 
-    final codigoInternoDigitado = _codigoInternoController.text.trim();
     final nomePadrao = _normalizarNomeProduto(_nomeController.text);
     final descricao = _descricaoController.text.trim();
     final categoria = _categoriaSelecionada?.trim() ?? '';
@@ -3882,24 +3929,26 @@ class _ProdutosPageState extends State<ProdutosPage>
         ? null
         : widget.produtoRepository.obterPorId(_produtoEmEdicaoId!);
     final pc = precoCusto!;
+    final temHistoricoNfe = produtoExistente != null &&
+        widget.produtoRepository.calcularCustoMedioPonderadoPorEntradasNfe(
+              produtoExistente.id,
+            ) !=
+            null;
     final double custoMedioPersistido = produtoExistente != null
-        ? (widget.produtoRepository.calcularCustoMedioPonderadoPorEntradasNfe(
-                produtoExistente.id,
-              ) ??
-              (pc < 0 ? 0.0 : pc))
+        ? (temHistoricoNfe
+            ? produtoExistente.custoMedio
+            : (pc < 0 ? 0.0 : pc))
         : (pc < 0 ? 0.0 : pc);
     final preco1 = _parseValorMonetario(_preco1Controller.text);
     final preco2 = _parseValorMonetario(_preco2Controller.text);
     final preco3 = _parseValorMonetario(_preco3Controller.text);
-    final estoque = int.tryParse(_estoqueController.text) ?? 0;
+    final estoque = _lerEstoqueDoFormulario();
     final quantidadeMinima =
         int.tryParse(_quantidadeMinimaController.text) ?? 0;
     final leadTimeDias = int.tryParse(_leadTimeDiasController.text) ?? 7;
     final estoqueSeguranca =
         int.tryParse(_estoqueSegurancaController.text) ?? 0;
-    final codigoInternoFinal = _gerarSkuAutomatico
-        ? _gerarSkuAutomaticamente()
-        : codigoInternoDigitado;
+    final codigoInternoFinal = _resolverCodigoInternoAoSalvar();
 
     _nomeController.text = nomePadrao;
 
@@ -3987,7 +4036,23 @@ class _ProdutosPageState extends State<ProdutosPage>
       criadoEm: produtoExistente?.criadoEm,
     );
     final estavaEditando = _produtoEmEdicaoId != null;
-    final idSalvo = widget.produtoRepository.salvar(produto);
+    try {
+      final idSalvo = widget.produtoRepository.salvar(produto);
+      await _finalizarSalvarProduto(
+        produto: produto,
+        idSalvo: idSalvo,
+        estavaEditando: estavaEditando,
+      );
+    } on ProdutoSkuDuplicadoException catch (e) {
+      _definirStatus(e.toString(), erro: true);
+    }
+  }
+
+  Future<void> _finalizarSalvarProduto({
+    required Produto produto,
+    required int idSalvo,
+    required bool estavaEditando,
+  }) async {
     try {
       _sugestaoVendaRepo.substituirDoProduto(
         idSalvo,
@@ -4023,7 +4088,12 @@ class _ProdutosPageState extends State<ProdutosPage>
         _resetarFormulario();
       }
     } else {
-      _resetarFormulario();
+      final salvo = widget.produtoRepository.obterPorId(idSalvo);
+      if (salvo != null) {
+        _editarProdutoNoCabecalho(salvo);
+      } else {
+        _resetarFormulario();
+      }
       setState(() => _historicoVersao++);
     }
     _definirStatus(
@@ -4100,7 +4170,10 @@ class _ProdutosPageState extends State<ProdutosPage>
       _preco3Controller.text = _formatarValorMonetario(
         produto.preco3 > 0 ? produto.preco3 : produto.precoVenda,
       );
-      _estoqueController.text = produto.estoque.toString();
+      _estoqueController.text = ProdutoEmbalagem.formatarEstoque(
+        produto,
+        produto.estoque,
+      );
       _quantidadeMinimaController.text = produto.quantidadeMinima.toString();
       _leadTimeDiasController.text =
           produto.leadTimeDias > 0 ? produto.leadTimeDias.toString() : '7';
@@ -4316,14 +4389,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   Produto? _produtoPorCodigoInterno(String codigo) {
-    final alvo = codigo.trim().toLowerCase();
-    if (alvo.isEmpty) return null;
-    for (final p in widget.produtoRepository.listarTodos()) {
-      if (p.codigoInterno.trim().toLowerCase() == alvo) {
-        return p;
-      }
-    }
-    return null;
+    return widget.produtoRepository.obterPorCodigoInterno(codigo);
   }
 
   Future<void> _importarProdutosCsv() async {
@@ -4603,6 +4669,9 @@ class _ProdutosPageState extends State<ProdutosPage>
       if (codigo.isEmpty && idxCodEx != null && idxCodEx < row.length) {
         codigo = row[idxCodEx].trim();
       }
+      if (codigo.isNotEmpty) {
+        codigo = normalizarCodigoInternoPersistido(codigo);
+      }
       final nome = row[idxNome].trim();
       final descExtra = idxDescricao != null && idxDescricao < row.length
           ? row[idxDescricao].trim()
@@ -4748,15 +4817,19 @@ class _ProdutosPageState extends State<ProdutosPage>
         criadoEm: existente?.criadoEm,
         ativo: existente?.ativo ?? true,
       );
-      final idSalvo = widget.produtoRepository.salvar(produto);
-      widget.produtoRepository.sincronizarCustoMedioInteligenteParaProduto(
-        idSalvo,
-        legadoImportacao: custoMedioVal > 0 ? custoMedioVal : null,
-      );
-      if (existente != null) {
-        atualizados++;
-      } else {
-        inseridos++;
+      try {
+        final idSalvo = widget.produtoRepository.salvar(produto);
+        widget.produtoRepository.sincronizarCustoMedioInteligenteParaProduto(
+          idSalvo,
+          legadoImportacao: custoMedioVal > 0 ? custoMedioVal : null,
+        );
+        if (existente != null) {
+          atualizados++;
+        } else {
+          inseridos++;
+        }
+      } on ProdutoSkuDuplicadoException catch (e) {
+        erros.add('Linha ${r + 1}: $e');
       }
     }
 
@@ -4804,306 +4877,12 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   Future<void> _abrirPesquisaProduto() async {
-    final pesquisaController = TextEditingController();
-    final resultadosScrollController = ScrollController();
-    final pesquisaFocusNode = FocusNode();
-    var somenteInativosLista = false;
-    List<Produto> resultados = widget.produtoRepository.pesquisarPadraoPdv(
-      '',
-      limite: 80,
-      somenteAtivos: !somenteInativosLista,
-      somenteInativos: somenteInativosLista,
-    );
-    int indiceSelecionado = resultados.isEmpty ? -1 : 0;
-
-    final produtoSelecionado = await showDialog<Produto>(
+    final produtoSelecionado = await showProdutoPesquisaDialog(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            TextSpan spanComDestaque(
-              String texto,
-              String termo,
-              TextStyle estiloBase,
-            ) {
-              final busca = termo.trim().toLowerCase();
-              if (busca.isEmpty) {
-                return TextSpan(text: texto, style: estiloBase);
-              }
-              final textoMinusculo = texto.toLowerCase();
-              final spans = <TextSpan>[];
-              var cursor = 0;
-
-              while (cursor < texto.length) {
-                final indice = textoMinusculo.indexOf(busca, cursor);
-                if (indice < 0) {
-                  spans.add(TextSpan(text: texto.substring(cursor)));
-                  break;
-                }
-                if (indice > cursor) {
-                  spans.add(TextSpan(text: texto.substring(cursor, indice)));
-                }
-                spans.add(
-                  TextSpan(
-                    text: texto.substring(indice, indice + busca.length),
-                    style: estiloBase.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                );
-                cursor = indice + busca.length;
-              }
-
-              return TextSpan(style: estiloBase, children: spans);
-            }
-
-            void rolarParaIndiceSelecionado() {
-              if (!resultadosScrollController.hasClients ||
-                  indiceSelecionado < 0) {
-                return;
-              }
-              const alturaEstimadaLinha = 64.0;
-              final posicaoDesejada = (indiceSelecionado * alturaEstimadaLinha)
-                  .clamp(
-                    0.0,
-                    resultadosScrollController.position.maxScrollExtent,
-                  );
-              resultadosScrollController.animateTo(
-                posicaoDesejada,
-                duration: const Duration(milliseconds: 120),
-                curve: Curves.easeOut,
-              );
-            }
-
-            return Focus(
-              onKeyEvent: (node, event) {
-                if (event is! KeyDownEvent || resultados.isEmpty) {
-                  return KeyEventResult.ignored;
-                }
-
-                if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                  setDialogState(() {
-                    indiceSelecionado = math.min(
-                      indiceSelecionado + 1,
-                      resultados.length - 1,
-                    );
-                  });
-                  rolarParaIndiceSelecionado();
-                  return KeyEventResult.handled;
-                }
-
-                if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                  setDialogState(() {
-                    indiceSelecionado = math.max(indiceSelecionado - 1, 0);
-                  });
-                  rolarParaIndiceSelecionado();
-                  return KeyEventResult.handled;
-                }
-
-                if (event.logicalKey == LogicalKeyboardKey.enter ||
-                    event.logicalKey == LogicalKeyboardKey.numpadEnter) {
-                  final indice = indiceSelecionado >= 0 ? indiceSelecionado : 0;
-                  Navigator.pop(context, resultados[indice]);
-                  return KeyEventResult.handled;
-                }
-
-                if (event.logicalKey == LogicalKeyboardKey.escape) {
-                  Navigator.pop(context);
-                  return KeyEventResult.handled;
-                }
-
-                return KeyEventResult.ignored;
-              },
-              child: AlertDialog(
-                title: const Text('Pesquisar produto'),
-                content: AdaptiveDialogPane(
-                  desktopWidth: 760,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(
-                              height: 28,
-                              width: 28,
-                              child: Checkbox(
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                                visualDensity: VisualDensity.compact,
-                                value: somenteInativosLista,
-                                onChanged: (v) {
-                                  if (v == null) return;
-                                  setDialogState(() {
-                                    somenteInativosLista = v;
-                                    resultados = widget.produtoRepository
-                                        .pesquisarPadraoPdv(
-                                          pesquisaController.text,
-                                          limite: 80,
-                                          somenteAtivos: !somenteInativosLista,
-                                          somenteInativos: somenteInativosLista,
-                                        );
-                                    indiceSelecionado = resultados.isEmpty
-                                        ? -1
-                                        : 0;
-                                  });
-                                  WidgetsBinding.instance.addPostFrameCallback((
-                                    _,
-                                  ) {
-                                    if (resultadosScrollController.hasClients) {
-                                      resultadosScrollController.jumpTo(0);
-                                    }
-                                  });
-                                },
-                              ),
-                            ),
-                            Flexible(
-                              child: Text(
-                                'Somente inativos',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: pesquisaController,
-                        focusNode: pesquisaFocusNode,
-                        autofocus: true,
-                        decoration: produtoBuscaInputDecoration(),
-                        onChanged: (value) {
-                          setDialogState(() {
-                            resultados = widget.produtoRepository.pesquisarPadraoPdv(
-                              value,
-                              limite: 80,
-                              somenteAtivos: !somenteInativosLista,
-                              somenteInativos: somenteInativosLista,
-                            );
-                            indiceSelecionado = resultados.isEmpty ? -1 : 0;
-                          });
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (resultadosScrollController.hasClients) {
-                              resultadosScrollController.jumpTo(0);
-                            }
-                            if (pesquisaFocusNode.canRequestFocus) {
-                              pesquisaFocusNode.requestFocus();
-                            }
-                          });
-                        },
-                        onSubmitted: (_) {
-                          if (resultados.isEmpty) {
-                            return;
-                          }
-                          final indice = indiceSelecionado >= 0
-                              ? indiceSelecionado
-                              : 0;
-                          Navigator.pop(context, resultados[indice]);
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minHeight: 220,
-                          maxHeight: adaptiveDialogListMaxHeight(context),
-                        ),
-                        child: resultados.isEmpty
-                            ? const Center(
-                                child: Text('Nenhum produto encontrado.'),
-                              )
-                            : ListView.builder(
-                                controller: resultadosScrollController,
-                                shrinkWrap: true,
-                                itemCount: resultados.length,
-                                itemBuilder: (context, index) {
-                                  final produto = resultados[index];
-                                  final consulta = pesquisaController.text
-                                      .trim();
-                                  final estiloTitulo =
-                                      Theme.of(
-                                        context,
-                                      ).textTheme.titleMedium?.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                      ) ??
-                                      const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                      );
-                                  final estiloSubtitulo =
-                                      Theme.of(context).textTheme.bodyMedium ??
-                                      const TextStyle();
-                                  final selecionado =
-                                      index == indiceSelecionado;
-
-                                  return MouseRegion(
-                                    onEnter: (_) {
-                                      if (indiceSelecionado == index) {
-                                        return;
-                                      }
-                                      setDialogState(() {
-                                        indiceSelecionado = index;
-                                      });
-                                    },
-                                    child: ListTile(
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                            horizontal: 6,
-                                            vertical: 4,
-                                          ),
-                                      selected: selecionado,
-                                      selectedTileColor: Theme.of(context)
-                                          .colorScheme
-                                          .primary
-                                          .withValues(alpha: 0.08),
-                                      title: RichText(
-                                        text: spanComDestaque(
-                                          produto.nome,
-                                          consulta,
-                                          estiloTitulo,
-                                        ),
-                                      ),
-                                      subtitle: RichText(
-                                        text: spanComDestaque(
-                                          'SKU: ${produto.codigoInterno} | '
-                                          'Un: ${rotuloUnidadeProdutoLista(produto)} | '
-                                          'Categoria: ${produto.categoria.isEmpty ? '-' : produto.categoria}'
-                                          '${produto.ativo ? '' : ' · Inativo'}',
-                                          consulta,
-                                          estiloSubtitulo,
-                                        ),
-                                      ),
-                                      onTap: () =>
-                                          Navigator.pop(context, produto),
-                                    ),
-                                  );
-                                },
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Fechar'),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      produtoRepository: widget.produtoRepository,
     );
-
-    pesquisaController.dispose();
-    resultadosScrollController.dispose();
-    pesquisaFocusNode.dispose();
-
-    if (produtoSelecionado != null) {
-      _editarProdutoNoCabecalho(produtoSelecionado);
-    }
+    if (!mounted || produtoSelecionado == null) return;
+    _editarProdutoNoCabecalho(produtoSelecionado);
   }
 
   @override
@@ -5161,7 +4940,11 @@ class _ProdutosPageState extends State<ProdutosPage>
                         },
                       ),
                 },
-                child: KeyboardListener(
+                child: Focus(
+                  autofocus: false,
+                  canRequestFocus: false,
+                  skipTraversal: true,
+                  child: KeyboardListener(
                   focusNode: _cadastroKeyboardFocusNode,
                   onKeyEvent: (KeyEvent event) {
                     if (event is! KeyDownEvent) {
@@ -5208,15 +4991,14 @@ class _ProdutosPageState extends State<ProdutosPage>
                                         _erpGap8,
                                         0,
                                       ),
-                                      child: RawScrollbar(
+                                      child: Scrollbar(
                                         controller: _scrollController,
                                         thumbVisibility: true,
                                         trackVisibility: true,
                                         thickness: 10,
                                         radius: const Radius.circular(6),
-                                        crossAxisMargin: 4,
-                                        mainAxisMargin: 4,
                                         child: SingleChildScrollView(
+                                          primary: false,
                                           controller: _scrollController,
                                           padding: const EdgeInsets.only(
                                             right: _erpScrollbarGutter,
@@ -5483,8 +5265,12 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                   decoration:
                                                                       _erpInputDecoration(
                                                                         context,
-                                                                        helper:
-                                                                            'Manual ou geracao automatica ao salvar',
+                                                                        helper: _gerarSkuAutomatico
+                                                                            ? (_produtoEmEdicaoId ==
+                                                                                    null
+                                                                                ? 'Proximo: ${widget.produtoRepository.proximoSkuAutomatico()} (numerico curto para o PDV)'
+                                                                                : 'Proximo: ${widget.produtoRepository.proximoSkuAutomatico(ignorarProdutoId: _produtoEmEdicaoId)} — substitui o SKU atual ao salvar')
+                                                                            : 'Manual ou geracao automatica ao salvar',
                                                                       ),
                                                                 ),
                                                                 CheckboxListTile(
@@ -6438,12 +6224,18 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                   _estoqueController,
                                                               keyboardType:
                                                                   TextInputType
-                                                                      .number,
+                                                                      .numberWithOptions(
+                                                                decimal:
+                                                                    _estoqueFormularioAceitaDecimal,
+                                                              ),
                                                               onChanged: (_) =>
                                                                   setState(() {}),
                                                               decoration:
                                                                   _erpInputDecoration(
                                                                     context,
+                                                                    helper: _estoqueFormularioAceitaDecimal
+                                                                        ? 'Ex.: 144,62 m² (valor exato)'
+                                                                        : null,
                                                                   ),
                                                             ),
                                                           ],
@@ -6704,6 +6496,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                       ),
                     ],
                   ),
+                ),
                 ),
               ),
             );

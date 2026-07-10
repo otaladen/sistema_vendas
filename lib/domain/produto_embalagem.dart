@@ -49,20 +49,103 @@ class ProdutoEmbalagem {
         : 1;
   }
 
-  /// Quantidade da nota convertida para unidade de estoque ([Produto.unidade]).
-  static int quantidadeNotaParaEstoque({
+  /// Quantidade comercial da nota em unidade de venda/estoque (ex.: CX -> m²), sem arredondar.
+  static double quantidadeNotaParaUnidadeVenda({
     required double quantidadeComercial,
     required double fator,
     required bool embalagemMultiplica,
   }) {
-    if (fator <= 0 || !quantidadeComercial.isFinite || quantidadeComercial < 0) {
+    if (fator <= 0 ||
+        !quantidadeComercial.isFinite ||
+        quantidadeComercial < 0) {
       return 0;
     }
     final bruto = embalagemMultiplica
         ? quantidadeComercial * fator
         : quantidadeComercial / fator;
-    if (!bruto.isFinite) return 0;
+    if (!bruto.isFinite || bruto < 0) return 0;
+    return bruto;
+  }
+
+  static bool notaExigeEscalaEstoque({
+    required double quantidadeUnidadeVenda,
+    required double fator,
+    String? unidadeComercial,
+    String? unidadeInterna,
+  }) {
+    if (quantidadeUnidadeVenda != quantidadeUnidadeVenda.roundToDouble()) {
+      return true;
+    }
+    if (fator > 0 &&
+        (fator - 1).abs() > 0.0001 &&
+        fator != fator.roundToDouble()) {
+      return true;
+    }
+    final uCom = normalizarUnidade(unidadeComercial);
+    final uInt = normalizarUnidade(unidadeInterna);
+    if (uCom.isNotEmpty &&
+        uInt.isNotEmpty &&
+        !unidadesEquivalentes(uCom, uInt)) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Quantidade da nota convertida para valor armazenado em [Produto.estoqueReal].
+  static int quantidadeNotaParaEstoque({
+    required double quantidadeComercial,
+    required double fator,
+    required bool embalagemMultiplica,
+    Produto? produto,
+    String? unidadeComercial,
+    String? unidadeInterna,
+  }) {
+    final bruto = quantidadeNotaParaUnidadeVenda(
+      quantidadeComercial: quantidadeComercial,
+      fator: fator,
+      embalagemMultiplica: embalagemMultiplica,
+    );
+    if (bruto <= 0) return 0;
+    final fracionada = produto != null
+        ? estoqueUsaEscalaFracionada(produto) ||
+            exigeQuantidadeDecimalUnidadeVenda(produto, bruto)
+        : notaExigeEscalaEstoque(
+            quantidadeUnidadeVenda: bruto,
+            fator: fator,
+            unidadeComercial: unidadeComercial,
+            unidadeInterna: unidadeInterna,
+          );
+    if (fracionada) {
+      return QuantidadeVendaUtil.paraArmazenamento(bruto, fracionada: true);
+    }
     return bruto.round();
+  }
+
+  /// Texto da quantidade convertida da nota para exibicao na conferencia.
+  static String formatarQuantidadeNotaEstoque({
+    required int estoqueArmazenado,
+    required double quantidadeUnidadeVenda,
+    Produto? produto,
+    String? unidadeInterna,
+    bool comUnidade = false,
+  }) {
+    if (produto != null) {
+      return formatarEstoque(
+        produto,
+        estoqueArmazenado,
+        comUnidade: comUnidade,
+      );
+    }
+    final u = normalizarUnidade(unidadeInterna);
+    final fracionada = quantidadeUnidadeVenda !=
+            quantidadeUnidadeVenda.roundToDouble() ||
+        estoqueArmazenado >= QuantidadeVendaUtil.escalaFracionada;
+    final txt = QuantidadeVendaUtil.formatarExibicao(
+      quantidadeUnidadeVenda,
+      fracionada: fracionada,
+    );
+    if (!comUnidade || u.isEmpty) return txt;
+    return '$txt $u';
   }
 
   /// Quantidade digitada no PDV convertida para estoque.
@@ -79,6 +162,9 @@ class ProdutoEmbalagem {
       quantidadeComercial: quantidadeDigitada.toDouble(),
       fator: produto.quantidadePorEmbalagem,
       embalagemMultiplica: produto.embalagemMultiplica,
+      produto: produto,
+      unidadeComercial: produto.unidadeCompraEfetiva,
+      unidadeInterna: produto.unidade,
     );
   }
 
@@ -197,6 +283,150 @@ class ProdutoEmbalagem {
       quantidadeArmazenada,
       fracionada: leituraUsaEscalaFracionada(produto, quantidadeArmazenada),
     );
+  }
+
+  /// Estoque fisico usa milésimos (ex.: 144,62 m² → 144620) para pisos CX/m².
+  static bool estoqueUsaEscalaFracionada(Produto produto) {
+    if (produto.permiteQuantidadeFracionada) return true;
+    return vendaPodeUsarUnidadeCompra(produto);
+  }
+
+  /// Converte estoque legado (m² inteiros no banco) para a escala atual.
+  static int estoqueLegadoParaArmazenado(Produto produto, int estoqueBruto) {
+    if (estoqueBruto == 0 || !estoqueUsaEscalaFracionada(produto)) {
+      return estoqueBruto;
+    }
+    if (estoqueBruto < QuantidadeVendaUtil.escalaFracionada) {
+      return estoqueBruto * QuantidadeVendaUtil.escalaFracionada;
+    }
+    return estoqueBruto;
+  }
+
+  /// Migra estoque legado in-place antes de movimentar (primeira baixa/entrada).
+  static void garantirEstoqueEmEscalaNoProduto(Produto produto) {
+    if (!estoqueUsaEscalaFracionada(produto)) return;
+    final fisico = estoqueLegadoParaArmazenado(produto, produto.estoqueReal);
+    if (fisico != produto.estoqueReal) {
+      produto.estoqueReal = fisico;
+      produto.estoqueAtual = fisico;
+    }
+    if (produto.estoqueReservado > 0 &&
+        produto.estoqueReservado < QuantidadeVendaUtil.escalaFracionada) {
+      produto.estoqueReservado *= QuantidadeVendaUtil.escalaFracionada;
+    }
+  }
+
+  /// Valor em [Produto.unidade] para exibicao (ex.: 144,62 m²).
+  static double valorEstoqueExibicao(Produto produto, int estoqueArmazenado) {
+    if (estoqueArmazenado == 0) return 0;
+    if (!estoqueUsaEscalaFracionada(produto)) {
+      return estoqueArmazenado.toDouble();
+    }
+    return estoqueLegadoParaArmazenado(produto, estoqueArmazenado) /
+        QuantidadeVendaUtil.escalaFracionada;
+  }
+
+  static String formatarEstoque(
+    Produto produto,
+    int estoqueArmazenado, {
+    bool comUnidade = false,
+  }) {
+    final v = valorEstoqueExibicao(produto, estoqueArmazenado);
+    final txt = formatarQuantidadeUnidadeVenda(produto, v);
+    if (!comUnidade) return txt;
+    return '$txt ${normalizarUnidade(produto.unidade)}';
+  }
+
+  /// Texto enriquecido: "144,62 M2 (≈ 55 CX)" quando vende por caixa.
+  static String formatarEstoqueDetalhado(
+    Produto produto,
+    int estoqueArmazenado,
+  ) {
+    final base = formatarEstoque(produto, estoqueArmazenado, comUnidade: true);
+    if (!vendaPodeUsarUnidadeCompra(produto)) return base;
+    final m2 = valorEstoqueExibicao(produto, estoqueArmazenado);
+    final f = produto.quantidadePorEmbalagem;
+    if (f <= 0 || !m2.isFinite || m2 <= 0) return base;
+    final cx = m2 / f;
+    if (!cx.isFinite || cx <= 0) return base;
+    final cxTxt = formatarQuantidadeUnidadeVenda(produto, cx);
+    final uCompra = normalizarUnidade(produto.unidadeCompraEfetiva);
+    return '$base (≈ $cxTxt $uCompra)';
+  }
+
+  static int? parseEstoqueEntrada(String texto, Produto produto) {
+    final fracionada = estoqueUsaEscalaFracionada(produto);
+    final v = QuantidadeVendaUtil.parseEntradaPdv(
+      texto,
+      fracionada: fracionada,
+    );
+    if (v == null) return null;
+    if (!fracionada) return v.round();
+    return QuantidadeVendaUtil.paraArmazenamento(v, fracionada: true);
+  }
+
+  /// Unidades de estoque a abater/adicionar a partir do valor persistido do item.
+  static int unidadeEstoqueDeQuantidadeArmazenada({
+    required Produto? produto,
+    required int quantidadeArmazenada,
+  }) {
+    if (quantidadeArmazenada <= 0) return 0;
+    if (produto == null) return quantidadeArmazenada;
+    if (produto.permiteQuantidadeFracionada ||
+        leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
+      return quantidadeArmazenada;
+    }
+    return QuantidadeVendaUtil.paraEstoqueInteiro(produto, quantidadeArmazenada);
+  }
+
+  /// Texto de quantidade para UI (caixa, listagens) a partir do valor persistido.
+  static String textoQuantidadeArmazenada({
+    required Produto? produto,
+    required int quantidadeArmazenada,
+  }) {
+    if (produto == null) {
+      return quantidadeArmazenada.toString();
+    }
+    final carrinho = quantidadeCarrinhoDeItemPersistido(
+      produto: produto,
+      quantidadeArmazenada: quantidadeArmazenada,
+    );
+    if (carrinho.emUnidadeCompra) {
+      return rotuloQuantidadeCarrinho(
+        produto: produto,
+        quantidadeDigitada: carrinho.quantidadeDigitada,
+        emUnidadeCompra: true,
+      );
+    }
+    final qtd = quantidadeVendaEfetivaItem(
+      produto: produto,
+      quantidadeArmazenada: quantidadeArmazenada,
+    );
+    return formatarQuantidadeUnidadeVenda(produto, qtd);
+  }
+
+  /// Incremento/decremento em [ItemVenda.quantidade] (caixa +/-).
+  static int passoQuantidadeArmazenada({
+    required Produto? produto,
+    required int quantidadeArmazenada,
+  }) {
+    if (produto == null) return 1;
+    final carrinho = quantidadeCarrinhoDeItemPersistido(
+      produto: produto,
+      quantidadeArmazenada: quantidadeArmazenada,
+    );
+    if (carrinho.emUnidadeCompra && vendaPodeUsarUnidadeCompra(produto)) {
+      return quantidadeArmazenadaItemVenda(
+        produto: produto,
+        quantidadeDigitada: 1,
+        emUnidadeCompra: true,
+      );
+    }
+    if (produto.permiteQuantidadeFracionada ||
+        leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
+      return QuantidadeVendaUtil.escalaFracionada ~/ 10;
+    }
+    return 1;
   }
 
   /// Quantidade armazenada em [ItemVenda.quantidade] a partir do carrinho PDV.
