@@ -77,4 +77,9 @@ abstract final class ConfigSecoes {
       icon: Icons.schedule_outlined,
     ),
   ];
+
+  static int indiceDeId(String id) {
+    final i = todas.indexWhere((s) => s.id == id);
+    return i >= 0 ? i : 0;
+  }
 }

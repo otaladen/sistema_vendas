@@ -48,6 +48,11 @@ void main() {
       UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarListagemVendas),
       isFalse,
     );
+    expect(UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u), isFalse);
+    expect(UsuarioPermissaoHelper.podeVerMinhasVendasHoje(u), isFalse);
+    expect(UsuarioPermissaoHelper.podeAcessarLojaAoVivo(u), isTrue);
+    expect(UsuarioPermissaoHelper.podeVerOrcamentosDashboard(u), isFalse);
+    expect(UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(u), isFalse);
     expect(
       UsuarioPermissaoHelper.tem(u, PermissaoUsuario.leituraParcialCaixa),
       isFalse,
@@ -60,6 +65,45 @@ void main() {
       UsuarioPermissaoHelper.tem(u, PermissaoUsuario.manutencaoAuditoriaCaixa),
       isFalse,
     );
+  });
+
+  test('vendedor: minhas vendas sem total da loja', () {
+    final u = PerfilUsuarioPresetAplicador.aplicar(
+      UsuarioSistema(
+        id: '5',
+        nome: 'V',
+        login: 'v2',
+        senha: 'x',
+        vendedorId: 12,
+      ),
+      PerfilUsuarioPreset.vendedor,
+    );
+    expect(UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u), isFalse);
+    expect(UsuarioPermissaoHelper.podeVerMinhasVendasHoje(u), isTrue);
+    expect(UsuarioPermissaoHelper.podeVerOrcamentosDashboard(u), isTrue);
+    expect(UsuarioPermissaoHelper.podeAcessarLojaAoVivo(u), isTrue);
+    expect(UsuarioPermissaoHelper.podeVerMetasVendedoresLoja(u), isFalse);
+  });
+
+  test('separador: sem orcamentos nem faturamento', () {
+    final u = PerfilUsuarioPresetAplicador.aplicar(
+      UsuarioSistema(id: '6', nome: 'S', login: 's', senha: 'x'),
+      PerfilUsuarioPreset.separador,
+    );
+    expect(UsuarioPermissaoHelper.podeVerOrcamentosDashboard(u), isFalse);
+    expect(UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u), isFalse);
+    expect(UsuarioPermissaoHelper.podeAcessarLojaAoVivo(u), isTrue);
+  });
+
+  test('gerente: visao gerencial completa no dashboard', () {
+    final u = PerfilUsuarioPresetAplicador.aplicar(
+      UsuarioSistema(id: '7', nome: 'G', login: 'g2', senha: 'x'),
+      PerfilUsuarioPreset.gerente,
+    );
+    expect(UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u), isTrue);
+    expect(UsuarioPermissaoHelper.podeVerMetasVendedoresLoja(u), isTrue);
+    expect(UsuarioPermissaoHelper.podeVerOrcamentosDashboard(u), isTrue);
+    expect(UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(u), isTrue);
   });
 
   test('senha hash verifica e rejeita errada', () {

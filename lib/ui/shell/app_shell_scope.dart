@@ -20,7 +20,8 @@ class AppShellScope extends InheritedWidget {
   final MainMenuDestino destinoAtual;
   final MainMenuSubDestino? subDestinoAtual;
   final List<MainMenuDestino> favoritos;
-  final void Function(MainMenuDestino destino) irPara;
+  final void Function(MainMenuDestino destino, {String? configSecaoInicialId})
+      irPara;
   final void Function(MainMenuDestino pai, MainMenuSubDestino sub) irParaSub;
   final Future<void> Function(MainMenuDestino destino) alternarFavorito;
   final VoidCallback fecharAbaAtual;

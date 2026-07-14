@@ -64,7 +64,9 @@ abstract final class VendaDocumentoRotuloHelper {
   }) {
     final controle = rotuloControleInterno(venda);
     if (venda.nfceProcessandoPendenteFocus) {
-      final estoque = venda.estoqueBaixadoCupom ? ' · Estoque OK' : '';
+      final estoque = venda.estoqueBaixadoCupom
+          ? ''
+          : ' · Estoque pendente';
       return 'NFC-e aguardando SEFAZ · $controle$estoque';
     }
     if (venda.nfceEmissaoEmAndamento) {
@@ -75,7 +77,7 @@ abstract final class VendaDocumentoRotuloHelper {
     final temNfe55 = nfe55?.autorizada == true;
     if (!temNfce && !temNfe55) {
       if (venda.estoqueBaixadoCupom) {
-        return '$controle · Estoque OK · fiscal pendente';
+        return '$controle · fiscal pendente';
       }
       return '$controle · aguardando documento';
     }
@@ -86,7 +88,7 @@ abstract final class VendaDocumentoRotuloHelper {
     final nfe = rotuloNfe55(nfe55);
     if (nfe != null) partes.add(nfe);
     partes.add(controle);
-    partes.add(venda.estoqueBaixadoCupom ? 'Estoque OK' : 'Estoque pendente');
+    if (!venda.estoqueBaixadoCupom) partes.add('Estoque pendente');
     return partes.join(' · ');
   }
 
@@ -97,8 +99,8 @@ abstract final class VendaDocumentoRotuloHelper {
   }) {
     if (venda.nfceProcessandoPendenteFocus) {
       return venda.estoqueBaixadoCupom
-          ? 'SEFAZ pendente · Estoque OK'
-          : 'SEFAZ pendente';
+          ? 'SEFAZ pendente'
+          : 'SEFAZ pendente · Estoque pendente';
     }
     if (venda.nfceEmissaoEmAndamento) {
       return 'Emitindo NFC-e';
@@ -107,13 +109,14 @@ abstract final class VendaDocumentoRotuloHelper {
     final temNfce = venda.nfceEmitida;
     final temNfe55 = nfe55?.autorizada == true;
     if (!temNfce && !temNfe55) {
-      if (venda.estoqueBaixadoCupom) {
-        return 'Fiscal pendente · Estoque OK';
+      if (!venda.estoqueBaixadoCupom) {
+        return 'Fiscal e estoque pendentes';
       }
-      return 'Aguardando documento';
+      return 'Fiscal pendente';
     }
 
-    return venda.estoqueBaixadoCupom ? 'Estoque OK' : 'Estoque pendente';
+    if (!venda.estoqueBaixadoCupom) return 'Estoque pendente';
+    return 'Concluída';
   }
 
   static Color corStatusLista(Venda venda, ColorScheme scheme) {

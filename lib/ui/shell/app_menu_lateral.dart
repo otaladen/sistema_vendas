@@ -238,10 +238,12 @@ class _ItemMenuGrupo extends StatelessWidget {
                                     fontSize: AppMenuModoEstilo.tamanhoFonteItem(
                                       context,
                                     ),
-                                    fontWeight: AppMenuModoEstilo.pesoTextoItem(
+                                    fontWeight:
+                                        AppMenuModoEstilo.pesoTextoGrupoMenu(
                                       context,
                                       _grupoAtivo,
                                     ),
+                                    letterSpacing: 0.1,
                                     color: AppMenuModoEstilo.corTextoItem(
                                       context,
                                       destino: destino,
@@ -274,18 +276,34 @@ class _ItemMenuGrupo extends StatelessWidget {
           ),
           if (menuExpandido && expandido)
             Padding(
-              padding: const EdgeInsets.only(left: 8, top: 2),
-              child: Column(
-                children: [
-                  for (final sub in _subitens)
-                    _ItemMenuSub(
-                      sub: sub,
-                      selecionado: subDestinoAtual == sub,
-                      pai: destino,
-                      badge: badgeSubDe?.call(sub) ?? 0,
-                      onTap: () => onSelecionarSub(sub),
+              padding: const EdgeInsets.only(left: 14, top: 2),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border(
+                    left: BorderSide(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .outlineVariant
+                          .withValues(alpha: 0.65),
+                      width: 1,
                     ),
-                ],
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: Column(
+                    children: [
+                      for (final sub in _subitens)
+                        _ItemMenuSub(
+                          sub: sub,
+                          selecionado: subDestinoAtual == sub,
+                          pai: destino,
+                          badge: badgeSubDe?.call(sub) ?? 0,
+                          onTap: () => onSelecionarSub(sub),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
         ],
@@ -333,7 +351,7 @@ class _ItemMenuSub extends StatelessWidget {
                   : null,
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               child: Row(
                 children: [
                   if (badge > 0)
@@ -343,7 +361,7 @@ class _ItemMenuSub extends StatelessWidget {
                         label: Text(badge > 99 ? '99+' : '$badge'),
                         child: Icon(
                           sub.icone,
-                          size: 18,
+                          size: 16,
                           color: selecionado ? corModulo : scheme.onSurfaceVariant,
                         ),
                       ),
@@ -351,21 +369,24 @@ class _ItemMenuSub extends StatelessWidget {
                   else
                     Icon(
                       sub.icone,
-                      size: 18,
+                      size: 16,
                       color: selecionado ? corModulo : scheme.onSurfaceVariant,
                     ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       sub.titulo,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            fontWeight:
-                                selecionado ? FontWeight.w700 : FontWeight.w500,
-                            color: selecionado
-                                ? scheme.onSurface
-                                : scheme.onSurfaceVariant,
-                            height: 1.15,
-                          ),
+                      style: TextStyle(
+                        fontSize: AppMenuModoEstilo.tamanhoFonteSubItem(context),
+                        fontWeight: AppMenuModoEstilo.pesoTextoSubMenu(
+                          context,
+                          selecionado,
+                        ),
+                        color: selecionado
+                            ? scheme.onSurface
+                            : scheme.onSurfaceVariant.withValues(alpha: 0.92),
+                        height: 1.2,
+                      ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),

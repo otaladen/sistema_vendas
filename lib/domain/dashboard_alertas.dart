@@ -35,6 +35,7 @@ class DashboardAlerta {
     this.destino,
     this.filtroContasReceber,
     this.filtroContasPagar,
+    this.configSecaoId,
     this.prioridade = 50,
   });
 
@@ -45,6 +46,7 @@ class DashboardAlerta {
   final MainMenuDestino? destino;
   final FiltroContasReceber? filtroContasReceber;
   final FiltroContasPagar? filtroContasPagar;
+  final String? configSecaoId;
   final int prioridade;
 }
 
@@ -62,6 +64,7 @@ class DashboardAlertasService {
     EmpresaConfig? empresaConfig,
     BackupRegistroManual? backupManual,
     bool podeConfiguracoes = false,
+    bool podeOrcamentos = false,
   }) {
     vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
     final alertas = <DashboardAlerta>[];
@@ -178,25 +181,27 @@ class DashboardAlertasService {
       }
     }
 
-    final orcs = vendaRepository.listarOrcamentosPendentes();
-    final hoje = DateTime.now();
-    final orcsAntigos = orcs.where((v) {
-      final d = v.data.toLocal();
-      final ref = DateTime(hoje.year, hoje.month, hoje.day);
-      final vd = DateTime(d.year, d.month, d.day);
-      return ref.difference(vd).inDays >= 7;
-    }).length;
-    if (orcsAntigos > 0) {
-      alertas.add(
-        DashboardAlerta(
-          tipo: DashboardAlertaTipo.orcamentoAntigo,
-          titulo: 'Orcamentos antigos',
-          detalhe: '$orcsAntigos orcamento(s) com 7+ dias',
-          icone: Icons.description_outlined,
-          destino: MainMenuDestino.vendas,
-          prioridade: 40,
-        ),
-      );
+    if (podeOrcamentos) {
+      final orcs = vendaRepository.listarOrcamentosPendentes();
+      final hoje = DateTime.now();
+      final orcsAntigos = orcs.where((v) {
+        final d = v.data.toLocal();
+        final ref = DateTime(hoje.year, hoje.month, hoje.day);
+        final vd = DateTime(d.year, d.month, d.day);
+        return ref.difference(vd).inDays >= 7;
+      }).length;
+      if (orcsAntigos > 0) {
+        alertas.add(
+          DashboardAlerta(
+            tipo: DashboardAlertaTipo.orcamentoAntigo,
+            titulo: 'Orcamentos antigos',
+            detalhe: '$orcsAntigos orcamento(s) com 7+ dias',
+            icone: Icons.description_outlined,
+            destino: MainMenuDestino.vendas,
+            prioridade: 40,
+          ),
+        );
+      }
     }
 
     if (podeConfiguracoes &&
@@ -219,6 +224,7 @@ class DashboardAlertasService {
                 : 'Ultimo backup ha $horas hora(s)',
             icone: Icons.backup_outlined,
             destino: MainMenuDestino.configuracoes,
+            configSecaoId: 'backup',
             prioridade: backup.saude == BackupSaude.critico ? 12 : 35,
           ),
         );

@@ -25,6 +25,10 @@ enum AppRelatorioId {
   fechamentoHist,
   entregasResumo,
   sugestoesVenda,
+  movimentacaoEstoque,
+  devolucoesPeriodo,
+  pendenciasEntrega,
+  historicoEntregas,
 }
 
 /// Cores de destaque dos relatorios derivadas do tema ativo.
@@ -71,6 +75,14 @@ abstract final class AppRelatorioCores {
         return AppModuloCores.destino(context, MainMenuDestino.entregas);
       case AppRelatorioId.sugestoesVenda:
         return AppModuloCores.harmonizar(scheme, 165);
+      case AppRelatorioId.movimentacaoEstoque:
+        return AppModuloCores.destino(context, MainMenuDestino.estoque);
+      case AppRelatorioId.devolucoesPeriodo:
+        return scheme.error;
+      case AppRelatorioId.pendenciasEntrega:
+        return AppModuloCores.destino(context, MainMenuDestino.entregas);
+      case AppRelatorioId.historicoEntregas:
+        return AppModuloCores.harmonizar(scheme, 230);
     }
   }
 }

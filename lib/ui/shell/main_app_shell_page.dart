@@ -109,9 +109,13 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   }
 
   Future<void> _atualizarBadgesMenu() async {
-    final fiscal = FiscalPendenciasResumoService.contar(
-      vendaRepository: widget.vendaRepository,
-    ).total;
+    final fiscal = UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(
+          widget.usuarioLogado,
+        )
+        ? FiscalPendenciasResumoService.contar(
+            vendaRepository: widget.vendaRepository,
+          ).total
+        : 0;
     var backupAlerta = false;
     if (UsuarioPermissaoHelper.tem(
       widget.usuarioLogado,
@@ -180,7 +184,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     }
   }
 
-  void _irPara(MainMenuDestino destino) {
+  void _irPara(MainMenuDestino destino, {String? configSecaoInicialId}) {
     if (!destino.podeAcessar(widget.usuarioLogado)) return;
     if (MainMenuSubDestinoHelper.moduloTemSubmenu(destino)) {
       final sub = MainMenuSubDestinoHelper.primeiroPermitido(
@@ -192,7 +196,44 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       }
       return;
     }
+    if (destino == MainMenuDestino.configuracoes) {
+      final secao = configSecaoInicialId ?? (_backupAlerta ? 'backup' : null);
+      _abrirConfiguracoes(secaoInicialId: secao);
+      return;
+    }
     _abrirOuAtivarAba(destino: destino);
+  }
+
+  void _abrirConfiguracoes({String? secaoInicialId}) {
+    const destino = MainMenuDestino.configuracoes;
+    final id = AppShellTab.idDe(destino: destino);
+    final idx = _abas.indexWhere((a) => a.id == id);
+
+    if (idx >= 0 && secaoInicialId != null) {
+      setState(() {
+        _abas[idx] = _criarAba(
+          destino: destino,
+          configSecaoInicialId: secaoInicialId,
+        );
+        _ativarAba(idx, notificar: false);
+      });
+      unawaited(_atualizarBadgesMenu());
+      return;
+    }
+
+    if (idx >= 0) {
+      _ativarAba(idx);
+      return;
+    }
+
+    setState(() {
+      _abas.add(_criarAba(
+        destino: destino,
+        configSecaoInicialId: secaoInicialId,
+      ));
+      _ativarAba(_abas.length - 1, notificar: false);
+    });
+    unawaited(_atualizarBadgesMenu());
   }
 
   void _irParaSub(MainMenuDestino pai, MainMenuSubDestino sub) {
@@ -234,6 +275,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     MainMenuSubDestino? sub,
     String? id,
     bool forcarNovaInstancia = false,
+    String? configSecaoInicialId,
   }) {
     final tabId = id ??
         (forcarNovaInstancia
@@ -245,7 +287,11 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       destino: destino,
       subDestino: sub,
       navigatorKey: GlobalKey<NavigatorState>(),
-      paginaInicial: _conteudoAba(destino: destino, sub: sub),
+      paginaInicial: _conteudoAba(
+        destino: destino,
+        sub: sub,
+        configSecaoInicialId: configSecaoInicialId,
+      ),
     );
   }
 
@@ -290,6 +336,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   Widget _conteudoAba({
     required MainMenuDestino destino,
     MainMenuSubDestino? sub,
+    String? configSecaoInicialId,
   }) {
     if (sub != null) {
       final deps = _valoresDeps();
@@ -303,7 +350,10 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
         ),
       );
     }
-    return _conteudoDestino(destino);
+    return _conteudoDestino(
+      destino,
+      configSecaoInicialId: configSecaoInicialId,
+    );
   }
 
   void _alternarGrupoMenu(MainMenuDestino grupo) {
@@ -338,7 +388,10 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     );
   }
 
-  Widget _conteudoDestino(MainMenuDestino destino) {
+  Widget _conteudoDestino(
+    MainMenuDestino destino, {
+    String? configSecaoInicialId,
+  }) {
     if (destino == MainMenuDestino.inicio) {
       return _valoresDeps(
         child: MainMenuDashboard(
@@ -349,7 +402,11 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     }
     final deps = _valoresDeps();
     return _valoresDeps(
-      child: MainMenuRouter.pagina(destino, deps),
+      child: MainMenuRouter.pagina(
+        destino,
+        deps,
+        configSecaoInicialId: configSecaoInicialId,
+      ),
     );
   }
 
@@ -443,13 +500,23 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   }
 
   int _badgeRail(MainMenuDestino d) {
-    if (d == MainMenuDestino.notasFiscais) return _fiscalPendencias;
+    if (d == MainMenuDestino.notasFiscais &&
+        UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(
+          widget.usuarioLogado,
+        )) {
+      return _fiscalPendencias;
+    }
     if (d == MainMenuDestino.configuracoes && _backupAlerta) return 1;
     return 0;
   }
 
   int _badgeSub(MainMenuSubDestino sub) {
-    if (sub == MainMenuSubDestino.fiscalPendencias) return _fiscalPendencias;
+    if (sub == MainMenuSubDestino.fiscalPendencias &&
+        UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(
+          widget.usuarioLogado,
+        )) {
+      return _fiscalPendencias;
+    }
     return 0;
   }
 }

@@ -401,4 +401,49 @@ class UsuarioPermissaoHelper {
     if (tem(u, PermissaoUsuario.cancelarVendas)) chips.add('Cancelar');
     return chips.isEmpty ? const ['Basico'] : chips;
   }
+
+  /// Faturamento e volume de vendas de toda a loja (painel gerencial).
+  static bool podeVerFaturamentoTotalLoja(UsuarioSistema u) {
+    if (!u.ativo) return false;
+    if (u.admin) return true;
+    final perfil = perfilUsuarioFromId(u.perfil);
+    if (perfil == PerfilUsuarioPreset.gerente ||
+        perfil == PerfilUsuarioPreset.dono) {
+      return true;
+    }
+    return u.podeFinanceiro || u.podeAcessarRelatorios;
+  }
+
+  /// Metas e desempenho de todos os vendedores.
+  static bool podeVerMetasVendedoresLoja(UsuarioSistema u) =>
+      podeVerFaturamentoTotalLoja(u);
+
+  /// KPI de vendas do proprio vendedor (usuario com [vendedorId] vinculado).
+  static bool podeVerMinhasVendasHoje(UsuarioSistema u) {
+    if (!u.ativo) return false;
+    if (podeVerFaturamentoTotalLoja(u)) return true;
+    return u.vendedorId > 0 && tem(u, PermissaoUsuario.acessarPdv);
+  }
+
+  /// Alertas de orcamentos pendentes no painel inicial.
+  static bool podeVerOrcamentosDashboard(UsuarioSistema u) {
+    if (!tem(u, PermissaoUsuario.vendasHub)) return false;
+    return tem(u, PermissaoUsuario.acessarListagemVendas) ||
+        tem(u, PermissaoUsuario.acessarPdv) ||
+        podeVerFaturamentoTotalLoja(u);
+  }
+
+  /// Badge de pendencias fiscais no tile de notas.
+  static bool podeVerBadgeFiscalDashboard(UsuarioSistema u) =>
+      tem(u, PermissaoUsuario.estoque);
+
+  /// Painel Loja ao vivo — blocos filtrados por permissao na pagina.
+  static bool podeAcessarLojaAoVivo(UsuarioSistema u) {
+    if (!u.ativo) return false;
+    return podeVerFaturamentoTotalLoja(u) ||
+        tem(u, PermissaoUsuario.acessarCaixa) ||
+        tem(u, PermissaoUsuario.estoque) ||
+        podeVisualizarEntregas(u) ||
+        podeVerMinhasVendasHoje(u);
+  }
 }

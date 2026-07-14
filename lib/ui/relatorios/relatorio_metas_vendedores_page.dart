@@ -8,6 +8,7 @@ import '../../data/produto_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
 import '../../domain/loja_ao_vivo_service.dart';
+import '../../model/usuario_sistema.dart';
 
 /// Acompanhamento diario das metas de vendedores (meta mensal / dias do mes).
 class RelatorioMetasVendedoresPage extends StatefulWidget {
@@ -17,12 +18,14 @@ class RelatorioMetasVendedoresPage extends StatefulWidget {
     required this.vendedorRepository,
     required this.produtoRepository,
     required this.objectBox,
+    required this.usuarioLogado,
   });
 
   final VendaRepository vendaRepository;
   final VendedorRepository vendedorRepository;
   final ProdutoRepository produtoRepository;
   final ObjectBox objectBox;
+  final UsuarioSistema usuarioLogado;
 
   @override
   State<RelatorioMetasVendedoresPage> createState() =>
@@ -59,7 +62,7 @@ class _RelatorioMetasVendedoresPageState
       vendedorRepository: widget.vendedorRepository,
       objectBox: widget.objectBox,
     );
-    final snap = await svc.carregar();
+    final snap = await svc.carregar(usuario: widget.usuarioLogado);
     if (!mounted) return;
     setState(() {
       _metas = snap.metasVendedores

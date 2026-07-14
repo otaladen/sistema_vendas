@@ -18,24 +18,28 @@ import '../../data/local_backup_restore.dart';
 import '../../data/local_backup_service.dart';
 import '../../data/local_backup_validation.dart';
 import '../../data/objectbox.dart';
+import '../../data/produto_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/backup_historico_item.dart';
 import '../../domain/backup_retencao.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../services/auditoria_registrar.dart';
+import '../produtos/importar_chacal_backup_flow.dart';
 
 class BackupConfiguracaoSection extends StatefulWidget {
   const BackupConfiguracaoSection({
     super.key,
     required this.appConfigRepository,
     required this.objectBox,
+    required this.produtoRepository,
     this.lanSyncScheduler,
     required this.nomeLoja,
   });
 
   final AppConfigRepository appConfigRepository;
   final ObjectBox objectBox;
+  final ProdutoRepository produtoRepository;
   final LanSyncScheduler? lanSyncScheduler;
   final String nomeLoja;
 
@@ -67,6 +71,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   int _backupAutomaticoIntervaloMinutos = 1440;
   int _backupRetencaoMaxCopias = 15;
   int _ultimoBackupAutomaticoMs = 0;
+  LocalBackupEscopo _backupAutomaticoEscopo = LocalBackupEscopo.completo;
 
   bool _backupSegundoDestinoAtivo = false;
   String _backupSegundoDestinoPasta = '';
@@ -90,6 +95,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
           await widget.appConfigRepository.carregarFalhaBackupAutomatico();
       final aoFechar =
           await widget.appConfigRepository.carregarBackupAoFecharAtivo();
+      final escopoAuto =
+          await widget.appConfigRepository.carregarBackupAutomaticoEscopo();
       final horarioTarefa =
           await widget.appConfigRepository.carregarHorarioTarefaBackupWindows();
       var tarefaInstalada = false;
@@ -106,6 +113,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         _manual = manual;
         _falha = falha;
         _backupAoFecharAtivo = aoFechar;
+        _backupAutomaticoEscopo = escopoAuto;
         _backupAutomaticoAtivo = config.backupAutomaticoAtivo;
         _backupAutomaticoPasta = config.backupAutomaticoPasta;
         _backupRetencaoMaxCopias = config.backupRetencaoMaxCopias;
@@ -319,6 +327,23 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     }
   }
 
+  Future<void> _importarBackupChacal() async {
+    if (_backupEmAndamento || _restauracaoEmAndamento) return;
+    await executarImportacaoChacalBackup(
+      context: context,
+      produtoRepository: widget.produtoRepository,
+      onStatus: (msg, {erro = false}) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: erro ? Theme.of(context).colorScheme.error : null,
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _restaurarDeArquivoZip() async {
     if (_restauracaoEmAndamento || _backupEmAndamento) return;
     final pick = await FilePicker.platform.pickFiles(
@@ -483,7 +508,16 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     });
   }
 
-  Future<void> _criarBackupDados({String? pastaDestino}) async {
+  Future<void> _definirEscopoBackupAutomatico(LocalBackupEscopo? escopo) async {
+    if (escopo == null) return;
+    setState(() => _backupAutomaticoEscopo = escopo);
+    await widget.appConfigRepository.salvarBackupAutomaticoEscopo(escopo);
+  }
+
+  Future<void> _criarBackupDados({
+    String? pastaDestino,
+    required LocalBackupEscopo escopo,
+  }) async {
     if (_backupEmAndamento) return;
     var destinoRaiz = pastaDestino?.trim() ?? '';
     if (destinoRaiz.isEmpty) {
@@ -508,6 +542,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         tipo: LocalBackupTipo.manual,
         nomeLoja: widget.nomeLoja,
         objectBox: widget.objectBox,
+        escopo: escopo,
         lanSyncScheduler: widget.lanSyncScheduler,
         onProgress: _atualizarProgresso,
       );
@@ -528,18 +563,51 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       AuditoriaRegistrar.registrar(
         modulo: AuditoriaModulo.backup,
         acao: AuditoriaAcao.backupCriar,
-        resumo: 'Backup manual criado',
-        detalhes: {'caminho': resultado.pastaBackup.path},
+        resumo: escopo == LocalBackupEscopo.completo
+            ? 'Backup manual completo criado'
+            : escopo == LocalBackupEscopo.somenteBanco
+                ? 'Backup manual somente banco criado'
+                : 'Backup manual cadastro produtos criado',
+        detalhes: {
+          'caminho': resultado.pastaBackup.path,
+          'escopo': escopo.manifestValue,
+          if (resultado.quantidadeProdutos != null)
+            'quantidadeProdutos': resultado.quantidadeProdutos,
+        },
       );
 
       if (!mounted) return;
       await _recarregar();
+      final mensagemSucesso = escopo == LocalBackupEscopo.cadastroProdutos
+          ? 'Backup de cadastro concluido com '
+              '${resultado.quantidadeProdutos ?? 0} produto(s).\n\n'
+              'Pasta:\n${resultado.pastaBackup.path}'
+          : 'Backup ${escopo.rotulo.toLowerCase()} concluido com sucesso.\n\n'
+              'Pasta:\n${resultado.pastaBackup.path}';
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          duration: const Duration(seconds: 8),
+          duration: const Duration(seconds: 6),
           content: Text(
-            'Backup concluido: ${resultado.pastaBackup.path}',
+            escopo == LocalBackupEscopo.cadastroProdutos
+                ? 'Backup de cadastro (${resultado.quantidadeProdutos ?? 0} '
+                    'produto(s)) concluido.'
+                : 'Backup ${escopo.rotulo.toLowerCase()} concluido.',
           ),
+        ),
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Backup concluido'),
+          content: SelectableText(mensagemSucesso),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
         ),
       );
     } on LocalBackupInvalidoException catch (e) {
@@ -584,6 +652,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         tipo: LocalBackupTipo.automatico,
         nomeLoja: widget.nomeLoja,
         objectBox: widget.objectBox,
+        escopo: _backupAutomaticoEscopo,
         lanSyncScheduler: widget.lanSyncScheduler,
         onProgress: _atualizarProgresso,
       );
@@ -801,6 +870,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       Text('Tipo: ${item.rotuloTipo}'),
+                      Text('Escopo: ${item.rotuloEscopo}'),
                       Text('Tamanho: ${item.tamanhoFormatado}'),
                       if (item.empresa.trim().isNotEmpty)
                         Text('Empresa: ${item.empresa}'),
@@ -814,6 +884,31 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                       const Text(
                         'Essa acao vai sobrescrever os dados locais atuais.',
                       ),
+                    if (item != null &&
+                        item.escopo == LocalBackupEscopo.somenteBanco) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Este backup contem somente o banco. Fotos, POD e '
+                        'configuracoes atuais deste PC serao mantidos.',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (item != null &&
+                        item.escopo == LocalBackupEscopo.cadastroProdutos) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Este backup atualiza o cadastro de produtos por codigo. '
+                        'Vendas, clientes e estoque local dos produtos ja '
+                        'existentes serao preservados.',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                     const Text(
                       'Recomendado: criar um backup de seguranca antes.\n\n'
                       'O programa fechara sozinho apos copiar o backup.',
@@ -879,6 +974,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
           tipo: LocalBackupTipo.manual,
           nomeLoja: widget.nomeLoja,
           objectBox: widget.objectBox,
+          escopo: LocalBackupEscopo.completo,
           lanSyncScheduler: widget.lanSyncScheduler,
           onProgress: _atualizarProgresso,
         );
@@ -929,6 +1025,62 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
 
   Future<void> _executarRestauracao(Directory origemSelecionada) async {
     _atualizarProgresso(0.15, 'Validando backup…');
+    final escopo = await LocalBackupService.lerEscopoManifest(origemSelecionada);
+
+    if (escopo == LocalBackupEscopo.cadastroProdutos) {
+      LocalBackupValidation.validarCadastroProdutos(origemSelecionada);
+      _atualizarProgresso(0.35, 'Importando cadastro de produtos…');
+      final resumo = await restaurarDadosLocais(
+        pastaBackupSelecionada: origemSelecionada,
+        destinoBase: await obterDiretorioBaseDadosApp(),
+        limparDestino: _limparDiretorio,
+        objectBox: widget.objectBox,
+      );
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.backup,
+        acao: AuditoriaAcao.backupRestaurar,
+        resumo: 'Cadastro de produtos restaurado',
+        detalhes: {
+          'origem': origemSelecionada.path,
+          'inseridos': resumo?.inseridos ?? 0,
+          'atualizados': resumo?.atualizados ?? 0,
+        },
+      );
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).maybePop();
+      final msg =
+          'Cadastro restaurado com sucesso.\n\n'
+          'Novos: ${resumo?.inseridos ?? 0}\n'
+          'Atualizados: ${resumo?.atualizados ?? 0}\n\n'
+          'Estoque local foi preservado nos produtos existentes.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cadastro restaurado: ${resumo?.inseridos ?? 0} novo(s), '
+            '${resumo?.atualizados ?? 0} atualizado(s).',
+          ),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Restauracao concluida'),
+          content: Text(msg),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      await _recarregar();
+      return;
+    }
+
     final origemDados = LocalBackupValidation.resolverPastaDadosBackup(
       origemSelecionada,
     );
@@ -1123,6 +1275,31 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                     style: theme.textTheme.bodySmall,
                   ),
                 const SizedBox(height: 8),
+                DropdownButtonFormField<LocalBackupEscopo>(
+                  key: ValueKey(_backupAutomaticoEscopo),
+                  decoration: const InputDecoration(
+                    labelText: 'Conteudo do backup automatico',
+                  ),
+                  initialValue: _backupAutomaticoEscopo,
+                  items: localBackupEscoposAutomaticos()
+                      .map(
+                        (e) => DropdownMenuItem(
+                          value: e,
+                          child: Text(e.rotulo),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: ocupado ? null : _definirEscopoBackupAutomatico,
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 8),
+                  child: Text(
+                    _backupAutomaticoEscopo.descricaoCurta,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
                 DropdownButtonFormField<int>(
                   key: ValueKey(_backupAutomaticoIntervaloMinutos),
                   decoration: const InputDecoration(labelText: 'Frequencia'),
@@ -1235,15 +1412,52 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
+                Text(
+                  'Completo: tudo. Somente banco: data.mdb. '
+                  'Cadastro de produtos: use o botao dedicado abaixo.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 10),
                 FilledButton.icon(
-                  onPressed: ocupado ? null : () => unawaited(_criarBackupDados()),
+                  onPressed: ocupado
+                      ? null
+                      : () => unawaited(
+                            _criarBackupDados(
+                              escopo: LocalBackupEscopo.completo,
+                            ),
+                          ),
                   icon: const Icon(Icons.backup_outlined),
                   label: Text(
                     _backupEmAndamento
                         ? 'Criando backup…'
-                        : 'Criar backup agora',
+                        : 'Backup completo agora',
                   ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: ocupado
+                      ? null
+                      : () => unawaited(
+                            _criarBackupDados(
+                              escopo: LocalBackupEscopo.somenteBanco,
+                            ),
+                          ),
+                  icon: const Icon(Icons.storage_outlined),
+                  label: const Text('Backup somente banco agora'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: ocupado
+                      ? null
+                      : () => unawaited(
+                            _criarBackupDados(
+                              escopo: LocalBackupEscopo.cadastroProdutos,
+                            ),
+                          ),
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: const Text('Backup cadastro de produtos agora'),
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
@@ -1264,6 +1478,14 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                         ? 'Restaurando…'
                         : 'Restaurar backup',
                   ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: ocupado
+                      ? null
+                      : () => unawaited(_importarBackupChacal()),
+                  icon: const Icon(Icons.archive_outlined),
+                  label: const Text('Importar backup Chacal (.s3db / .sql / .txt)'),
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
@@ -1598,7 +1820,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                       ),
                       title: Text(_dataHora.format(item.criadoEm)),
                       subtitle: Text(
-                        '${item.rotuloTipo} · ${item.tamanhoFormatado}',
+                        '${item.rotuloTipo} · ${item.rotuloEscopo} · '
+                        '${item.tamanhoFormatado}',
                       ),
                       trailing: Wrap(
                         spacing: 0,

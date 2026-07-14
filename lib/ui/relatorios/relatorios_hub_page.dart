@@ -18,7 +18,11 @@ import 'relatorio_comissao_vendedores_page.dart';
 import '../theme/app_relatorio_cores.dart';
 import 'relatorio_curva_abc_page.dart';
 import 'relatorio_dashboard_executivo_page.dart';
+import 'relatorio_devolucoes_page.dart';
 import 'relatorio_entregas_resumo_page.dart';
+import 'relatorio_historico_entregas_page.dart';
+import 'relatorio_movimentacao_estoque_page.dart';
+import 'relatorio_pendencias_entrega_page.dart';
 import 'relatorio_estoque_minimo_page.dart';
 import 'relatorio_historico_fechamento_page.dart';
 import 'relatorio_horarios_pico_page.dart';
@@ -302,6 +306,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
               vendedorRepository: vd,
               produtoRepository: p,
               objectBox: p.objectBox,
+              usuarioLogado: widget.usuarioLogado,
             ),
           ),
         ),
@@ -430,6 +435,57 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
             builder: (_) => RelatorioEstoqueMinimoPage(
               produtoRepository: p,
             ),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'produtos',
+        categoriaTitulo: 'Produtos e estoque',
+        categoriaIcone: Icons.inventory_2_outlined,
+        icon: Icons.swap_vert_outlined,
+        relatorioCor: AppRelatorioId.movimentacaoEstoque,
+        titulo: 'Movimentacao de estoque',
+        subtitulo:
+            'Entradas, saidas e saldo por produto ou grupo (categoria/marca); detalhe do kardex.',
+        palavrasChave: const [
+          'movimentacao',
+          'estoque',
+          'kardex',
+          'entrada',
+          'saida',
+          'ajuste',
+          'inventario',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioMovimentacaoEstoquePage(
+              produtoRepository: p,
+              objectBox: p.objectBox,
+            ),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'produtos',
+        categoriaTitulo: 'Produtos e estoque',
+        categoriaIcone: Icons.inventory_2_outlined,
+        icon: Icons.undo_outlined,
+        relatorioCor: AppRelatorioId.devolucoesPeriodo,
+        titulo: 'Devolucoes e trocas',
+        subtitulo:
+            'Registros no periodo por produto ou detalhe (cliente, nota, motivo).',
+        palavrasChave: const [
+          'devolucao',
+          'troca',
+          'retorno',
+          'estorno',
+          'cliente',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioDevolucoesPage(vendaRepository: v),
           ),
         ),
       ),
@@ -593,6 +649,54 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           context,
           MaterialPageRoute<void>(
             builder: (_) => const RelatorioHistoricoFechamentoPage(),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'operacional',
+        categoriaTitulo: 'Operacional',
+        categoriaIcone: Icons.settings_suggest_outlined,
+        icon: Icons.pending_actions_outlined,
+        relatorioCor: AppRelatorioId.pendenciasEntrega,
+        titulo: 'Pendencias de retirada e entrega',
+        subtitulo:
+            'Itens ainda nao retirados (futura) ou em carreto; cliente, produto e quantidade.',
+        palavrasChave: const [
+          'pendente',
+          'retirada',
+          'futura',
+          'entrega',
+          'carreto',
+          'separacao',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioPendenciasEntregaPage(vendaRepository: v),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'operacional',
+        categoriaTitulo: 'Operacional',
+        categoriaIcone: Icons.settings_suggest_outlined,
+        icon: Icons.history_outlined,
+        relatorioCor: AppRelatorioId.historicoEntregas,
+        titulo: 'Historico de entregas',
+        subtitulo:
+            'Transicoes de status, retiradas, devolucoes e POD no periodo.',
+        palavrasChave: const [
+          'historico',
+          'entrega',
+          'status',
+          'motorista',
+          'romaneio',
+          'evento',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioHistoricoEntregasPage(vendaRepository: v),
           ),
         ),
       ),

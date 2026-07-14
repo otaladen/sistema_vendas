@@ -39,11 +39,13 @@ class BackupAgendadoHeadlessService {
       final destino = Directory(pasta);
       if (!destino.existsSync()) return 5;
 
+      final escopo = await repository.carregarBackupAutomaticoEscopo();
       final resultado = await LocalBackupService.executar(
         destinoRaiz: destino,
         tipo: LocalBackupTipo.automatico,
         nomeLoja: config.nomeLoja,
         objectBox: objectBox,
+        escopo: escopo,
       );
 
       await BackupPosExecucaoService.aposBackupSucesso(

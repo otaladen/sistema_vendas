@@ -4,6 +4,9 @@ import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../domain/filtro_listagem_entregas.dart';
+import '../domain/permissao_usuario.dart';
+import '../domain/usuario_permissao_helper.dart';
+import '../model/usuario_sistema.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../domain/dashboard_alertas.dart';
@@ -81,11 +84,33 @@ class LojaAoVivoService {
   final VendedorRepository vendedorRepository;
   final ObjectBox objectBox;
 
-  Future<LojaAoVivoSnapshot> carregar() async {
+  Future<LojaAoVivoSnapshot> carregar({required UsuarioSistema usuario}) async {
+    final verTotal =
+        UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(usuario);
+    final verMetasTodos =
+        UsuarioPermissaoHelper.podeVerMetasVendedoresLoja(usuario);
+    final verCaixa = UsuarioPermissaoHelper.tem(
+      usuario,
+      PermissaoUsuario.acessarCaixa,
+    );
+    final verEntregas =
+        UsuarioPermissaoHelper.podeVisualizarEntregas(usuario);
+    final verEstoque =
+        UsuarioPermissaoHelper.tem(usuario, PermissaoUsuario.estoque);
+    final verFinanceiro =
+        UsuarioPermissaoHelper.tem(usuario, PermissaoUsuario.financeiro);
+    final verOrcamentos =
+        UsuarioPermissaoHelper.podeVerOrcamentosDashboard(usuario);
+
     final agora = DateTime.now();
     final limites = calcularLimitesPeriodo(preset: 'hoje');
-    final vendasHoje =
+    final vendasHojeBrutas =
         relatorioVendasFinalizadasPeriodo(vendaRepository, limites);
+    final vendasHoje = verTotal
+        ? vendasHojeBrutas
+        : vendasHojeBrutas
+            .where((v) => v.vendedor.targetId == usuario.vendedorId)
+            .toList();
     final faturamento =
         vendasHoje.fold<double>(0, (s, v) => s + v.total);
     final pico = relatorioCalcularHorariosPico(vendasHoje);
@@ -94,47 +119,70 @@ class LojaAoVivoService {
     final terminalLocal = await sessaoRepo.obterTerminalId();
     final sessaoLocal = await sessaoRepo.carregarSessaoLocal();
     final todasSessoes = await sessaoRepo.listarTodasSessoes();
-    final outroAberto = todasSessoes.entries.any(
-      (e) => e.key != terminalLocal && e.value.aberto,
-    );
+    final outroAberto = verCaixa &&
+        todasSessoes.entries.any(
+          (e) => e.key != terminalLocal && e.value.aberto,
+        );
 
     const filtroEnt = FiltroListagemEntregas(statusEntrega: 'todos');
-    final entRes = vendaRepository.carregarListagemEntregasComResumo(
-      filtroLista: filtroEnt,
-      filtroContagem: filtroEnt.paraContagemResumo(),
-    );
-    final emAberto = entRes.entregas
-        .where((v) => !relatorioEntregaStatusFinalizado(v.statusEntrega))
-        .length;
+    final entRes = verEntregas
+        ? vendaRepository.carregarListagemEntregasComResumo(
+            filtroLista: filtroEnt,
+            filtroContagem: filtroEnt.paraContagemResumo(),
+          )
+        : null;
+    final emAberto = entRes == null
+        ? 0
+        : entRes.entregas
+            .where((v) => !relatorioEntregaStatusFinalizado(v.statusEntrega))
+            .length;
 
-    vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
-    final titulosAbertos = vendaRepository.titulos.listarTodosAbertos();
-    final fiadoVencido = titulosAbertos
-        .where(ContasReceberHelper.ehVencido)
-        .fold<double>(0, (s, l) => s + l.titulo.saldo);
-
-    final produtos = produtoRepository.listarTodos();
-    var critico = 0;
-    var zerado = 0;
-    for (final p in produtos) {
-      if (!p.ativo) continue;
-      if (p.estoqueReal <= 0) zerado++;
-      else if (p.estoqueReal < p.quantidadeMinima) critico++;
+    var fiadoVencido = 0.0;
+    if (verFinanceiro) {
+      vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+      final titulosAbertos = vendaRepository.titulos.listarTodosAbertos();
+      fiadoVencido = titulosAbertos
+          .where(ContasReceberHelper.ehVencido)
+          .fold<double>(0, (s, l) => s + l.titulo.saldo);
     }
 
-    final orcs = vendaRepository.listarOrcamentosPendentes();
-    final metas = _calcularMetas(vendasHoje, vendedorRepository.listarTodos());
+    var critico = 0;
+    var zerado = 0;
+    if (verEstoque) {
+      final produtos = produtoRepository.listarTodos();
+      for (final p in produtos) {
+        if (!p.ativo) continue;
+        if (p.estoqueReal <= 0) {
+          zerado++;
+        } else if (p.estoqueReal < p.quantidadeMinima) {
+          critico++;
+        }
+      }
+    }
+
+    final orcs = verOrcamentos
+        ? vendaRepository.listarOrcamentosPendentes()
+        : const <Venda>[];
+    final metasBrutas = _calcularMetas(
+      verMetasTodos ? vendasHojeBrutas : vendasHoje,
+      vendedorRepository.listarTodos(),
+    );
+    final metas = verMetasTodos
+        ? metasBrutas
+        : metasBrutas
+            .where((m) => m.vendedorId == usuario.vendedorId)
+            .toList();
 
     return LojaAoVivoSnapshot(
       vendasHoje: vendasHoje.length,
       faturamentoHoje: faturamento,
       horaPicoHoje: pico.horaPico,
       vendasHoraPico: pico.vendasNaHoraPico,
-      caixaAberto: sessaoLocal.aberto,
-      caixaOperador: sessaoLocal.operador,
-      caixaTerminalId: terminalLocal,
+      caixaAberto: verCaixa && sessaoLocal.aberto,
+      caixaOperador: verCaixa ? sessaoLocal.operador : '',
+      caixaTerminalId: verCaixa ? terminalLocal : '',
       outroTerminalCaixaAberto: outroAberto,
-      entregasAtrasadas: entRes.atrasadas,
+      entregasAtrasadas: entRes?.atrasadas ?? 0,
       entregasEmAberto: emAberto,
       estoqueCritico: critico,
       estoqueZerado: zerado,

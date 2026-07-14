@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../domain/backup_historico_item.dart';
+import '../domain/local_backup_escopo.dart';
+import 'local_backup_cadastro_produtos_service.dart';
 import 'local_backup_service.dart';
 import 'local_backup_validation.dart';
 
@@ -55,6 +57,7 @@ class BackupHistoricoService {
     var tamanhoKb = 0.0;
     var empresa = '';
     var valido = false;
+    var escopo = LocalBackupEscopo.completo;
 
     final manifestFile = File(
       p.join(pasta.path, LocalBackupService.manifestFileName),
@@ -74,17 +77,30 @@ class BackupHistoricoService {
         }
         tamanhoKb = (map['tamanhoBancoKb'] as num?)?.toDouble() ?? 0;
         empresa = map['empresa']?.toString() ?? '';
+        escopo = localBackupEscopoFromManifest(map['escopo']);
       } catch (_) {}
     }
 
     try {
-      final dados = LocalBackupValidation.resolverPastaDadosBackup(pasta);
-      LocalBackupValidation.validarDadosAplicacao(dados);
-      valido = true;
-      if (tamanhoKb <= 0) {
-        final mdb = LocalBackupValidation.localizarDataMdb(dados);
-        if (mdb != null) {
-          tamanhoKb = mdb.lengthSync() / 1024.0;
+      if (escopo == LocalBackupEscopo.cadastroProdutos) {
+        LocalBackupValidation.validarCadastroProdutos(pasta);
+        valido = true;
+        if (tamanhoKb <= 0) {
+          final jsonFile =
+              LocalBackupCadastroProdutosService.arquivoJsonNoBackup(pasta);
+          if (jsonFile.existsSync()) {
+            tamanhoKb = jsonFile.lengthSync() / 1024.0;
+          }
+        }
+      } else {
+        final dados = LocalBackupValidation.resolverPastaDadosBackup(pasta);
+        LocalBackupValidation.validarDadosAplicacao(dados);
+        valido = true;
+        if (tamanhoKb <= 0) {
+          final mdb = LocalBackupValidation.localizarDataMdb(dados);
+          if (mdb != null) {
+            tamanhoKb = mdb.lengthSync() / 1024.0;
+          }
         }
       }
     } catch (_) {
@@ -99,6 +115,7 @@ class BackupHistoricoService {
       empresa: empresa,
       valido: valido,
       pastaRaiz: pastaRaiz,
+      escopo: escopo,
     );
   }
 

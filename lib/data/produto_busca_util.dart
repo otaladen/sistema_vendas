@@ -63,6 +63,22 @@ bool skuEhNumericoSequencial(String codigoInterno) {
   return textoSomenteDigitosBusca(t);
 }
 
+/// SKU curto de balcao (1..9999999). Exclui EAN/GTIN usados por engano como SKU.
+bool skuEhNumericoSequencialCurto(String codigoInterno) {
+  if (!skuEhNumericoSequencial(codigoInterno)) return false;
+  final digits = somenteDigitosBusca(codigoInterno);
+  return digits.isNotEmpty && digits.length <= 7;
+}
+
+/// Parece codigo de barras (EAN/UPC/GTIN) — inadequado como SKU de loja.
+bool skuPareceCodigoBarrasGtin(String codigo) {
+  final t = codigo.trim();
+  if (t.isEmpty || !textoSomenteDigitosBusca(t)) return false;
+  final digits = somenteDigitosBusca(t);
+  if (digits.length >= 8) return true;
+  return false;
+}
+
 /// Valor inteiro de SKU numerico puro; null se alfanumerico ou reservado.
 int? skuComoInteiroSequencial(String codigoInterno) {
   if (!skuEhNumericoSequencial(codigoInterno)) return null;
@@ -70,6 +86,7 @@ int? skuComoInteiroSequencial(String codigoInterno) {
 }
 
 /// Proximo SKU numerico curto (1, 2, 3...) com base no maior ja usado.
+/// Ignora GTINs longos indevidamente gravados em [codigoInterno].
 String proximoSkuNumericoSequencial(Iterable<String> codigosExistentes) {
   var maxN = 0;
   final ocupados = <String>{};
@@ -78,6 +95,7 @@ String proximoSkuNumericoSequencial(Iterable<String> codigosExistentes) {
     if (t.isEmpty) continue;
     final canon = normalizarCodigoInternoPersistido(t).toLowerCase();
     if (canon.isNotEmpty) ocupados.add(canon);
+    if (!skuEhNumericoSequencialCurto(t)) continue;
     final n = skuComoInteiroSequencial(t);
     if (n != null && n > maxN) maxN = n;
   }

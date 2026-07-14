@@ -21,3 +21,7 @@ export 'relatorios/relatorio_curva_abc_page.dart';
 export 'relatorios/relatorio_historico_fechamento_page.dart';
 export 'relatorios/relatorio_horarios_pico_page.dart';
 export 'relatorios/relatorio_entregas_resumo_page.dart';
+export 'relatorios/relatorio_movimentacao_estoque_page.dart';
+export 'relatorios/relatorio_devolucoes_page.dart';
+export 'relatorios/relatorio_pendencias_entrega_page.dart';
+export 'relatorios/relatorio_historico_entregas_page.dart';

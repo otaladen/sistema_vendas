@@ -211,6 +211,18 @@ abstract final class AppMenuModoEstilo {
     }
   }
 
+  /// Subitens do menu (orcamentos, listagem, etc.) — menor que o grupo pai.
+  static double tamanhoFonteSubItem(BuildContext context) =>
+      (tamanhoFonteItem(context) - 1.25).clamp(11.0, 14.0);
+
+  static FontWeight pesoTextoGrupoMenu(BuildContext context, bool selecionado) {
+    if (selecionado) return pesoTextoItem(context, true);
+    return FontWeight.w600;
+  }
+
+  static FontWeight pesoTextoSubMenu(BuildContext context, bool selecionado) =>
+      selecionado ? FontWeight.w600 : FontWeight.w400;
+
   static double alturaItemMinima(BuildContext context) {
     switch (modoAtual(context)) {
       case AppMenuModoId.classico:

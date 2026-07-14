@@ -8,6 +8,9 @@ import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../domain/loja_ao_vivo_service.dart';
+import '../domain/permissao_usuario.dart';
+import '../domain/usuario_permissao_helper.dart';
+import '../model/usuario_sistema.dart';
 import '../ui/relatorios/relatorio_horarios_pico_helper.dart';
 
 /// Painel fullscreen com visao operacional da loja em tempo real.
@@ -18,12 +21,14 @@ class LojaAoVivoPage extends StatefulWidget {
     required this.produtoRepository,
     required this.vendedorRepository,
     required this.objectBox,
+    required this.usuarioLogado,
   });
 
   final VendaRepository vendaRepository;
   final ProdutoRepository produtoRepository;
   final VendedorRepository vendedorRepository;
   final ObjectBox objectBox;
+  final UsuarioSistema usuarioLogado;
 
   @override
   State<LojaAoVivoPage> createState() => _LojaAoVivoPageState();
@@ -57,7 +62,7 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
       vendedorRepository: widget.vendedorRepository,
       objectBox: widget.objectBox,
     );
-    final snap = await svc.carregar();
+    final snap = await svc.carregar(usuario: widget.usuarioLogado);
     if (!mounted) return;
     setState(() {
       _snap = snap;
@@ -71,6 +76,18 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final snap = _snap;
+    final u = widget.usuarioLogado;
+    final verVendas = UsuarioPermissaoHelper.podeVerMinhasVendasHoje(u);
+    final verCaixa = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarCaixa);
+    final verEntregas = UsuarioPermissaoHelper.podeVisualizarEntregas(u);
+    final verEstoque = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque);
+    final verFinanceiro = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro);
+    final verOrcamentos =
+        UsuarioPermissaoHelper.podeVerOrcamentosDashboard(u);
+    final verMetasTodos =
+        UsuarioPermissaoHelper.podeVerMetasVendedoresLoja(u);
+    final verMetasProprias =
+        !verMetasTodos && u.vendedorId > 0 && verVendas;
 
     return Scaffold(
       appBar: AppBar(
@@ -102,9 +119,33 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
-                      _buildGridKpis(context, snap),
-                      const SizedBox(height: 16),
-                      if (snap.outroTerminalCaixaAberto)
+                      if (verVendas ||
+                          verCaixa ||
+                          verEntregas ||
+                          verEstoque ||
+                          verOrcamentos)
+                        _buildGridKpis(
+                          context,
+                          snap,
+                          verVendas: verVendas,
+                          verCaixa: verCaixa,
+                          verEntregas: verEntregas,
+                          verEstoque: verEstoque,
+                          verOrcamentos: verOrcamentos,
+                          rotuloVendas:
+                              UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(
+                                    u,
+                                  )
+                                  ? 'Vendas hoje'
+                                  : 'Minhas vendas hoje',
+                        ),
+                      if (verVendas ||
+                          verCaixa ||
+                          verEntregas ||
+                          verEstoque ||
+                          verOrcamentos)
+                        const SizedBox(height: 16),
+                      if (verCaixa && snap.outroTerminalCaixaAberto)
                         _buildAlerta(
                           context,
                           Icons.warning_amber_outlined,
@@ -112,41 +153,49 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
                           'Mantenha apenas um caixa aberto por loja.',
                           theme.colorScheme.errorContainer,
                         ),
-                      if (snap.fiadoVencido > 0.001)
+                      if (verFinanceiro && snap.fiadoVencido > 0.001)
                         _buildAlerta(
                           context,
                           Icons.account_balance_wallet_outlined,
                           'Fiado vencido: ${_fmt(snap.fiadoVencido)}',
                           theme.colorScheme.errorContainer,
                         ),
-                      if (snap.estoqueZerado > 0)
+                      if (verEstoque && snap.estoqueZerado > 0)
                         _buildAlerta(
                           context,
                           Icons.inventory_2_outlined,
                           '${snap.estoqueZerado} produto(s) com estoque zerado',
                           theme.colorScheme.tertiaryContainer,
                         ),
-                      if (snap.entregasAtrasadas > 0)
+                      if (verEntregas && snap.entregasAtrasadas > 0)
                         _buildAlerta(
                           context,
                           Icons.local_shipping_outlined,
                           '${snap.entregasAtrasadas} entrega(s) atrasada(s)',
                           theme.colorScheme.secondaryContainer,
                         ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Metas dos vendedores (hoje)',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+                      if (verMetasTodos || verMetasProprias) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          verMetasTodos
+                              ? 'Metas dos vendedores (hoje)'
+                              : 'Minha meta (hoje)',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      if (snap.metasVendedores.isEmpty)
-                        const Text('Nenhum vendedor com meta mensal cadastrada.')
-                      else
-                        ...snap.metasVendedores.map(
-                          (m) => _buildMetaCard(context, m),
-                        ),
+                        const SizedBox(height: 8),
+                        if (snap.metasVendedores.isEmpty)
+                          Text(
+                            verMetasTodos
+                                ? 'Nenhum vendedor com meta mensal cadastrada.'
+                                : 'Nenhuma meta vinculada ao seu cadastro.',
+                          )
+                        else
+                          ...snap.metasVendedores.map(
+                            (m) => _buildMetaCard(context, m),
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -169,53 +218,69 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
     );
   }
 
-  Widget _buildGridKpis(BuildContext context, LojaAoVivoSnapshot snap) {
+  Widget _buildGridKpis(
+    BuildContext context,
+    LojaAoVivoSnapshot snap, {
+    required bool verVendas,
+    required bool verCaixa,
+    required bool verEntregas,
+    required bool verEstoque,
+    required bool verOrcamentos,
+    required String rotuloVendas,
+  }) {
     return LayoutBuilder(
       builder: (context, c) {
         final cols = c.maxWidth >= 900 ? 4 : (c.maxWidth >= 560 ? 2 : 1);
-        final cards = [
-          _KpiCard(
-            rotulo: 'Vendas hoje',
-            valor: '${snap.vendasHoje}',
-            detalhe: _fmt(snap.faturamentoHoje),
-            icone: Icons.point_of_sale_outlined,
-          ),
-          _KpiCard(
-            rotulo: 'Pico do dia',
-            valor: relatorioFormatarFaixaHoraria(snap.horaPicoHoje),
-            detalhe: '${snap.vendasHoraPico} venda(s)',
-            icone: Icons.schedule_outlined,
-          ),
-          _KpiCard(
-            rotulo: 'Caixa',
-            valor: snap.caixaAberto ? 'Aberto' : 'Fechado',
-            detalhe: snap.caixaAberto
-                ? '${snap.caixaOperador} · ${snap.caixaTerminalId}'
-                : 'Nenhuma sessao local',
-            icone: Icons.account_balance_outlined,
-            destaque: snap.caixaAberto,
-          ),
-          _KpiCard(
-            rotulo: 'Entregas',
-            valor: '${snap.entregasEmAberto} abertas',
-            detalhe: '${snap.entregasAtrasadas} atrasada(s)',
-            icone: Icons.local_shipping_outlined,
-            alerta: snap.entregasAtrasadas > 0,
-          ),
-          _KpiCard(
-            rotulo: 'Estoque critico',
-            valor: '${snap.estoqueCritico}',
-            detalhe: '${snap.estoqueZerado} zerado(s)',
-            icone: Icons.inventory_outlined,
-            alerta: snap.estoqueCritico > 0 || snap.estoqueZerado > 0,
-          ),
-          _KpiCard(
-            rotulo: 'Orcamentos',
-            valor: '${snap.orcamentosAbertos}',
-            detalhe: 'Aguardando caixa',
-            icone: Icons.description_outlined,
-          ),
+        final cards = <Widget>[
+          if (verVendas)
+            _KpiCard(
+              rotulo: rotuloVendas,
+              valor: '${snap.vendasHoje}',
+              detalhe: _fmt(snap.faturamentoHoje),
+              icone: Icons.point_of_sale_outlined,
+            ),
+          if (verVendas)
+            _KpiCard(
+              rotulo: 'Pico do dia',
+              valor: relatorioFormatarFaixaHoraria(snap.horaPicoHoje),
+              detalhe: '${snap.vendasHoraPico} venda(s)',
+              icone: Icons.schedule_outlined,
+            ),
+          if (verCaixa)
+            _KpiCard(
+              rotulo: 'Caixa',
+              valor: snap.caixaAberto ? 'Aberto' : 'Fechado',
+              detalhe: snap.caixaAberto
+                  ? '${snap.caixaOperador} · ${snap.caixaTerminalId}'
+                  : 'Nenhuma sessao local',
+              icone: Icons.account_balance_outlined,
+              destaque: snap.caixaAberto,
+            ),
+          if (verEntregas)
+            _KpiCard(
+              rotulo: 'Entregas',
+              valor: '${snap.entregasEmAberto} abertas',
+              detalhe: '${snap.entregasAtrasadas} atrasada(s)',
+              icone: Icons.local_shipping_outlined,
+              alerta: snap.entregasAtrasadas > 0,
+            ),
+          if (verEstoque)
+            _KpiCard(
+              rotulo: 'Estoque critico',
+              valor: '${snap.estoqueCritico}',
+              detalhe: '${snap.estoqueZerado} zerado(s)',
+              icone: Icons.inventory_outlined,
+              alerta: snap.estoqueCritico > 0 || snap.estoqueZerado > 0,
+            ),
+          if (verOrcamentos)
+            _KpiCard(
+              rotulo: 'Orcamentos',
+              valor: '${snap.orcamentosAbertos}',
+              detalhe: 'Aguardando caixa',
+              icone: Icons.description_outlined,
+            ),
         ];
+        if (cards.isEmpty) return const SizedBox.shrink();
         return GridView.count(
           crossAxisCount: cols,
           shrinkWrap: true,

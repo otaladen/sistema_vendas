@@ -82,4 +82,58 @@ class ProdutoLimiteDescontoPdv {
         sub *
         100;
   }
+
+  /// Menor preco unitario permitido sem autorizacao de desconto acima do teto.
+  static double precoMinimoUnitario({
+    required double precoTabelaReferencia,
+    required Produto produto,
+    required String precoTipo,
+    required double tetoEmpresaOuUsuario,
+  }) {
+    if (precoTabelaReferencia <= 0) return 0;
+    final pct = percentualEfetivo(
+      produto: produto,
+      precoTipo: precoTipo,
+      tetoEmpresaOuUsuario: tetoEmpresaOuUsuario,
+    );
+    return precoTabelaReferencia * (1 - pct / 100);
+  }
+
+  /// Desconto unitario (R$) acima do teto cadastrado para a tabela de preco.
+  static double descontoUnitarioAcimaDoTeto({
+    required double novoPrecoUnitario,
+    required double precoTabelaReferencia,
+    required Produto produto,
+    required String precoTipo,
+    required double tetoEmpresaOuUsuario,
+  }) {
+    if (precoTabelaReferencia <= 0 || novoPrecoUnitario >= precoTabelaReferencia) {
+      return 0;
+    }
+    final minimo = precoMinimoUnitario(
+      precoTabelaReferencia: precoTabelaReferencia,
+      produto: produto,
+      precoTipo: precoTipo,
+      tetoEmpresaOuUsuario: tetoEmpresaOuUsuario,
+    );
+    if (novoPrecoUnitario >= minimo - 1e-6) return 0;
+    return (minimo - novoPrecoUnitario).clamp(0, double.infinity);
+  }
+
+  /// Desconto maximo em reais na linha (preco tabela x quantidade x % teto).
+  static double descontoMaximoReaisNaLinha({
+    required double precoTabelaReferencia,
+    required double quantidade,
+    required Produto produto,
+    required String precoTipo,
+    required double tetoEmpresaOuUsuario,
+  }) {
+    if (precoTabelaReferencia <= 0 || quantidade <= 0) return 0;
+    final pct = percentualEfetivo(
+      produto: produto,
+      precoTipo: precoTipo,
+      tetoEmpresaOuUsuario: tetoEmpresaOuUsuario,
+    );
+    return precoTabelaReferencia * quantidade * pct / 100;
+  }
 }

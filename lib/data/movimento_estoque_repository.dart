@@ -72,4 +72,37 @@ class MovimentoEstoqueRepository {
       q.close();
     }
   }
+
+  /// Movimentos no intervalo (UTC), ordenados do mais antigo ao mais recente.
+  List<MovimentoEstoque> listarPorPeriodo({
+    required DateTime inicio,
+    required DateTime fim,
+    int? produtoId,
+  }) {
+    final inicioUtc = DateTime(inicio.year, inicio.month, inicio.day).toUtc();
+    final fimUtc = DateTime(
+      fim.year,
+      fim.month,
+      fim.day,
+      23,
+      59,
+      59,
+      999,
+    ).toUtc();
+    var cond = MovimentoEstoque_.registradoEm
+        .greaterOrEqualDate(inicioUtc)
+        .and(MovimentoEstoque_.registradoEm.lessOrEqualDate(fimUtc));
+    if (produtoId != null && produtoId > 0) {
+      cond = cond & MovimentoEstoque_.produto.equals(produtoId);
+    }
+    final q = _db.movimentoEstoqueBox
+        .query(cond)
+        .order(MovimentoEstoque_.registradoEm)
+        .build();
+    try {
+      return q.find();
+    } finally {
+      q.close();
+    }
+  }
 }

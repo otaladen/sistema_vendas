@@ -12,7 +12,9 @@ import '../data/cliente_repository.dart';
 import '../data/conferencia_carga_repository.dart';
 import '../data/motorista_repository.dart';
 import '../data/produto_repository.dart';
+import '../data/usuario_repository.dart';
 import '../data/venda_repository.dart';
+import '../data/vendedor_repository.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/complemento_entrega_codec.dart';
@@ -44,6 +46,7 @@ import '../services/entrega_pod_prefetch_service.dart';
 import 'entregas/entrega_pod_chip.dart';
 import 'entregas/entrega_pod_foto_panel.dart';
 import 'entregas/pod_entrega_dialog.dart';
+import 'pdv_vendedor_bloqueio.dart';
 import 'registrar_devolucao_troca_page.dart';
 
 /// Filtro rapido pelos contadores de resumo (atrasadas / pendentes hoje).
@@ -62,6 +65,7 @@ class EntregasPage extends StatefulWidget {
     required this.vendaRepository,
     required this.produtoRepository,
     required this.motoristaRepository,
+    required this.vendedorRepository,
     required this.usuarioAtual,
     required this.podeGerenciarStatusEntrega,
     required this.podeRegistrarPodEntrega,
@@ -72,6 +76,7 @@ class EntregasPage extends StatefulWidget {
   final VendaRepository vendaRepository;
   final ProdutoRepository produtoRepository;
   final MotoristaRepository motoristaRepository;
+  final VendedorRepository vendedorRepository;
   final AppConfigRepository? appConfigRepository;
   final String usuarioAtual;
   final bool podeGerenciarStatusEntrega;
@@ -87,6 +92,7 @@ class _EntregasPageState extends State<EntregasPage>
     with SingleTickerProviderStateMixin {
   late final ConferenciaCargaRepository _conferenciaCargaRepository =
       ConferenciaCargaRepository(widget.vendaRepository.objectBox);
+  final UsuarioRepository _usuarioRepository = UsuarioRepository();
 
   late TabController _tabEntregasController;
   bool _mostrarDicasEntregas = true;
@@ -532,7 +538,8 @@ class _EntregasPageState extends State<EntregasPage>
       builder: (_) => _DialogRetiradaLojaCarretoAntesSaida(
         venda: v,
         vendaRepository: widget.vendaRepository,
-        usuario: widget.usuarioAtual,
+        vendedorRepository: widget.vendedorRepository,
+        usuarioRepository: _usuarioRepository,
       ),
     );
     if (!mounted) return;
@@ -4292,12 +4299,14 @@ class _DialogRetiradaLojaCarretoAntesSaida extends StatefulWidget {
   const _DialogRetiradaLojaCarretoAntesSaida({
     required this.venda,
     required this.vendaRepository,
-    required this.usuario,
+    required this.vendedorRepository,
+    required this.usuarioRepository,
   });
 
   final Venda venda;
   final VendaRepository vendaRepository;
-  final String usuario;
+  final VendedorRepository vendedorRepository;
+  final UsuarioRepository usuarioRepository;
 
   @override
   State<_DialogRetiradaLojaCarretoAntesSaida> createState() =>
@@ -4360,12 +4369,18 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
       );
       return;
     }
+    final operador = await solicitarOperadorRetiradaNaLoja(
+      context: context,
+      vendedorRepository: widget.vendedorRepository,
+      usuarioRepository: widget.usuarioRepository,
+    );
+    if (operador == null || !mounted) return;
     try {
       final quem = _quemRetirouController.text.trim();
       widget.vendaRepository.registrarRetiradaParcialLojaCarretoAntesSaida(
         widget.venda.id,
         map,
-        usuario: widget.usuario,
+        usuario: operador,
         retiradoPor: quem.isEmpty ? null : quem,
       );
       if (!mounted) return;
@@ -4390,15 +4405,6 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'Informe quantas unidades o cliente esta retirando agora na loja. '
-                'So e permitido ate o checklist marcar "Saiu". O romaneio e a carga '
-                'passam a mostrar apenas o que ainda segue no carro.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton(
@@ -4412,8 +4418,8 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
                 controller: _quemRetirouController,
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(
-                  labelText: 'Quem retirou (opcional)',
-                  hintText: 'Nome de quem leva a mercadoria',
+                  labelText: 'Quem retirou',
+                  hintText: 'Opcional',
                   isDense: true,
                 ),
               ),

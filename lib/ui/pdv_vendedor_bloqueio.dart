@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../services/cupom_nao_fiscal_venda_pdf.dart';
 import '../data/usuario_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../model/vendedor.dart';
@@ -14,6 +15,11 @@ Future<Vendedor?> solicitarIdentificacaoVendedorPdv({
   required VendedorRepository vendedorRepository,
   required UsuarioRepository usuarioRepository,
   bool permitirCancelar = true,
+  String titulo = 'Identificacao do vendedor',
+  String mensagem =
+      'Informe a senha do vendedor ou o login do sistema para liberar '
+      'o terminal. O PDV identifica automaticamente quem esta vendendo.',
+  String rotuloConfirmar = 'Entrar',
 }) async {
   final comSenha = vendedorRepository.contarAtivosComSenhaPdv();
   final comUsuario = await usuarioRepository.contarAtivosComVendedorVinculado();
@@ -52,8 +58,29 @@ Future<Vendedor?> solicitarIdentificacaoVendedorPdv({
       permitirCancelar: permitirCancelar,
       permiteSenhaVendedor: comSenha > 0,
       permiteUsuarioSistema: comUsuario > 0,
+      titulo: titulo,
+      mensagem: mensagem,
+      rotuloConfirmar: rotuloConfirmar,
     ),
   );
+}
+
+/// Senha PDV ou login do sistema para registrar quem autorizou retirada na loja.
+Future<String?> solicitarOperadorRetiradaNaLoja({
+  required BuildContext context,
+  required VendedorRepository vendedorRepository,
+  required UsuarioRepository usuarioRepository,
+}) async {
+  final vendedor = await solicitarIdentificacaoVendedorPdv(
+    context: context,
+    vendedorRepository: vendedorRepository,
+    usuarioRepository: usuarioRepository,
+    titulo: 'Autorizar retirada',
+    mensagem: 'Senha do vendedor ou login do sistema.',
+    rotuloConfirmar: 'Confirmar',
+  );
+  if (vendedor == null) return null;
+  return CupomNaoFiscalVendaPdf.rotuloVendedorUmLinha(vendedor);
 }
 
 class _DialogoBloqueioVendedorPdv extends StatefulWidget {
@@ -63,6 +90,9 @@ class _DialogoBloqueioVendedorPdv extends StatefulWidget {
     required this.permitirCancelar,
     required this.permiteSenhaVendedor,
     required this.permiteUsuarioSistema,
+    required this.titulo,
+    required this.mensagem,
+    required this.rotuloConfirmar,
   });
 
   final VendedorRepository vendedorRepository;
@@ -70,6 +100,9 @@ class _DialogoBloqueioVendedorPdv extends StatefulWidget {
   final bool permitirCancelar;
   final bool permiteSenhaVendedor;
   final bool permiteUsuarioSistema;
+  final String titulo;
+  final String mensagem;
+  final String rotuloConfirmar;
 
   @override
   State<_DialogoBloqueioVendedorPdv> createState() =>
@@ -199,17 +232,14 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
         widget.permiteSenhaVendedor && widget.permiteUsuarioSistema;
 
     return AlertDialog(
-      title: const Text('Identificacao do vendedor'),
+      title: Text(widget.titulo),
       content: SizedBox(
         width: 440,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Informe a senha do vendedor ou o login do sistema para liberar '
-              'o terminal. O PDV identifica automaticamente quem esta vendendo.',
-            ),
+            Text(widget.mensagem),
             if (mostrarSeletorModo) ...[
               const SizedBox(height: 12),
               SegmentedButton<_ModoIdentificacaoVendedorPdv>(
@@ -303,7 +333,7 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Entrar'),
+              : Text(widget.rotuloConfirmar),
         ),
       ],
     );

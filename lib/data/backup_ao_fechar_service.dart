@@ -35,11 +35,13 @@ class BackupAoFecharService {
 
     _emExecucao = true;
     try {
+      final escopo = await repository.carregarBackupAutomaticoEscopo();
       final resultado = await LocalBackupService.executar(
         destinoRaiz: destino,
         tipo: LocalBackupTipo.automatico,
         nomeLoja: nomeLoja,
         objectBox: objectBox,
+        escopo: escopo,
         lanSyncScheduler: lanSyncScheduler,
       );
 

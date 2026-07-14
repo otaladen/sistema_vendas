@@ -12,6 +12,7 @@ import '../model/produto.dart';
 import 'produto_detalhe_venda_page.dart';
 import 'widgets/pdv_consulta_painel_insights.dart';
 import 'widgets/pdv_estoque_resumo_panel.dart';
+import 'widgets/pdv_sugestoes_carrinho_strip.dart';
 import 'widgets/promocao_badge.dart';
 
 /// Tres listas de preco do produto (ativo em destaque; clicavel na consulta).
@@ -149,6 +150,10 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
     this.onInserirKit,
     this.onAdicionarAgregado,
     this.rotulosDeposito = const PdvConsultaDepositoRotulos(),
+    this.sugestoesCarrinho = const [],
+    this.sugestoesOrigemNome = '',
+    this.onFecharSugestoesCarrinho,
+    this.onAdicionarSugestaoCarrinho,
   });
 
   final Produto produto;
@@ -177,6 +182,13 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
   final ValueChanged<PdvConsultaKitResumo>? onInserirKit;
   final ValueChanged<PdvConsultaAgregadoVenda>? onAdicionarAgregado;
   final PdvConsultaDepositoRotulos rotulosDeposito;
+  final List<PdvConsultaAgregadoVenda> sugestoesCarrinho;
+  final String sugestoesOrigemNome;
+  final VoidCallback? onFecharSugestoesCarrinho;
+  final ValueChanged<PdvConsultaAgregadoVenda>? onAdicionarSugestaoCarrinho;
+
+  bool get _temSugestoesCarrinho =>
+      sugestoesCarrinho.isNotEmpty && onAdicionarSugestaoCarrinho != null;
 
   bool get _usarAbasInsights =>
       insights != null && insights!.temConteudo;
@@ -473,6 +485,16 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
         quantidadeNoOrcamento: quantidadeNoOrcamento,
         rotulosDeposito: rotulosDeposito,
       ),
+      if (_temSugestoesCarrinho) ...[
+        const SizedBox(height: 12),
+        PdvSugestoesCarrinhoStrip(
+          sugestoes: sugestoesCarrinho,
+          formatarMoeda: formatarMoeda,
+          produtoOrigemNome: sugestoesOrigemNome,
+          onAdicionar: onAdicionarSugestaoCarrinho!,
+          onFechar: onFecharSugestoesCarrinho ?? () {},
+        ),
+      ],
       if (mostrarDescricaoInline) ...[
         const SizedBox(height: 10),
         ProdutoDescricaoTecnicaInline(

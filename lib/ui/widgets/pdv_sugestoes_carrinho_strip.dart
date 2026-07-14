@@ -10,12 +10,15 @@ class PdvSugestoesCarrinhoStrip extends StatelessWidget {
     required this.formatarMoeda,
     required this.onAdicionar,
     required this.onFechar,
+    this.produtoOrigemNome,
   });
 
   final List<PdvConsultaAgregadoVenda> sugestoes;
   final String Function(double) formatarMoeda;
   final ValueChanged<PdvConsultaAgregadoVenda> onAdicionar;
   final VoidCallback onFechar;
+  /// Produto que gerou as sugestoes (ex.: item recém-adicionado).
+  final String? produtoOrigemNome;
 
   @override
   Widget build(BuildContext context) {
@@ -60,6 +63,19 @@ class PdvSugestoesCarrinhoStrip extends StatelessWidget {
                 ),
               ],
             ),
+            if (produtoOrigemNome != null &&
+                produtoOrigemNome!.trim().isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                'Com: ${produtoOrigemNome!.trim()}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
             for (var i = 0; i < sugestoes.length; i++) ...[
               if (i > 0) const SizedBox(height: 2),
               _LinhaSugestao(

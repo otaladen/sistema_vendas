@@ -52,11 +52,13 @@ class AutoBackupService {
 
     _emExecucao = true;
     try {
+      final escopo = await repository.carregarBackupAutomaticoEscopo();
       final resultado = await LocalBackupService.executar(
         destinoRaiz: destinoRaiz,
         tipo: LocalBackupTipo.automatico,
         nomeLoja: config.nomeLoja,
         objectBox: objectBox,
+        escopo: escopo,
         lanSyncScheduler: lanSyncScheduler,
       );
 

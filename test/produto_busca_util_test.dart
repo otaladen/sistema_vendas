@@ -108,6 +108,12 @@ void main() {
         '8859',
       );
       expect(proximoSkuNumericoSequencial(const []), '1');
+      expect(skuPareceCodigoBarrasGtin('2890000040018'), isTrue);
+      expect(skuEhNumericoSequencialCurto('2890000040018'), isFalse);
+      expect(
+        proximoSkuNumericoSequencial(['2890000040018', '2100000000012', '12']),
+        '13',
+      );
     });
   });
 

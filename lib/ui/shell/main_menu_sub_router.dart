@@ -203,6 +203,7 @@ class MainMenuSubRouter {
                     vendaRepository: deps.vendaRepository,
                     produtoRepository: deps.produtoRepository,
                     motoristaRepository: deps.motoristaRepository,
+                    vendedorRepository: deps.vendedorRepository,
                     appConfigRepository: deps.appConfigRepository,
                     usuarioAtual: u.login,
                     podeGerenciarStatusEntrega: podeGerenciarEntregas,

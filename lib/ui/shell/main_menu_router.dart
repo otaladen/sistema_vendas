@@ -98,13 +98,20 @@ class MainMenuRouter {
     );
   }
 
-  static void abrir(BuildContext context, MainMenuDestino destino) {
+  static void abrir(
+    BuildContext context,
+    MainMenuDestino destino, {
+    String? configSecaoInicialId,
+  }) {
     final deps = MainMenuDeps.maybeOf(context);
     if (deps == null || !destino.podeAcessar(deps.usuarioLogado)) return;
 
     final shell = AppShellScope.maybeOf(context);
     if (shell != null) {
-      shell.irPara(destino);
+      shell.irPara(
+        destino,
+        configSecaoInicialId: configSecaoInicialId,
+      );
       return;
     }
 
@@ -124,13 +131,21 @@ class MainMenuRouter {
           lanSyncScheduler: deps.lanSyncScheduler,
           appConfigRepository: deps.appConfigRepository,
           printService: deps.printService,
-          child: pagina(destino, deps),
+          child: pagina(
+            destino,
+            deps,
+            configSecaoInicialId: configSecaoInicialId,
+          ),
         ),
       ),
     );
   }
 
-  static Widget pagina(MainMenuDestino destino, MainMenuDeps deps) {
+  static Widget pagina(
+    MainMenuDestino destino,
+    MainMenuDeps deps, {
+    String? configSecaoInicialId,
+  }) {
     final u = deps.usuarioLogado;
     switch (destino) {
       case MainMenuDestino.inicio:
@@ -200,6 +215,7 @@ class MainMenuRouter {
           vendaRepository: deps.vendaRepository,
           produtoRepository: deps.produtoRepository,
           motoristaRepository: deps.motoristaRepository,
+          vendedorRepository: deps.vendedorRepository,
           appConfigRepository: deps.appConfigRepository,
           usuarioAtual: u.login,
           podeGerenciarStatusEntrega:
@@ -237,6 +253,7 @@ class MainMenuRouter {
           appConfigRepository: deps.appConfigRepository,
           printService: deps.printService,
           produtoRepository: deps.produtoRepository,
+          secaoInicialId: configSecaoInicialId,
         );
       case MainMenuDestino.motorista:
         return MotoristaEntregasPage(

@@ -152,6 +152,11 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     if (!mounted) return;
     final deps = MainMenuDeps.maybeOf(context);
     if (deps == null) return;
+    if (!UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(
+      deps.usuarioLogado,
+    )) {
+      return;
+    }
     final total = FiscalPendenciasResumoService.contar(
       vendaRepository: deps.vendaRepository,
     ).total;
@@ -207,9 +212,15 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     final fim = inicio
         .add(const Duration(days: 1))
         .subtract(const Duration(milliseconds: 1));
-    final vendas = deps.vendaRepository
+    final todasVendas = deps.vendaRepository
         .listarPorPeriodo(PeriodoFiltro(inicio: inicio, fim: fim))
         .where((v) => !v.cancelada && v.status == 'finalizada');
+    final u = deps.usuarioLogado;
+    final verTotalLoja =
+        UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u);
+    final vendas = verTotalLoja
+        ? todasVendas
+        : todasVendas.where((v) => v.vendedor.targetId == u.vendedorId);
     final faturamento = vendas.fold<double>(0, (s, v) => s + v.total);
 
     const filtroEntregas = FiltroListagemEntregas(statusEntrega: 'todos');
@@ -222,16 +233,21 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         .length;
 
     deps.vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
-    final titulosAbertos = deps.vendaRepository.titulos.listarTodosAbertos();
-    final totalAReceber = titulosAbertos.fold<double>(
-      0,
-      (s, l) => s + l.titulo.saldo,
-    );
-    final totalFiadoVencido = titulosAbertos
-        .where(ContasReceberHelper.ehVencido)
-        .fold<double>(0, (s, l) => s + l.titulo.saldo);
+    final podeFinanceiro =
+        UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro);
+    double? totalAReceber;
+    double? totalFiadoVencido;
+    if (podeFinanceiro) {
+      final titulosAbertos = deps.vendaRepository.titulos.listarTodosAbertos();
+      totalAReceber = titulosAbertos.fold<double>(
+        0,
+        (s, l) => s + l.titulo.saldo,
+      );
+      totalFiadoVencido = titulosAbertos
+          .where(ContasReceberHelper.ehVencido)
+          .fold<double>(0, (s, l) => s + l.titulo.saldo);
+    }
 
-    final u = deps.usuarioLogado;
     final backupManual =
         await deps.appConfigRepository.carregarRegistroBackupManual();
     final backupStatus = BackupStatusHelper.avaliar(
@@ -251,11 +267,14 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         u,
         PermissaoUsuario.configuracoes,
       ),
+      podeOrcamentos: UsuarioPermissaoHelper.podeVerOrcamentosDashboard(u),
     );
 
-    final fiscalPendencias = FiscalPendenciasResumoService.contar(
-      vendaRepository: deps.vendaRepository,
-    ).total;
+    final fiscalPendencias = UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(u)
+        ? FiscalPendenciasResumoService.contar(
+            vendaRepository: deps.vendaRepository,
+          ).total
+        : 0;
 
     final recadoRepo = RecadoLojaRepository(deps.objectBox);
     final recadosNaoLidos = recadoRepo.listarNaoLidosParaUsuario(u);
@@ -296,7 +315,11 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       return;
     }
     if (alerta.destino != null) {
-      _ir(alerta.destino!);
+      MainMenuRouter.abrir(
+        context,
+        alerta.destino!,
+        configSecaoInicialId: alerta.configSecaoId,
+      );
     }
   }
 
@@ -329,7 +352,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
 
   void _abrirLojaAoVivo() {
     final deps = MainMenuDeps.of(context);
-    if (!UsuarioPermissaoHelper.tem(deps.usuarioLogado, PermissaoUsuario.vendasHub)) {
+    if (!UsuarioPermissaoHelper.podeAcessarLojaAoVivo(deps.usuarioLogado)) {
       return;
     }
     Navigator.push<void>(
@@ -353,6 +376,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
             produtoRepository: deps.produtoRepository,
             vendedorRepository: deps.vendedorRepository,
             objectBox: deps.objectBox,
+            usuarioLogado: deps.usuarioLogado,
           ),
         ),
       ),
@@ -393,6 +417,11 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     final deps = MainMenuDeps.of(context);
     final u = deps.usuarioLogado;
     final podeVendas = _tem(PermissaoUsuario.vendasHub);
+    final podeVerMinhasVendas =
+        UsuarioPermissaoHelper.podeVerMinhasVendasHoje(u);
+    final podeVerTotalLoja =
+        UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u);
+    final podeLojaAoVivo = UsuarioPermissaoHelper.podeAcessarLojaAoVivo(u);
     final podePdv = _tem(PermissaoUsuario.acessarPdv);
     final podeCaixa = _tem(PermissaoUsuario.acessarCaixa);
     final podeFinanceiro = _tem(PermissaoUsuario.financeiro);
@@ -462,7 +491,9 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                 ],
                 _faixaKpis(
                   resumo: resumo,
-                  podeVendas: podeVendas,
+                  podeVendas: podeVerMinhasVendas,
+                  rotuloVendas:
+                      podeVerTotalLoja ? 'Vendas hoje' : 'Minhas vendas hoje',
                   podeCaixa: podeCaixa,
                   podeEntregas: podeEntregas,
                   podeFinanceiro: podeFinanceiro,
@@ -477,7 +508,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                       : '${_recadosNaoLidos.length} recado(s) nao lido(s). Toque para abrir.',
                   onTap: _abrirRecados,
                 ),
-                if (podeVendas) ...[
+                if (podeLojaAoVivo) ...[
                   const SizedBox(height: 12),
                   HubNavButton(
                     icon: Icons.monitor_heart_outlined,
@@ -486,8 +517,9 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                       AppModuloId.lojaAoVivo,
                     ),
                     titulo: 'Loja ao vivo',
-                    subtitulo:
-                        'Painel fullscreen: vendas/hora, caixa, entregas, estoque e metas.',
+                    subtitulo: podeVerTotalLoja
+                        ? 'Painel operacional: vendas, caixa, entregas, estoque e metas.'
+                        : 'Painel com os indicadores liberados para o seu perfil.',
                     onTap: _abrirLojaAoVivo,
                   ),
                 ],
@@ -499,22 +531,32 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                   podeCaixa: podeCaixa,
                   podeEntregas: podeEntregas,
                 ),
-                const SizedBox(height: 16),
-                const MainMenuSectionHeader(titulo: 'Fiscal e financeiro'),
-                MainMenuTileGrid(
-                  tiles: [
-                    _tileModulo(MainMenuDestino.notasFiscais),
-                    _tileModulo(MainMenuDestino.financeiro),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                const MainMenuSectionHeader(titulo: 'Cadastros e sistema'),
-                MainMenuTileGrid(
-                  tiles: [
-                    _tileModulo(MainMenuDestino.cadastros),
-                    _tileModulo(MainMenuDestino.configuracoes),
-                  ],
-                ),
+                if (MainMenuDestino.notasFiscais.podeAcessar(u) ||
+                    MainMenuDestino.financeiro.podeAcessar(u)) ...[
+                  const SizedBox(height: 16),
+                  const MainMenuSectionHeader(titulo: 'Fiscal e financeiro'),
+                  MainMenuTileGrid(
+                    tiles: [
+                      if (MainMenuDestino.notasFiscais.podeAcessar(u))
+                        _tileModulo(MainMenuDestino.notasFiscais),
+                      if (MainMenuDestino.financeiro.podeAcessar(u))
+                        _tileModulo(MainMenuDestino.financeiro),
+                    ],
+                  ),
+                ],
+                if (MainMenuDestino.cadastros.podeAcessar(u) ||
+                    MainMenuDestino.configuracoes.podeAcessar(u)) ...[
+                  const SizedBox(height: 16),
+                  const MainMenuSectionHeader(titulo: 'Cadastros e sistema'),
+                  MainMenuTileGrid(
+                    tiles: [
+                      if (MainMenuDestino.cadastros.podeAcessar(u))
+                        _tileModulo(MainMenuDestino.cadastros),
+                      if (MainMenuDestino.configuracoes.podeAcessar(u))
+                        _tileModulo(MainMenuDestino.configuracoes),
+                    ],
+                  ),
+                ],
                 if (podeMotorista) ...[
                   const SizedBox(height: 16),
                   const MainMenuSectionHeader(titulo: 'Campo'),
@@ -569,7 +611,9 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
   Widget _tileModulo(MainMenuDestino d) {
     final u = MainMenuDeps.of(context).usuarioLogado;
     final habilitado = d.podeAcessar(u);
-    final badge = d == MainMenuDestino.notasFiscais
+    final podeBadgeFiscal =
+        UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(u);
+    final badge = d == MainMenuDestino.notasFiscais && podeBadgeFiscal
         ? (_resumo?.fiscalPendencias ?? 0)
         : d == MainMenuDestino.configuracoes && (_resumo?.backupAlerta ?? false)
             ? 1
@@ -590,6 +634,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
   Widget _faixaKpis({
     required _MainMenuResumo? resumo,
     required bool podeVendas,
+    required String rotuloVendas,
     required bool podeCaixa,
     required bool podeEntregas,
     required bool podeFinanceiro,
@@ -606,7 +651,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
           if (podeVendas)
             MainMenuKpiCard(
               icone: Icons.trending_up_outlined,
-              rotulo: 'Vendas hoje',
+              rotulo: rotuloVendas,
               valor: 'R\$ $fmt',
               detalhe: vendasDet,
               cor: HubNavColors.menuVendas(context),

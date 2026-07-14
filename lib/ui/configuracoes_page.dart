@@ -43,6 +43,7 @@ class ConfiguracoesPage extends StatefulWidget {
     required this.printService,
     required this.produtoRepository,
     this.lanSyncScheduler,
+    this.secaoInicialId,
   });
 
   final VendaRepository vendaRepository;
@@ -51,6 +52,7 @@ class ConfiguracoesPage extends StatefulWidget {
   final PrintService printService;
   final ProdutoRepository produtoRepository;
   final LanSyncScheduler? lanSyncScheduler;
+  final String? secaoInicialId;
 
   @override
   State<ConfiguracoesPage> createState() => _ConfiguracoesPageState();
@@ -100,6 +102,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _pdvBalcaoRapido = true;
   bool _pdvCheckoutDireto = true;
   bool _pdvPularDialogOrcamentoSalvo = true;
+  bool _pdvExigirClienteRetiradaFutura = false;
   int _obraCalcTijoloProdutoId = 0;
   int _obraCalcCimentoProdutoId = 0;
   int _obraCalcAreiaProdutoId = 0;
@@ -162,6 +165,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   @override
   void initState() {
     super.initState();
+    final secao = widget.secaoInicialId?.trim();
+    if (secao != null && secao.isNotEmpty) {
+      _indiceSecaoConfig = ConfigSecoes.indiceDeId(secao);
+    }
     _carregarConfig();
     _carregarChaveGemini();
     _carregarConfigFiscal();
@@ -331,6 +338,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _pdvBalcaoRapido = config.pdvBalcaoRapido;
       _pdvCheckoutDireto = config.pdvCheckoutDireto;
       _pdvPularDialogOrcamentoSalvo = config.pdvPularDialogOrcamentoSalvo;
+      _pdvExigirClienteRetiradaFutura = config.pdvExigirClienteRetiradaFutura;
       _obraCalcTijoloProdutoId = config.obraCalcTijoloProdutoId;
       _obraCalcCimentoProdutoId = config.obraCalcCimentoProdutoId;
       _obraCalcAreiaProdutoId = config.obraCalcAreiaProdutoId;
@@ -605,6 +613,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           pdvBalcaoRapido: _pdvBalcaoRapido,
           pdvCheckoutDireto: _pdvCheckoutDireto,
           pdvPularDialogOrcamentoSalvo: _pdvPularDialogOrcamentoSalvo,
+          pdvExigirClienteRetiradaFutura: _pdvExigirClienteRetiradaFutura,
           obraCalcTijoloProdutoId: _obraCalcTijoloProdutoId,
           obraCalcCimentoProdutoId: _obraCalcCimentoProdutoId,
           obraCalcAreiaProdutoId: _obraCalcAreiaProdutoId,
@@ -1270,6 +1279,22 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 ),
               ),
               const Divider(height: 28),
+              Text('Entrega', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 4),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _pdvExigirClienteRetiradaFutura,
+                onChanged: (value) {
+                  setState(() => _pdvExigirClienteRetiradaFutura = value);
+                },
+                title: const Text('Exigir cliente na retirada futura'),
+                subtitle: const Text(
+                  'Quando ativo, qualquer item marcado como retirada futura no PDV '
+                  'exige selecionar ou cadastrar o cliente antes de enviar ao caixa, '
+                  'como no carreto.',
+                ),
+              ),
+              const Divider(height: 28),
               Text('Atendimento', style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 4),
               SwitchListTile.adaptive(
@@ -1890,6 +1915,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         BackupConfiguracaoSection(
           appConfigRepository: widget.appConfigRepository,
           objectBox: widget.objectBox,
+          produtoRepository: widget.produtoRepository,
           lanSyncScheduler: widget.lanSyncScheduler,
           nomeLoja: _nomeLojaController.text.trim().isEmpty
               ? 'LOJA DE MATERIAIS'

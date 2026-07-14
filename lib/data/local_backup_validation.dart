@@ -1,8 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-/// Validacao e resolucao de caminhos para backup/restauracao local (Windows/Android).
+import 'local_backup_cadastro_produtos_service.dart';
 class LocalBackupValidation {
   LocalBackupValidation._();
 
@@ -63,6 +64,36 @@ class LocalBackupValidation {
     if (mdb == null) return 'banco nao encontrado';
     final kb = (mdb.lengthSync() / 1024).toStringAsFixed(1);
     return '$kb KB';
+  }
+
+  static void validarCadastroProdutos(Directory pastaBackup) {
+    final jsonFile =
+        LocalBackupCadastroProdutosService.arquivoJsonNoBackup(pastaBackup);
+    if (!jsonFile.existsSync()) {
+      throw LocalBackupInvalidoException(
+        'Backup de cadastro de produtos invalido: '
+        'arquivo ${LocalBackupCadastroProdutosService.arquivoProdutos} ausente.',
+      );
+    }
+    if (jsonFile.lengthSync() < 4) {
+      throw LocalBackupInvalidoException(
+        'Arquivo de produtos do backup esta vazio ou corrompido.',
+      );
+    }
+  }
+
+  static int? contarProdutosCadastroBackup(Directory pastaBackup) {
+    try {
+      final jsonFile =
+          LocalBackupCadastroProdutosService.arquivoJsonNoBackup(pastaBackup);
+      if (!jsonFile.existsSync()) return null;
+      final map = jsonDecode(jsonFile.readAsStringSync()) as Map;
+      final q = map['quantidade'];
+      if (q is num) return q.toInt();
+      final lista = map['produtos'];
+      if (lista is List) return lista.length;
+    } catch (_) {}
+    return null;
   }
 }
 

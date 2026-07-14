@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/fiscal_config.dart';
 import '../domain/auditoria_retencao.dart';
 import '../domain/backup_retencao.dart';
+import '../domain/local_backup_escopo.dart';
 import '../services/fiscal_config_store.dart';
 import '../model/config_layout_impressao.dart';
 import 'sync/sync_local_config.dart';
@@ -113,6 +114,9 @@ class EmpresaConfig {
 
     /// PDV: apos enviar orcamento ao caixa, exige identificar o vendedor de novo.
     this.pdvBloqueioVendedorAposOrcamento = false,
+
+    /// PDV: itens em retirada futura exigem cliente cadastrado (como carreto).
+    this.pdvExigirClienteRetiradaFutura = false,
 
     /// Calculadora de obra (PDV): IDs de produto padrao (0 = nao configurado).
     this.obraCalcTijoloProdutoId = 0,
@@ -234,6 +238,7 @@ class EmpresaConfig {
   final bool pdvBloqueioVendedor;
   final int pdvBloqueioVendedorInatividadeMinutos;
   final bool pdvBloqueioVendedorAposOrcamento;
+  final bool pdvExigirClienteRetiradaFutura;
 
   /// Produtos padrao da calculadora de obra no PDV (ObjectBox id).
   final int obraCalcTijoloProdutoId;
@@ -317,6 +322,7 @@ class EmpresaConfig {
     bool? pdvBloqueioVendedor,
     int? pdvBloqueioVendedorInatividadeMinutos,
     bool? pdvBloqueioVendedorAposOrcamento,
+    bool? pdvExigirClienteRetiradaFutura,
     int? obraCalcTijoloProdutoId,
     int? obraCalcCimentoProdutoId,
     int? obraCalcAreiaProdutoId,
@@ -424,6 +430,8 @@ class EmpresaConfig {
               : this.pdvBloqueioVendedorInatividadeMinutos,
       pdvBloqueioVendedorAposOrcamento: pdvBloqueioVendedorAposOrcamento ??
           this.pdvBloqueioVendedorAposOrcamento,
+      pdvExigirClienteRetiradaFutura: pdvExigirClienteRetiradaFutura ??
+          this.pdvExigirClienteRetiradaFutura,
       obraCalcTijoloProdutoId:
           obraCalcTijoloProdutoId ?? this.obraCalcTijoloProdutoId,
       obraCalcCimentoProdutoId:
@@ -527,6 +535,7 @@ class AppConfigRepository {
   static const _kBackupSegundoDestinoAtivo = 'config_backup_segundo_destino_ativo_v1';
   static const _kBackupSegundoDestinoPasta = 'config_backup_segundo_destino_pasta_v1';
   static const _kBackupAoFecharAtivo = 'config_backup_ao_fechar_ativo_v1';
+  static const _kBackupAutomaticoEscopo = 'config_backup_automatico_escopo_v1';
   static const _kBackupTarefaWindowsHorario = 'config_backup_tarefa_windows_horario_v1';
   static const _kBackupAutomaticoFalhaMs = 'config_backup_automatico_falha_ms_v1';
   static const _kBackupAutomaticoFalhaMsg = 'config_backup_automatico_falha_msg_v1';
@@ -558,6 +567,8 @@ class AppConfigRepository {
       'config_pdv_bloqueio_vendedor_inatividade_min_v1';
   static const _kPdvBloqueioVendedorAposOrcamento =
       'config_pdv_bloqueio_vendedor_apos_orcamento_v1';
+  static const _kPdvExigirClienteRetiradaFutura =
+      'config_pdv_exigir_cliente_retirada_futura_v1';
   static const _kObraCalcTijoloProdutoId = 'config_obra_calc_tijolo_produto_id_v1';
   static const _kObraCalcCimentoProdutoId =
       'config_obra_calc_cimento_produto_id_v1';
@@ -687,6 +698,8 @@ class AppConfigRepository {
           prefs.getInt(_kPdvBloqueioVendedorInatividadeMinutos) ?? 0,
       pdvBloqueioVendedorAposOrcamento:
           prefs.getBool(_kPdvBloqueioVendedorAposOrcamento) ?? false,
+      pdvExigirClienteRetiradaFutura:
+          prefs.getBool(_kPdvExigirClienteRetiradaFutura) ?? false,
       obraCalcTijoloProdutoId: prefs.getInt(_kObraCalcTijoloProdutoId) ?? 0,
       obraCalcCimentoProdutoId: prefs.getInt(_kObraCalcCimentoProdutoId) ?? 0,
       obraCalcAreiaProdutoId: prefs.getInt(_kObraCalcAreiaProdutoId) ?? 0,
@@ -920,6 +933,10 @@ class AppConfigRepository {
       _kPdvBloqueioVendedorAposOrcamento,
       config.pdvBloqueioVendedorAposOrcamento,
     );
+    await prefs.setBool(
+      _kPdvExigirClienteRetiradaFutura,
+      config.pdvExigirClienteRetiradaFutura,
+    );
     await prefs.setInt(
       _kObraCalcTijoloProdutoId,
       config.obraCalcTijoloProdutoId < 0 ? 0 : config.obraCalcTijoloProdutoId,
@@ -1093,6 +1110,23 @@ class AppConfigRepository {
   Future<void> salvarBackupAoFecharAtivo(bool ativo) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kBackupAoFecharAtivo, ativo);
+  }
+
+  /// Escopo dos backups automaticos, ao fechar e tarefa Windows (padrao: completo).
+  Future<LocalBackupEscopo> carregarBackupAutomaticoEscopo() async {
+    final prefs = await SharedPreferences.getInstance();
+    final escopo = localBackupEscopoFromManifest(
+      prefs.getString(_kBackupAutomaticoEscopo),
+    );
+    if (!escopo.disponivelNoAutomatico) {
+      return LocalBackupEscopo.completo;
+    }
+    return escopo;
+  }
+
+  Future<void> salvarBackupAutomaticoEscopo(LocalBackupEscopo escopo) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kBackupAutomaticoEscopo, escopo.manifestValue);
   }
 
   Future<BackupFalhaRegistro> carregarFalhaBackupAutomatico() async {

@@ -57,3 +57,15 @@ Color corRelMetasVendedor(BuildContext context) =>
 
 Color corRelLogSistema(BuildContext context) =>
     AppRelatorioCores.cor(context, AppRelatorioId.logSistema);
+
+Color corRelHistoricoEntregas(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.historicoEntregas);
+
+Color corRelMovimentacaoEstoque(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.movimentacaoEstoque);
+
+Color corRelDevolucoesPeriodo(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.devolucoesPeriodo);
+
+Color corRelPendenciasEntrega(BuildContext context) =>
+    AppRelatorioCores.cor(context, AppRelatorioId.pendenciasEntrega);

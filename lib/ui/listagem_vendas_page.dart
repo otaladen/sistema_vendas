@@ -43,6 +43,7 @@ import '../services/focus_nfe_service.dart';
 import 'fiscal/abrir_documento_fiscal.dart';
 import 'fiscal/emitir_nfce_venda_flow.dart';
 import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
+import 'pdv_vendedor_bloqueio.dart';
 import 'registrar_devolucao_troca_page.dart';
 
 /// Lista vendas já finalizadas no Caixa (`status == finalizada`), com filtros e busca.
@@ -593,7 +594,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       builder: (ctx) => _DialogRegistrarRetiradaCliente(
         venda: atual,
         vendaRepository: widget.vendaRepository,
-        usuario: widget.usuarioAtual,
+        vendedorRepository: widget.vendedorRepository,
+        usuarioRepository: _usuarioRepository,
       ),
     );
     if (ok == true && mounted) {
@@ -2010,12 +2012,14 @@ class _DialogRegistrarRetiradaCliente extends StatefulWidget {
   const _DialogRegistrarRetiradaCliente({
     required this.venda,
     required this.vendaRepository,
-    required this.usuario,
+    required this.vendedorRepository,
+    required this.usuarioRepository,
   });
 
   final Venda venda;
   final VendaRepository vendaRepository;
-  final String usuario;
+  final VendedorRepository vendedorRepository;
+  final UsuarioRepository usuarioRepository;
 
   @override
   State<_DialogRegistrarRetiradaCliente> createState() =>
@@ -2112,6 +2116,12 @@ class _DialogRegistrarRetiradaClienteState
       );
       return;
     }
+    final operador = await solicitarOperadorRetiradaNaLoja(
+      context: context,
+      vendedorRepository: widget.vendedorRepository,
+      usuarioRepository: widget.usuarioRepository,
+    );
+    if (operador == null || !mounted) return;
     try {
       final quem = _quemRetirouController.text.trim();
       final retiradoPor = quem.isEmpty ? null : quem;
@@ -2119,7 +2129,7 @@ class _DialogRegistrarRetiradaClienteState
         widget.vendaRepository.registrarRetiradaParcial(
           widget.venda.id,
           mapFutura,
-          usuario: widget.usuario,
+          usuario: operador,
           retiradoPor: retiradoPor,
         );
       }
@@ -2127,7 +2137,7 @@ class _DialogRegistrarRetiradaClienteState
         widget.vendaRepository.registrarRetiradaParcialLojaCarretoAntesSaida(
           widget.venda.id,
           mapCarretoLoja,
-          usuario: widget.usuario,
+          usuario: operador,
           retiradoPor: retiradoPor,
         );
       }
@@ -2153,20 +2163,12 @@ class _DialogRegistrarRetiradaClienteState
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'Cliente retirando na loja agora (parcial ou total). '
-                'Itens de carreto so aparecem enquanto o romaneio nao saiu.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 12),
               TextField(
                 controller: _quemRetirouController,
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(
-                  labelText: 'Quem retirou (opcional)',
-                  hintText: 'Nome de quem leva a mercadoria',
+                  labelText: 'Quem retirou',
+                  hintText: 'Opcional',
                   isDense: true,
                 ),
               ),

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../data/local_backup_service.dart';
+import '../domain/local_backup_escopo.dart';
 
 /// Entrada da lista de backups encontrados em disco.
 class BackupHistoricoItem {
@@ -12,6 +13,7 @@ class BackupHistoricoItem {
     required this.empresa,
     required this.valido,
     required this.pastaRaiz,
+    this.escopo = LocalBackupEscopo.completo,
   });
 
   final Directory pasta;
@@ -21,12 +23,15 @@ class BackupHistoricoItem {
   final String empresa;
   final bool valido;
   final String pastaRaiz;
+  final LocalBackupEscopo escopo;
 
   String get rotuloTipo => switch (tipo) {
         LocalBackupTipo.manual => 'Manual',
         LocalBackupTipo.automatico => 'Automatico',
         null => 'Desconhecido',
       };
+
+  String get rotuloEscopo => escopo.rotulo;
 
   String get tamanhoFormatado {
     if (tamanhoBancoKb <= 0) return '—';

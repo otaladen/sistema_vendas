@@ -88,6 +88,9 @@ class ProdutoRepository extends ChangeNotifier {
   Map<int, double> _cacheScoreHistorico = const {};
   final Map<int, Map<int, double>> _cacheScoreCliente = {};
 
+  /// >0: [salvar]/invalidacao nao notifica UI/rede (importacao em lote).
+  int _importacaoEmLoteDepth = 0;
+
   static bool _migracaoAtivoLegadoOk = false;
 
   String get productImagesDirPath => _db.productImagesDir.path;
@@ -1200,8 +1203,10 @@ class ProdutoRepository extends ChangeNotifier {
       }
       return novoId;
     });
-    invalidarCacheBusca();
-    notificarAlteracaoParaRede(entidade: 'produto', entidadeId: id);
+    if (_importacaoEmLoteDepth <= 0) {
+      invalidarCacheBusca();
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: id);
+    }
     return id;
   }
 
@@ -1427,8 +1432,10 @@ class ProdutoRepository extends ChangeNotifier {
       p.custoMedio = p.precoCusto < 0 ? 0 : p.precoCusto;
     }
     _db.produtoBox.put(p);
-    invalidarCacheBusca();
-    notificarAlteracaoParaRede(entidade: 'produto', entidadeId: produtoId);
+    if (_importacaoEmLoteDepth <= 0) {
+      invalidarCacheBusca();
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: produtoId);
+    }
   }
 
   /// Recalcula custo medio para varios produtos (uma notificacao ao final).
@@ -1456,6 +1463,22 @@ class ProdutoRepository extends ChangeNotifier {
     if (vistos.isNotEmpty) {
       invalidarCacheBusca();
       notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+    }
+  }
+
+  /// Executa gravacoes em massa sem rebuild de cache/notificacao a cada item.
+  Future<T> executarImportacaoEmLote<T>(Future<T> Function() acao) async {
+    _importacaoEmLoteDepth++;
+    enterSyncApplySilencioso();
+    try {
+      return await acao();
+    } finally {
+      leaveSyncApplySilencioso();
+      _importacaoEmLoteDepth--;
+      if (_importacaoEmLoteDepth <= 0) {
+        invalidarCacheBusca();
+        notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+      }
     }
   }
 

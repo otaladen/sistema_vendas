@@ -14,6 +14,9 @@ import '../data/lista_compra_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/produto_sugestao_venda_repository.dart';
 import '../domain/permissao_usuario.dart';
+import '../domain/importacao/produto_importacao_linha.dart';
+import '../domain/importacao/produto_importacao_util.dart';
+import '../domain/produto_categorias_catalogo.dart';
 import '../domain/produto_embalagem.dart';
 import '../data/produto_busca_util.dart';
 import '../domain/produto_substitutos_util.dart';
@@ -39,6 +42,7 @@ import 'layout/app_layout.dart';
 import 'widgets/abas_historico_produto_widget.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
+import 'produtos/importar_chacal_backup_flow.dart';
 import 'produtos/produto_pesquisa_dialog.dart';
 import 'produtos/produtos_sugestoes_venda_section.dart';
 
@@ -108,10 +112,10 @@ class _ProdutosPageState extends State<ProdutosPage>
   /// Rodapé fixo: empilha botões abaixo desta largura.
   static const double _erpRodapeAcaoBreakpoint = 520;
 
-  /// Escala de espacamento do cadastro ERP (8 / 16 / 24).
-  static const double _erpGap8 = 8;
-  static const double _erpGap16 = 16;
-  static const double _erpGap24 = 24;
+  /// Escala de espacamento do cadastro ERP (compacto).
+  static const double _erpGap8 = 6;
+  static const double _erpGap16 = 10;
+  static const double _erpGap24 = 14;
 
   /// Folga a direita para a barra de rolagem nao cobrir bordas dos cards.
   static const double _erpScrollbarGutter = 18;
@@ -154,120 +158,9 @@ class _ProdutosPageState extends State<ProdutosPage>
     'FD': 'FD - Fardo',
     'LT': 'LT - Litro',
   };
-  static const String _categoriaOutros = 'Outros';
-  static const Map<String, List<String>> _categoriasMateriaisConstrucao = {
-    'Cimento e Argamassas': ['Cimento', 'Argamassa', 'Rejunte', 'Cal'],
-    'Telhas e Cobertura': [
-      'Telha Ceramica',
-      'Telha Fibrocimento',
-      'Telha Metalica',
-      'Telha PVC',
-      'Cumeeira',
-      'Rufos e Calhas',
-      'Manta Termica',
-      'Parafuso para Telha',
-    ],
-    'Estrutural e Alvenaria': [
-      'Tijolo',
-      'Bloco de Concreto',
-      'Canaleta',
-      'Areia',
-      'Brita',
-      'Pedra',
-      'Aco para Construcao',
-      'Vergalhao',
-    ],
-    'Tintas e Acessorios': [
-      'Tinta Acrilica',
-      'Tinta Esmalte',
-      'Selador',
-      'Verniz',
-      'Rolo e Pincel',
-    ],
-    'Hidraulica': [
-      'Tubos e Conexoes',
-      'Registros',
-      'Torneiras',
-      'Caixa d\'agua',
-      'Sifoes e Valvulas',
-      'Bombas',
-      'Irrigacao',
-      'Acessorios para Banheiro',
-    ],
-    'Eletrica': [
-      'Fios e Cabos',
-      'Disjuntores',
-      'Tomadas e Interruptores',
-      'Quadro de Distribuicao',
-      'Iluminacao',
-      'Eletroduto',
-      'Canaleta',
-      'Luminaria LED',
-    ],
-    'Ferragens': [
-      'Parafusos e Buchas',
-      'Pregos',
-      'Dobradiças',
-      'Fechaduras',
-      'Correntes e Cabos de Aco',
-      'Abraçadeiras',
-      'Chapas e Cantoneiras',
-      'Fixadores',
-    ],
-    'Madeiras e Chapas': [
-      'Compensado',
-      'MDF',
-      'OSB',
-      'Vigas e Ripas',
-      'Portas e Batentes',
-    ],
-    'Pisos e Revestimentos': [
-      'Piso Ceramico',
-      'Porcelanato',
-      'Revestimento de Parede',
-      'Rodape',
-      'Pastilha',
-    ],
-    'Loucas e Metais': [
-      'Vaso Sanitario',
-      'Lavatório',
-      'Cuba',
-      'Torneira',
-      'Chuveiro',
-      'Misturador',
-      'Assento Sanitario',
-    ],
-    'Impermeabilizacao e Quimicos': [
-      'Impermeabilizante',
-      'Vedante',
-      'Silicone',
-      'Espuma Expansiva',
-      'Aditivo para Concreto',
-      'Desmoldante',
-    ],
-    'Ferramentas': [
-      'Manuais',
-      'Eletricas',
-      'Medicao',
-      'EPIs',
-      'Acessorios de Corte',
-    ],
-    'Jardinagem e Externo': [
-      'Mangueira',
-      'Grama Sintetica',
-      'Ferramentas de Jardim',
-      'Vaso e Cachepot',
-      'Pedrisco Decorativo',
-    ],
-    'Forros e Divisorias': [
-      'Forro PVC',
-      'Forro Gesso',
-      'Perfil para Drywall',
-      'Chapa Drywall',
-      'Acessorios Drywall',
-    ],
-    _categoriaOutros: [],
-  };
+  static const String _categoriaOutros = ProdutoCategoriasCatalogo.outros;
+  static const Map<String, List<String>> _categoriasMateriaisConstrucao =
+      ProdutoCategoriasCatalogo.materiaisConstrucao;
 
   final _codigoInternoController = TextEditingController();
   final _nomeController = TextEditingController();
@@ -577,7 +470,7 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   Widget _erpFieldLabel(String text, BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: _erpGap8),
+      padding: const EdgeInsets.only(bottom: 4),
       child: Text(text, style: _erpLabelStyle(context)),
     );
   }
@@ -693,23 +586,23 @@ class _ProdutosPageState extends State<ProdutosPage>
       suffixIcon: suffixIcon,
       filled: true,
       fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
         borderSide: BorderSide(color: subtle),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: cs.primary, width: 2),
+        borderRadius: BorderRadius.circular(6),
+        borderSide: BorderSide(color: cs.primary, width: 1.5),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
         borderSide: BorderSide(color: cs.error),
       ),
       focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: cs.error, width: 2),
+        borderRadius: BorderRadius.circular(6),
+        borderSide: BorderSide(color: cs.error, width: 1.5),
       ),
     );
   }
@@ -731,13 +624,13 @@ class _ProdutosPageState extends State<ProdutosPage>
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.75)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
+            color: Colors.black.withValues(alpha: 0.045),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-      padding: const EdgeInsets.all(_erpGap24),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -745,13 +638,13 @@ class _ProdutosPageState extends State<ProdutosPage>
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 22, color: cs.primary),
+                Icon(icon, size: 18, color: cs.primary),
                 const SizedBox(width: _erpGap8),
               ],
               Expanded(
                 child: Text(
                   title,
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -781,7 +674,7 @@ class _ProdutosPageState extends State<ProdutosPage>
         final cellW = cols > 0 ? usable / cols : maxW;
         return Wrap(
           spacing: gap,
-          runSpacing: gap,
+          runSpacing: _erpGap8,
           children: fields
               .map((w) => SizedBox(width: cols <= 1 ? maxW : cellW, child: w))
               .toList(),
@@ -946,11 +839,11 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
 
     return Container(
-      margin: const EdgeInsets.only(top: _erpGap8, bottom: _erpGap16),
-      padding: const EdgeInsets.all(6),
+      margin: const EdgeInsets.only(top: 4, bottom: _erpGap8),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: cs.outlineVariant.withValues(alpha: 0.5),
         ),
@@ -1018,7 +911,6 @@ class _ProdutosPageState extends State<ProdutosPage>
     final preco1 = _parseValorMonetario(_preco1Controller.text);
     final estoque = _lerEstoqueDoFormulario();
     final minimo = int.tryParse(_quantidadeMinimaController.text.trim()) ?? 0;
-    final unidade = _normalizarUnidade(_unidadeSelecionada);
     final estoqueExib = ProdutoEmbalagem.formatarEstoque(
       _produtoEmbalagemContexto(),
       estoque,
@@ -1036,7 +928,7 @@ class _ProdutosPageState extends State<ProdutosPage>
 
     return Container(
       margin: const EdgeInsets.only(bottom: _erpGap8),
-      padding: const EdgeInsets.all(_erpGap16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: cs.surface,
         borderRadius: BorderRadius.circular(10),
@@ -1351,24 +1243,24 @@ class _ProdutosPageState extends State<ProdutosPage>
     final saveStyle = ElevatedButton.styleFrom(
       backgroundColor: cs.primary,
       foregroundColor: cs.onPrimary,
-      elevation: 2,
-      shadowColor: Colors.black.withValues(alpha: 0.18),
+      elevation: 1,
+      shadowColor: Colors.black.withValues(alpha: 0.14),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
     );
 
     final cancelStyle = OutlinedButton.styleFrom(
       foregroundColor: Color.lerp(cs.onSurface, cs.error, 0.35)!,
       side: BorderSide(color: cs.outline.withValues(alpha: 0.42)),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
     );
 
     final etiquetaStyle = OutlinedButton.styleFrom(
       foregroundColor: cs.onSurfaceVariant,
       side: BorderSide(color: cs.outline.withValues(alpha: 0.55)),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     );
 
     return LayoutBuilder(
@@ -1428,6 +1320,27 @@ class _ProdutosPageState extends State<ProdutosPage>
           ),
         );
 
+        Widget? excluir;
+        if (_produtoEmEdicaoId != null) {
+          final excluirStyle = OutlinedButton.styleFrom(
+            foregroundColor: cs.error,
+            side: BorderSide(color: cs.error.withValues(alpha: 0.55)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          );
+          excluir = Tooltip(
+            message: 'Excluir produto do cadastro',
+            child: OutlinedButton.icon(
+              style: excluirStyle,
+              onPressed: _excluirProdutoEmEdicao,
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Excluir'),
+            ),
+          );
+        }
+
         if (narrow) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1446,6 +1359,10 @@ class _ProdutosPageState extends State<ProdutosPage>
                   ),
                 ),
               SizedBox(width: double.infinity, child: cancelar),
+              if (excluir != null) ...[
+                const SizedBox(height: _erpGap8),
+                SizedBox(width: double.infinity, child: excluir),
+              ],
               const SizedBox(height: _erpGap8),
               SizedBox(width: double.infinity, child: espelhar),
               const SizedBox(height: _erpGap8),
@@ -1473,6 +1390,10 @@ class _ProdutosPageState extends State<ProdutosPage>
                 ),
               ),
             cancelar,
+            if (excluir != null) ...[
+              const SizedBox(width: _erpGap16),
+              excluir,
+            ],
             const SizedBox(width: _erpGap16),
             espelhar,
             const SizedBox(width: _erpGap16),
@@ -2838,40 +2759,69 @@ class _ProdutosPageState extends State<ProdutosPage>
           ),
         ]),
         const SizedBox(height: _erpGap8),
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(
-              value: true,
-              label: Text('Multiplica'),
-              icon: Icon(Icons.close, size: 16),
-            ),
-            ButtonSegment(
-              value: false,
-              label: Text('Divide'),
-              icon: Icon(Icons.percent, size: 16),
-            ),
-          ],
-          selected: {_embalagemMultiplica},
-          onSelectionChanged: (s) {
-            if (s.isEmpty) return;
-            setState(() => _embalagemMultiplica = s.first);
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final empilhar = constraints.maxWidth < 560;
+            final fatorBtn = SegmentedButton<bool>(
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              segments: const [
+                ButtonSegment(
+                  value: true,
+                  label: Text('Multiplica'),
+                  icon: Icon(Icons.close, size: 16),
+                ),
+                ButtonSegment(
+                  value: false,
+                  label: Text('Divide'),
+                  icon: Icon(Icons.percent, size: 16),
+                ),
+              ],
+              selected: {_embalagemMultiplica},
+              onSelectionChanged: (s) {
+                if (s.isEmpty) return;
+                setState(() => _embalagemMultiplica = s.first);
+              },
+            );
+            final fracao = SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              title: const Text('Venda fracionada'),
+              subtitle: const Text('Qtd. decimal no PDV (m, m², kg…)'),
+              value: _permiteQuantidadeFracionada,
+              onChanged: (v) =>
+                  setState(() => _permiteQuantidadeFracionada = v),
+            );
+            if (empilhar) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  fatorBtn,
+                  const SizedBox(height: _erpGap8),
+                  fracao,
+                ],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                fatorBtn,
+                const SizedBox(width: _erpGap16),
+                Expanded(child: fracao),
+              ],
+            );
           },
         ),
-        const SizedBox(height: _erpGap8),
-        SwitchListTile(
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Permite venda fracionada'),
-          subtitle: const Text(
-            'Ex.: metro, m², kg — quantidade decimal no PDV.',
-          ),
-          value: _permiteQuantidadeFracionada,
-          onChanged: (v) => setState(() => _permiteQuantidadeFracionada = v),
-        ),
+        const SizedBox(height: 4),
         Text(
           preview,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.w600,
+                fontSize: 12,
+                height: 1.25,
               ),
         ),
       ],
@@ -3491,6 +3441,7 @@ class _ProdutosPageState extends State<ProdutosPage>
           k == 'lucro' ||
           k == 'comissao' ||
           k.contains('ncm') ||
+          k.contains('gtin') ||
           k.contains('barras') ||
           k.contains('descricao') ||
           k.contains('observ') ||
@@ -4392,6 +4343,16 @@ class _ProdutosPageState extends State<ProdutosPage>
     return widget.produtoRepository.obterPorCodigoInterno(codigo);
   }
 
+  Future<void> _importarBackupChacal() async {
+    await executarImportacaoChacalBackup(
+      context: context,
+      produtoRepository: widget.produtoRepository,
+      onStatus: (msg, {erro = false}) => _definirStatus(msg, erro: erro),
+    );
+    if (!mounted) return;
+    setState(() {});
+  }
+
   Future<void> _importarProdutosCsv() async {
     final pick = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -4538,8 +4499,30 @@ class _ProdutosPageState extends State<ProdutosPage>
     ]);
     final idxFabricante = _indiceColunaPorAliases(headers, [
       'fabricante',
-      'marca',
     ]);
+    final idxMarca = _indiceColunaPorAliases(headers, ['marca']);
+    final idxNcm = _indiceColunaPorAliases(headers, ['ncm']);
+    final idxGtin = _indiceColunaPorAliases(headers, [
+      'gtin',
+      'ean',
+      'codigobarras',
+      'codigo barras',
+      'codigo_barras',
+      'codbarras',
+      'cod barras',
+    ]);
+    final idxFamilia = _indiceColunaPorAliases(headers, ['familia']);
+    final idxGrupo = _indiceColunaPorAliases(headers, [
+      'grupo',
+      'categoria',
+    ]);
+    final idxSubgrupo = _indiceColunaPorAliases(headers, [
+      'subgrupo',
+      'sub grupo',
+      'sub_grupo',
+      'subcategoria',
+    ]);
+    final idxInativo = _indiceColunaPorAliases(headers, ['inativo']);
     final idxUnidade = _indiceColunaPorAliases(headers, [
       'unidade',
       'und',
@@ -4584,6 +4567,13 @@ class _ProdutosPageState extends State<ProdutosPage>
     excluirCol(idxEstMinimo);
     excluirCol(idxPrecoCusto);
     excluirCol(idxCustoMedio);
+    excluirCol(idxMarca);
+    excluirCol(idxNcm);
+    excluirCol(idxGtin);
+    excluirCol(idxFamilia);
+    excluirCol(idxGrupo);
+    excluirCol(idxSubgrupo);
+    excluirCol(idxInativo);
     final idxPrecoRefinado = _refinarIndicePrecoVenda(
       linhas,
       headers,
@@ -4623,8 +4613,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                     const Text(
                       'Paradox TabEst1: Codigo, CodInterno ou CodEx, Produto, PrecoVenda, Quantidade, '
                       'PrecoCusto, CustoMedio, EstMinimo, Fabricante, Unidade, Obs (opcionais).\n'
-                      'Categoria fixa: Outros / Importacao CSV. PrecoVenda do CSV = apenas A Prazo (preco1); '
-                      'a Vista e Atacado ficam 0 em produtos novos ou mantidos na atualizacao.\n'
+                      'Chacal/CSV enriquecido: NCM, GTIN, Marca, Familia, Grupo, Subgrupo, Preco2, Preco3, Inativo.\n'
+                      'Categoria e subcategoria sao mapeadas de Familia/Grupo/Subgrupo quando presentes.\n'
+                      'PrecoVenda do CSV = apenas A Prazo (preco1); Preco2/Preco3 importados se existirem.\n'
                       'Quantidade negativa ou decimal: arredonda e nao deixa estoque < 0.\n'
                       'PrecoVenda vazio ou "000": tenta PrecoCusto; depois valores em Obs/descricao '
                       '(ex.: 60,00 no texto); se ainda zero, grava venda R\$ 0,01.',
@@ -4725,6 +4716,33 @@ class _ProdutosPageState extends State<ProdutosPage>
       final fabricanteTxt = idxFabricante != null && idxFabricante < row.length
           ? row[idxFabricante].trim()
           : '';
+      final marcaTxt = idxMarca != null && idxMarca < row.length
+          ? row[idxMarca].trim()
+          : '';
+      final ncmTxt = idxNcm != null && idxNcm < row.length
+          ? row[idxNcm].trim()
+          : '';
+      final gtinTxt = idxGtin != null && idxGtin < row.length
+          ? row[idxGtin].trim()
+          : '';
+      final familiaTxt = idxFamilia != null && idxFamilia < row.length
+          ? row[idxFamilia].trim()
+          : '';
+      final grupoTxt = idxGrupo != null && idxGrupo < row.length
+          ? row[idxGrupo].trim()
+          : '';
+      final subgrupoTxt = idxSubgrupo != null && idxSubgrupo < row.length
+          ? row[idxSubgrupo].trim()
+          : '';
+      final inativoTxt = idxInativo != null && idxInativo < row.length
+          ? row[idxInativo].trim()
+          : '';
+      final preco2Txt = idxPreco2 != null && idxPreco2 < row.length
+          ? row[idxPreco2].trim()
+          : '';
+      final preco3Txt = idxPreco3 != null && idxPreco3 < row.length
+          ? row[idxPreco3].trim()
+          : '';
       final unidadeTxt = idxUnidade != null && idxUnidade < row.length
           ? row[idxUnidade].trim()
           : '';
@@ -4775,48 +4793,36 @@ class _ProdutosPageState extends State<ProdutosPage>
         continue;
       }
 
-      // Import antigo copiava PrecoVenda para preco2/preco3: se os tres eram iguais, zera vista/atacado na reimportacao.
-      var preco2Imp = existente?.preco2 ?? 0;
-      var preco3Imp = existente?.preco3 ?? 0;
-      if (existente != null) {
-        final p1a = existente.preco1;
-        if (p1a > 0 &&
-            (existente.preco2 - p1a).abs() < 0.0001 &&
-            (existente.preco3 - p1a).abs() < 0.0001) {
-          preco2Imp = 0;
-          preco3Imp = 0;
-        }
-      }
-
-      final produto = Produto(
-        id: existente?.id ?? 0,
+      final preco2Val = _parseValorMonetario(preco2Txt) ?? 0;
+      final preco3Val = _parseValorMonetario(preco3Txt) ?? 0;
+      final linhaImport = ProdutoImportacaoLinha(
         codigoInterno: codigo,
         nome: _normalizarNomeProduto(nome),
         descricao: descricao,
-        unidade: _normalizarUnidade(unidadeTxt.isEmpty ? 'UN' : unidadeTxt),
-        categoria: _categoriaOutros,
-        subcategoria: 'Importacao CSV',
-        marca: '',
-        fornecedor: '',
-        fabricante: fabricanteTxt,
-        codigoBarras: '',
-        fotoPath: existente?.fotoPath ?? '',
-        localizacao: '',
-        ncm: '',
-        estoque: estoque,
-        quantidadeMinima: qtdMin > 0
-            ? qtdMin
-            : (existente?.quantidadeMinima ?? 0),
+        preco1: preco,
+        preco2: preco2Val > 0 ? preco2Val : 0,
+        preco3: preco3Val > 0 ? preco3Val : 0,
         precoCusto: precoCusto,
         custoMedio: custoMedioVal,
-        // PrecoVenda do TabEst1 = "a prazo" no sistema antigo -> so preco1 e precoVenda (como no salvar manual).
-        preco1: preco,
-        preco2: preco2Imp,
-        preco3: preco3Imp,
-        precoVenda: preco,
-        criadoEm: existente?.criadoEm,
-        ativo: existente?.ativo ?? true,
+        estoque: estoque,
+        quantidadeMinima: qtdMin,
+        unidade: unidadeTxt.isEmpty ? 'UN' : unidadeTxt,
+        marca: marcaTxt,
+        fabricante: fabricanteTxt,
+        codigoBarras: ProdutoImportacaoUtil.normalizarCodigoBarras(
+          gtin: gtinTxt,
+          codigoInterno: codigo,
+        ),
+        ncm: ProdutoImportacaoUtil.normalizarNcm(ncmTxt),
+        familia: familiaTxt,
+        grupo: grupoTxt,
+        subgrupo: subgrupoTxt,
+        ativo: inativoTxt.isNotEmpty
+            ? ProdutoImportacaoUtil.ativoDeFlagLegado(inativoTxt)
+            : (existente?.ativo ?? true),
+        subcategoriaFallback: 'Importacao CSV',
       );
+      final produto = linhaImport.paraProduto(existente: existente);
       try {
         final idSalvo = widget.produtoRepository.salvar(produto);
         widget.produtoRepository.sincronizarCustoMedioInteligenteParaProduto(
@@ -4899,6 +4905,11 @@ class _ProdutosPageState extends State<ProdutosPage>
       appBar: AppBar(
         title: const Text('Cadastro de Produtos'),
         actions: [
+          IconButton(
+            tooltip: 'Importar backup Chacal (.s3db / .sql / .txt)',
+            icon: const Icon(Icons.archive_outlined),
+            onPressed: _importarBackupChacal,
+          ),
           IconButton(
             tooltip: 'Importar produtos (CSV)',
             icon: const Icon(Icons.upload_file_outlined),
@@ -4986,8 +4997,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                   Expanded(
                                     child: Padding(
                                       padding: const EdgeInsets.fromLTRB(
-                                        _erpGap24,
                                         _erpGap16,
+                                        _erpGap8,
                                         _erpGap8,
                                         0,
                                       ),
@@ -5002,7 +5013,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                           controller: _scrollController,
                                           padding: const EdgeInsets.only(
                                             right: _erpScrollbarGutter,
-                                            bottom: _erpGap24,
+                                            bottom: _erpGap16,
                                           ),
                                           child: Column(
                                             crossAxisAlignment:
@@ -5451,6 +5462,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                         DropdownButtonFormField<
                                                           String
                                                         >(
+                                                          isDense: true,
+                                                          isExpanded: true,
                                                           initialValue:
                                                               _categoriaSelecionada,
                                                           validator:
@@ -5504,6 +5517,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                           key: ValueKey(
                                                             'subcategoria_${_categoriaSelecionada ?? 'vazio'}_${_subcategoriaSelecionada ?? 'vazio'}',
                                                           ),
+                                                          isDense: true,
+                                                          isExpanded: true,
                                                           initialValue:
                                                               _subcategoriaSelecionada,
                                                           validator:
@@ -5575,7 +5590,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                     ),
                                                   ],
                                                   const SizedBox(
-                                                    height: _erpGap16,
+                                                    height: _erpGap8,
                                                   ),
                                                   _erpResponsiveGrid(context, [
                                                     Column(
@@ -6352,50 +6367,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                   ),
                                                 ],
                                               ),
-                                              if (_produtoEmEdicaoId !=
-                                                  null) ...[
-                                                const SizedBox(
-                                                  height: _erpGap16,
-                                                ),
-                                                SizedBox(
-                                                  width: double.infinity,
-                                                  child: OutlinedButton.icon(
-                                                    style: OutlinedButton.styleFrom(
-                                                      foregroundColor: Theme.of(
-                                                        context,
-                                                      ).colorScheme.error,
-                                                      side: BorderSide(
-                                                        color: Theme.of(context)
-                                                            .colorScheme
-                                                            .error
-                                                            .withValues(
-                                                              alpha: 0.5,
-                                                            ),
-                                                      ),
-                                                      visualDensity:
-                                                          VisualDensity.compact,
-                                                      padding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 12,
-                                                            vertical: 8,
-                                                          ),
-                                                      minimumSize: Size.zero,
-                                                      tapTargetSize:
-                                                          MaterialTapTargetSize
-                                                              .shrinkWrap,
-                                                    ),
-                                                    onPressed:
-                                                        _excluirProdutoEmEdicao,
-                                                    icon: const Icon(
-                                                      Icons.delete_outline,
-                                                      size: 18,
-                                                    ),
-                                                    label: const Text(
-                                                      'Excluir produto',
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
                                               ],
                                             ],
                                           ),
@@ -6465,10 +6436,10 @@ class _ProdutosPageState extends State<ProdutosPage>
                                       ],
                                     ),
                                     padding: const EdgeInsets.fromLTRB(
-                                      _erpGap24,
                                       _erpGap16,
+                                      _erpGap8,
                                       _erpGap24,
-                                      _erpGap16,
+                                      _erpGap8,
                                     ),
                                     child: SafeArea(
                                       top: false,

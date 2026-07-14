@@ -4,9 +4,12 @@ import 'package:flutter/services.dart';
 import '../domain/auditoria_catalogo.dart';
 import '../data/usuario_repository.dart';
 import '../domain/permissao_usuario.dart';
+import '../domain/produto_limite_desconto_pdv.dart';
 import '../domain/usuario_permissao_helper.dart';
+import '../model/produto.dart';
 import '../model/usuario_sistema.dart';
 import '../services/auditoria_registrar.dart';
+import 'pdv_desconto_autorizacao.dart';
 
 class AlteracaoPrecoUnitarioPdvResult {
   const AlteracaoPrecoUnitarioPdvResult({
@@ -39,6 +42,10 @@ Future<AlteracaoPrecoUnitarioPdvResult?> solicitarAlteracaoPrecoUnitarioPdv(
   BuildContext context,
   UsuarioRepository usuarioRepository, {
   required UsuarioSistema usuarioLogado,
+  required Produto produto,
+  required String precoTipo,
+  required double tetoDescontoPercentualEmpresa,
+  required double quantidadeLinha,
   required String nomeProduto,
   required double precoAtual,
   required double precoTabela,
@@ -89,9 +96,43 @@ Future<AlteracaoPrecoUnitarioPdvResult?> solicitarAlteracaoPrecoUnitarioPdv(
       precoTabela: precoTabela,
       rotuloTabela: rotuloTabela,
       formatarMoeda: formatarMoeda,
+      produto: produto,
+      precoTipo: precoTipo,
+      tetoDescontoPercentualEmpresa: tetoDescontoPercentualEmpresa,
     ),
   );
   if (valor == null || !context.mounted) return null;
+
+  if (valor.manual) {
+    final descontoExtraUnitario = ProdutoLimiteDescontoPdv.descontoUnitarioAcimaDoTeto(
+      novoPrecoUnitario: valor.preco,
+      precoTabelaReferencia: precoTabela,
+      produto: produto,
+      precoTipo: precoTipo,
+      tetoEmpresaOuUsuario: tetoDescontoPercentualEmpresa,
+    );
+    if (descontoExtraUnitario > 1e-6) {
+      final maximoPermitido = ProdutoLimiteDescontoPdv.descontoMaximoReaisNaLinha(
+        precoTabelaReferencia: precoTabela,
+        quantidade: quantidadeLinha,
+        produto: produto,
+        precoTipo: precoTipo,
+        tetoEmpresaOuUsuario: tetoDescontoPercentualEmpresa,
+      );
+      final descontoSolicitado = (precoTabela - valor.preco) * quantidadeLinha;
+      final authDesconto = await solicitarAutorizacaoDescontoAcimaTetoPdv(
+        context,
+        usuarioRepository,
+        usuarioLogado: usuarioLogado,
+        maximoPermitidoReais: maximoPermitido,
+        descontoSolicitadoReais: descontoSolicitado,
+        formatarMoeda: formatarMoeda,
+      );
+      if (!context.mounted) return null;
+      if (authDesconto == null) return null;
+      autorizadoPor = authDesconto;
+    }
+  }
 
   AuditoriaRegistrar.registrar(
     modulo: AuditoriaModulo.orcamento,
@@ -205,6 +246,9 @@ class _DialogoNovoPrecoPdv extends StatefulWidget {
     required this.precoTabela,
     required this.rotuloTabela,
     required this.formatarMoeda,
+    required this.produto,
+    required this.precoTipo,
+    required this.tetoDescontoPercentualEmpresa,
   });
 
   final String nomeProduto;
@@ -212,6 +256,9 @@ class _DialogoNovoPrecoPdv extends StatefulWidget {
   final double precoTabela;
   final String rotuloTabela;
   final String Function(double) formatarMoeda;
+  final Produto produto;
+  final String precoTipo;
+  final double tetoDescontoPercentualEmpresa;
 
   @override
   State<_DialogoNovoPrecoPdv> createState() => _DialogoNovoPrecoPdvState();
@@ -272,6 +319,17 @@ class _DialogoNovoPrecoPdvState extends State<_DialogoNovoPrecoPdv> {
 
   @override
   Widget build(BuildContext context) {
+    final pct = ProdutoLimiteDescontoPdv.percentualEfetivo(
+      produto: widget.produto,
+      precoTipo: widget.precoTipo,
+      tetoEmpresaOuUsuario: widget.tetoDescontoPercentualEmpresa,
+    );
+    final precoMinimo = ProdutoLimiteDescontoPdv.precoMinimoUnitario(
+      precoTabelaReferencia: widget.precoTabela,
+      produto: widget.produto,
+      precoTipo: widget.precoTipo,
+      tetoEmpresaOuUsuario: widget.tetoDescontoPercentualEmpresa,
+    );
     return AlertDialog(
       title: const Text('Preco unitario'),
       content: SizedBox(
@@ -290,6 +348,17 @@ class _DialogoNovoPrecoPdvState extends State<_DialogoNovoPrecoPdv> {
               '${widget.rotuloTabela}: ${widget.formatarMoeda(widget.precoTabela)}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (widget.precoTabela > 0 && pct > 0.004) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Minimo sem autorizacao: ${widget.formatarMoeda(precoMinimo)} '
+                '(desconto max. ${pct.toStringAsFixed(1)}%)',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
             const SizedBox(height: 12),
             TextField(
               controller: _precoController,

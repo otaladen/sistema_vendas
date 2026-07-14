@@ -78,4 +78,25 @@ void main() {
     );
     expect(max, closeTo(5, 0.001));
   });
+
+  test('preco minimo unitario respeita teto da loja', () {
+    final minimo = ProdutoLimiteDescontoPdv.precoMinimoUnitario(
+      precoTabelaReferencia: 53.50,
+      produto: _prod(),
+      precoTipo: 'preco1',
+      tetoEmpresaOuUsuario: 15,
+    );
+    expect(minimo, closeTo(45.475, 0.001));
+  });
+
+  test('detecta desconto unitario acima do teto', () {
+    final extra = ProdutoLimiteDescontoPdv.descontoUnitarioAcimaDoTeto(
+      novoPrecoUnitario: 10,
+      precoTabelaReferencia: 53.50,
+      produto: _prod(),
+      precoTipo: 'preco1',
+      tetoEmpresaOuUsuario: 15,
+    );
+    expect(extra, closeTo(35.475, 0.001));
+  });
 }
