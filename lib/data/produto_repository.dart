@@ -1492,8 +1492,34 @@ class ProdutoRepository extends ChangeNotifier {
     _cacheMontadoEm = null;
   }
 
-  /// Chamado apos operacoes que alteram [Produto.estoqueReal] / [Produto.estoqueReservado]
-  /// fora deste repositorio (ex.: finalizacao de venda, checklist de entrega).
+  /// Atualiza estoque nos docs em cache sem rebuild completo do catalogo.
+  void _sincronizarEstoqueNosDocsCache() {
+    if (_cacheDocs.isEmpty) return;
+    for (final doc in _cacheDocs) {
+      final id = doc.produto.id;
+      if (id <= 0) continue;
+      final fresh = _db.produtoBox.get(id);
+      if (fresh == null) continue;
+      doc.produto.estoqueReal = fresh.estoqueReal;
+      doc.produto.estoqueReservado = fresh.estoqueReservado;
+      doc.produto.estoqueAtual = fresh.estoqueAtual;
+    }
+  }
+
+  /// Apos venda/entrega: estoque e historico mudaram, mas o catalogo de busca
+  /// (nomes, barras, etc.) continua valido. Evita wipe + [notifyListeners]
+  /// a cada escrita — o gargalo do PDV com catalogo grande.
+  void atualizarCacheAposMovimentoEstoque() {
+    _sincronizarEstoqueNosDocsCache();
+    // Força recálculo lazy dos scores de historico na proxima busca.
+    _cacheItemCount = -1;
+    _cacheVendaCount = -1;
+    _cacheScoreHistorico = const {};
+    _cacheScoreCliente.clear();
+  }
+
+  /// Chamado apos operacoes que alteram cadastro/estrutura do catalogo
+  /// (salvar produto, sync de produtos, importacao, etc.).
   void invalidarCacheBusca() {
     _invalidarCacheBusca();
     notifyListeners();

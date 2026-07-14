@@ -32,7 +32,7 @@ class SyncService {
     _vendedorRepo = VendedorRepository(objectBox);
     _vendaRepo = VendaRepository(
       objectBox,
-      onAposEscrita: _produtoRepo.invalidarCacheBusca,
+      onAposEscrita: _produtoRepo.atualizarCacheAposMovimentoEstoque,
     );
   }
 

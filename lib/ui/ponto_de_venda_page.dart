@@ -28,6 +28,7 @@ import '../domain/produto_embalagem.dart';
 import '../domain/produto_limite_desconto_pdv.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_unidade_exibicao.dart';
+import '../domain/sessao_operacional_guard.dart';
 import '../data/app_config_repository.dart';
 import '../domain/lista_compra_item_constantes.dart';
 import '../data/lista_compra_repository.dart';
@@ -239,6 +240,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   /// Linha selecionada no carrinho (navegacao com setas).
   int? _indiceLinhaCarrinho;
+
+  /// Epoch local: muda so a selecao de linha sem rebuildar AppBar/busca.
+  final ValueNotifier<int> _selecaoCarrinhoEpoch = ValueNotifier(0);
 
   /// Tabela de preco para novos itens (F1–F3 sem linha selecionada).
   String _precoListaAtivo = 'preco1';
@@ -621,6 +625,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   @override
   void initState() {
     super.initState();
+    SessaoOperacionalGuard.marcarPdvAberto();
     HardwareKeyboard.instance.addHandler(_handlerTeclasHardwarePdv);
     widget.produtoRepository.addListener(_onProdutoRepositoryChanged);
     initSafeSyncRefresh(
@@ -949,6 +954,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   @override
   void dispose() {
+    SessaoOperacionalGuard.marcarPdvFechado();
     disposeSafeSyncRefresh();
     widget.produtoRepository.removeListener(_onProdutoRepositoryChanged);
     HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwarePdv);
@@ -979,6 +985,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _enderecoEntregaController.dispose();
     _observacaoEntregaController.dispose();
     _disposeLinhasPagamentoMisto();
+    _selecaoCarrinhoEpoch.dispose();
     super.dispose();
   }
 
@@ -1928,6 +1935,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     });
   }
 
+  /// Atualiza a linha selecionada. Com [isolado], so rebuilda carrinho/preview.
+  void _definirIndiceLinhaCarrinho(int? index, {bool isolado = false}) {
+    if (_indiceLinhaCarrinho == index) return;
+    _indiceLinhaCarrinho = index;
+    if (isolado) {
+      _selecaoCarrinhoEpoch.value++;
+    }
+  }
+
   /// Setas no carrinho: ↑↓ outra linha (↑ na primeira volta a busca); +/- qtd no teclado numerico.
   KeyEventResult _onKeyCarrinho(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
@@ -1945,12 +1961,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           _pesquisaFocus.requestFocus();
           return KeyEventResult.handled;
         }
-        setState(() => _indiceLinhaCarrinho = idx - 1);
+        _definirIndiceLinhaCarrinho(idx - 1, isolado: true);
         return KeyEventResult.handled;
       }
-      setState(() {
-        _indiceLinhaCarrinho = (idx + 1).clamp(0, n - 1);
-      });
+      _definirIndiceLinhaCarrinho((idx + 1).clamp(0, n - 1), isolado: true);
       return KeyEventResult.handled;
     }
 
@@ -2002,9 +2016,26 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   void _carregarDadosIniciais() {
-    setState(() {
-      _vendedoresAtivos = widget.vendedorRepository.listarAtivos();
-    });
+    final novos = widget.vendedorRepository.listarAtivos();
+    if (_mesmaListaVendedoresAtivos(_vendedoresAtivos, novos)) {
+      return;
+    }
+    setState(() => _vendedoresAtivos = novos);
+  }
+
+  /// Evita rebuild completo do PDV quando o sync so dispara o listener de produtos
+  /// e a lista de vendedores nao mudou.
+  static bool _mesmaListaVendedoresAtivos(
+    List<Vendedor> atual,
+    List<Vendedor> novos,
+  ) {
+    if (identical(atual, novos)) return true;
+    if (atual.length != novos.length) return false;
+    for (var i = 0; i < atual.length; i++) {
+      if (atual[i].id != novos[i].id) return false;
+      if (atual[i].nomeCompleto != novos[i].nomeCompleto) return false;
+    }
+    return true;
   }
 
   static const double _larguraSeletorVendedorAppBarPdv = 148;
@@ -2691,8 +2722,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   void _atualizarOverlaySugestoesClientePdv() {
-    _fecharOverlaySugestoesClientePdv();
-    if (_pdvClientesSugeridos.isEmpty || !_focusClientePdV.hasFocus) return;
+    if (_pdvClientesSugeridos.isEmpty || !_focusClientePdV.hasFocus) {
+      _fecharOverlaySugestoesClientePdv();
+      return;
+    }
+    // Overlay ja aberto: so redesenha (setas / digitacao) sem rebuild do PDV.
+    if (_overlaySugestoesClientePdv != null) {
+      _overlaySugestoesClientePdv!.markNeedsBuild();
+      return;
+    }
 
     final box =
         _keySeletorClienteAppBarPdv.currentContext?.findRenderObject()
@@ -2701,6 +2739,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
     final offset = box.localToGlobal(Offset.zero);
     final overlay = Overlay.of(context);
+    final fieldHeight = box.size.height;
 
     _overlaySugestoesClientePdv = OverlayEntry(
       builder: (overlayContext) {
@@ -2715,7 +2754,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             ),
             Positioned(
               left: offset.dx,
-              top: offset.dy + box.size.height + 2,
+              top: offset.dy + fieldHeight + 2,
               width: 300,
               child: Material(
                 elevation: 6,
@@ -2756,11 +2795,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   void _atualizarSugestoesClientePdv(String texto) {
-    setState(() {
-      _pdvClientesSugeridos = _pesquisarClientesPdv(texto);
-      _pdvIndiceSugestaoCliente =
-          _pdvClientesSugeridos.isEmpty ? -1 : 0;
-    });
+    // Nao usa setState: a lista vive no OverlayEntry.
+    _pdvClientesSugeridos = _pesquisarClientesPdv(texto);
+    _pdvIndiceSugestaoCliente =
+        _pdvClientesSugeridos.isEmpty ? -1 : 0;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _atualizarOverlaySugestoesClientePdv();
     });
@@ -2795,18 +2833,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Nenhum cliente encontrado para "$termo".')),
       );
-      setState(() {
-        _pdvClientesSugeridos = [];
-        _pdvIndiceSugestaoCliente = -1;
-      });
+      _pdvClientesSugeridos = [];
+      _pdvIndiceSugestaoCliente = -1;
       _fecharOverlaySugestoesClientePdv();
       return;
     }
 
-    setState(() {
-      _pdvClientesSugeridos = lista;
-      _pdvIndiceSugestaoCliente = 0;
-    });
+    _pdvClientesSugeridos = lista;
+    _pdvIndiceSugestaoCliente = 0;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _atualizarOverlaySugestoesClientePdv();
     });
@@ -3022,21 +3056,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
     if (_pdvClientesSugeridos.isNotEmpty) {
       if (key == LogicalKeyboardKey.arrowDown) {
-        setState(() {
-          final max = _pdvClientesSugeridos.length - 1;
-          _pdvIndiceSugestaoCliente =
-              (_pdvIndiceSugestaoCliente + 1).clamp(0, max);
-        });
+        final max = _pdvClientesSugeridos.length - 1;
+        _pdvIndiceSugestaoCliente =
+            (_pdvIndiceSugestaoCliente + 1).clamp(0, max);
         _atualizarOverlaySugestoesClientePdv();
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.arrowUp) {
-        setState(() {
-          final max = _pdvClientesSugeridos.length - 1;
-          _pdvIndiceSugestaoCliente = _pdvIndiceSugestaoCliente <= 0
-              ? max
-              : _pdvIndiceSugestaoCliente - 1;
-        });
+        final max = _pdvClientesSugeridos.length - 1;
+        _pdvIndiceSugestaoCliente = _pdvIndiceSugestaoCliente <= 0
+            ? max
+            : _pdvIndiceSugestaoCliente - 1;
         _atualizarOverlaySugestoesClientePdv();
         return KeyEventResult.handled;
       }
@@ -3049,10 +3079,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
 
     if (key == LogicalKeyboardKey.escape && _pdvClientesSugeridos.isNotEmpty) {
-      setState(() {
-        _pdvClientesSugeridos = [];
-        _pdvIndiceSugestaoCliente = -1;
-      });
+      _pdvClientesSugeridos = [];
+      _pdvIndiceSugestaoCliente = -1;
       _fecharOverlaySugestoesClientePdv();
       return KeyEventResult.handled;
     }
@@ -3550,7 +3578,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         itens: _carrinho,
         indiceLinhaSelecionada: _indiceLinhaCarrinho,
         onSelecionarLinha: (index) {
-          setState(() => _indiceLinhaCarrinho = index);
+          _definirIndiceLinhaCarrinho(index, isolado: true);
           _carrinhoFocus.requestFocus();
         },
         rotuloPreco: _rotuloPreco,
@@ -7194,7 +7222,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 ),
                 const SizedBox(height: 8),
                 Expanded(
-                  child: _buildAreaCarrinhoComPreviewPdv(),
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: _selecaoCarrinhoEpoch,
+                    builder: (context, epoch, child) =>
+                        _buildAreaCarrinhoComPreviewPdv(),
+                  ),
                 ),
               ],
             ),

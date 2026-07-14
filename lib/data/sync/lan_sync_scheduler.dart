@@ -209,10 +209,6 @@ class LanSyncScheduler {
     if (scheduler == null) return;
     final debounce = await SyncImplantacaoConfig(scheduler._configRepository)
         .debounceEventoRede();
-    if (debounce <= SyncImplantacaoConfig.debounceRedeNormal) {
-      await scheduler.sincronizarAgora();
-      return;
-    }
     _debounceSyncEscrita?.cancel();
     _debounceSyncEscrita = Timer(debounce, () {
       unawaited(scheduler.sincronizarAgora());

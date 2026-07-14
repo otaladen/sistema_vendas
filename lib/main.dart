@@ -324,7 +324,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                         ProdutoRepository(widget.objectBox);
                     final vendaRepository = VendaRepository(
                       widget.objectBox,
-                      onAposEscrita: produtoRepository.invalidarCacheBusca,
+                      onAposEscrita:
+                          produtoRepository.atualizarCacheAposMovimentoEstoque,
                     );
                     return MainAppShellPage(
                       objectBox: widget.objectBox,

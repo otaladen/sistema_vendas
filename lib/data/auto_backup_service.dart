@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../domain/auditoria_catalogo.dart';
+import '../domain/sessao_operacional_guard.dart';
 import 'app_config_repository.dart';
 import 'backup_pos_execucao_service.dart';
 import 'objectbox.dart';
@@ -23,6 +24,8 @@ class AutoBackupService {
     LanSyncScheduler? lanSyncScheduler,
   }) async {
     if (_emExecucao) return;
+    // Fecha o ObjectBox: nao interromper PDV aberto (use backup agendado headless).
+    if (SessaoOperacionalGuard.pdvEmUso) return;
     final config = await repository.carregarEmpresaConfig();
     if (!config.backupAutomaticoAtivo) return;
     final pasta = config.backupAutomaticoPasta.trim();
@@ -49,6 +52,9 @@ class AutoBackupService {
     }
 
     if (objectBox == null) return;
+
+    // Revalida: pode ter aberto PDV durante a checagem de config.
+    if (SessaoOperacionalGuard.pdvEmUso) return;
 
     _emExecucao = true;
     try {

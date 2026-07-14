@@ -8,8 +8,9 @@ class SyncImplantacaoConfig {
 
   static const intervaloSyncNormal = Duration(seconds: 30);
   static const intervaloSyncImplantacao = Duration(seconds: 60);
-  static const debounceRedeNormal = Duration(milliseconds: 100);
-  static const debounceRedeImplantacao = Duration(seconds: 3);
+  /// Agrupa varias gravações locais (itens de venda, etc.) numa única sync.
+  static const debounceRedeNormal = Duration(seconds: 2);
+  static const debounceRedeImplantacao = Duration(seconds: 5);
 
   Future<bool> modoImplantacaoAtivo() =>
       _repository.carregarModoImplantacaoLocal();

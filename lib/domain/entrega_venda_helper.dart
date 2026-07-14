@@ -158,6 +158,18 @@ class EntregaVendaHelper {
     }
   }
 
+  /// Rotulo curto na linha do carrinho PDV (icone + texto).
+  static String rotuloCurtoTipoItem(String tipo) {
+    switch (normalizarTipoItem(tipo)) {
+      case tipoEntregaLoja:
+        return 'Carreto';
+      case tipoRetiradaFutura:
+        return 'Futura';
+      default:
+        return 'Leva';
+    }
+  }
+
   /// Item de venda que migrou de retirada futura para carreto (apos frete).
   static bool itemMigradoRetiradaFuturaParaCarreto(ItemVenda item) {
     return tipoEfetivoItem(item) == tipoRetiradaFutura &&

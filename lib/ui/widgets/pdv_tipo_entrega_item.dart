@@ -41,21 +41,46 @@ class PdvBotaoTipoEntregaItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tipo = EntregaVendaHelper.normalizarTipoItem(tipoEntregaItem);
-    final rotulo = EntregaVendaHelper.rotuloTipoItem(tipo);
+    final rotuloCompleto = EntregaVendaHelper.rotuloTipoItem(tipo);
+    final rotuloCurto = EntregaVendaHelper.rotuloCurtoTipoItem(tipo);
     final emoji = EntregaVendaHelper.emojiTipoItem(tipo);
-    return IconButton(
-      onPressed: onPressed,
-      tooltip: '$emoji $rotulo — toque para alternar',
-      visualDensity: VisualDensity.compact,
-      padding: EdgeInsets.all(compacto ? 2 : 4),
-      constraints: BoxConstraints(
-        minWidth: compacto ? 30 : 36,
-        minHeight: compacto ? 30 : 36,
-      ),
-      icon: Icon(
-        iconePara(tipo),
-        size: compacto ? 18 : 22,
-        color: corPara(context, tipo),
+    final cor = corPara(context, tipo);
+    final theme = Theme.of(context);
+
+    return Tooltip(
+      message: '$emoji $rotuloCompleto — toque para alternar',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compacto ? 4 : 6,
+              vertical: compacto ? 4 : 6,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  iconePara(tipo),
+                  size: compacto ? 16 : 20,
+                  color: cor,
+                ),
+                SizedBox(width: compacto ? 3 : 4),
+                Text(
+                  rotuloCurto,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: compacto ? 11 : 12,
+                    color: cor,
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

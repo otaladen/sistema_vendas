@@ -26,6 +26,7 @@ import '../layout/app_layout.dart';
 import '../main_menu_dashboard.dart';
 import '../widgets/app_rodape_status_bar.dart';
 import 'app_menu_lateral.dart';
+import 'app_shell_aba_visibilidade.dart';
 import 'app_shell_scope.dart';
 import 'app_shell_tab.dart';
 import 'app_shell_tab_bar.dart';
@@ -472,11 +473,14 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
                               child: IndexedStack(
                                 index: _indiceAbaAtiva,
                                 children: [
-                                  for (final aba in _abas)
-                                    AppShellTabNavigator(
-                                      key: ValueKey<String>(aba.id),
-                                      navigatorKey: aba.navigatorKey,
-                                      paginaInicial: aba.paginaInicial,
+                                  for (var i = 0; i < _abas.length; i++)
+                                    AppShellAbaVisibilidade(
+                                      ativa: i == _indiceAbaAtiva,
+                                      child: AppShellTabNavigator(
+                                        key: ValueKey<String>(_abas[i].id),
+                                        navigatorKey: _abas[i].navigatorKey,
+                                        paginaInicial: _abas[i].paginaInicial,
+                                      ),
                                     ),
                                 ],
                               ),

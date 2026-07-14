@@ -505,7 +505,6 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   Widget _buildCabecalhoConsulta() {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final dica = _dicaBuscaContextual;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -522,33 +521,35 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                   const SingleActivator(LogicalKeyboardKey.arrowDown):
                       _focarListaPrimeiroItem,
                 },
-                child: TextField(
-                  controller: _pesquisaController,
-                  focusNode: _pesquisaFocus,
-                  autofocus: widget.termoInicial.isEmpty,
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    labelText: 'Filtrar na consulta',
-                    helperText: dica,
-                    helperMaxLines: 1,
-                    isDense: true,
-                    hintText: 'Nome, codigo ou codigo de barras',
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.search),
-                      onPressed: () => _atualizarLista(
+                child: ListenableBuilder(
+                  listenable: _pesquisaController,
+                  builder: (context, _) {
+                    return TextField(
+                      controller: _pesquisaController,
+                      focusNode: _pesquisaFocus,
+                      autofocus: widget.termoInicial.isEmpty,
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                        labelText: 'Filtrar na consulta',
+                        helperText: _dicaBuscaContextual,
+                        helperMaxLines: 1,
+                        isDense: true,
+                        hintText: 'Nome, codigo ou codigo de barras',
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.search),
+                          onPressed: () => _atualizarLista(
+                            forcarAutoSeUnico: true,
+                            focarListaSeTiverItens: true,
+                          ),
+                        ),
+                      ),
+                      onChanged: (_) => _agendarBuscaDigitacao(),
+                      onSubmitted: (_) => _atualizarLista(
                         forcarAutoSeUnico: true,
                         focarListaSeTiverItens: true,
                       ),
-                    ),
-                  ),
-                  onChanged: (_) {
-                    _agendarBuscaDigitacao();
-                    setState(() {});
+                    );
                   },
-                  onSubmitted: (_) => _atualizarLista(
-                    forcarAutoSeUnico: true,
-                    focarListaSeTiverItens: true,
-                  ),
                 ),
               );
               final chips = PdvConsultaTabelaPrecoChips(

@@ -23,6 +23,7 @@ import '../../services/lan_sync_server_manager.dart';
 import 'loja_ao_vivo_page.dart';
 import 'layout/app_layout.dart';
 import 'relatorios/relatorio_entregas_helper.dart';
+import 'shell/app_shell_aba_visibilidade.dart';
 import 'theme/app_modulo_cores.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
@@ -90,19 +91,18 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
   List<MainMenuDestino> _favoritos = const [];
   List<RecadoLoja> _recadosNaoLidos = const [];
   Timer? _fiscalPendenciasTimer;
+  bool _timersPeriodicosAtivos = false;
 
   @override
   void initState() {
     super.initState();
-    _atualizarRelogio();
-    _relogioTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      _atualizarRelogio();
-    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _inicializar());
-    _fiscalPendenciasTimer = Timer.periodic(
-      const Duration(seconds: 60),
-      (_) => unawaited(_atualizarPendenciasFiscais()),
-    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sincronizarTimersComVisibilidade();
   }
 
   Future<void> _inicializar() async {
@@ -123,7 +123,60 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     }
     await _carregarFavoritos();
     await _carregarPainel();
-    _iniciarAlertasProativos(deps);
+    if (mounted) _sincronizarTimersComVisibilidade();
+  }
+
+  bool _abaVisivelAgora() {
+    if (!mounted) return false;
+    if (!AppShellAbaVisibilidade.leituraSemDependencia(context)) return false;
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return false;
+    return true;
+  }
+
+  void _sincronizarTimersComVisibilidade() {
+    if (!mounted) return;
+    // Registra dependencia no InheritedWidget da aba.
+    final abaAtiva = AppShellAbaVisibilidade.estaAtiva(context);
+    final route = ModalRoute.of(context);
+    final deveRodar =
+        abaAtiva && (route == null || route.isCurrent);
+    if (deveRodar == _timersPeriodicosAtivos) return;
+    _timersPeriodicosAtivos = deveRodar;
+    if (deveRodar) {
+      _iniciarTimersPeriodicos();
+    } else {
+      _pararTimersPeriodicos();
+    }
+  }
+
+  void _iniciarTimersPeriodicos() {
+    _pararTimersPeriodicos();
+    _atualizarRelogio();
+    _relogioTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!_abaVisivelAgora()) return;
+      _atualizarRelogio();
+    });
+    _fiscalPendenciasTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) {
+        if (!_abaVisivelAgora()) return;
+        unawaited(_atualizarPendenciasFiscais());
+      },
+    );
+    final deps = MainMenuDeps.maybeOf(context);
+    if (deps != null) {
+      _iniciarAlertasProativos(deps);
+    }
+  }
+
+  void _pararTimersPeriodicos() {
+    _relogioTimer?.cancel();
+    _relogioTimer = null;
+    _fiscalPendenciasTimer?.cancel();
+    _fiscalPendenciasTimer = null;
+    _alertasProativosTimer?.cancel();
+    _alertasProativosTimer = null;
   }
 
   void _iniciarAlertasProativos(MainMenuDeps deps) {
@@ -136,15 +189,16 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     unawaited(_alertasProativosService!.verificarEEnviarSeDevido());
     _alertasProativosTimer = Timer.periodic(
       const Duration(minutes: 30),
-      (_) => unawaited(_alertasProativosService?.verificarEEnviarSeDevido()),
+      (_) {
+        if (!_abaVisivelAgora()) return;
+        unawaited(_alertasProativosService?.verificarEEnviarSeDevido());
+      },
     );
   }
 
   @override
   void dispose() {
-    _relogioTimer?.cancel();
-    _alertasProativosTimer?.cancel();
-    _fiscalPendenciasTimer?.cancel();
+    _pararTimersPeriodicos();
     super.dispose();
   }
 

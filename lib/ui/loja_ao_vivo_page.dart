@@ -12,6 +12,7 @@ import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../ui/relatorios/relatorio_horarios_pico_helper.dart';
+import 'shell/app_shell_aba_visibilidade.dart';
 
 /// Painel fullscreen com visao operacional da loja em tempo real.
 class LojaAoVivoPage extends StatefulWidget {
@@ -40,12 +41,43 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
   LojaAoVivoSnapshot? _snap;
   bool _carregando = true;
   Timer? _autoRefresh;
+  bool _timerAtivo = false;
 
   @override
   void initState() {
     super.initState();
     _atualizar();
-    _autoRefresh = Timer.periodic(const Duration(seconds: 30), (_) => _atualizar());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sincronizarTimerComVisibilidade();
+  }
+
+  bool _abaVisivelAgora() {
+    if (!mounted) return false;
+    if (!AppShellAbaVisibilidade.leituraSemDependencia(context)) return false;
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return false;
+    return true;
+  }
+
+  void _sincronizarTimerComVisibilidade() {
+    if (!mounted) return;
+    final abaAtiva = AppShellAbaVisibilidade.estaAtiva(context);
+    final route = ModalRoute.of(context);
+    final deveRodar =
+        abaAtiva && (route == null || route.isCurrent);
+    if (deveRodar == _timerAtivo) return;
+    _timerAtivo = deveRodar;
+    _autoRefresh?.cancel();
+    _autoRefresh = null;
+    if (!deveRodar) return;
+    _autoRefresh = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!_abaVisivelAgora()) return;
+      _atualizar();
+    });
   }
 
   @override
