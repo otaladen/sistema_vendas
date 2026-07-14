@@ -43,6 +43,40 @@ abstract final class EstoqueListaMetricas {
     if (dias < 1) return '<1d';
     return '${dias.round()}d';
   }
+
+  /// Valor monetario do estoque fisico (custo × quantidade na unidade de venda).
+  static double contribuicaoValorEstoque(Produto produto) {
+    final custo = custoExibicao(produto);
+    if (!custo.isFinite || custo < 0 || custo > 1e9) return 0;
+    final qtd = ProdutoEmbalagem.valorEstoqueExibicao(
+      produto,
+      produto.estoqueReal,
+    );
+    if (!qtd.isFinite || qtd <= 0) return 0;
+    final total = qtd * custo;
+    if (!total.isFinite || total < 0) return 0;
+    // Protege KPI contra cadastro importado absurdo (qtd×custo).
+    if (total > 1e12) return 0;
+    return total;
+  }
+
+  /// Ativo com estoque (unidade de venda) no ou abaixo do minimo cadastrado.
+  static bool abaixoDoMinimo(Produto produto) {
+    if (!produto.ativo) return false;
+    final min = produto.quantidadeMinima;
+    if (min < 0) return false;
+    return produto.estoqueExibicao <= min + 1e-9;
+  }
+
+  /// Estoque reservado somado em unidade de venda (arredondado para KPI).
+  static int estoqueReservadoExibicaoArredondado(Produto produto) {
+    final v = ProdutoEmbalagem.valorEstoqueExibicao(
+      produto,
+      produto.estoqueReservado,
+    );
+    if (!v.isFinite || v <= 0) return 0;
+    return v.round().clamp(0, 1 << 30);
+  }
 }
 
 /// Colunas ordenaveis da tabela de estoque.

@@ -20,6 +20,7 @@ import '../config/fiscal_config.dart';
 import '../domain/fiscal/focus_documento_fiscal_url.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../domain/fiscal/icms_focus_item_helper.dart';
+import '../domain/fiscal/ibscbs_focus_item_helper.dart';
 import '../domain/fiscal/venda_documento_fiscal_mutex.dart';
 import '../domain/fiscal/nfe_cfop_devolucao_resolver.dart';
 import '../domain/fiscal/nfe_cfop_resolver.dart';
@@ -1679,7 +1680,7 @@ class FocusNfeService {
         ? 'ID-${produto.id}'
         : produto.codigoInterno.trim();
     final gtin = _codigoBarrasFocus(produto);
-    final trib = _tributacaoItemPadrao(produto);
+    final trib = _tributacaoItemPadrao(produto, valorBruto: valorBruto);
     final cest = FiscalService.normalizarCest(produto.cest);
 
     return {
@@ -1775,6 +1776,9 @@ class FocusNfeService {
       'csc',
       'duplicidade',
       'denegad',
+      'ibs',
+      'cbs',
+      'classifica',
     ];
     for (final e in exclusoesRejeicaoFiscal) {
       if (msg.contains(e)) return false;
@@ -1979,7 +1983,7 @@ class FocusNfeService {
         : produto.codigoInterno.trim();
     final gtin = _codigoBarrasFocus(produto);
 
-    final trib = _tributacaoItemPadrao(produto);
+    final trib = _tributacaoItemPadrao(produto, valorBruto: valorBruto);
     final cest = FiscalService.normalizarCest(produto.cest);
 
     return {
@@ -2010,10 +2014,14 @@ class FocusNfeService {
   /// - ICMS origem 0 (Nacional)
   /// - CST 00 na maioria dos itens tributados (balcao)
   /// - PIS/COFINS 01 (operacao tributavel, aliquota basica)
+  /// - IBS/CBS CST 000 + cClassTrib 000001 (fase testes 2026)
   ///
   /// Ajuste por [Produto.grupoTributario] (ST / isento). Quando o cadastro
   /// passar a ter CST por produto, mapeie em [_resolverIcmsSituacaoTributariaItem].
-  Map<String, String> _tributacaoItemPadrao(Produto produto) {
+  Map<String, dynamic> _tributacaoItemPadrao(
+    Produto produto, {
+    required double valorBruto,
+  }) {
     return {
       ...IcmsFocusItemHelper.camposIcmsItem(
         icmsOrigem: _resolverIcmsOrigemItem(produto),
@@ -2021,6 +2029,7 @@ class FocusNfeService {
       ),
       'pis_situacao_tributaria': _resolverPisCofinsItem(produto),
       'cofins_situacao_tributaria': _resolverPisCofinsItem(produto),
+      ...IbscbsFocusItemHelper.camposItem(baseCalculo: valorBruto),
     };
   }
 

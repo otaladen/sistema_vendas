@@ -47,4 +47,39 @@ void main() {
     expect(EstoqueListaMetricas.coberturaDias(p), isNull);
     expect(EstoqueListaMetricas.formatarCobertura(p), '—');
   });
+
+  test('valor em estoque usa quantidade de exibicao (fracionado)', () {
+    final p = Produto(
+      codigoInterno: 'CX1',
+      nome: 'Piso',
+      unidade: 'M2',
+      unidadeCompra: 'CX',
+      quantidadePorEmbalagem: 2.5,
+      permiteQuantidadeFracionada: true,
+      precoCusto: 10,
+      precoVenda: 20,
+      estoqueReal: 10000, // 10,00 m2
+      quantidadeMinima: 5,
+    );
+    // 10 m2 * R$ 10 = R$ 100 (nao 10000*10)
+    expect(EstoqueListaMetricas.contribuicaoValorEstoque(p), closeTo(100, 0.01));
+    expect(EstoqueListaMetricas.abaixoDoMinimo(p), isFalse);
+  });
+
+  test('abaixo do minimo compara unidade de venda', () {
+    final p = Produto(
+      codigoInterno: 'CX2',
+      nome: 'Piso baixo',
+      unidade: 'M2',
+      unidadeCompra: 'CX',
+      quantidadePorEmbalagem: 2.5,
+      permiteQuantidadeFracionada: true,
+      precoCusto: 10,
+      precoVenda: 20,
+      estoqueReal: 3000, // 3 m2
+      quantidadeMinima: 5,
+    );
+    expect(p.estoqueExibicao, closeTo(3, 0.001));
+    expect(EstoqueListaMetricas.abaixoDoMinimo(p), isTrue);
+  });
 }

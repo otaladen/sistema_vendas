@@ -68,10 +68,14 @@ class MainMenuDashboard extends StatefulWidget {
     super.key,
     this.mostrarAppBar = true,
     this.onIniciarSync,
+    this.onAbrirMenu,
   });
 
   final bool mostrarAppBar;
   final Future<void> Function()? onIniciarSync;
+
+  /// Abre a gaveta do shell mobile (ícone ☰).
+  final VoidCallback? onAbrirMenu;
 
   @override
   State<MainMenuDashboard> createState() => _MainMenuDashboardState();
@@ -639,6 +643,14 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: widget.onAbrirMenu != null
+            ? IconButton(
+                tooltip: 'Menu',
+                icon: const Icon(Icons.menu_rounded),
+                onPressed: widget.onAbrirMenu,
+              )
+            : null,
+        automaticallyImplyLeading: widget.onAbrirMenu == null,
         title: Text(tituloAppBar),
         actions: [
           IconButton(

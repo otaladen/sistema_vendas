@@ -507,6 +507,13 @@ abstract final class EmitirNfceVendaFlow {
           '4. Confira CSC e ID CSC da SEFAZ.\n'
           '5. Cole o token em Configuracoes → Fiscal — Focus NFe.';
     }
+    if (m.contains('ibs') || m.contains('cbs')) {
+      return 'A SEFAZ passou a exigir o grupo IBS/CBS (reforma tributaria).\n\n'
+          'O sistema ja envia CST 000 + classificacao 000001 com aliquotas '
+          'de testes 2026 (CBS 0,9% e IBS-UF 0,1%).\n\n'
+          'Se a rejeicao continuar, valide com o contador o CST/cClassTrib '
+          'do produto (isento, monofasico, ST, etc.) e o painel Focus.';
+    }
     return null;
   }
 

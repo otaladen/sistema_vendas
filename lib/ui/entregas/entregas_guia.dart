@@ -8,6 +8,18 @@ class EntregasGuia {
   static const _prefsDicasVisiveis = 'entregas_dicas_visiveis';
   static const _prefsUltimaAba = 'entregas_ultima_aba';
   static const _prefsModoDiaKanban = 'entregas_modo_dia_kanban';
+  static const _prefsVisaoSimples = 'entregas_visao_simples';
+
+  /// Visao operacional enxuta (padrao). False = Patio/Dia avancado.
+  static Future<bool> visaoSimplesAtiva() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_prefsVisaoSimples) ?? true;
+  }
+
+  static Future<void> setVisaoSimplesAtiva(bool ativa) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsVisaoSimples, ativa);
+  }
 
   /// Preferencias de abertura (0=Patio, 1=Dia; kanban = visualizacao na aba Dia).
   static Future<({int aba, bool kanban})> preferenciasAbertura() async {

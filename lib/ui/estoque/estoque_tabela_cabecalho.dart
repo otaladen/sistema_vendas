@@ -64,16 +64,16 @@ class EstoqueTabelaCabecalho extends StatelessWidget {
                 coluna: EstoqueColunaOrdenacao.disponivel,
                 tooltip: 'Estoque livre (fisico - reservado)',
               ),
-              _coluna('Fis.', EstoqueTabelaColunas.larguraNum, estilo,
+              _coluna('Fís.', EstoqueTabelaColunas.larguraNum, estilo,
                   tooltip: 'Estoque fisico', align: TextAlign.end),
               _coluna('Res.', EstoqueTabelaColunas.larguraNum, estilo,
                   tooltip: 'Reservado', align: TextAlign.end),
-              _coluna('Min.', EstoqueTabelaColunas.larguraNum, estilo,
+              _coluna('Mín.', EstoqueTabelaColunas.larguraNum, estilo,
                   tooltip: 'Quantidade minima', align: TextAlign.end),
               _coluna('PP', EstoqueTabelaColunas.larguraNum, estilo,
                   tooltip: 'Ponto de pedido', align: TextAlign.end),
               _colunaOrdenavel(
-                'Media',
+                'Média',
                 EstoqueTabelaColunas.larguraMedia,
                 estilo,
                 corAtiva: scheme.primary,
@@ -93,7 +93,7 @@ class EstoqueTabelaCabecalho extends StatelessWidget {
                     tooltip: 'Custo medio ou cadastrado', align: TextAlign.end),
               if (verCusto)
                 _colunaOrdenavel(
-                  'Marg%',
+                  'Marg.%',
                   EstoqueTabelaColunas.larguraMargem,
                   estilo,
                   corAtiva: scheme.primary,

@@ -25,6 +25,7 @@ import '../../services/print_service.dart';
 import '../layout/app_layout.dart';
 import '../main_menu_dashboard.dart';
 import '../widgets/app_rodape_status_bar.dart';
+import 'app_menu_drawer.dart';
 import 'app_menu_lateral.dart';
 import 'app_shell_aba_visibilidade.dart';
 import 'app_shell_scope.dart';
@@ -84,6 +85,10 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   final List<AppShellTab> _abas = [];
   int _indiceAbaAtiva = 0;
   int _seqAba = 0;
+
+  /// Shell mobile: gaveta + navigator (sem abas desktop).
+  final GlobalKey<ScaffoldState> _mobileScaffoldKey = GlobalKey<ScaffoldState>();
+  Widget? _paginaModuloMobile;
 
   @override
   void initState() {
@@ -416,16 +421,138 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
         favoritos: _favoritos,
       );
 
+  void _fecharDrawerMobile() {
+    final state = _mobileScaffoldKey.currentState;
+    if (state?.isDrawerOpen ?? false) {
+      state!.closeDrawer();
+    }
+  }
+
+  void _irParaMobile(MainMenuDestino destino, {String? configSecaoInicialId}) {
+    if (!destino.podeAcessar(widget.usuarioLogado)) return;
+    if (MainMenuSubDestinoHelper.moduloTemSubmenu(destino)) {
+      final sub = MainMenuSubDestinoHelper.primeiroPermitido(
+        destino,
+        widget.usuarioLogado,
+      );
+      if (sub != null) {
+        _irParaSubMobile(destino, sub);
+      }
+      return;
+    }
+    _fecharDrawerMobile();
+    if (destino == MainMenuDestino.inicio) {
+      setState(() {
+        _destino = MainMenuDestino.inicio;
+        _subDestino = null;
+        _paginaModuloMobile = null;
+      });
+      return;
+    }
+    setState(() {
+      _destino = destino;
+      _subDestino = null;
+      _paginaModuloMobile = _conteudoAba(
+        destino: destino,
+        configSecaoInicialId: destino == MainMenuDestino.configuracoes
+            ? (configSecaoInicialId ?? (_backupAlerta ? 'backup' : null))
+            : configSecaoInicialId,
+      );
+    });
+    unawaited(_atualizarBadgesMenu());
+  }
+
+  void _irParaSubMobile(MainMenuDestino pai, MainMenuSubDestino sub) {
+    if (!sub.podeAcessar(widget.usuarioLogado)) return;
+    _fecharDrawerMobile();
+    setState(() {
+      _destino = pai;
+      _subDestino = sub;
+      _sincronizarGrupoExpandidoComDestino(pai);
+      _paginaModuloMobile = _conteudoAba(destino: pai, sub: sub);
+    });
+    unawaited(_atualizarBadgesMenu());
+  }
+
+  void _fecharModuloMobile() {
+    setState(() {
+      _destino = MainMenuDestino.inicio;
+      _subDestino = null;
+      _paginaModuloMobile = null;
+    });
+  }
+
+  Widget _buildShellMobile(BuildContext context) {
+    return AppShellScope(
+      destinoAtual: _destino,
+      subDestinoAtual: _subDestino,
+      favoritos: _favoritos,
+      irPara: _irParaMobile,
+      irParaSub: _irParaSubMobile,
+      alternarFavorito: _alternarFavorito,
+      fecharAbaAtual: _fecharModuloMobile,
+      child: Scaffold(
+        key: _mobileScaffoldKey,
+        drawer: AppMenuDrawer(
+          itens: _itensRail,
+          destinoAtual: _destino,
+          subDestinoAtual: _subDestino,
+          usuarioLogado: widget.usuarioLogado,
+          onSelecionar: _irParaMobile,
+          onSelecionarSub: _irParaSubMobile,
+          badgeDe: _badgeRail,
+          badgeSubDe: _badgeSub,
+        ),
+        body: Navigator(
+          pages: [
+            MaterialPage<void>(
+              key: const ValueKey<String>('mobile-inicio'),
+              child: MainMenuDashboard(
+                onIniciarSync: _iniciarSyncSeNecessario,
+                onAbrirMenu: () =>
+                    _mobileScaffoldKey.currentState?.openDrawer(),
+              ),
+            ),
+            if (_paginaModuloMobile != null)
+              MaterialPage<void>(
+                key: ValueKey<String>(
+                  'mobile-${_destino.name}-${_subDestino?.name ?? 'root'}',
+                ),
+                child: Scaffold(
+                  floatingActionButton: FloatingActionButton.small(
+                    heroTag: 'menu_modulos_mobile',
+                    tooltip: 'Abrir menu',
+                    onPressed: () =>
+                        _mobileScaffoldKey.currentState?.openDrawer(),
+                    child: const Icon(Icons.menu_rounded),
+                  ),
+                  floatingActionButtonLocation:
+                      FloatingActionButtonLocation.startFloat,
+                  body: _paginaModuloMobile!,
+                ),
+              ),
+          ],
+          onDidRemovePage: (page) {
+            if (page.key == const ValueKey<String>('mobile-inicio')) {
+              return;
+            }
+            _fecharModuloMobile();
+          },
+        ),
+        bottomNavigationBar: AppRodapeStatusBar(
+          usuarioLogin: widget.usuarioLogado.login,
+          usuarioNome: widget.usuarioLogado.nome,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         if (!context.isDesktopLayout) {
-          return _valoresDeps(
-            child: MainMenuDashboard(
-              onIniciarSync: _iniciarSyncSeNecessario,
-            ),
-          );
+          return _valoresDeps(child: _buildShellMobile(context));
         }
         return AppShellScope(
           destinoAtual: _destino,

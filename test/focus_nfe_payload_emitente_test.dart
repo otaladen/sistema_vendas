@@ -47,6 +47,13 @@ void main() {
     expect(itemPayload.containsKey('icms_aliquota'), isFalse);
     expect(itemPayload['pis_situacao_tributaria'], '01');
     expect(itemPayload['cofins_situacao_tributaria'], '01');
+    expect(itemPayload['ibs_cbs_situacao_tributaria'], '000');
+    expect(itemPayload['ibs_cbs_classificacao_tributaria'], '000001');
+    expect(itemPayload['ibs_cbs_base_calculo'], 70.0);
+    expect(itemPayload['cbs_aliquota'], '0.9');
+    expect(itemPayload['cbs_valor'], '0.63');
+    expect(itemPayload['ibs_uf_aliquota'], '0.1');
+    expect(itemPayload['ibs_uf_valor'], '0.07');
     expect(itemPayload.containsKey('cest'), isFalse);
     expect(itemPayload['codigo_barras_comercial'], 'SEM GTIN');
     expect(payload['uf_emitente'], 'BA');
@@ -150,6 +157,9 @@ void main() {
 
     expect(itemPayload['cest'], '1000300');
     expect(itemPayload['icms_origem'], '1');
+    expect(itemPayload['ibs_cbs_situacao_tributaria'], '000');
+    expect(itemPayload['ibs_cbs_classificacao_tributaria'], '000001');
+    expect(itemPayload['ibs_cbs_base_calculo'], 10.0);
     expect(itemPayload['icms_situacao_tributaria'], '60');
     expect(itemPayload.containsKey('icms_modalidade_base_calculo'), isFalse);
     expect(itemPayload.containsKey('icms_base_calculo'), isFalse);

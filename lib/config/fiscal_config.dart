@@ -72,6 +72,12 @@ class FiscalConfig {
   /// PIS/COFINS padrao (Simples): 49 = outras saidas.
   static const String pisCofinsSituacaoTributariaSimples = '49';
 
+  /// CST IBS/CBS padrao (tributacao integral). NT 2025.002 / guia Focus.
+  static const String ibsCbsSituacaoTributariaPadrao = '000';
+
+  /// cClassTrib padrao (tributado integralmente IBS e CBS).
+  static const String ibsCbsClassificacaoTributariaPadrao = '000001';
+
   /// Natureza da operacao padrao (NFC-e e NF-e).
   static const String naturezaOperacaoPadrao = 'Venda de mercadoria';
 

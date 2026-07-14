@@ -1,6 +1,8 @@
 import 'package:objectbox/objectbox.dart';
 
 import '../data/objectbox.dart';
+import '../domain/produto_embalagem.dart';
+import '../domain/quantidade_venda_util.dart';
 import '../domain/produto_estoque_sync.dart';
 import '../model/produto.dart';
 
@@ -73,15 +75,45 @@ class ComprasPreditivasService {
     return limiarEstoqueNovoProduto(produto).toDouble();
   }
 
-  /// `true` se estoque atual atingiu ou ficou abaixo do limiar de alerta.
+  /// `true` se estoque atual (unidade de venda) atingiu ou ficou abaixo do limiar.
   bool verificarEstoqueCritico(
     Produto produto, {
     int? consumoNoPeriodo,
   }) {
-    if (temGiroVendaConfiavel(produto, consumoNoPeriodo: consumoNoPeriodo)) {
-      return produto.estoqueAtual <= calcularPontoPedido(produto);
+    final estoque = produto.estoqueExibicao;
+    final limiarRaw = calcularPontoPedidoExibicao(
+      produto,
+      consumoNoPeriodo: consumoNoPeriodo,
+    );
+    final limiar = _limiarPpNaUnidadeDeVenda(
+      produto,
+      limiarRaw,
+      comGiro: temGiroVendaConfiavel(
+        produto,
+        consumoNoPeriodo: consumoNoPeriodo,
+      ),
+    );
+    return estoque <= limiar + 1e-9;
+  }
+
+  /// Alinha PP/minimo com [Produto.estoqueExibicao].
+  ///
+  /// Cadastro (mínimo/segurança) e media ja na unidade de venda: usa o limiar.
+  /// Se a media ainda estiver em milésimos (legado do consumo), normaliza.
+  static double _limiarPpNaUnidadeDeVenda(
+    Produto produto,
+    double limiarRaw, {
+    required bool comGiro,
+  }) {
+    if (!limiarRaw.isFinite || limiarRaw < 0) return 0;
+    if (!ProdutoEmbalagem.estoqueUsaEscalaFracionada(produto)) {
+      return limiarRaw;
     }
-    return produto.estoqueAtual <= limiarEstoqueNovoProduto(produto);
+    if (!comGiro) return limiarRaw;
+    if (limiarRaw >= QuantidadeVendaUtil.escalaFracionada) {
+      return limiarRaw / QuantidadeVendaUtil.escalaFracionada;
+    }
+    return limiarRaw;
   }
 
   /// Monta consumo por produto em uma unica passagem (60 dias).

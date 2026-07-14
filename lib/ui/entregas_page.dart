@@ -23,6 +23,7 @@ import '../model/item_venda.dart';
 import '../model/venda.dart';
 import 'entregas/entrega_card_lista.dart';
 import 'entregas/entregas_barra_compacta.dart';
+import 'entregas/entregas_visao_simples.dart';
 import 'entregas/filtros_entrega_sheet.dart';
 import 'entregas/logistica_entregas.dart';
 import 'entregas/planejamento_entrega_dia.dart';
@@ -96,6 +97,7 @@ class _EntregasPageState extends State<EntregasPage>
 
   late TabController _tabEntregasController;
   bool _mostrarDicasEntregas = true;
+  bool _visaoSimples = true;
 
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   final _bairroController = TextEditingController();
@@ -321,14 +323,43 @@ class _EntregasPageState extends State<EntregasPage>
 
   Future<void> _aplicarPreferenciasAberturaSalvas() async {
     final prefs = await EntregasGuia.preferenciasAbertura();
+    final simples = await EntregasGuia.visaoSimplesAtiva();
     if (!mounted) return;
     if (prefs.aba != _tabEntregasController.index) {
       _tabEntregasController.index = prefs.aba;
     }
-    setState(() => _modoVisualizacaoDia = prefs.kanban
-        ? _ModoVisualizacaoDia.kanban
-        : _ModoVisualizacaoDia.lista);
+    setState(() {
+      _visaoSimples = simples;
+      _modoVisualizacaoDia = prefs.kanban
+          ? _ModoVisualizacaoDia.kanban
+          : _ModoVisualizacaoDia.lista;
+    });
   }
+
+  Future<void> _definirVisaoSimples(bool simples) async {
+    await EntregasGuia.setVisaoSimplesAtiva(simples);
+    if (!mounted) return;
+    setState(() => _visaoSimples = simples);
+  }
+
+  void _aplicarDiaRapidoSimples({required bool amanha}) {
+    final base = DateTime.now();
+    final dia = DateTime(base.year, base.month, base.day)
+        .add(Duration(days: amanha ? 1 : 0));
+    _selecionarDiaPlanejamento(PlanejamentoEntregaDia.chaveDeDateTime(dia));
+  }
+
+  String _rotuloDiaSelecionadoSimples() {
+    final chave = _chaveDiaPlanejamentoSelecionado;
+    if (chave == null || chave.isEmpty) return 'Escolher dia';
+    if (_filtroDataMarcada == 'hoje') return 'Hoje';
+    if (_filtroDataMarcada == 'amanha') return 'Amanhã';
+    return chave;
+  }
+
+  bool get _diaSelecionadoEhHojeSimples => _filtroDataMarcada == 'hoje';
+
+  bool get _diaSelecionadoEhAmanhaSimples => _filtroDataMarcada == 'amanha';
 
   void _salvarPreferenciasAberturaAtual() {
     unawaited(
@@ -4009,6 +4040,49 @@ class _EntregasPageState extends State<EntregasPage>
     }
     final gruposLista = groupedLista.keys.toList()
       ..sort((a, b) => a.compareTo(b));
+
+    if (_visaoSimples) {
+      final motoristas = widget.motoristaRepository
+          .listarAtivos()
+          .map((m) => m.nome.trim())
+          .where((n) => n.isNotEmpty)
+          .toList();
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Entregas'),
+          actions: [
+            IconButton(
+              tooltip: 'Atualizar',
+              icon: const Icon(Icons.refresh),
+              onPressed: _atualizarListaEntregas,
+            ),
+          ],
+        ),
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+          child: EntregasVisaoSimples(
+            entregas: listaExibicao,
+            nomesMotoristas: motoristas,
+            atrasadas: atrasadas,
+            diaEhHoje: _diaSelecionadoEhHojeSimples,
+            diaEhAmanha: _diaSelecionadoEhAmanhaSimples,
+            rotuloDiaSelecionado: _rotuloDiaSelecionadoSimples(),
+            rotuloStatus: _rotuloStatusEntrega,
+            corStatus: _corStatus,
+            labelAcaoPrincipal: (v) => _acaoPrincipalEntrega(v)?.label,
+            onHoje: () => _aplicarDiaRapidoSimples(amanha: false),
+            onAmanha: () => _aplicarDiaRapidoSimples(amanha: true),
+            onEscolherDia: () => _abrirSeletorPlanejamentoDia(resumoPorDia),
+            onAtribuirMotorista: _editarMotoristaEntrega,
+            onAcaoPrincipal: _executarAcaoPrincipalEntrega,
+            onAbrirDetalhes: _abrirDetalhesItensVenda,
+            onVisaoAvancada: () => unawaited(_definirVisaoSimples(false)),
+            podeGerenciar: widget.podeGerenciarStatusEntrega,
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
         appBar: AppBar(
           title: const Text('Entregas'),
@@ -4026,6 +4100,11 @@ class _EntregasPageState extends State<EntregasPage>
             ],
           ),
           actions: [
+            TextButton.icon(
+              onPressed: () => unawaited(_definirVisaoSimples(true)),
+              icon: const Icon(Icons.view_agenda_outlined, size: 18),
+              label: const Text('Visão simples'),
+            ),
             IconButton(
               tooltip: 'Como usar Entregas',
               icon: const Icon(Icons.help_outline),

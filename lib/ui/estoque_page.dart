@@ -230,10 +230,10 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     for (final p in produtos) {
       if (p.ativo) {
         ativos++;
-        if (p.estoque <= p.quantidadeMinima) abaixoMinimo++;
-        valorEstoque += _contribuicaoValorEstoque(p);
+        if (EstoqueListaMetricas.abaixoDoMinimo(p)) abaixoMinimo++;
+        valorEstoque += EstoqueListaMetricas.contribuicaoValorEstoque(p);
       }
-      reservado += p.estoqueReservado;
+      reservado += EstoqueListaMetricas.estoqueReservadoExibicaoArredondado(p);
       final categoria = p.categoria.trim();
       if (categoria.isNotEmpty) categorias.add(categoria);
       final fornecedor = p.fornecedor.trim();
@@ -246,15 +246,6 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     _totalReservadoCache = reservado;
     _categoriasDisponiveis = categorias.toList()..sort();
     _fornecedoresDisponiveis = fornecedores.toList()..sort();
-  }
-
-  double _contribuicaoValorEstoque(Produto produto) {
-    final custo =
-        produto.custoMedio > 0 ? produto.custoMedio : produto.precoCusto;
-    if (!custo.isFinite || custo < 0 || custo > 1e9) return 0;
-    if (produto.estoqueReal <= 0) return 0;
-    final total = produto.estoqueReal * custo;
-    return total.isFinite ? total : 0;
   }
 
   void _onOrdenarColuna(EstoqueColunaOrdenacao coluna) {
@@ -924,7 +915,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
         case FiltroEstoqueOperacional.todos:
           break;
         case FiltroEstoqueOperacional.abaixoMinimo:
-          if (!(p.ativo && p.estoque <= p.quantidadeMinima)) return false;
+          if (!EstoqueListaMetricas.abaixoDoMinimo(p)) return false;
         case FiltroEstoqueOperacional.ppCritico:
           if (!(_criticoPpPorProdutoId[p.id] ?? false)) return false;
         case FiltroEstoqueOperacional.comReserva:
