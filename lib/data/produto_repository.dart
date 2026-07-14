@@ -17,7 +17,42 @@ import 'produto_busca_sinonimos.dart';
 import 'produto_busca_util.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'sync/sync_delete_outbox.dart';
+import 'sync/sync_dirty_outbox.dart';
 import 'sync/sync_write_trigger.dart';
+
+/// Resultado de [ProdutoRepository.zerarCadastroCompleto].
+class ProdutoCadastroZerarResultado {
+  const ProdutoCadastroZerarResultado({
+    required this.produtosRemovidos,
+    required this.movimentosRemovidos,
+    required this.historicosEntradaRemovidos,
+    required this.vinculosRemovidos,
+    required this.kitsRemovidos,
+    required this.kitItensRemovidos,
+    required this.promocoesRemovidas,
+    required this.promocaoItensRemovidos,
+    required this.promocaoCombosRemovidos,
+    required this.sugestoesRemovidas,
+    required this.metricasSugestaoRemovidas,
+    required this.itensListaCompraRemovidos,
+    required this.imagensRemovidas,
+  });
+
+  final int produtosRemovidos;
+  final int movimentosRemovidos;
+  final int historicosEntradaRemovidos;
+  final int vinculosRemovidos;
+  final int kitsRemovidos;
+  final int kitItensRemovidos;
+  final int promocoesRemovidas;
+  final int promocaoItensRemovidos;
+  final int promocaoCombosRemovidos;
+  final int sugestoesRemovidas;
+  final int metricasSugestaoRemovidas;
+  final int itensListaCompraRemovidos;
+  final int imagensRemovidas;
+}
 
 /// Media ponderada (quantidade interna * custo unitario da nota) sobre todas as
 /// [HistoricoEntrada] do produto. Retorna null se nao houver linhas validas.
@@ -1305,6 +1340,96 @@ class ProdutoRepository extends ChangeNotifier {
       invalidarCacheBusca();
     }
     return ok;
+  }
+
+  /// Remove todos os produtos do cadastro para reimportacao do zero.
+  ///
+  /// Mantem vendas, clientes, usuarios e itens historicos de venda.
+  /// Limpa dados satelites do catalogo (movimentos, historico de entrada,
+  /// kits, promocões, sugestoes, vinculos e lista de compras).
+  Future<ProdutoCadastroZerarResultado> zerarCadastroCompleto({
+    bool limparImagens = true,
+  }) async {
+    final produtos = _db.produtoBox.getAll();
+    final ids = produtos.map((p) => p.id).where((id) => id > 0).toList();
+    final total = ids.length;
+
+    final imagensRemovidas = limparImagens
+        ? await _limparPastaImagensProdutos()
+        : 0;
+
+    var movimentos = 0;
+    var historicos = 0;
+    var vinculos = 0;
+    var kits = 0;
+    var kitItens = 0;
+    var promocoes = 0;
+    var promoItens = 0;
+    var promoCombos = 0;
+    var sugestoes = 0;
+    var metricasSugestao = 0;
+    var listaCompras = 0;
+
+    _db.store.runInTransaction(TxMode.write, () {
+      historicos = _db.historicoEntradaBox.removeAll();
+      movimentos = _db.movimentoEstoqueBox.removeAll();
+      vinculos = _db.vinculoFornecedorProdutoBox.removeAll();
+      kitItens = _db.kitOrcamentoItemBox.removeAll();
+      kits = _db.kitOrcamentoBox.removeAll();
+      promoItens = _db.promocaoItemBox.removeAll();
+      promoCombos = _db.promocaoComboItemBox.removeAll();
+      promocoes = _db.promocaoBox.removeAll();
+      sugestoes = _db.produtoSugestaoVendaBox.removeAll();
+      metricasSugestao = _db.sugestaoVendaMetricaEventoBox.removeAll();
+      listaCompras = _db.itemListaCompraBox.removeAll();
+      _db.produtoBox.removeAll();
+    });
+
+    if (ids.isNotEmpty) {
+      await SyncDeleteOutbox.registrarVarios(
+        entity: 'produto',
+        entityIds: ids,
+      );
+      await SyncDirtyOutbox.removerVarios(
+        entity: 'produto',
+        entityIds: ids,
+      );
+    }
+    invalidarCacheBusca();
+    notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+
+    return ProdutoCadastroZerarResultado(
+      produtosRemovidos: total,
+      movimentosRemovidos: movimentos,
+      historicosEntradaRemovidos: historicos,
+      vinculosRemovidos: vinculos,
+      kitsRemovidos: kits,
+      kitItensRemovidos: kitItens,
+      promocoesRemovidas: promocoes,
+      promocaoItensRemovidos: promoItens,
+      promocaoCombosRemovidos: promoCombos,
+      sugestoesRemovidas: sugestoes,
+      metricasSugestaoRemovidas: metricasSugestao,
+      itensListaCompraRemovidos: listaCompras,
+      imagensRemovidas: imagensRemovidas,
+    );
+  }
+
+  Future<int> _limparPastaImagensProdutos() async {
+    final dir = _db.productImagesDir;
+    if (!dir.existsSync()) return 0;
+    var removidas = 0;
+    for (final entity in dir.listSync()) {
+      try {
+        if (entity is File) {
+          await entity.delete();
+          removidas++;
+        }
+      } catch (_) {
+        // Melhor esforco: cadastro ja foi limpo.
+      }
+    }
+    return removidas;
   }
 
   Produto? obterPorId(int id) => _db.produtoBox.get(id);

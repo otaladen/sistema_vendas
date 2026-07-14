@@ -64,6 +64,7 @@ class AuditoriaAcao {
   static const reajustePrecoEstorno = 'reajuste_preco_estorno';
   static const devolucao = 'devolucao';
   static const troca = 'troca';
+  static const zerarCadastroProdutos = 'zerar_cadastro_produtos';
 }
 
 String auditoriaRotuloModulo(String modulo) {
@@ -167,6 +168,8 @@ String auditoriaRotuloAcao(String acao) {
       return 'Devolucao';
     case AuditoriaAcao.troca:
       return 'Troca';
+    case AuditoriaAcao.zerarCadastroProdutos:
+      return 'Zerar cadastro de produtos';
     default:
       return acao;
   }

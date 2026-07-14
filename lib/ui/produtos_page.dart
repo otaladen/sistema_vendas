@@ -43,8 +43,11 @@ import 'widgets/abas_historico_produto_widget.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'produtos/importar_chacal_backup_flow.dart';
+import 'produtos/preco_mercado_busca_dialog.dart';
 import 'produtos/produto_pesquisa_dialog.dart';
 import 'produtos/produtos_sugestoes_venda_section.dart';
+import 'produtos/zerar_cadastro_produtos_flow.dart';
+import '../services/preco_mercado_service.dart';
 
 class _CadastroProdutoSalvarIntent extends Intent {
   const _CadastroProdutoSalvarIntent();
@@ -2653,6 +2656,41 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
+  Future<void> _abrirBuscaPrecoMercado() async {
+    final nome = _nomeController.text.trim();
+    if (nome.isEmpty && _codigoBarrasController.text.trim().isEmpty) {
+      _definirStatus(
+        'Informe o nome (ou codigo de barras) na aba Principal antes da busca.',
+        erro: true,
+      );
+      return;
+    }
+    final escolha = await mostrarBuscaPrecoMercadoDialog(
+      context: context,
+      service: PrecoMercadoService(
+        objectBox: widget.produtoRepository.objectBox,
+        geminiService: _geminiService,
+      ),
+      nomeProduto: nome,
+      codigoBarras: _codigoBarrasController.text.trim(),
+      unidade: _normalizarUnidade(_unidadeSelecionada),
+      produtoId: _produtoEmEdicaoId,
+      custoAtual: _custoBaseParaCalculoPrecos(),
+      podeEditarPreco: _podeEditarPrecoProduto,
+    );
+    if (!mounted || escolha == null) return;
+    final controller = _precoControllerIndice(escolha.precoIndice);
+    setState(() {
+      controller.text = _formatarValorMonetario(escolha.preco);
+      _sincronizarAlvosPrecificacaoComPrecosAtuais();
+    });
+    _definirStatus(
+      'Preco ${escolha.precoIndice} preenchido com a mediana de mercado '
+      '(${_formatarValorMonetario(escolha.preco)}). Confira antes de salvar.',
+      erro: false,
+    );
+  }
+
   Widget _buildAbaPrecosCadastro(
     BuildContext context, {
     required double margem1,
@@ -2667,6 +2705,24 @@ class _ProdutosPageState extends State<ProdutosPage>
       title: 'Precos, custos e margem de lucro',
       icon: Icons.payments_outlined,
       children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _abrirBuscaPrecoMercado,
+            icon: const Icon(Icons.travel_explore_outlined),
+            label: const Text('Pesquisar preco de mercado'),
+          ),
+        ),
+        const SizedBox(height: _erpGap8),
+        Text(
+          'Foco Salvador/BA. Como os sites bloqueiam coleta automatica, '
+          'o app abre Ferreira Costa, Leroy e Mercado Livre para voce '
+          'informar os precos e calcular a media.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: _erpGap16),
         _buildTabelaPrecosVendaCadastro(
           context,
           margem1: margem1,
@@ -4353,6 +4409,17 @@ class _ProdutosPageState extends State<ProdutosPage>
     setState(() {});
   }
 
+  Future<void> _zerarCadastroProdutos() async {
+    final resultado = await executarZerarCadastroProdutos(
+      context: context,
+      produtoRepository: widget.produtoRepository,
+      onStatus: (msg, {erro = false}) => _definirStatus(msg, erro: erro),
+    );
+    if (!mounted || resultado == null) return;
+    _resetarFormulario();
+    setState(() {});
+  }
+
   Future<void> _importarProdutosCsv() async {
     final pick = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -4914,6 +4981,14 @@ class _ProdutosPageState extends State<ProdutosPage>
             tooltip: 'Importar produtos (CSV)',
             icon: const Icon(Icons.upload_file_outlined),
             onPressed: _importarProdutosCsv,
+          ),
+          IconButton(
+            tooltip: 'Zerar cadastro de produtos',
+            icon: Icon(
+              Icons.delete_forever_outlined,
+              color: theme.colorScheme.error,
+            ),
+            onPressed: _zerarCadastroProdutos,
           ),
         ],
       ),

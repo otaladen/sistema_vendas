@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 import '../domain/gemini_produto_padronizado.dart';
+import '../domain/preco_mercado_resultado.dart';
 import 'gemini_config.dart';
 
 /// Modelos tentados em ordem. Cada modelo tem cota separada no tier gratuito.
@@ -249,6 +250,129 @@ class GeminiService {
     );
     if (map == null) return null;
     return ProdutoPadronizadoGemini.fromMap(map);
+  }
+
+  static final Schema _schemaQueryBuscaPreco = Schema.object(
+    description: 'Query melhorada para busca de preco de mercado',
+    properties: {
+      'query_busca': Schema.string(
+        description:
+            'Termo de busca curto e preciso (marca, tipo, medida/peso). '
+            'Sem inventar valores de preco.',
+        nullable: false,
+      ),
+      'dica': Schema.string(
+        description:
+            'Dica curta em portugues sobre o que observar na comparacao '
+            '(unidade, embalagem). Nao invente precos numericos.',
+        nullable: true,
+      ),
+    },
+    requiredProperties: ['query_busca'],
+  );
+
+  /// Sugere query de busca de mercado (gasta 1 request da cota Gemini).
+  ///
+  /// Nao devolve precos — apenas melhora o termo de pesquisa.
+  Future<PrecoMercadoQueryAvancada?> sugerirQueryBuscaPreco(
+    String nomeBruto, {
+    String unidade = '',
+    String codigoBarras = '',
+    String cidade = 'Salvador',
+    String uf = 'BA',
+    List<String> lojasAlvo = const [
+      'Ferreira Costa',
+      'Leroy Merlin',
+      'Mercado Livre',
+    ],
+  }) async {
+    final bruto = nomeBruto.trim();
+    if (bruto.isEmpty) return null;
+
+    final apiKey = await _resolvedApiKey();
+    if (!GeminiConfig.chavePareceValida(apiKey)) {
+      throw GeminiConfigException(
+        'Chave da API Gemini nao configurada. '
+        'Salve em Configuracoes > Integracoes ou use GEMINI_API_KEY.',
+      );
+    }
+
+    final lojas = lojasAlvo.where((l) => l.trim().isNotEmpty).join(', ');
+    final prompt = StringBuffer()
+      ..writeln(
+        'Voce ajuda uma loja de materiais de construcao em $cidade/$uf '
+        'a buscar precos de mercado na internet.',
+      )
+      ..writeln(
+        'Priorize ofertas dessas redes/sites: $lojas.',
+      )
+      ..writeln(
+        'Monte um termo de busca OBJETIVO (em portugues) para achar ofertas '
+        'do mesmo produto nessa regiao. Inclua marca/tipo/medida quando der.',
+      )
+      ..writeln(
+        'Pode mencionar a cidade ($cidade) no termo se ajudar. '
+        'NUNCA invente nem sugira valores numericos de preco.',
+      )
+      ..writeln()
+      ..writeln('Produto: $bruto');
+    if (unidade.trim().isNotEmpty) {
+      prompt.writeln('Unidade de venda: ${unidade.trim()}');
+    }
+    if (codigoBarras.trim().isNotEmpty) {
+      prompt.writeln('Codigo de barras: ${codigoBarras.trim()}');
+    }
+
+    GenerativeAIException? ultimoErroGemini;
+    for (final nomeModelo in _modelos) {
+      final model = GenerativeModel(
+        model: nomeModelo,
+        apiKey: apiKey,
+        generationConfig: GenerationConfig(
+          responseMimeType: 'application/json',
+          responseSchema: _schemaQueryBuscaPreco,
+          temperature: 0.2,
+          maxOutputTokens: 256,
+        ),
+      );
+      try {
+        final response = await model.generateContent([
+          Content.text(prompt.toString()),
+        ]);
+        final texto = response.text?.trim();
+        if (texto == null || texto.isEmpty) return null;
+        final decoded = jsonDecode(texto);
+        if (decoded is! Map<String, dynamic>) {
+          throw GeminiServiceException(
+            'Resposta do Gemini em formato inesperado.',
+          );
+        }
+        return PrecoMercadoQueryAvancada.fromMap(decoded);
+      } on GenerativeAIException catch (e) {
+        ultimoErroGemini = e;
+        final interpretado = _interpretarErroGemini(e);
+        if (interpretado.chaveBloqueadaParaApi) throw interpretado;
+        if (nomeModelo != _modelos.last) continue;
+        throw interpretado;
+      } on FormatException catch (e) {
+        throw GeminiServiceException(
+          'JSON invalido retornado pelo Gemini: ${e.message}',
+          cause: e,
+        );
+      } catch (e) {
+        if (e is GeminiConfigException || e is GeminiServiceException) {
+          rethrow;
+        }
+        throw GeminiServiceException(
+          'Erro ao sugerir busca de preco: $e',
+          cause: e,
+        );
+      }
+    }
+
+    final erroGemini = ultimoErroGemini;
+    if (erroGemini != null) throw _interpretarErroGemini(erroGemini);
+    return null;
   }
 
   static GeminiServiceException _interpretarErroGemini(GenerativeAIException e) {

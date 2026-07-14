@@ -14,18 +14,41 @@ class SyncDeleteOutbox {
     int? localId,
   }) async {
     if (entity.trim().isEmpty || entityId <= 0) return;
+    await registrarVarios(
+      entity: entity,
+      entityIds: [entityId],
+      localIdFor: localId == null ? null : (_) => localId,
+    );
+  }
+
+  /// Registra varios deletes numa unica gravacao (ex.: zerar cadastro).
+  static Future<void> registrarVarios({
+    required String entity,
+    required Iterable<int> entityIds,
+    int Function(int entityId)? localIdFor,
+  }) async {
+    final ent = entity.trim();
+    if (ent.isEmpty) return;
+    final ids = entityIds.where((id) => id > 0).toSet();
+    if (ids.isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     final lista = _lerLista(prefs);
-    final chave = '${entity.trim()}:$entityId';
-    if (lista.any((e) => e.chave == chave)) return;
-    lista.add(
-      _SyncDeleteEntry(
-        entity: entity.trim(),
-        entityId: entityId,
-        localId: localId ?? entityId,
-      ),
-    );
-    await _gravarLista(prefs, lista);
+    final existentes = lista.map((e) => e.chave).toSet();
+    var alterou = false;
+    for (final id in ids) {
+      final chave = '$ent:$id';
+      if (existentes.contains(chave)) continue;
+      lista.add(
+        _SyncDeleteEntry(
+          entity: ent,
+          entityId: id,
+          localId: localIdFor?.call(id) ?? id,
+        ),
+      );
+      existentes.add(chave);
+      alterou = true;
+    }
+    if (alterou) await _gravarLista(prefs, lista);
   }
 
   static Future<List<Map<String, dynamic>>> mutacoesParaPush() async {

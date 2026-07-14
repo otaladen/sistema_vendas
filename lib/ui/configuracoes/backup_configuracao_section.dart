@@ -26,6 +26,7 @@ import '../../domain/backup_retencao.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../services/auditoria_registrar.dart';
 import '../produtos/importar_chacal_backup_flow.dart';
+import '../produtos/zerar_cadastro_produtos_flow.dart';
 
 class BackupConfiguracaoSection extends StatefulWidget {
   const BackupConfiguracaoSection({
@@ -330,6 +331,23 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   Future<void> _importarBackupChacal() async {
     if (_backupEmAndamento || _restauracaoEmAndamento) return;
     await executarImportacaoChacalBackup(
+      context: context,
+      produtoRepository: widget.produtoRepository,
+      onStatus: (msg, {erro = false}) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: erro ? Theme.of(context).colorScheme.error : null,
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _zerarCadastroProdutos() async {
+    if (_backupEmAndamento || _restauracaoEmAndamento) return;
+    await executarZerarCadastroProdutos(
       context: context,
       produtoRepository: widget.produtoRepository,
       onStatus: (msg, {erro = false}) {
@@ -1486,6 +1504,18 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                       : () => unawaited(_importarBackupChacal()),
                   icon: const Icon(Icons.archive_outlined),
                   label: const Text('Importar backup Chacal (.s3db / .sql / .txt)'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: ocupado
+                      ? null
+                      : () => unawaited(_zerarCadastroProdutos()),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: theme.colorScheme.error,
+                    side: BorderSide(color: theme.colorScheme.error),
+                  ),
+                  icon: const Icon(Icons.delete_forever_outlined),
+                  label: const Text('Zerar cadastro de produtos'),
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(

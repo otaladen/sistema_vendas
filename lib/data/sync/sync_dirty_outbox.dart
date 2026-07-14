@@ -30,12 +30,27 @@ class SyncDirtyOutbox {
   }) async {
     final ent = entity.trim();
     if (ent.isEmpty || entityId <= 0) return;
+    await removerVarios(entity: ent, entityIds: [entityId]);
+  }
+
+  /// Remove marcações dirty de varios IDs (ou de toda a entidade se [entityIds] vazio).
+  static Future<void> removerVarios({
+    required String entity,
+    Iterable<int> entityIds = const [],
+  }) async {
+    final ent = entity.trim();
+    if (ent.isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     final lista = _lerLista(prefs);
-    final chave = _chave(ent, entityId);
-    if (!lista.any((e) => e.chave == chave)) return;
-    lista.removeWhere((e) => e.chave == chave);
-    await _gravarLista(prefs, lista);
+    final antes = lista.length;
+    final ids = entityIds.where((id) => id > 0).toSet();
+    if (ids.isEmpty) {
+      lista.removeWhere((e) => e.entity == ent);
+    } else {
+      final chaves = ids.map((id) => _chave(ent, id)).toSet();
+      lista.removeWhere((e) => chaves.contains(e.chave));
+    }
+    if (lista.length != antes) await _gravarLista(prefs, lista);
   }
 
   static Future<List<SyncDirtyPendingEntry>> listar() async {
