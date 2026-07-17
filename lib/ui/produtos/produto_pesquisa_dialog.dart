@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -16,6 +17,8 @@ const int _kLoteScrollExibicao = 35;
 const int _kLoteRepoVazio = 40;
 const int _kLimiteBuscaTexto = 350;
 const int _kDebounceBuscaMs = 260;
+const double _kAlturaLinha = 68.0;
+const double _kMiniaturaPx = 40.0;
 
 /// Dialogo de pesquisa de produto no cadastro (debounce + scroll progressivo).
 Future<Produto?> showProdutoPesquisaDialog({
@@ -193,8 +196,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
       });
     }
     if (!_scrollController.hasClients) return;
-    const alturaLinha = 64.0;
-    final alvo = (_indiceSelecionado * alturaLinha).clamp(
+    final alvo = (_indiceSelecionado * _kAlturaLinha).clamp(
       0.0,
       _scrollController.position.maxScrollExtent,
     );
@@ -337,7 +339,9 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
                         child: ListView.builder(
                           controller: _scrollController,
                           itemCount: itemCount + (_carregando ? 1 : 0),
+                          itemExtent: _kAlturaLinha,
                           addRepaintBoundaries: true,
+                          cacheExtent: 280,
                           itemBuilder: (context, index) {
                             if (index >= itemCount) {
                               return const Padding(
@@ -423,9 +427,12 @@ class _ProdutoPesquisaLinha extends StatelessWidget {
       child: MouseRegion(
         onEnter: (_) => onHover(),
         child: ListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
           contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           selected: selecionado,
           selectedTileColor: scheme.primary.withValues(alpha: 0.08),
+          leading: _ProdutoFotoMiniatura(fotoPath: produto.fotoPath),
           title: _TextoComDestaque(
             texto: produto.nome,
             termo: consulta,
@@ -437,6 +444,61 @@ class _ProdutoPesquisaLinha extends StatelessWidget {
             estilo: estiloSubtitulo,
           ),
           onTap: onTap,
+        ),
+      ),
+    );
+  }
+}
+
+/// Miniatura 40px: decode so no tamanho da tela (nao carrega o JPEG inteiro).
+class _ProdutoFotoMiniatura extends StatelessWidget {
+  const _ProdutoFotoMiniatura({required this.fotoPath});
+
+  final String fotoPath;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final path = fotoPath.trim();
+    final placeholder = DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Icon(
+        Icons.image_outlined,
+        size: 20,
+        color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+      ),
+    );
+
+    if (path.isEmpty) {
+      return SizedBox(
+        width: _kMiniaturaPx,
+        height: _kMiniaturaPx,
+        child: placeholder,
+      );
+    }
+
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final cachePx = (_kMiniaturaPx * dpr).round().clamp(40, 96);
+
+    return SizedBox(
+      width: _kMiniaturaPx,
+      height: _kMiniaturaPx,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.file(
+          File(path),
+          key: ValueKey(path),
+          width: _kMiniaturaPx,
+          height: _kMiniaturaPx,
+          fit: BoxFit.cover,
+          cacheWidth: cachePx,
+          cacheHeight: cachePx,
+          filterQuality: FilterQuality.low,
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => placeholder,
         ),
       ),
     );

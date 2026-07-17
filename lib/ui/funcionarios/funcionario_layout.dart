@@ -24,10 +24,9 @@ abstract final class FuncionarioLayout {
   static bool isCompactDesktop(double width, double height) =>
       width < laptopWidth || height < shortHeight;
 
-  /// KPIs da equipe ficam na sidebar para liberar altura na ficha.
+  /// KPIs da equipe ficam na sidebar (ficha limpa, estilo ERP).
   static bool kpisNaSidebar(double width, double height) =>
-      width >= AppBreakpoints.desktop &&
-      (width < laptopWidth || height < shortHeight);
+      width >= AppBreakpoints.desktop;
 
   /// Duas colunas na aba Documentos.
   static bool documentosDuasColunas(double contentWidth) =>

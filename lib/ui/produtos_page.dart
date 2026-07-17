@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -27,6 +28,7 @@ import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/fiscal/produto_fiscal_catalog.dart';
 import '../domain/produto_nome_exibicao.dart';
+import '../domain/produto_nome_titulo_normalizer.dart';
 import '../domain/produto_precificacao.dart';
 import '../model/produto_sugestao_venda.dart';
 import '../model/produto.dart';
@@ -48,6 +50,9 @@ import 'produtos/produto_pesquisa_dialog.dart';
 import 'produtos/produtos_sugestoes_venda_section.dart';
 import 'produtos/zerar_cadastro_produtos_flow.dart';
 import '../services/preco_mercado_service.dart';
+import 'widgets/pdv_barcode_scanner_page.dart';
+import 'widgets/pdv_barcode_scanner_support.dart';
+import 'widgets/operacao_feedback.dart';
 
 class _CadastroProdutoSalvarIntent extends Intent {
   const _CadastroProdutoSalvarIntent();
@@ -206,6 +211,9 @@ class _ProdutosPageState extends State<ProdutosPage>
   bool _buscandoFoto = false;
   bool _consultandoNcm = false;
   bool _consultandoGemini = false;
+  List<ImagemProdutoEncontrada> _opcoesBuscaFoto = const [];
+  String _termoUltimaBuscaFoto = '';
+  int _indiceOpcaoBuscaFotoAtual = -1;
   String _infoNcmBrasilApi = '';
   String _unidadeSelecionada = 'UN';
   String _grupoTributarioSelecionado = GrupoTributarioProduto.tributado.codigo;
@@ -272,7 +280,14 @@ class _ProdutosPageState extends State<ProdutosPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focarBarrasSeNovoCadastro();
+      _consolidarFotosDuplicadasEmSegundoPlano();
     });
+  }
+
+  Future<void> _consolidarFotosDuplicadasEmSegundoPlano() async {
+    try {
+      await widget.produtoRepository.consolidarFotosDuplicadas();
+    } catch (_) {}
   }
 
   void _onSubAbaCadastroChanged() {
@@ -1095,10 +1110,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                     decoration: _erpInputDecoration(
                       context,
                       hint: 'Leia ou digite o GTIN',
-                      suffixIcon: _suffixConsultaBrasilApi(
-                        carregando: _consultandoGtin,
-                        tooltip: 'Buscar produto na Brasil API',
-                        onPressed:
+                      suffixIcon: _suffixCodigoBarrasComCamera(
+                        carregandoGtin: _consultandoGtin,
+                        onConsultarGtin:
                             _consultandoGtin ? null : _consultarGtinBrasilApi,
                       ),
                     ),
@@ -1503,78 +1517,8 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
-  String _normalizarNomeProduto(String nome) {
-    final texto = nome.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (texto.isEmpty) {
-      return '';
-    }
-    const conectores = {
-      'de',
-      'da',
-      'do',
-      'das',
-      'dos',
-      'e',
-      'em',
-      'com',
-      'para',
-      'por',
-    };
-    const siglas = {
-      'pvc',
-      'uv',
-      'led',
-      'mdf',
-      'osb',
-      'ac',
-      'cp',
-      'kg',
-      'g',
-      'mg',
-      'mm',
-      'cm',
-      'm',
-      'm2',
-      'm3',
-      'l',
-      'lt',
-      'ml',
-      'w',
-      'v',
-      'a',
-      'un',
-      'cx',
-      'sc',
-    };
-
-    final tokens = texto.split(' ').where((parte) => parte.isNotEmpty).toList();
-    final normalizados = <String>[];
-    for (var i = 0; i < tokens.length; i++) {
-      final tokenOriginal = tokens[i];
-      final token = tokenOriginal.toLowerCase();
-      if (siglas.contains(token)) {
-        normalizados.add(token.toUpperCase());
-        continue;
-      }
-      if (token.contains('/')) {
-        final partes = token.split('/');
-        final frac = partes
-            .map((p) => p.trim())
-            .where((p) => p.isNotEmpty)
-            .join('/');
-        normalizados.add(frac);
-        continue;
-      }
-      if (i > 0 && conectores.contains(token)) {
-        normalizados.add(token);
-        continue;
-      }
-      final inicial = token[0].toUpperCase();
-      final restante = token.length > 1 ? token.substring(1).toLowerCase() : '';
-      normalizados.add('$inicial$restante');
-    }
-    return normalizados.join(' ');
-  }
+  String _normalizarNomeProduto(String nome) =>
+      ProdutoNomeTituloNormalizer.normalizar(nome);
 
   void _definirStatus(String mensagem, {required bool erro}) {
     final semantic = context.semanticColors;
@@ -1593,7 +1537,9 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   void _resetarFormulario() {
+    _formKey.currentState?.reset();
     setState(() {
+      _historicoVersao++;
       _codigoInternoController.clear();
       _nomeController.clear();
       _nomeImpressaoController.clear();
@@ -1637,6 +1583,9 @@ class _ProdutosPageState extends State<ProdutosPage>
       _fotoPathAtual = '';
       _fotoOrigemLocalPath = null;
       _fotoFoiRemovida = false;
+      _opcoesBuscaFoto = const [];
+      _termoUltimaBuscaFoto = '';
+      _indiceOpcaoBuscaFotoAtual = -1;
       _consultandoGtin = false;
       _consultandoNcm = false;
       _consultandoGemini = false;
@@ -1661,7 +1610,6 @@ class _ProdutosPageState extends State<ProdutosPage>
       _quantidadeEmbalagemController.text = '1';
       _unidadeCompraController.clear();
     });
-    _formKey.currentState?.reset();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focarBarrasSeNovoCadastro();
@@ -1741,13 +1689,25 @@ class _ProdutosPageState extends State<ProdutosPage>
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Fechar'),
           ),
-          if (erro.chaveBloqueadaParaApi)
+          if (erro.cotaEsgotada)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _abrirUrlExterna('https://aistudio.google.com/rate-limit');
+              },
+              child: const Text('Ver cota'),
+            ),
+          if (erro.chaveBloqueadaParaApi || erro.chaveVazada)
             FilledButton(
               onPressed: () {
                 Navigator.pop(ctx);
                 _abrirUrlExterna('https://aistudio.google.com/apikey');
               },
-              child: const Text('Criar chave Gemini'),
+              child: Text(
+                erro.chaveVazada
+                    ? 'Gerar chave nova'
+                    : 'Criar chave Gemini',
+              ),
             ),
         ],
       ),
@@ -1850,6 +1810,31 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   Future<void> _buscarFotoProdutoNaWeb() async {
+    await _buscarFotoProdutoNaWebComOpcao();
+  }
+
+  Future<void> _buscarOutraFotoProdutoNaWeb() async {
+    await _buscarFotoProdutoNaWebComOpcao(buscarOutra: true);
+  }
+
+  Future<({String path, int indice})?> _baixarOpcaoFotoBuscada(
+    List<ImagemProdutoEncontrada> imagens, {
+    required int startIndex,
+  }) async {
+    for (var i = startIndex; i < imagens.length; i++) {
+      final pathLocal = await _produtoImagemBuscaService.baixarParaTemporario(
+        imagens[i].url,
+      );
+      if (pathLocal != null) {
+        return (path: pathLocal, indice: i);
+      }
+    }
+    return null;
+  }
+
+  Future<void> _buscarFotoProdutoNaWebComOpcao({
+    bool buscarOutra = false,
+  }) async {
     final nome = _nomeController.text.trim();
     if (nome.isEmpty) {
       _snackbarBrasilApi(
@@ -1873,13 +1858,37 @@ class _ProdutosPageState extends State<ProdutosPage>
     setState(() => _buscandoFoto = true);
 
     try {
-      final pathLocal = await _produtoImagemBuscaService
-          .buscarEBaixarPrimeiraImagem(termo);
+      List<ImagemProdutoEncontrada> opcoes = _opcoesBuscaFoto;
+      var indiceInicial = 0;
+      final reutilizarBusca =
+          buscarOutra &&
+          _termoUltimaBuscaFoto == termo &&
+          _opcoesBuscaFoto.isNotEmpty;
+
+      if (reutilizarBusca) {
+        indiceInicial = _indiceOpcaoBuscaFotoAtual + 1;
+        if (indiceInicial >= opcoes.length) {
+          _snackbarBrasilApi(
+            'Nao encontrei outra opcao nesta busca. Tente ajustar nome ou marca.',
+            erro: true,
+          );
+          return;
+        }
+      } else {
+        opcoes = await _produtoImagemBuscaService.buscarImagens(termo, limite: 8);
+      }
+
+      final fotoEscolhida = await _baixarOpcaoFotoBuscada(
+        opcoes,
+        startIndex: indiceInicial,
+      );
       if (!mounted) return;
 
-      if (pathLocal == null) {
+      if (fotoEscolhida == null) {
         _snackbarBrasilApi(
-          'Nenhuma imagem encontrada ou baixavel para "$termo".',
+          buscarOutra
+              ? 'Nao foi possivel baixar outra foto para "$termo".'
+              : 'Nenhuma imagem encontrada ou baixavel para "$termo".',
           erro: true,
         );
         return;
@@ -1889,15 +1898,20 @@ class _ProdutosPageState extends State<ProdutosPage>
       if (!mounted) return;
 
       setState(() {
-        _fotoOrigemLocalPath = pathLocal;
+        _opcoesBuscaFoto = opcoes;
+        _termoUltimaBuscaFoto = termo;
+        _indiceOpcaoBuscaFotoAtual = fotoEscolhida.indice;
+        _fotoOrigemLocalPath = fotoEscolhida.path;
         _fotoFoiRemovida = false;
       });
 
       final semantic = context.semanticColors;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text(
-            'Foto carregada na pre-visualizacao. Salve o produto para gravar.',
+          content: Text(
+            buscarOutra
+                ? 'Outra foto carregada na pre-visualizacao. Salve o produto para gravar.'
+                : 'Foto carregada na pre-visualizacao. Salve o produto para gravar.',
           ),
           duration: const Duration(seconds: 4),
           backgroundColor: semantic.successFg,
@@ -2080,13 +2094,17 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
     if (confirmar != true) return;
 
+    final fotoPath = produto.fotoPath.trim();
     final removido = widget.produtoRepository.remover(produtoId);
     if (!removido) {
       _definirStatus('Nao foi possivel excluir o produto.', erro: true);
       return;
     }
-    if (produto.fotoPath.trim().isNotEmpty) {
-      await _produtoImagemService.removerImagemProduto(produto.fotoPath);
+    if (fotoPath.isNotEmpty) {
+      await _produtoImagemService.removerImagemProdutoSeOrfao(
+        fotoPath,
+        contarReferencias: widget.produtoRepository.contarProdutosComFotoPath,
+      );
     }
     _resetarFormulario();
     _definirStatus('Produto excluido com sucesso.', erro: false);
@@ -2989,6 +3007,122 @@ class _ProdutosPageState extends State<ProdutosPage>
       icon: Icon(icon),
       onPressed: onPressed,
     );
+  }
+
+  Widget? _suffixCodigoBarrasComCamera({
+    required bool carregandoGtin,
+    required VoidCallback? onConsultarGtin,
+  }) {
+    final brasilApi = _suffixConsultaBrasilApi(
+      carregando: carregandoGtin,
+      tooltip: 'Buscar produto na Brasil API',
+      onPressed: onConsultarGtin,
+    );
+    if (!pdvLeitorCameraDisponivel) return brasilApi;
+
+    return SizedBox(
+      width: 96,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Bipar codigo de barras',
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: carregandoGtin
+                ? null
+                : () {
+                    unawaited(_abrirLeitorCameraCodigoBarras());
+                  },
+          ),
+          ?brasilApi,
+        ],
+      ),
+    );
+  }
+
+  Future<void> _abrirLeitorCameraCodigoBarras() async {
+    if (!pdvLeitorCameraDisponivel || !mounted) return;
+
+    Produto? produtoExistente;
+    await Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => PdvBarcodeScannerPage(
+          titulo: 'Codigo de barras',
+          modoContinuoInicial: false,
+          mostrarToggleContinuo: false,
+          instrucaoUnico:
+              'Aponte para o codigo. O EAN sera preenchido no cadastro.',
+          onCodigoLido: (codigo) async {
+            final normalizado = normalizarCodigoBarrasConsulta(codigo);
+            if (normalizado.isEmpty) {
+              return const PdvBarcodeScanFeedback(
+                sucesso: false,
+                mensagem: 'Codigo invalido.',
+              );
+            }
+            produtoExistente = widget.produtoRepository.buscarPorCodigoBarras(
+              normalizado,
+              somenteAtivos: false,
+            );
+            _codigoBarrasController.text = normalizado;
+            if (produtoExistente != null) {
+              return PdvBarcodeScanFeedback(
+                sucesso: true,
+                mensagem:
+                    'Ja cadastrado: ${ProdutoNomeExibicao.paraTela(produtoExistente!)}',
+              );
+            }
+            return PdvBarcodeScanFeedback(
+              sucesso: true,
+              mensagem: 'EAN $normalizado',
+            );
+          },
+        ),
+      ),
+    );
+    if (!mounted) return;
+
+    final existente = produtoExistente;
+    if (existente != null) {
+      final abrir = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Produto ja cadastrado'),
+          content: Text(
+            'Codigo ${_codigoBarrasController.text} pertence a '
+            '"${ProdutoNomeExibicao.paraTela(existente)}".\n\n'
+            'Deseja abrir este produto para edicao?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Manter codigo'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Abrir produto'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (abrir == true) {
+        _editarProdutoNoCabecalho(existente);
+        return;
+      }
+    }
+
+    if (_codigoBarrasController.text.trim().isNotEmpty &&
+        _nomeController.text.trim().isEmpty) {
+      await _consultarGtinBrasilApi();
+    } else if (_codigoBarrasController.text.trim().isNotEmpty) {
+      OperacaoFeedback.sucesso(
+        context,
+        'Codigo de barras preenchido.',
+      );
+    }
   }
 
   Widget? _suffixConsultaBrasilApi({
@@ -3981,11 +4115,25 @@ class _ProdutosPageState extends State<ProdutosPage>
       }
       if (fotoPathExistente.trim().isNotEmpty &&
           fotoPathExistente != fotoProcessada) {
-        await _produtoImagemService.removerImagemProduto(fotoPathExistente);
+        await _produtoImagemService.removerImagemProdutoSeOrfao(
+          fotoPathExistente,
+          contarReferencias: (path) =>
+              widget.produtoRepository.contarProdutosComFotoPath(
+            path,
+            excluirProdutoId: produtoExistente?.id,
+          ),
+        );
       }
       fotoPathFinal = fotoProcessada;
     } else if (_fotoFoiRemovida && fotoPathExistente.trim().isNotEmpty) {
-      await _produtoImagemService.removerImagemProduto(fotoPathExistente);
+      await _produtoImagemService.removerImagemProdutoSeOrfao(
+        fotoPathExistente,
+        contarReferencias: (path) =>
+            widget.produtoRepository.contarProdutosComFotoPath(
+          path,
+          excluirProdutoId: produtoExistente?.id,
+        ),
+      );
       fotoPathFinal = '';
     }
 
@@ -4150,6 +4298,9 @@ class _ProdutosPageState extends State<ProdutosPage>
       _fotoPathAtual = produto.fotoPath;
       _fotoOrigemLocalPath = null;
       _fotoFoiRemovida = false;
+      _opcoesBuscaFoto = const [];
+      _termoUltimaBuscaFoto = '';
+      _indiceOpcaoBuscaFotoAtual = -1;
       _ncmController.text = produto.ncm;
       _cestController.text = produto.cest;
       _cfopVendaController.text = produto.cfopVenda;
@@ -4407,6 +4558,45 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
     if (!mounted) return;
     setState(() {});
+  }
+
+  Future<void> _padronizarNomesTituloEmLote() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Padronizar nomes dos produtos?'),
+        content: const Text(
+          'Converte nomes em MAIUSCULO para o padrao de titulo, '
+          'como "Abraçadeira de Nylon 100mm X 2.5mm".\n\n'
+          'Isso altera o cadastro inteiro. Nomes de impressao distintos '
+          'do nome do produto sao preservados.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Padronizar agora'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final r = widget.produtoRepository.padronizarNomesTituloEmLote();
+    if (!mounted) return;
+    _resetarFormulario();
+    setState(() {});
+    _definirStatus(
+      r.alterados > 0
+          ? 'Nomes padronizados: ${r.alterados} alterado(s), '
+              '${r.inalterados} ja estavam ok.'
+          : 'Nenhum nome precisou de alteracao '
+              '(${r.inalterados} produto(s)).',
+      erro: false,
+    );
   }
 
   Future<void> _zerarCadastroProdutos() async {
@@ -4983,6 +5173,11 @@ class _ProdutosPageState extends State<ProdutosPage>
             onPressed: _importarProdutosCsv,
           ),
           IconButton(
+            tooltip: 'Padronizar nomes (titulo, nao MAIUSCULO)',
+            icon: const Icon(Icons.text_fields_outlined),
+            onPressed: _padronizarNomesTituloEmLote,
+          ),
+          IconButton(
             tooltip: 'Zerar cadastro de produtos',
             icon: Icon(
               Icons.delete_forever_outlined,
@@ -5461,6 +5656,24 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                   'Buscar foto',
                                                                 ),
                                                               ),
+                                                              if (_termoUltimaBuscaFoto
+                                                                  .isNotEmpty)
+                                                                OutlinedButton.icon(
+                                                                  style:
+                                                                      _estiloBotaoContornoCompacto,
+                                                                  onPressed:
+                                                                      _buscandoFoto
+                                                                          ? null
+                                                                          : _buscarOutraFotoProdutoNaWeb,
+                                                                  icon: const Icon(
+                                                                    Icons
+                                                                        .refresh_outlined,
+                                                                    size: 18,
+                                                                  ),
+                                                                  label: const Text(
+                                                                    'Outra foto',
+                                                                  ),
+                                                                ),
                                                               if (_fotoPreviewPath() !=
                                                                   null)
                                                                 OutlinedButton.icon(

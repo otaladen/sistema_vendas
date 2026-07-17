@@ -105,7 +105,8 @@ bool movimentacaoEstoquePassaFiltroNatureza(
       return m.deltaFisico < 0 &&
           !movimentacaoEstoqueEhCancelamento(m.tipoMovimento);
     case FiltroNaturezaMovimentacaoEstoque.devolucoes:
-      return m.tipoMovimento == TipoMovimentoEstoque.devolucaoCliente.name;
+      return m.tipoMovimento == TipoMovimentoEstoque.devolucaoCliente.name ||
+          m.tipoMovimento == TipoMovimentoEstoque.devolucaoFornecedor.name;
     case FiltroNaturezaMovimentacaoEstoque.cancelamentos:
       return movimentacaoEstoqueEhCancelamento(m.tipoMovimento);
     case FiltroNaturezaMovimentacaoEstoque.ajustes:

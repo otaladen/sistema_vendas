@@ -11,7 +11,9 @@ import '../domain/pdv_consulta_similares_util.dart';
 import '../domain/produto_substitutos_util.dart';
 import '../domain/pdv_busca_inteligente.dart';
 import '../domain/produto_nome_exibicao.dart';
+import '../domain/produto_nome_titulo_normalizer.dart';
 import '../services/gerenciador_estoque_service.dart';
+import '../services/produto_imagem_service.dart';
 import 'movimento_estoque_repository.dart';
 import 'produto_busca_sinonimos.dart';
 import 'produto_busca_util.dart';
@@ -1193,6 +1195,16 @@ class ProdutoRepository extends ChangeNotifier {
     produto.codigoInterno = normalizarCodigoInternoPersistido(
       produto.codigoInterno,
     );
+    final nomeBruto = produto.nome;
+    final nomeTitulo = ProdutoNomeTituloNormalizer.normalizar(nomeBruto);
+    final impressaoBruta = produto.nomeImpressao.trim();
+    // Se impressao seguia o nome antigo (ou vazia), acompanha o titulo novo.
+    if (impressaoBruta.isEmpty ||
+        impressaoBruta == nomeBruto.trim() ||
+        impressaoBruta == nomeTitulo) {
+      produto.nomeImpressao = nomeTitulo;
+    }
+    produto.nome = nomeTitulo;
     produto.nomeImpressao = ProdutoNomeExibicao.normalizarNomeImpressaoPersistido(
       nome: produto.nome,
       nomeImpressao: produto.nomeImpressao,
@@ -1340,6 +1352,106 @@ class ProdutoRepository extends ChangeNotifier {
       invalidarCacheBusca();
     }
     return ok;
+  }
+
+  /// Converte nomes em MAIUSCULO para titulo (ex.: Abracadeira de Nylon…).
+  ///
+  /// Atualiza tambem [Produto.nomeImpressao] quando ele era igual ao nome antigo
+  /// ou estava vazio.
+  ({int alterados, int inalterados}) padronizarNomesTituloEmLote() {
+    var alterados = 0;
+    var inalterados = 0;
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final p in _db.produtoBox.getAll()) {
+        final nomeAntigo = p.nome;
+        final impressaoAntiga = p.nomeImpressao.trim();
+        final nomeNovo = ProdutoNomeTituloNormalizer.normalizar(nomeAntigo);
+        if (nomeNovo.isEmpty || nomeNovo == nomeAntigo.trim()) {
+          inalterados++;
+          continue;
+        }
+        p.nome = nomeNovo;
+        if (impressaoAntiga.isEmpty || impressaoAntiga == nomeAntigo.trim()) {
+          p.nomeImpressao = nomeNovo;
+        } else {
+          p.nomeImpressao = ProdutoNomeExibicao.normalizarNomeImpressaoPersistido(
+            nome: nomeNovo,
+            nomeImpressao: impressaoAntiga,
+          );
+        }
+        _db.produtoBox.put(p);
+        alterados++;
+      }
+    });
+    if (alterados > 0) {
+      invalidarCacheBusca();
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+    }
+    return (alterados: alterados, inalterados: inalterados);
+  }
+
+  /// Quantos produtos apontam para o mesmo arquivo de foto.
+  int contarProdutosComFotoPath(
+    String imagePath, {
+    int? excluirProdutoId,
+  }) {
+    final alvo = imagePath.trim();
+    if (alvo.isEmpty) return 0;
+    final alvoAbs = p.normalize(File(alvo).absolute.path);
+    final alvoBase = p.basename(alvoAbs);
+    var n = 0;
+    for (final pr in _db.produtoBox.getAll()) {
+      if (excluirProdutoId != null && pr.id == excluirProdutoId) continue;
+      final fp = pr.fotoPath.trim();
+      if (fp.isEmpty) continue;
+      final fpAbs = p.normalize(File(fp).absolute.path);
+      if (fpAbs == alvoAbs || p.basename(fpAbs) == alvoBase) {
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /// Une fotos com o mesmo conteudo em um unico arquivo e atualiza os produtos.
+  Future<({int produtosAtualizados, int arquivosRemovidos})>
+      consolidarFotosDuplicadas() async {
+    final produtos = _db.produtoBox.getAll();
+    final pares = <({int id, String fotoPath})>[
+      for (final pr in produtos)
+        if (pr.fotoPath.trim().isNotEmpty)
+          (id: pr.id, fotoPath: pr.fotoPath.trim()),
+    ];
+    if (pares.isEmpty) {
+      return (produtosAtualizados: 0, arquivosRemovidos: 0);
+    }
+
+    final svc = ProdutoImagemService(imagesDirectoryPath: productImagesDirPath);
+    final resultado = await svc.consolidarImagensDuplicadas(pares);
+    if (resultado.novosPaths.isEmpty) {
+      return (
+        produtosAtualizados: 0,
+        arquivosRemovidos: resultado.arquivosRemovidos,
+      );
+    }
+
+    var atualizados = 0;
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final entry in resultado.novosPaths.entries) {
+        final pr = _db.produtoBox.get(entry.key);
+        if (pr == null) continue;
+        pr.fotoPath = entry.value;
+        _db.produtoBox.put(pr);
+        atualizados++;
+      }
+    });
+    if (atualizados > 0) {
+      invalidarCacheBusca();
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+    }
+    return (
+      produtosAtualizados: atualizados,
+      arquivosRemovidos: resultado.arquivosRemovidos,
+    );
   }
 
   /// Remove todos os produtos do cadastro para reimportacao do zero.

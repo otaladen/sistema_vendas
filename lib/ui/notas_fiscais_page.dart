@@ -65,6 +65,17 @@ class NotasFiscaisPage extends StatelessWidget {
             ),
           ),
           HubNavButton(
+            icon: Icons.assignment_return_outlined,
+            corDestaque: HubNavColors.menuNotasFiscais(context),
+            titulo: 'Devolucao ao fornecedor',
+            subtitulo:
+                'NF-e de saida (CFOP 5202/6202) referenciando a compra + baixa de estoque.',
+            onTap: () => _abrirSub(
+              context,
+              MainMenuSubDestino.fiscalDevolucaoFornecedor,
+            ),
+          ),
+          HubNavButton(
             icon: Icons.pending_actions_outlined,
             corDestaque: HubNavColors.menuNotasFiscais(context),
             titulo: 'Pendencias fiscais',

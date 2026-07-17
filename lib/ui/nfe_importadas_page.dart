@@ -10,6 +10,7 @@ import '../data/nfe_entrada_repository.dart';
 import '../data/produto_repository.dart';
 import '../model/historico_entrada.dart';
 import '../model/nfe_importada_registro.dart';
+import 'fiscal/nfe_devolucao_fornecedor_page.dart';
 
 /// Log de NF-e importadas por XML: KPIs, filtros, ordenacao, detalhe e exportacao CSV.
 class NfeImportadasPage extends StatefulWidget {
@@ -264,6 +265,17 @@ class _NfeImportadasPageState extends State<NfeImportadasPage> {
     );
   }
 
+  void _abrirDevolucaoFornecedor(NfeImportadaRegistro r) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NfeDevolucaoFornecedorPage(
+          produtoRepository: widget.produtoRepository,
+          chaveNotaInicial: r.chaveAcesso,
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmarEstornoImportacao(
     BuildContext sheetContext,
     NfeImportadaRegistro r,
@@ -419,6 +431,14 @@ class _NfeImportadasPageState extends State<NfeImportadasPage> {
                           : () => _copiar('CNPJ', r.cnpjFornecedor.trim()),
                       icon: const Icon(Icons.badge_outlined, size: 18),
                       label: const Text('Copiar CNPJ'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _abrirDevolucaoFornecedor(r);
+                      },
+                      icon: const Icon(Icons.assignment_return_outlined, size: 18),
+                      label: const Text('Devolver ao fornecedor'),
                     ),
                   ],
                 ),

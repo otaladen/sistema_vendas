@@ -177,9 +177,13 @@ class _PrecoMercadoBuscaDialogState extends State<_PrecoMercadoBuscaDialog> {
       });
     } on GeminiServiceException catch (e) {
       if (!mounted) return;
+      final extra = (e.instrucoesCorrecao != null &&
+              e.instrucoesCorrecao!.isNotEmpty)
+          ? '\n${e.instrucoesCorrecao!.first}'
+          : '';
       setState(() {
         _carregando = false;
-        _erro = e.message;
+        _erro = '${e.message}$extra';
       });
     } on PrecoMercadoException catch (e) {
       if (!mounted) return;

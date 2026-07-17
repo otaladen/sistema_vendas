@@ -20,6 +20,7 @@ enum MainMenuSubDestino {
   cadastrosUsuarios,
   fiscalImportarNfe,
   fiscalNotasImportadas,
+  fiscalDevolucaoFornecedor,
   fiscalPendencias,
   fiscalNfeSaida,
   fiscalRelatorioMensal,
@@ -49,6 +50,7 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return MainMenuDestino.cadastros;
       case MainMenuSubDestino.fiscalImportarNfe:
       case MainMenuSubDestino.fiscalNotasImportadas:
+      case MainMenuSubDestino.fiscalDevolucaoFornecedor:
       case MainMenuSubDestino.fiscalPendencias:
       case MainMenuSubDestino.fiscalNfeSaida:
       case MainMenuSubDestino.fiscalRelatorioMensal:
@@ -91,6 +93,8 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return 'Importar NF-e (XML)';
       case MainMenuSubDestino.fiscalNotasImportadas:
         return 'Notas ja importadas';
+      case MainMenuSubDestino.fiscalDevolucaoFornecedor:
+        return 'Devolucao ao fornecedor';
       case MainMenuSubDestino.fiscalPendencias:
         return 'Pendencias fiscais';
       case MainMenuSubDestino.fiscalNfeSaida:
@@ -140,6 +144,8 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return Icons.receipt_long_outlined;
       case MainMenuSubDestino.fiscalNotasImportadas:
         return Icons.fact_check_outlined;
+      case MainMenuSubDestino.fiscalDevolucaoFornecedor:
+        return Icons.assignment_return_outlined;
       case MainMenuSubDestino.fiscalPendencias:
         return Icons.pending_actions_outlined;
       case MainMenuSubDestino.fiscalNfeSaida:
@@ -189,6 +195,7 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.cadastros);
       case MainMenuSubDestino.fiscalImportarNfe:
       case MainMenuSubDestino.fiscalNotasImportadas:
+      case MainMenuSubDestino.fiscalDevolucaoFornecedor:
       case MainMenuSubDestino.fiscalPendencias:
       case MainMenuSubDestino.fiscalNfeSaida:
       case MainMenuSubDestino.fiscalRelatorioMensal:
@@ -238,6 +245,7 @@ abstract final class MainMenuSubDestinoHelper {
   static const _fiscal = [
     MainMenuSubDestino.fiscalImportarNfe,
     MainMenuSubDestino.fiscalNotasImportadas,
+    MainMenuSubDestino.fiscalDevolucaoFornecedor,
     MainMenuSubDestino.fiscalPendencias,
     MainMenuSubDestino.fiscalNfeSaida,
     MainMenuSubDestino.fiscalRelatorioMensal,

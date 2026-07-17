@@ -46,6 +46,9 @@ enum TipoMovimentoEstoque {
   /// Devolucao/troca pos-entrega.
   devolucaoCliente,
 
+  /// Baixa fisica ao devolver mercadoria ao fornecedor/fabrica (NF-e).
+  devolucaoFornecedor,
+
   /// Ajuste manual na tela de estoque ou cadastro.
   ajusteManual,
 
@@ -74,6 +77,7 @@ abstract final class PoliticaMovimentoEstoque {
       case TipoMovimentoEstoque.complementoEntregaBaixa:
       case TipoMovimentoEstoque.cancelamentoVendaEstorno:
       case TipoMovimentoEstoque.devolucaoCliente:
+      case TipoMovimentoEstoque.devolucaoFornecedor:
       case TipoMovimentoEstoque.ajusteManual:
       case TipoMovimentoEstoque.vendaDiretaLegada:
         return true;

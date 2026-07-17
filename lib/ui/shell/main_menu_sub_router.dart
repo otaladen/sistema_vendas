@@ -15,6 +15,7 @@ import '../financeiro/relatorio_contas_pagar_page.dart';
 import '../financeiro/tesouraria_semanal_page.dart';
 import '../fiscal/exportar_fechamento_page.dart';
 import '../fiscal/fiscal_importar_nfe_page.dart';
+import '../fiscal/nfe_devolucao_fornecedor_page.dart';
 import '../fiscal/nfe_gerenciamento_page.dart';
 import '../fiscal/pendencias_fiscais_page.dart';
 import '../fiscal/relatorio_fiscal_mensal_page.dart';
@@ -124,6 +125,10 @@ class MainMenuSubRouter {
         );
       case MainMenuSubDestino.fiscalNotasImportadas:
         return NfeImportadasPage(
+          produtoRepository: deps.produtoRepository,
+        );
+      case MainMenuSubDestino.fiscalDevolucaoFornecedor:
+        return NfeDevolucaoFornecedorPage(
           produtoRepository: deps.produtoRepository,
         );
       case MainMenuSubDestino.fiscalPendencias:

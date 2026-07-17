@@ -56,6 +56,18 @@ class FiscalConfig {
   /// Devolucao de venda com ST — mesma UF.
   static const String cfopDevolucaoVendaEstadualSt = '1411';
 
+  /// Devolucao de compra para comercializacao (loja → fabrica/fornecedor), estadual.
+  static const String cfopDevolucaoCompraEstadual = '5202';
+
+  /// Devolucao de compra para comercializacao (loja → fornecedor), interestadual.
+  static const String cfopDevolucaoCompraInterestadual = '6202';
+
+  /// Devolucao de compra estadual com mercadoria sujeita a ST.
+  static const String cfopDevolucaoCompraEstadualSt = '5411';
+
+  /// Devolucao de compra interestadual com mercadoria sujeita a ST.
+  static const String cfopDevolucaoCompraInterestadualSt = '6411';
+
   /// Origem da mercadoria padrao (0 = nacional) quando o produto nao informar.
   static const String icmsOrigemPadrao = '0';
 

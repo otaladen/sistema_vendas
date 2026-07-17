@@ -27,10 +27,13 @@ import 'produto_detalhe_venda_page.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'widgets/consulta_lista_vazia.dart';
 import 'widgets/pdv_atalhos_ajuda.dart';
+import 'widgets/pdv_barcode_scanner_page.dart';
+import 'widgets/pdv_barcode_scanner_support.dart';
 import 'widgets/pdv_consulta_filtros_chips.dart';
 import 'widgets/pdv_consulta_linha_produto.dart';
 import 'widgets/pdv_consulta_lista_cabecalho.dart';
 import 'widgets/pdv_consulta_tabela_preco_chips.dart';
+import 'widgets/operacao_feedback.dart';
 
 /// Resultado ao escolher (ou atalho rapido) na consulta de produtos do PDV.
 class PdvConsultaProdutoResult {
@@ -196,6 +199,97 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
         autoSeUnicoEnquantoDigita: true,
       );
     });
+  }
+
+  Future<void> _abrirLeitorCameraConsulta() async {
+    if (!pdvLeitorCameraDisponivel || !mounted) return;
+
+    String? codigoLido;
+    Produto? produtoEncontrado;
+    PdvPesquisaComando? comandoLido;
+    String? mensagemErro;
+
+    await Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => PdvBarcodeScannerPage(
+          titulo: 'Consultar produto',
+          modoContinuoInicial: false,
+          mostrarToggleContinuo: false,
+          instrucaoUnico:
+              'Aponte para o codigo. O produto sera selecionado na consulta.',
+          onCodigoLido: (codigo) async {
+            final comando = PdvPesquisaComando.parse(codigo);
+            final termo = comando.termoBusca.trim();
+            if (termo.isEmpty) {
+              return const PdvBarcodeScanFeedback(
+                sucesso: false,
+                mensagem: 'Codigo invalido.',
+              );
+            }
+
+            codigoLido = termo;
+            comandoLido = comando;
+
+            final porBarras =
+                widget.produtoRepository.resolverLeitorCodigoBarras(termo);
+            if (porBarras != null) {
+              produtoEncontrado = porBarras;
+              return PdvBarcodeScanFeedback(
+                sucesso: true,
+                mensagem: porBarras.nome.trim().isEmpty
+                    ? termo
+                    : porBarras.nome.trim(),
+              );
+            }
+
+            final resolvido = widget.produtoRepository.resolverPesquisaPdv(
+              termo,
+              clienteId: widget.clienteId,
+            );
+            if (resolvido.deveAutoSelecionar &&
+                resolvido.produtoAuto != null) {
+              produtoEncontrado = resolvido.produtoAuto;
+              return PdvBarcodeScanFeedback(
+                sucesso: true,
+                mensagem: resolvido.produtoAuto!.nome.trim().isEmpty
+                    ? termo
+                    : resolvido.produtoAuto!.nome.trim(),
+              );
+            }
+
+            mensagemErro = 'Produto nao encontrado: $termo';
+            return PdvBarcodeScanFeedback(
+              sucesso: false,
+              mensagem: mensagemErro,
+            );
+          },
+        ),
+      ),
+    );
+    if (!mounted) return;
+
+    final produto = produtoEncontrado;
+    if (produto != null) {
+      _pesquisaController.text = codigoLido ?? '';
+      _confirmarProduto(produto, comando: comandoLido);
+      return;
+    }
+
+    final termo = codigoLido?.trim() ?? '';
+    if (termo.isEmpty) {
+      _focarCampoBusca();
+      return;
+    }
+
+    _pesquisaController.text = termo;
+    if (mensagemErro != null) {
+      OperacaoFeedback.erro(context, mensagemErro!);
+    }
+    _atualizarLista(
+      forcarAutoSeUnico: true,
+      focarListaSeTiverItens: true,
+    );
   }
 
   bool _deveAutoConfirmarResolvido(
@@ -535,11 +629,27 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                         helperMaxLines: 1,
                         isDense: true,
                         hintText: 'Nome, codigo ou codigo de barras',
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.search),
-                          onPressed: () => _atualizarLista(
-                            forcarAutoSeUnico: true,
-                            focarListaSeTiverItens: true,
+                        suffixIcon: SizedBox(
+                          width: pdvLeitorCameraDisponivel ? 96 : 48,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (pdvLeitorCameraDisponivel)
+                                IconButton(
+                                  tooltip: 'Bipar codigo de barras',
+                                  icon: const Icon(Icons.qr_code_scanner),
+                                  onPressed: () =>
+                                      unawaited(_abrirLeitorCameraConsulta()),
+                                ),
+                              IconButton(
+                                icon: const Icon(Icons.search),
+                                onPressed: () => _atualizarLista(
+                                  forcarAutoSeUnico: true,
+                                  focarListaSeTiverItens: true,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),

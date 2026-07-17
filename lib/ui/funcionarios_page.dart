@@ -29,9 +29,7 @@ import '../services/funcionario_folha_csv_export.dart';
 import '../services/brasil_api_cep_service.dart';
 import 'funcionarios/funcionario_layout.dart';
 import 'funcionarios/widgets/funcionario_atalhos_bar.dart';
-import 'funcionarios/widgets/funcionario_equipe_kpis.dart';
 import 'funcionarios/widgets/funcionario_folha_painel.dart';
-import 'funcionarios/widgets/funcionario_lista_sidebar.dart';
 import 'funcionarios/widgets/funcionario_resumo_header.dart';
 import 'layout/app_layout.dart';
 import 'theme/app_semantic_helper.dart';
@@ -76,8 +74,6 @@ class FuncionariosPage extends StatefulWidget {
 
 class _FuncionariosPageState extends State<FuncionariosPage>
     with SingleTickerProviderStateMixin {
-  final _scaffoldKey = GlobalKey<ScaffoldState>();
-  final _listaScrollController = ScrollController();
   late final FuncionarioFolhaService _folhaService = FuncionarioFolhaService(
     funcionarioRepository: widget.funcionarioRepository,
     fechamentoRepository: widget.funcionarioRepository.fechamentos,
@@ -89,13 +85,6 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      );
-
-  static ButtonStyle get _estiloBotaoPrimarioCompacto => FilledButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       );
@@ -145,8 +134,6 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   final _observacoesController = TextEditingController();
   final _cnhNumeroController = TextEditingController();
   final _epiObservacoesController = TextEditingController();
-  final _pesquisaController = TextEditingController();
-  final _filtroListaController = TextEditingController();
   final _scrollAbaIdent = ScrollController();
   final _scrollAbaDocs = ScrollController();
   final _scrollAbaFin = ScrollController();
@@ -188,7 +175,6 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   List<LancamentoFuncionario> _lancamentos = [];
   late DateTime _mesFiltroLancamentos =
       DateTime(DateTime.now().year, DateTime.now().month, 1);
-  bool _somenteAtivosLista = false;
 
   @override
   void initState() {
@@ -226,7 +212,6 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     _scrollAbaDocs.dispose();
     _scrollAbaFin.dispose();
     _scrollAbaOp.dispose();
-    _listaScrollController.dispose();
     _debounceConsultaCep?.cancel();
     _nomeFocus.dispose();
     _cepFocus.dispose();
@@ -257,8 +242,6 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     _observacoesController.dispose();
     _cnhNumeroController.dispose();
     _epiObservacoesController.dispose();
-    _pesquisaController.dispose();
-    _filtroListaController.dispose();
     super.dispose();
   }
 
@@ -520,24 +503,6 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         funcaoOutro: f.funcaoOutro,
         cargoLegado: f.cargo,
       );
-
-  List<Funcionario> _listaFiltrada() {
-    var lista =
-        widget.funcionarioRepository.pesquisar(_filtroListaController.text);
-    if (_somenteAtivosLista) {
-      lista = lista.where((f) => f.ativo).toList();
-    }
-    return lista;
-  }
-
-  ({int total, int ativos, double folha}) _calcularKpisEquipe() {
-    final todos = widget.funcionarioRepository.listarTodos();
-    final ativos = todos.where((f) => f.ativo).length;
-    final folha = todos
-        .where((f) => f.ativo)
-        .fold<double>(0, (acc, f) => acc + f.salario);
-    return (total: todos.length, ativos: ativos, folha: folha);
-  }
 
   void _carregarRhFromFuncionario(Funcionario f) {
     var setor = f.setor;
@@ -2739,10 +2704,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
               horizontal: compactUi ? 12 : 16,
             ),
             tabs: const [
-              Tab(text: 'Identificacao'),
+              Tab(text: 'Dados'),
               Tab(text: 'Documentos'),
-              Tab(text: 'Financeiro'),
-              Tab(text: 'Operacional'),
+              Tab(text: 'Remuneracao'),
+              Tab(text: 'Acessos'),
             ],
           ),
         ),
@@ -2752,7 +2717,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             children: [
               _wrapAbaScroll(
                 controller: _scrollAbaIdent,
-                children: _conteudoAbaIdentificacao(context),
+                children: _conteudoAbaDados(context),
               ),
               _wrapAbaScroll(
                 controller: _scrollAbaDocs,
@@ -2760,11 +2725,11 @@ class _FuncionariosPageState extends State<FuncionariosPage>
               ),
               _wrapAbaScroll(
                 controller: _scrollAbaFin,
-                children: _conteudoAbaFinanceiro(context),
+                children: _conteudoAbaRemuneracao(context),
               ),
               _wrapAbaScroll(
                 controller: _scrollAbaOp,
-                children: _conteudoAbaOperacional(context),
+                children: _conteudoAbaAcessos(context),
               ),
             ],
           ),
@@ -2773,12 +2738,59 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     );
   }
 
-  List<Widget> _conteudoAbaIdentificacao(BuildContext context) {
+  List<Widget> _conteudoAbaDados(BuildContext context) {
     return [
       _buildSectionCard(
         context: context,
-        title: 'RH — setor e funcao',
+        title: 'Identificacao',
         icon: Icons.badge_outlined,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.end,
+              children: [
+                SizedBox(
+                  width: context.isFuncionarioCompactDesktop ? 112 : _wCodigo,
+                  child: TextField(
+                    controller: _codigoController,
+                    decoration: const InputDecoration(
+                      labelText: 'Codigo interno',
+                      hintText: 'Ex.: 01',
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 280,
+                  child: TextField(
+                    focusNode: _nomeFocus,
+                    controller: _nomeController,
+                    onChanged: (_) => setState(() {}),
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome completo',
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                FilterChip(
+                  label: Text(_ativo ? 'Ativo no sistema' : 'Inativo'),
+                  selected: _ativo,
+                  onSelected: (v) => unawaited(_onAtivoChanged(v)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      _buildSectionCard(
+        context: context,
+        title: 'RH — setor e funcao',
+        icon: Icons.work_outline,
         children: _camposSetorFuncaoDatas(),
       ),
       if (!_ativo) ...[
@@ -3210,7 +3222,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     ];
   }
 
-  List<Widget> _conteudoAbaFinanceiro(BuildContext context) {
+  List<Widget> _conteudoAbaRemuneracao(BuildContext context) {
     final theme = Theme.of(context);
     final compactUi = context.isFuncionarioCompactDesktop;
     final resumoMes = _resumoMesAtual();
@@ -3223,24 +3235,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         : null;
 
     return [
-      FuncionarioFolhaPainel(
-        mesReferencia: _mesFiltroLancamentos,
-        resumoMes: resumoMes,
-        mesFechado: mesFechado,
-        contaPagarId: fechamento?.contaPagarId ?? resumoMes?.contaPagarId ?? 0,
-        alertasEquipe: _alertasEquipeMes(),
-        historico12Meses: _historico12Meses(),
-        onFecharMes: () => unawaited(_fecharMesRh()),
-        onReabrirMes: () => unawaited(_reabrirMesRh()),
-        onExportarFolhaEquipe: () => unawaited(_exportarFolhaEquipeCsv()),
-        onExportarLancamentosAno: () => unawaited(_exportarLancamentosAnoCsv()),
-        onRelatorioSetor: () => unawaited(_mostrarRelatorioFolhaSetor()),
-        compact: compactUi,
-      ),
-      const SizedBox(height: 8),
       _buildSectionCard(
         context: context,
-        title: 'Financeiro',
+        title: 'Salario e beneficios',
         icon: Icons.payments_outlined,
         children: [
           _buildPainelKpiFinanceiro(context),
@@ -3296,7 +3293,14 @@ class _FuncionariosPageState extends State<FuncionariosPage>
               ],
             ),
           ),
-          const SizedBox(height: 8),
+        ],
+      ),
+      const SizedBox(height: 8),
+      _buildSectionCard(
+        context: context,
+        title: 'Lancamentos do mes',
+        icon: Icons.receipt_long_outlined,
+        children: [
           LayoutBuilder(
             builder: (context, constraints) {
               final acoesWrap =
@@ -3391,10 +3395,62 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             ),
         ],
       ),
+      const SizedBox(height: 8),
+      Card(
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.75),
+          ),
+        ),
+        child: ExpansionTile(
+          initiallyExpanded: false,
+          maintainState: true,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+          leading: Icon(
+            Icons.account_balance_outlined,
+            color: theme.colorScheme.primary,
+            size: 20,
+          ),
+          title: Text(
+            'Folha da equipe / fechamento',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          subtitle: Text(
+            'Fechar mes, exportacoes e historico',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          children: [
+            FuncionarioFolhaPainel(
+              mesReferencia: _mesFiltroLancamentos,
+              resumoMes: resumoMes,
+              mesFechado: mesFechado,
+              contaPagarId:
+                  fechamento?.contaPagarId ?? resumoMes?.contaPagarId ?? 0,
+              alertasEquipe: _alertasEquipeMes(),
+              historico12Meses: _historico12Meses(),
+              onFecharMes: () => unawaited(_fecharMesRh()),
+              onReabrirMes: () => unawaited(_reabrirMesRh()),
+              onExportarFolhaEquipe: () => unawaited(_exportarFolhaEquipeCsv()),
+              onExportarLancamentosAno: () =>
+                  unawaited(_exportarLancamentosAnoCsv()),
+              onRelatorioSetor: () => unawaited(_mostrarRelatorioFolhaSetor()),
+              compact: compactUi,
+            ),
+          ],
+        ),
+      ),
     ];
   }
 
-  List<Widget> _conteudoAbaOperacional(BuildContext context) {
+  List<Widget> _conteudoAbaAcessos(BuildContext context) {
     return [
       _buildSecaoVendedorPdv(context),
       const SizedBox(height: 8),
@@ -3422,15 +3478,13 @@ class _FuncionariosPageState extends State<FuncionariosPage>
 
   Widget _buildResumoHeader(BuildContext context, {required bool compactUi}) {
     return FuncionarioResumoHeader(
-      codigoController: _codigoController,
-      nomeController: _nomeController,
-      nomeFocus: _nomeFocus,
+      nome: _nomeController.text,
+      codigo: _codigoController.text,
       resumoRh: _resumoSetorFuncaoAtual(),
       tempoCasa: _rotuloTempoCasa(),
       liquidoFormatado: _formatMoeda(_liquidoReferencia()),
       proximoPagamentoFormatado: _dateFormat.format(_dataProximoPagamento()),
       ativo: _ativo,
-      onAtivoChanged: (v) => unawaited(_onAtivoChanged(v)),
       emEdicaoId: _funcionarioEmEdicaoId,
       tambemVendedorPdv: _tambemVendedorPdv,
       vendedorVinculadoId: _vendedorVinculadoId,
@@ -3443,50 +3497,126 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       dataDemissaoFormatada: _dataDemissao != null
           ? _dateFormat.format(_dataDemissao!)
           : null,
-      larguraCodigo: compactUi ? 112 : _wCodigo,
       compact: compactUi,
     );
   }
 
-  Widget _buildListaSidebar({required bool compact}) {
-    final kpis = _calcularKpisEquipe();
-    final mostrarKpis = !compact && context.funcionarioKpisNaSidebar;
+  Widget _buildRodapeAcaoCadastro(BuildContext context, {required bool emEdicao}) {
+    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
 
-    return FuncionarioListaSidebar(
-      compact: compact,
-      funcionarios: _listaFiltrada(),
-      selectedId: _funcionarioEmEdicaoId,
-      filtroController: _filtroListaController,
-      somenteAtivos: _somenteAtivosLista,
-      scrollController: compact ? null : _listaScrollController,
-      resumoRh: _resumoRhDe,
-      mostrarKpisEquipe: mostrarKpis,
-      totalCadastrados: kpis.total,
-      totalAtivos: kpis.ativos,
-      folhaBaseAtivos: kpis.folha,
-      onFiltroChanged: () => setState(() {}),
-      onSomenteAtivosChanged: (v) => setState(() => _somenteAtivosLista = v),
-      onSelect: (f) {
-        if (!compact) {
-          Navigator.of(context).maybePop();
+    final saveStyle = ElevatedButton.styleFrom(
+      backgroundColor: cs.primary,
+      foregroundColor: cs.onPrimary,
+      elevation: 1,
+      shadowColor: Colors.black.withValues(alpha: 0.14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+    );
+    final cancelStyle = OutlinedButton.styleFrom(
+      foregroundColor: Color.lerp(cs.onSurface, cs.error, 0.35)!,
+      side: BorderSide(color: cs.outline.withValues(alpha: 0.42)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    );
+    final excluirStyle = OutlinedButton.styleFrom(
+      foregroundColor: cs.error,
+      side: BorderSide(color: cs.error.withValues(alpha: 0.55)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 520;
+        final status = emEdicao
+            ? 'Edicao #${_funcionarioEmEdicaoId!} · F5 ou F10 salva'
+            : 'Novo cadastro · F5 ou F10 salva';
+
+        final salvar = ElevatedButton.icon(
+          style: saveStyle,
+          onPressed: () => unawaited(_salvar()),
+          icon: const Icon(Icons.save_rounded),
+          label: Text(
+            emEdicao ? 'Salvar (F5 · F10)' : 'Salvar (F5 · F10)',
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        );
+        final cancelar = OutlinedButton(
+          style: cancelStyle,
+          onPressed: _limparFormulario,
+          child: const Text('Cancelar (Esc)'),
+        );
+        final excluir = emEdicao
+            ? OutlinedButton.icon(
+                style: excluirStyle,
+                onPressed: () {
+                  final atualId = _funcionarioEmEdicaoId;
+                  if (atualId == null) return;
+                  final atual =
+                      widget.funcionarioRepository.obterPorId(atualId);
+                  if (atual == null) return;
+                  _confirmarRemocao(atual);
+                },
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Excluir'),
+              )
+            : null;
+
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                status,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 8),
+              salvar,
+              const SizedBox(height: 8),
+              cancelar,
+              if (excluir != null) ...[
+                const SizedBox(height: 8),
+                excluir,
+              ],
+            ],
+          );
         }
-        _editar(f);
+
+        return Row(
+          children: [
+            Expanded(
+              child: Text(
+                status,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+            cancelar,
+            if (excluir != null) ...[
+              const SizedBox(width: 8),
+              excluir,
+            ],
+            const SizedBox(width: 8),
+            salvar,
+          ],
+        );
       },
     );
   }
 
   Widget _buildPainelDetalhe(BuildContext context, {required bool compact}) {
-    final theme = Theme.of(context);
     final emEdicao = _funcionarioEmEdicaoId != null;
     final compactUi = compact || context.isFuncionarioCompactDesktop;
-    final kpisNaSidebar = !compact && context.funcionarioKpisNaSidebar;
-    final kpis = _calcularKpisEquipe();
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
-        compactUi ? 10 : 12,
-        compactUi ? 6 : 8,
-        compactUi ? 10 : 12,
+        compactUi ? 10 : 16,
+        compactUi ? 6 : 10,
+        compactUi ? 10 : 16,
         compactUi ? 8 : 12,
       ),
       child: Column(
@@ -3496,17 +3626,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             _buildStatusBanner(context, _status),
             SizedBox(height: compactUi ? 6 : 8),
           ],
-          if (!kpisNaSidebar) ...[
-            FuncionarioEquipeKpis(
-              totalCadastrados: kpis.total,
-              totalAtivos: kpis.ativos,
-              folhaBaseAtivos: kpis.folha,
-            ),
-            SizedBox(height: compactUi ? 6 : 8),
-          ],
           FuncionarioAtalhosBar(
             compact: compactUi,
-            mostrarNavegacao: !compact,
+            mostrarNavegacao: true,
             onPrimeiro: _irPrimeiroFuncionario,
             onAnterior: _irFuncionarioAnterior,
             onProximo: _irProximoFuncionario,
@@ -3514,114 +3636,27 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             onPesquisar: _abrirPesquisaFuncionario,
             onNovo: _limparFormulario,
           ),
-          if (compact) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _pesquisaController,
-                    decoration: const InputDecoration(
-                      labelText: 'Busca rapida',
-                      prefixIcon: Icon(Icons.search),
-                      isDense: true,
-                    ),
-                    onSubmitted: (t) {
-                      final r = widget.funcionarioRepository.pesquisar(t);
-                      if (r.isNotEmpty) _editar(r.first);
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  style: _estiloBotaoContornoCompacto,
-                  onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-                  icon: const Icon(Icons.list_alt, size: 18),
-                  label: const Text('Equipe'),
-                ),
-              ],
-            ),
-          ],
           SizedBox(height: compactUi ? 6 : 8),
           _buildResumoHeader(context, compactUi: compactUi),
-          SizedBox(height: compactUi ? 6 : 8),
+          SizedBox(height: compactUi ? 4 : 6),
           Expanded(child: _buildCorpoAbas(context, compactUi: compactUi)),
           SizedBox(height: compactUi ? 6 : 8),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final acoesWrap =
-                  FuncionarioLayout.acoesEmWrap(constraints.maxWidth);
-              final salvarBtn = Expanded(
-                child: FilledButton.icon(
-                  style: _estiloBotaoPrimarioCompacto,
-                  onPressed: () => unawaited(_salvar()),
-                  icon: const Icon(Icons.save_outlined, size: 18),
-                  label: Text(
-                    emEdicao ? 'Atualizar (F5)' : 'Salvar (F5 · F10)',
-                  ),
-                ),
-              );
-              final novoBtn = OutlinedButton.icon(
-                style: _estiloBotaoContornoCompacto,
-                onPressed: _limparFormulario,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Novo (Esc)'),
-              );
-              final apagarBtn = OutlinedButton.icon(
-                style: _estiloBotaoContornoCompacto,
-                onPressed: () {
-                  final atualId = _funcionarioEmEdicaoId;
-                  if (atualId == null) return;
-                  final atual =
-                      widget.funcionarioRepository.obterPorId(atualId);
-                  if (atual == null) return;
-                  _confirmarRemocao(atual);
-                },
-                icon: Icon(
-                  Icons.delete_outline,
-                  size: 18,
-                  color: theme.colorScheme.error,
-                ),
-                label: Text(
-                  'Apagar',
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
-              );
-
-              if (acoesWrap) {
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    SizedBox(
-                      width: constraints.maxWidth,
-                      child: FilledButton.icon(
-                        style: _estiloBotaoPrimarioCompacto,
-                        onPressed: () => unawaited(_salvar()),
-                        icon: const Icon(Icons.save_outlined, size: 18),
-                        label: Text(
-                          emEdicao ? 'Atualizar (F5)' : 'Salvar (F5 · F10)',
-                        ),
-                      ),
-                    ),
-                    novoBtn,
-                    if (emEdicao) apagarBtn,
-                  ],
-                );
-              }
-
-              return Row(
-                children: [
-                  salvarBtn,
-                  const SizedBox(width: 8),
-                  novoBtn,
-                  if (emEdicao) ...[
-                    const SizedBox(width: 8),
-                    apagarBtn,
-                  ],
-                ],
-              );
-            },
+          Material(
+            elevation: 2,
+            color: Theme.of(context).colorScheme.surface,
+            shadowColor: Colors.black.withValues(alpha: 0.12),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                compactUi ? 4 : 8,
+                compactUi ? 8 : 10,
+                compactUi ? 4 : 8,
+                compactUi ? 4 : 6,
+              ),
+              child: SafeArea(
+                top: false,
+                child: _buildRodapeAcaoCadastro(context, emEdicao: emEdicao),
+              ),
+            ),
           ),
         ],
       ),
@@ -3630,7 +3665,6 @@ class _FuncionariosPageState extends State<FuncionariosPage>
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = context.isDesktopLayout;
     final sessaoActions = widget.usuarioLogado != null && widget.onLogout != null
         ? ContaSessaoAppBarActions(
             login: widget.usuarioLogado!.login,
@@ -3639,25 +3673,17 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         : null;
 
     return Scaffold(
-      key: _scaffoldKey,
       appBar: AppBar(
         title: const Text('Funcionarios'),
         actions: [
-          if (!isDesktop)
-            IconButton(
-              tooltip: 'Lista da equipe',
-              onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-              icon: const Icon(Icons.list_alt),
-            ),
+          IconButton(
+            tooltip: 'Pesquisar funcionario (F3)',
+            onPressed: () => unawaited(_abrirPesquisaFuncionario()),
+            icon: const Icon(Icons.search),
+          ),
           ?sessaoActions,
         ],
       ),
-      endDrawer: isDesktop
-          ? null
-          : Drawer(
-              width: math.min(MediaQuery.sizeOf(context).width * 0.88, 360),
-              child: SafeArea(child: _buildListaSidebar(compact: true)),
-            ),
       body: Shortcuts(
         shortcuts: const <ShortcutActivator, Intent>{
           SingleActivator(LogicalKeyboardKey.f5): _FuncionarioSalvarIntent(),
@@ -3687,30 +3713,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
               },
             ),
           },
-          child: isDesktop
-              ? Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(
-                      width: context.funcionarioSidebarWidth,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border(
-                            right: BorderSide(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outlineVariant
-                                  .withValues(alpha: 0.55),
-                            ),
-                          ),
-                        ),
-                        child: _buildListaSidebar(compact: false),
-                      ),
-                    ),
-                    Expanded(child: _buildPainelDetalhe(context, compact: false)),
-                  ],
-                )
-              : _buildPainelDetalhe(context, compact: true),
+          child: _buildPainelDetalhe(
+            context,
+            compact: !context.isDesktopLayout,
+          ),
         ),
       ),
     );
@@ -3815,34 +3821,44 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     required List<Widget> children,
   }) {
     final theme = Theme.of(context);
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.outlineVariant),
+    final cs = theme.colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 4),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.75)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.045),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 17, color: theme.colorScheme.primary),
-                const SizedBox(width: 6),
-                Text(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18, color: cs.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
                   title,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
-                    fontSize: 13.5,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ...children,
-          ],
-        ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...children,
+        ],
       ),
     );
   }

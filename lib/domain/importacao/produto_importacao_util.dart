@@ -1,9 +1,11 @@
+import '../produto_nome_titulo_normalizer.dart';
+
 /// Utilitarios compartilhados entre importacao CSV e Chacal.
 abstract final class ProdutoImportacaoUtil {
   ProdutoImportacaoUtil._();
 
   static String normalizarNome(String nome) =>
-      nome.trim().replaceAll(RegExp(r'\s+'), ' ');
+      ProdutoNomeTituloNormalizer.normalizar(nome);
 
   static String normalizarNcm(String? valor) {
     final digitos = (valor ?? '').replaceAll(RegExp(r'\D'), '');

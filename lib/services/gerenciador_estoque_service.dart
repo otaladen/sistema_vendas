@@ -945,6 +945,28 @@ class GerenciadorEstoqueService {
     );
   }
 
+  /// Baixa fisica apos NF-e de devolucao de compra autorizada (loja → fabrica).
+  void baixarEstoqueDevolucaoFornecedor({
+    required Produto produto,
+    required int quantidade,
+    required String chaveNotaCompra,
+    required String referenciaNfe,
+  }) {
+    if (quantidade <= 0) return;
+    PoliticaMovimentoEstoque.validarPermiteAlteracaoFisica(
+      TipoMovimentoEstoque.devolucaoFornecedor,
+    );
+    final antes = _snap(produto);
+    produto.estoqueReal -= quantidade;
+    final chave = chaveNotaCompra.replaceAll(RegExp(r'\D'), '');
+    persistirProduto(
+      produto,
+      TipoMovimentoEstoque.devolucaoFornecedor,
+      antes: antes,
+      documentoReferencia: 'Dev. forn. $chave · $referenciaNfe',
+    );
+  }
+
   String _refVenda(Venda venda) =>
       VendaDocumentoRotuloHelper.rotuloControleInterno(venda);
 

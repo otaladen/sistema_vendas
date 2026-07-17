@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
@@ -74,10 +75,24 @@ import 'pdv_vendedor_bloqueio.dart';
 import 'widgets/pdv_atalhos_ajuda.dart';
 import 'widgets/pdv_calculadora_panel.dart';
 import 'widgets/pdv_obra_calculadora_panel.dart';
+import 'widgets/pdv_barcode_scanner_page.dart';
+import 'widgets/pdv_barcode_scanner_support.dart';
 import 'widgets/pdv_carrinho_linha_compacta.dart';
 import 'widgets/pdv_tipo_entrega_item.dart';
 import 'widgets/plano_fiado_pdv_panel.dart';
 import 'widgets/troca_com_nota_pdv_banner.dart';
+
+class _PdvCodigoBarrasResultado {
+  const _PdvCodigoBarrasResultado({
+    required this.sucesso,
+    this.nomeProduto,
+    this.mensagemErro,
+  });
+
+  final bool sucesso;
+  final String? nomeProduto;
+  final String? mensagemErro;
+}
 
 class _LinhaPagamentoMistoPdV {
   _LinhaPagamentoMistoPdV({
@@ -1087,26 +1102,98 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     if (!mounted || _processandoLeitorBarrasPdv) return;
     final texto = _pesquisaController.text.trim();
     if (!consultaEanProvavelCompleto(texto)) return;
+    final resultado = await _processarCodigoBarrasPdv(texto);
+    if (!mounted || !resultado.sucesso) return;
+    _pesquisaController.clear();
+    _voltarFocoParaPesquisa();
+  }
+
+  Future<_PdvCodigoBarrasResultado> _processarCodigoBarrasPdv(
+    String codigoBruto,
+  ) async {
+    if (!mounted) {
+      return const _PdvCodigoBarrasResultado(
+        sucesso: false,
+        mensagemErro: 'Tela indisponivel.',
+      );
+    }
+    if (_processandoLeitorBarrasPdv) {
+      return const _PdvCodigoBarrasResultado(
+        sucesso: false,
+        mensagemErro: 'Aguarde o processamento anterior.',
+      );
+    }
+
+    final comando = PdvPesquisaComando.parse(codigoBruto);
+    final termo = comando.termoBusca.trim();
+    if (termo.isEmpty) {
+      return const _PdvCodigoBarrasResultado(
+        sucesso: false,
+        mensagemErro: 'Codigo invalido.',
+      );
+    }
+
     _processandoLeitorBarrasPdv = true;
     try {
-      final comando = PdvPesquisaComando.parse(texto);
-      final produto = widget.produtoRepository.resolverLeitorCodigoBarras(
-        comando.termoBusca,
+      final produto = widget.produtoRepository.resolverLeitorCodigoBarras(termo);
+      if (produto != null) {
+        _registrarProdutoRecente(produto);
+        final qtd = comando.quantidadeDireta ?? 1;
+        await _adicionarComQuantidade(
+          produto,
+          qtd.toDouble(),
+          precoTipo: _precoListaAtivo,
+          quantidadeEmUnidadeCompra: produto.pdvPodeVenderEmUnidadeCompra,
+        );
+        return _PdvCodigoBarrasResultado(
+          sucesso: true,
+          nomeProduto: ProdutoNomeExibicao.paraTela(produto),
+        );
+      }
+
+      final resolvido = widget.produtoRepository.resolverPesquisaPdv(
+        termo,
+        clienteId: _clienteSelecionadoId,
       );
-      if (produto == null) return;
-      _pesquisaController.clear();
-      _registrarProdutoRecente(produto);
-      final qtd = comando.quantidadeDireta ?? 1;
-      await _adicionarComQuantidade(
-        produto,
-        qtd.toDouble(),
-        precoTipo: _precoListaAtivo,
-        quantidadeEmUnidadeCompra: produto.pdvPodeVenderEmUnidadeCompra,
+      if (resolvido.deveAutoSelecionar && resolvido.produtoAuto != null) {
+        await _aplicarProdutoBuscaInteligente(
+          resolvido.produtoAuto!,
+          comando,
+        );
+        return _PdvCodigoBarrasResultado(
+          sucesso: true,
+          nomeProduto: ProdutoNomeExibicao.paraTela(resolvido.produtoAuto!),
+        );
+      }
+
+      return _PdvCodigoBarrasResultado(
+        sucesso: false,
+        mensagemErro: 'Produto nao encontrado: $termo',
       );
-      _voltarFocoParaPesquisa();
     } finally {
       _processandoLeitorBarrasPdv = false;
     }
+  }
+
+  Future<void> _abrirLeitorCameraPdv() async {
+    if (!pdvLeitorCameraDisponivel || !mounted) return;
+    await Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => PdvBarcodeScannerPage(
+          onCodigoLido: (codigo) async {
+            final resultado = await _processarCodigoBarrasPdv(codigo);
+            return PdvBarcodeScanFeedback(
+              sucesso: resultado.sucesso,
+              mensagem: resultado.sucesso
+                  ? resultado.nomeProduto
+                  : resultado.mensagemErro,
+            );
+          },
+        ),
+      ),
+    );
+    if (mounted) _voltarFocoParaPesquisa();
   }
 
   Future<void> _aplicarProdutoBuscaInteligente(
@@ -1866,6 +1953,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
   }
 
+  /// Evita "LayoutBuilder mutated during performLayout" ao remover item
+  /// (preview lateral + painel de checkout com LayoutBuilders aninhados).
+  void _aplicarMutacaoCarrinhoAposLayout(VoidCallback mutacao) {
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.idle ||
+        phase == SchedulerPhase.postFrameCallbacks) {
+      mutacao();
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      mutacao();
+    });
+  }
+
   int _passoQuantidadeCarrinho(_OrcamentoItemDraft item) {
     if (item.quantidadeEmUnidadeCompra ||
         !item.produto.permiteQuantidadeFracionada) {
@@ -1910,28 +2012,34 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         return;
       }
     }
-    setState(() {
-      final item = _carrinho[index];
-      final nova = item.quantidade + deltaArmazenado;
-      if (nova <= 0) {
-        _carrinho.removeAt(index);
-        _ajustarIndiceAposRemoverCarrinho(index);
-      } else {
-        item.quantidade = nova;
-        _recalcularPrecoLinhaCarrinho(item);
-        _promoCarrinho.aplicarRegrasCarrinho(
-          _carrinho,
-          dataReferencia: DateTime.now(),
-          segmentoCliente: _segmentoClienteAtivo,
-        );
-      }
+    _aplicarMutacaoCarrinhoAposLayout(() {
+      if (index < 0 || index >= _carrinho.length) return;
+      setState(() {
+        final item = _carrinho[index];
+        final nova = item.quantidade + deltaArmazenado;
+        if (nova <= 0) {
+          _carrinho.removeAt(index);
+          _ajustarIndiceAposRemoverCarrinho(index);
+        } else {
+          item.quantidade = nova;
+          _recalcularPrecoLinhaCarrinho(item);
+          _promoCarrinho.aplicarRegrasCarrinho(
+            _carrinho,
+            dataReferencia: DateTime.now(),
+            segmentoCliente: _segmentoClienteAtivo,
+          );
+        }
+      });
     });
   }
 
   void _removerItemCarrinho(int index) {
-    setState(() {
-      _carrinho.removeAt(index);
-      _ajustarIndiceAposRemoverCarrinho(index);
+    _aplicarMutacaoCarrinhoAposLayout(() {
+      if (index < 0 || index >= _carrinho.length) return;
+      setState(() {
+        _carrinho.removeAt(index);
+        _ajustarIndiceAposRemoverCarrinho(index);
+      });
     });
   }
 
@@ -3518,12 +3626,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   Widget _buildAreaCarrinhoComPreviewPdv() {
-    if (_carrinho.isEmpty || _linhaCarrinhoSelecionada == null) {
-      return _buildPainelCheckoutPdv();
-    }
+    // LayoutBuilder sempre presente: trocar a raiz (com/sem LayoutBuilder)
+    // ao esvaziar o carrinho mutava o RenderObject no meio do layout.
     return LayoutBuilder(
       builder: (context, constraints) {
         final painel = _buildPainelCheckoutPdv();
+        final mostrarPreview =
+            _carrinho.isNotEmpty && _linhaCarrinhoSelecionada != null;
+        if (!mostrarPreview) {
+          return painel;
+        }
         final lateral = constraints.maxWidth >= _breakpointPreviewCarrinhoPdv;
         if (lateral) {
           return Row(
@@ -7208,8 +7320,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                     pesquisaFocus: _pesquisaFocus,
                     pesquisaController: _pesquisaController,
                     mostrarAjudaAtalhos: _mostrarAjudaAtalhos,
+                    mostrarBotaoCamera: pdvLeitorCameraDisponivel,
                     onLimparBusca: _limparPesquisaAtalho,
                     onAbrirConsulta: () => unawaited(_abrirConsultaProdutos()),
+                    onAbrirCamera: () => unawaited(_abrirLeitorCameraPdv()),
                     onSubmitEntrada: () =>
                         unawaited(_processarEntradaPesquisaPdv()),
                     onRecarregarProdutos: _carregarDadosIniciais,
@@ -7251,14 +7365,18 @@ class _PdvHeaderPesquisa extends StatelessWidget {
     required this.onSubmitEntrada,
     required this.onRecarregarProdutos,
     required this.onToggleAjudaAtalhos,
+    this.mostrarBotaoCamera = false,
+    this.onAbrirCamera,
   });
 
   final bool modoBarraCarrinho;
   final FocusNode pesquisaFocus;
   final TextEditingController pesquisaController;
   final bool mostrarAjudaAtalhos;
+  final bool mostrarBotaoCamera;
   final VoidCallback onLimparBusca;
   final VoidCallback onAbrirConsulta;
+  final VoidCallback? onAbrirCamera;
   final VoidCallback onSubmitEntrada;
   final VoidCallback onRecarregarProdutos;
   final VoidCallback onToggleAjudaAtalhos;
@@ -7303,7 +7421,9 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                     ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
                     : null,
                 hintText: modoBarraCarrinho
-                    ? 'Pesquisar produto · Enter/F4 consulta · unico resultado entra direto'
+                    ? mostrarBotaoCamera
+                        ? 'Pesquisar ou bipar com a camera · Enter/F4 consulta'
+                        : 'Pesquisar produto · Enter/F4 consulta · unico resultado entra direto'
                     : null,
                 labelText: modoBarraCarrinho
                     ? null
@@ -7314,6 +7434,13 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                 suffixIcon: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (mostrarBotaoCamera && onAbrirCamera != null)
+                      IconButton(
+                        tooltip: 'Bipar codigo de barras',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: onAbrirCamera,
+                        icon: const Icon(Icons.qr_code_scanner, size: 22),
+                      ),
                     IconButton(
                       tooltip: 'Limpar busca',
                       visualDensity: VisualDensity.compact,

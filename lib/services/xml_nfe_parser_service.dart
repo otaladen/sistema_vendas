@@ -143,11 +143,40 @@ class XmlParserService {
     );
     final razao = _primeiroTexto(emit, 'xNome') ?? '';
     final fantasia = _primeiroTexto(emit, 'xFant') ?? '';
+    final ie = _somenteDigitos(_primeiroTexto(emit, 'IE') ?? '');
+
+    XmlElement? ender;
+    for (final c in emit.childElements) {
+      if (c.name.local == 'enderEmit') {
+        ender = c;
+        break;
+      }
+    }
 
     return EmitenteNfeTemporario(
       cnpj: cnpj,
       razaoSocial: razao.trim(),
       nomeFantasia: fantasia.trim(),
+      inscricaoEstadual: ie,
+      logradouro: ender == null ? '' : (_primeiroTexto(ender, 'xLgr') ?? '').trim(),
+      numero: ender == null ? '' : (_primeiroTexto(ender, 'nro') ?? '').trim(),
+      complemento:
+          ender == null ? '' : (_primeiroTexto(ender, 'xCpl') ?? '').trim(),
+      bairro: ender == null ? '' : (_primeiroTexto(ender, 'xBairro') ?? '').trim(),
+      municipio: ender == null ? '' : (_primeiroTexto(ender, 'xMun') ?? '').trim(),
+      codigoMunicipioIbge: ender == null
+          ? ''
+          : _somenteDigitos(_primeiroTexto(ender, 'cMun') ?? ''),
+      uf: ender == null
+          ? ''
+          : (_primeiroTexto(ender, 'UF') ?? '').trim().toUpperCase(),
+      cep: ender == null
+          ? ''
+          : _somenteDigitos(_primeiroTexto(ender, 'CEP') ?? ''),
+      telefone: ender == null
+          ? ''
+          : _somenteDigitos(_primeiroTexto(ender, 'fone') ?? ''),
+      email: (_primeiroTexto(emit, 'email') ?? '').trim(),
     );
   }
 
@@ -185,6 +214,8 @@ class XmlParserService {
       final cEanTrib = _normalizarEan(_primeiroTexto(prod, 'cEANTrib'));
       final ean = cEan.isNotEmpty ? cEan : cEanTrib;
       final ncm = _primeiroTexto(prod, 'NCM') ?? '';
+      final cfop = (_primeiroTexto(prod, 'CFOP') ?? '').trim();
+      final imposto = _extrairImpostoItem(el);
 
       itens.add(
         ItemNotaTemporario(
@@ -196,6 +227,16 @@ class XmlParserService {
           valorUnitarioComercial: vUnCom,
           codigoBarras: ean,
           ncm: ncm.trim(),
+          cfop: cfop,
+          icmsOrigem: imposto.origem,
+          icmsSituacaoTributaria: imposto.cst,
+          icmsBaseCalculo: imposto.vBc,
+          icmsAliquota: imposto.pIcms,
+          icmsValor: imposto.vIcms,
+          icmsBaseCalculoSt: imposto.vBcSt,
+          icmsAliquotaSt: imposto.pIcmsSt,
+          icmsValorSt: imposto.vIcmsSt,
+          ipiValor: imposto.vIpi,
         ),
       );
     }
@@ -298,6 +339,98 @@ class XmlParserService {
       );
     }
     return out;
+  }
+
+  /// Extrai ICMS/IPI do item (`det/imposto`) para espelhar na devolucao.
+  static ({
+    String origem,
+    String cst,
+    double vBc,
+    double pIcms,
+    double vIcms,
+    double vBcSt,
+    double pIcmsSt,
+    double vIcmsSt,
+    double vIpi,
+  }) _extrairImpostoItem(XmlElement det) {
+    var origem = '';
+    var cst = '';
+    var vBc = 0.0;
+    var pIcms = 0.0;
+    var vIcms = 0.0;
+    var vBcSt = 0.0;
+    var pIcmsSt = 0.0;
+    var vIcmsSt = 0.0;
+    var vIpi = 0.0;
+
+    XmlElement? imposto;
+    for (final c in det.childElements) {
+      if (c.name.local == 'imposto') {
+        imposto = c;
+        break;
+      }
+    }
+    if (imposto == null) {
+      return (
+        origem: origem,
+        cst: cst,
+        vBc: vBc,
+        pIcms: pIcms,
+        vIcms: vIcms,
+        vBcSt: vBcSt,
+        pIcmsSt: pIcmsSt,
+        vIcmsSt: vIcmsSt,
+        vIpi: vIpi,
+      );
+    }
+
+    for (final bloco in imposto.childElements) {
+      final nome = bloco.name.local;
+      if (nome == 'ICMS') {
+        for (final grupo in bloco.childElements) {
+          origem = (_primeiroTexto(grupo, 'orig') ?? origem).trim();
+          cst = (_primeiroTexto(grupo, 'CST') ??
+                  _primeiroTexto(grupo, 'CSOSN') ??
+                  cst)
+              .trim();
+          vBc = _parseDecimalOpcional(_primeiroTexto(grupo, 'vBC')) ?? vBc;
+          pIcms = _parseDecimalOpcional(_primeiroTexto(grupo, 'pICMS')) ?? pIcms;
+          vIcms = _parseDecimalOpcional(_primeiroTexto(grupo, 'vICMS')) ?? vIcms;
+          vBcSt = _parseDecimalOpcional(_primeiroTexto(grupo, 'vBCST')) ?? vBcSt;
+          pIcmsSt =
+              _parseDecimalOpcional(_primeiroTexto(grupo, 'pICMSST')) ?? pIcmsSt;
+          vIcmsSt =
+              _parseDecimalOpcional(_primeiroTexto(grupo, 'vICMSST')) ?? vIcmsSt;
+        }
+      } else if (nome == 'IPI') {
+        for (final grupo in bloco.childElements) {
+          if (grupo.name.local == 'IPITrib' || grupo.name.local == 'IPI') {
+            vIpi = _parseDecimalOpcional(_primeiroTexto(grupo, 'vIPI')) ?? vIpi;
+          }
+        }
+      }
+    }
+
+    return (
+      origem: origem,
+      cst: cst,
+      vBc: vBc,
+      pIcms: pIcms,
+      vIcms: vIcms,
+      vBcSt: vBcSt,
+      pIcmsSt: pIcmsSt,
+      vIcmsSt: vIcmsSt,
+      vIpi: vIpi,
+    );
+  }
+
+  static double? _parseDecimalOpcional(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      return _parseDecimal(raw);
+    } on FormatException {
+      return null;
+    }
   }
 
   /// Data de duplicata (`YYYY-MM-DD` ou ISO); normaliza para UTC meia-noite do dia civil.

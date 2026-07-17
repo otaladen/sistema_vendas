@@ -9,6 +9,16 @@ class ItemNotaTemporario {
     required this.valorUnitarioComercial,
     this.codigoBarras = '',
     this.ncm = '',
+    this.cfop = '',
+    this.icmsOrigem = '',
+    this.icmsSituacaoTributaria = '',
+    this.icmsBaseCalculo = 0,
+    this.icmsAliquota = 0,
+    this.icmsValor = 0,
+    this.icmsBaseCalculoSt = 0,
+    this.icmsAliquotaSt = 0,
+    this.icmsValorSt = 0,
+    this.ipiValor = 0,
   });
 
   final int numeroItem;
@@ -21,6 +31,18 @@ class ItemNotaTemporario {
   /// cEAN / cEANTrib quando informado (sem "SEM GTIN").
   final String codigoBarras;
   final String ncm;
+
+  /// Tributacao da compra (para espelhar na devolucao).
+  final String cfop;
+  final String icmsOrigem;
+  final String icmsSituacaoTributaria;
+  final double icmsBaseCalculo;
+  final double icmsAliquota;
+  final double icmsValor;
+  final double icmsBaseCalculoSt;
+  final double icmsAliquotaSt;
+  final double icmsValorSt;
+  final double ipiValor;
 }
 
 /// Dados do emitente extraidos do XML.
@@ -29,11 +51,33 @@ class EmitenteNfeTemporario {
     required this.cnpj,
     required this.razaoSocial,
     this.nomeFantasia = '',
+    this.inscricaoEstadual = '',
+    this.logradouro = '',
+    this.numero = '',
+    this.complemento = '',
+    this.bairro = '',
+    this.municipio = '',
+    this.codigoMunicipioIbge = '',
+    this.uf = '',
+    this.cep = '',
+    this.telefone = '',
+    this.email = '',
   });
 
   final String cnpj;
   final String razaoSocial;
   final String nomeFantasia;
+  final String inscricaoEstadual;
+  final String logradouro;
+  final String numero;
+  final String complemento;
+  final String bairro;
+  final String municipio;
+  final String codigoMunicipioIbge;
+  final String uf;
+  final String cep;
+  final String telefone;
+  final String email;
 }
 
 /// Duplicata extraída de `<cobr><dup>` no XML da NF-e.

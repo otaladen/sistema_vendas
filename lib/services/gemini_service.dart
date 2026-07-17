@@ -6,12 +6,20 @@ import '../domain/gemini_produto_padronizado.dart';
 import '../domain/preco_mercado_resultado.dart';
 import 'gemini_config.dart';
 
-/// Modelos tentados em ordem. Cada modelo tem cota separada no tier gratuito.
+/// Modelos em ordem.
+///
+/// Cotas free sao **por modelo** (RPD/RPM separados). O painel do AI Studio
+/// mostra frequentemente `gemini-1.5-flash` com cota restante enquanto 2.5
+/// ja esta esgotado — por isso 1.5 vem primeiro.
 const List<String> _modelosGemini = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
+  'gemini-1.5-flash',
   'gemini-2.0-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
 ];
+
+/// Ultimo modelo que respondeu OK nesta sessao (evita bater em modelo esgotado).
+String? _ultimoModeloGeminiOk;
 
 const String _systemPrompt = '''
 Voce e um especialista em catalogacao de materiais de construcao para lojas de varejo.
@@ -60,11 +68,17 @@ class GeminiServiceException implements Exception {
   final List<String>? instrucoesCorrecao;
 
   bool get chaveBloqueadaParaApi =>
-      codigoErro == 'API_KEY_SERVICE_BLOCKED';
+      codigoErro == 'API_KEY_SERVICE_BLOCKED' ||
+      codigoErro == 'API_KEY_LEAKED';
+
+  bool get chaveVazada => codigoErro == 'API_KEY_LEAKED';
 
   bool get cotaEsgotada =>
       codigoErro == 'RESOURCE_EXHAUSTED' ||
-      message.toLowerCase().contains('quota');
+      message.toLowerCase().contains('quota') ||
+      message.toLowerCase().contains('rate limit');
+
+  bool get modeloIndisponivel => codigoErro == 'MODEL_UNAVAILABLE';
 
   @override
   String toString() =>
@@ -86,6 +100,19 @@ class GeminiService {
       return override;
     }
     return GeminiConfig.resolverChave();
+  }
+
+  /// Ordem: ultimo que funcionou, depois o restante (lite primeiro).
+  List<String> get _modelosOrdemTentativa {
+    final preferido = _ultimoModeloGeminiOk?.trim() ?? '';
+    if (preferido.isEmpty || !_modelos.contains(preferido)) {
+      return List<String>.from(_modelos);
+    }
+    return [
+      preferido,
+      for (final m in _modelos)
+        if (m != preferido) m,
+    ];
   }
 
   static final Schema _schemaProdutoPadronizado = Schema.object(
@@ -175,8 +202,10 @@ class GeminiService {
     promptUsuario.write(bruto);
 
     GenerativeAIException? ultimoErroGemini;
+    final modelos = _modelosOrdemTentativa;
 
-    for (final nomeModelo in _modelos) {
+    for (var i = 0; i < modelos.length; i++) {
+      final nomeModelo = modelos[i];
       final model = GenerativeModel(
         model: nomeModelo,
         apiKey: apiKey,
@@ -207,15 +236,22 @@ class GeminiService {
         }
 
         final padronizado = ProdutoPadronizadoGemini.fromMap(decoded);
+        _ultimoModeloGeminiOk = nomeModelo;
         return padronizado.toMap();
       } on GenerativeAIException catch (e) {
         ultimoErroGemini = e;
-        final interpretado = _interpretarErroGemini(e);
+        final interpretado = _interpretarErroGemini(e, modelo: nomeModelo);
         if (interpretado.chaveBloqueadaParaApi) {
           throw interpretado;
         }
-        // Cota esgotada em um modelo: tenta o proximo (cotas sao por modelo).
-        if (nomeModelo != _modelos.last) {
+        // Se o modelo “preferido” esgotou, limpa para a proxima chamada
+        // comecar no 1.5 Flash (lista padrao).
+        if (interpretado.cotaEsgotada &&
+            _ultimoModeloGeminiOk == nomeModelo) {
+          _ultimoModeloGeminiOk = null;
+        }
+        // Cota e por modelo: se 2.5 esgotou, 1.5 Flash ainda pode ter RPD.
+        if (i < modelos.length - 1) {
           continue;
         }
         throw interpretado;
@@ -324,7 +360,9 @@ class GeminiService {
     }
 
     GenerativeAIException? ultimoErroGemini;
-    for (final nomeModelo in _modelos) {
+    final modelos = _modelosOrdemTentativa;
+    for (var i = 0; i < modelos.length; i++) {
+      final nomeModelo = modelos[i];
       final model = GenerativeModel(
         model: nomeModelo,
         apiKey: apiKey,
@@ -347,12 +385,18 @@ class GeminiService {
             'Resposta do Gemini em formato inesperado.',
           );
         }
+        _ultimoModeloGeminiOk = nomeModelo;
         return PrecoMercadoQueryAvancada.fromMap(decoded);
       } on GenerativeAIException catch (e) {
         ultimoErroGemini = e;
-        final interpretado = _interpretarErroGemini(e);
+        final interpretado = _interpretarErroGemini(e, modelo: nomeModelo);
         if (interpretado.chaveBloqueadaParaApi) throw interpretado;
-        if (nomeModelo != _modelos.last) continue;
+        if (interpretado.cotaEsgotada &&
+            _ultimoModeloGeminiOk == nomeModelo) {
+          _ultimoModeloGeminiOk = null;
+        }
+        // Cota e por modelo — tenta o proximo (ex.: 1.5 Flash ainda livre).
+        if (i < modelos.length - 1) continue;
         throw interpretado;
       } on FormatException catch (e) {
         throw GeminiServiceException(
@@ -375,9 +419,33 @@ class GeminiService {
     return null;
   }
 
-  static GeminiServiceException _interpretarErroGemini(GenerativeAIException e) {
+  static GeminiServiceException _interpretarErroGemini(
+    GenerativeAIException e, {
+    String? modelo,
+  }) {
     final msg = e.message;
     final lower = msg.toLowerCase();
+    final rotuloModelo = (modelo ?? '').trim().isEmpty
+        ? 'Gemini'
+        : modelo!.trim();
+
+    if (lower.contains('leaked') ||
+        lower.contains('reported as leaked')) {
+      return GeminiServiceException(
+        'Sua chave da API Gemini foi marcada como vazada pelo Google '
+        'e nao pode mais ser usada.',
+        cause: e,
+        codigoErro: 'API_KEY_LEAKED',
+        instrucoesCorrecao: const [
+          'Abra aistudio.google.com/apikey e delete/revogue a chave antiga.',
+          'Crie uma chave NOVA (nao reutilize a que vazou).',
+          'No sistema: Configuracoes → Integracoes → cole a chave nova → '
+          'Salvar chave Gemini.',
+          'Nunca publique a chave no GitHub, print, WhatsApp ou codigo-fonte. '
+          'Se ela ja apareceu em algum lugar, o Google bloqueia automaticamente.',
+        ],
+      );
+    }
 
     if (lower.contains('blocked') ||
         lower.contains('api_key_service_blocked')) {
@@ -399,18 +467,44 @@ class GeminiService {
       );
     }
 
+    if (lower.contains('not found') ||
+        lower.contains('is not found') ||
+        lower.contains('not supported') ||
+        (lower.contains('404') && lower.contains('model'))) {
+      return GeminiServiceException(
+        'Modelo $rotuloModelo indisponivel nesta chave/projeto.',
+        cause: e,
+        codigoErro: 'MODEL_UNAVAILABLE',
+        instrucoesCorrecao: const [
+          'O app tenta outro modelo automaticamente quando este nao existe.',
+          'Confira modelos liberados em aistudio.google.com.',
+        ],
+      );
+    }
+
     if (lower.contains('quota') ||
         lower.contains('resource_exhausted') ||
-        lower.contains('rate limit')) {
+        lower.contains('rate limit') ||
+        lower.contains('429')) {
+      final porMinuto = lower.contains('per minute') ||
+          lower.contains('rpm') ||
+          lower.contains('minute');
       return GeminiServiceException(
-        'Cota gratuita esgotada em todos os modelos testados. '
-        'Aguarde alguns minutos e tente de novo.',
+        porMinuto
+            ? 'Limite por minuto atingido no modelo $rotuloModelo. '
+                'Aguarde 1–2 minutos e tente de novo.'
+            : 'Cota do modelo $rotuloModelo esgotada (ou indisponivel). '
+                'O app tenta outros modelos automaticamente; se todos falharem, '
+                'veja o filtro no AI Studio (muitas vezes sobra cota no 1.5 Flash).',
         cause: e,
         codigoErro: 'RESOURCE_EXHAUSTED',
         instrucoesCorrecao: const [
-          'O tier gratuito tem limite por minuto e por dia (varia por modelo).',
-          'Verifique uso em: ai.dev/rate-limit',
-          'Se precisar de mais volume, ative faturamento no Google AI Studio.',
+          'No painel Rate limit, mude o filtro do modelo (ex.: Gemini 1.5 Flash). '
+          'Cada modelo tem RPM/RPD proprio — 4/20 no 1.5 Flash ainda permite uso.',
+          'Limite por minuto bloqueia mesmo com pouco uso no dia: espere ~1 minuto.',
+          'Limite diario renova a meia-noite (Pacifico), ~4h–5h da manha no Brasil.',
+          'Reinicie o app apos atualizar para usar gemini-1.5-flash primeiro.',
+          'Criar outra chave no MESMO projeto nao aumenta a cota.',
         ],
       );
     }

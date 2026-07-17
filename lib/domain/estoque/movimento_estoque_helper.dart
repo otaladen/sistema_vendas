@@ -39,6 +39,8 @@ abstract final class MovimentoEstoqueHelper {
         return 'Estorno cancelamento venda';
       case TipoMovimentoEstoque.devolucaoCliente:
         return 'Devolucao / troca';
+      case TipoMovimentoEstoque.devolucaoFornecedor:
+        return 'Devolucao ao fornecedor';
       case TipoMovimentoEstoque.ajusteManual:
         return 'Ajuste manual';
       case TipoMovimentoEstoque.vendaDiretaLegada:

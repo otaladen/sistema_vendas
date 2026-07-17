@@ -402,7 +402,9 @@ class ProdutoImagemBuscaService {
     }
 
       final dir = await getTemporaryDirectory();
-      final nome = 'busca_foto_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final ext = _extensaoArquivoImagem(response.bodyBytes, contentType);
+      final nome =
+          'busca_foto_${DateTime.now().millisecondsSinceEpoch}.$ext';
       final path = p.join(dir.path, nome);
       await File(path).writeAsBytes(response.bodyBytes, flush: true);
       return path;
@@ -483,5 +485,34 @@ class ProdutoImagemBuscaService {
       }
     } catch (_) {}
     return null;
+  }
+
+  /// Extensao real pelo magic number (busca costuma devolver WebP com URL .jpg).
+  static String _extensaoArquivoImagem(List<int> bytes, String contentType) {
+    final b = bytes;
+    if (b.length >= 3 && b[0] == 0xFF && b[1] == 0xD8) return 'jpg';
+    if (b.length >= 8 &&
+        b[0] == 0x89 &&
+        b[1] == 0x50 &&
+        b[2] == 0x4E &&
+        b[3] == 0x47) {
+      return 'png';
+    }
+    if (b.length >= 12 &&
+        b[0] == 0x52 &&
+        b[1] == 0x49 &&
+        b[2] == 0x46 &&
+        b[3] == 0x46 &&
+        b[8] == 0x57 &&
+        b[9] == 0x45 &&
+        b[10] == 0x42 &&
+        b[11] == 0x50) {
+      return 'webp';
+    }
+    final ct = contentType.toLowerCase();
+    if (ct.contains('png')) return 'png';
+    if (ct.contains('webp')) return 'webp';
+    if (ct.contains('gif')) return 'gif';
+    return 'jpg';
   }
 }

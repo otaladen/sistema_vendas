@@ -499,6 +499,7 @@ Color _corSub(BuildContext context, MainMenuSubDestino sub) {
     MainMenuSubDestino.cadastrosUsuarios => AppModuloId.usuariosCadastro,
     MainMenuSubDestino.fiscalImportarNfe ||
     MainMenuSubDestino.fiscalNotasImportadas ||
+    MainMenuSubDestino.fiscalDevolucaoFornecedor ||
     MainMenuSubDestino.fiscalPendencias ||
     MainMenuSubDestino.fiscalNfeSaida ||
     MainMenuSubDestino.fiscalRelatorioMensal ||
