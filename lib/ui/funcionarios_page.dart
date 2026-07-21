@@ -26,10 +26,12 @@ import '../model/vendedor.dart';
 import '../model/usuario_sistema.dart';
 import '../services/funcionario_extrato_pdf.dart';
 import '../services/funcionario_folha_csv_export.dart';
+import '../services/funcionario_imagem_service.dart';
 import '../services/brasil_api_cep_service.dart';
 import 'funcionarios/funcionario_layout.dart';
 import 'funcionarios/widgets/funcionario_atalhos_bar.dart';
 import 'funcionarios/widgets/funcionario_folha_painel.dart';
+import 'funcionarios/widgets/funcionario_foto_panel.dart';
 import 'funcionarios/widgets/funcionario_resumo_header.dart';
 import 'layout/app_layout.dart';
 import 'theme/app_semantic_helper.dart';
@@ -81,6 +83,15 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       widget.funcionarioRepository.objectBox,
     ),
   );
+
+  late final FuncionarioImagemService _imagemService = FuncionarioImagemService(
+    imagesDirectoryPath:
+        widget.funcionarioRepository.funcionarioImagesDirPath,
+  );
+
+  String _fotoPathAtual = '';
+  String? _fotoOrigemLocalPath;
+  bool _fotoFoiRemovida = false;
 
   static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
@@ -413,6 +424,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       _epiObservacoesController.clear();
       _podeOperarEmpilhadeira = false;
       _podeOperarTranspalete = false;
+      _fotoPathAtual = '';
+      _fotoOrigemLocalPath = null;
+      _fotoFoiRemovida = false;
       _lancamentos = [];
       _mesFiltroLancamentos =
           DateTime(DateTime.now().year, DateTime.now().month, 1);
@@ -703,12 +717,36 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         return;
       }
       try {
-        usuarioSistemaId = await _sincronizarUsuarioVinculo();
+        usuarioSistemaId = await _sincronizarUsuarioVinculo(
+          vendedorIdParaUsuario: vendedorId,
+          vendedorIdAnteriorFuncionario: existente?.vendedorId ?? 0,
+        );
       } catch (e) {
         setState(
           () => _status = 'Nao foi possivel vincular usuario do sistema: $e',
         );
         return;
+      }
+    } else {
+      // Desmarcou login: se tambem nao e vendedor, limpa usuario.vendedorId
+      // com seguranca (nao apaga o cadastro de vendedor).
+      final uidAnterior = existente?.usuarioSistemaId.trim() ?? '';
+      final vidAnterior = existente?.vendedorId ?? 0;
+      if (!_tambemVendedorPdv &&
+          uidAnterior.isNotEmpty &&
+          vidAnterior > 0) {
+        try {
+          await _limparVendedorIdDoUsuarioSeSeguro(
+            usuarioId: uidAnterior,
+            vendedorIdEsperado: vidAnterior,
+          );
+        } catch (e) {
+          setState(
+            () => _status =
+                'Nao foi possivel limpar vinculo usuario/vendedor: $e',
+          );
+          return;
+        }
       }
     }
 
@@ -721,6 +759,44 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         () => _status = 'Este motorista ja esta vinculado a outro funcionario.',
       );
       return;
+    }
+
+    final fotoPathExistente = existente?.fotoPath ?? '';
+    var fotoPathFinal = fotoPathExistente;
+    if (_fotoOrigemLocalPath != null &&
+        _fotoOrigemLocalPath!.trim().isNotEmpty) {
+      final processada = await _imagemService.processarESalvar(
+        sourceImagePath: _fotoOrigemLocalPath!,
+        funcionarioIdentifier: codigo,
+      );
+      if (processada == null) {
+        setState(
+          () => _status = 'Nao foi possivel processar a foto selecionada.',
+        );
+        return;
+      }
+      if (fotoPathExistente.trim().isNotEmpty &&
+          fotoPathExistente != processada) {
+        await _imagemService.removerSeOrfao(
+          fotoPathExistente,
+          contarReferencias: (path) =>
+              widget.funcionarioRepository.contarFuncionariosComFotoPath(
+            path,
+            excluirFuncionarioId: existente?.id,
+          ),
+        );
+      }
+      fotoPathFinal = processada;
+    } else if (_fotoFoiRemovida && fotoPathExistente.trim().isNotEmpty) {
+      await _imagemService.removerSeOrfao(
+        fotoPathExistente,
+        contarReferencias: (path) =>
+            widget.funcionarioRepository.contarFuncionariosComFotoPath(
+          path,
+          excluirFuncionarioId: existente?.id,
+        ),
+      );
+      fotoPathFinal = '';
     }
 
     final funcionario = Funcionario(
@@ -775,6 +851,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       epiObservacoes: _epiObservacoesController.text.trim(),
       podeOperarEmpilhadeira: _podeOperarEmpilhadeira,
       podeOperarTranspalete: _podeOperarTranspalete,
+      fotoPath: fotoPathFinal,
       criadoEm: existente?.criadoEm,
     );
     var id = widget.funcionarioRepository.salvar(funcionario);
@@ -797,9 +874,50 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       _vendedorVinculadoId = vendedorId;
       _motoristaVinculadoId = motoristaId;
       _usuarioVinculadoId = usuarioSistemaId;
+      _fotoPathAtual = fotoPathFinal;
+      _fotoOrigemLocalPath = null;
+      _fotoFoiRemovida = false;
       _status = 'Funcionario salvo com sucesso.';
     });
     unawaited(_carregarUsuariosCache());
+  }
+
+  String? _fotoPreviewPath() {
+    final origem = _fotoOrigemLocalPath?.trim();
+    if (origem != null && origem.isNotEmpty) return origem;
+    return _imagemService.resolverArquivoExistente(_fotoPathAtual);
+  }
+
+  Future<void> _aplicarFotoOrigem(String? path) async {
+    if (path == null || path.trim().isEmpty) return;
+    setState(() {
+      _fotoOrigemLocalPath = path;
+      _fotoFoiRemovida = false;
+      _status = 'Foto selecionada. Salve para gravar no cadastro.';
+    });
+  }
+
+  Future<void> _tirarFotoFuncionario() async {
+    final path = await _imagemService.capturarFotoCamera();
+    await _aplicarFotoOrigem(path);
+  }
+
+  Future<void> _escolherFotoFuncionario() async {
+    final path = FuncionarioImagemService.cameraDisponivel
+        ? await _imagemService.selecionarDaGaleria()
+        : await _imagemService.selecionarArquivoLocal();
+    await _aplicarFotoOrigem(path);
+  }
+
+  void _removerFotoFuncionario() {
+    setState(() {
+      _fotoOrigemLocalPath = null;
+      if (_fotoPathAtual.trim().isNotEmpty) {
+        _fotoFoiRemovida = true;
+      }
+      _fotoPathAtual = '';
+      _status = 'Foto removida. Salve para confirmar.';
+    });
   }
 
   void _editar(Funcionario f) {
@@ -858,6 +976,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       _epiObservacoesController.text = f.epiObservacoes;
       _podeOperarEmpilhadeira = f.podeOperarEmpilhadeira;
       _podeOperarTranspalete = f.podeOperarTranspalete;
+      _fotoPathAtual = f.fotoPath;
+      _fotoOrigemLocalPath = null;
+      _fotoFoiRemovida = false;
       _dataNascimento = f.dataNascimento.toLocal();
       _dataAdmissao = f.dataAdmissao.toLocal();
       _ativo = f.ativo;
@@ -1313,7 +1434,26 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     _tambemMotoristaEntrega = f.motoristaId > 0;
   }
 
-  Future<String> _sincronizarUsuarioVinculo() async {
+  Future<void> _limparVendedorIdDoUsuarioSeSeguro({
+    required String usuarioId,
+    required int vendedorIdEsperado,
+  }) async {
+    if (usuarioId.trim().isEmpty || vendedorIdEsperado <= 0) return;
+    final anterior = await widget.usuarioRepository.obterPorId(usuarioId);
+    if (anterior == null) return;
+    if (anterior.vendedorId != vendedorIdEsperado) return;
+    await widget.usuarioRepository.salvar(
+      anterior.copyWith(vendedorId: 0),
+      alteradoPor: widget.usuarioLogado,
+      anterior: anterior,
+      resumoExtra: 'Vinculo vendedor removido via funcionarios',
+    );
+  }
+
+  Future<String> _sincronizarUsuarioVinculo({
+    required int vendedorIdParaUsuario,
+    required int vendedorIdAnteriorFuncionario,
+  }) async {
     final id = _usuarioVinculadoId.trim();
     if (id.isEmpty) return '';
 
@@ -1328,6 +1468,18 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           : _nomeController.text.trim(),
       ativo: _ativo,
     );
+
+    // Fecha o triangulo RH ↔ login ↔ PDV: grava usuario.vendedorId.
+    if (_tambemVendedorPdv && vendedorIdParaUsuario > 0) {
+      atualizado = atualizado.copyWith(vendedorId: vendedorIdParaUsuario);
+    } else if (!_tambemVendedorPdv) {
+      final vidLimpar = vendedorIdAnteriorFuncionario > 0
+          ? vendedorIdAnteriorFuncionario
+          : _vendedorVinculadoId;
+      if (vidLimpar > 0 && anterior.vendedorId == vidLimpar) {
+        atualizado = atualizado.copyWith(vendedorId: 0);
+      }
+    }
 
     if (_tambemMotoristaEntrega) {
       final mot = _motoristaVinculadoId > 0
@@ -1458,6 +1610,18 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       return;
     }
 
+    var vendedorId = 0;
+    if (_tambemVendedorPdv) {
+      try {
+        vendedorId = _sincronizarVendedorVinculo();
+      } catch (e) {
+        setState(
+          () => _status = 'Nao foi possivel vincular vendedor no PDV: $e',
+        );
+        return;
+      }
+    }
+
     final id = DateTime.now().millisecondsSinceEpoch.toString();
     var base = UsuarioSistema(
       id: id,
@@ -1466,8 +1630,12 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       senha: '',
       ativo: _ativo,
       perfil: perfil.id,
+      vendedorId: vendedorId > 0 ? vendedorId : 0,
     );
     var usuario = PerfilUsuarioPresetAplicador.aplicar(base, perfil);
+    if (vendedorId > 0) {
+      usuario = usuario.copyWith(vendedorId: vendedorId);
+    }
     if (_tambemMotoristaEntrega && _motoristaVinculadoId > 0) {
       final mot = widget.motoristaRepository.obterPorId(_motoristaVinculadoId);
       if (mot != null) {
@@ -1495,7 +1663,11 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     setState(() {
       _temUsuarioSistema = true;
       _usuarioVinculadoId = id;
-      _status = 'Login criado e vinculado ao funcionario.';
+      _vendedorVinculadoId = vendedorId;
+      _tambemVendedorPdv = _tambemVendedorPdv || vendedorId > 0;
+      _status = vendedorId > 0
+          ? 'Login criado e vinculado ao funcionario e ao vendedor do PDV.'
+          : 'Login criado e vinculado ao funcionario.';
     });
   }
 
@@ -1618,7 +1790,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           contentPadding: EdgeInsets.zero,
           title: const Text('Tambem e vendedor no sistema (PDV / orcamentos)'),
           subtitle: const Text(
-            'Cria ou atualiza o cadastro de vendedor com os mesmos dados de contato.',
+            'Quem aparece nas vendas e comissoes. Nao cria senha — '
+            'o desbloqueio do PDV usa login do sistema ou PIN do vendedor.',
           ),
           value: _tambemVendedorPdv,
           onChanged: (v) => setState(() {
@@ -1791,7 +1964,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           contentPadding: EdgeInsets.zero,
           title: const Text('Possui usuario no sistema'),
           subtitle: const Text(
-            'Vincula permissoes de acesso (PDV, caixa, entregas, etc.).',
+            'Login e permissoes (PDV, caixa, etc.). A senha de acesso fica so aqui — '
+            'funcionario nao tem senha propria.',
           ),
           value: _temUsuarioSistema,
           onChanged: (v) => setState(() {
@@ -2745,6 +2919,14 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         title: 'Identificacao',
         icon: Icons.badge_outlined,
         children: [
+          FuncionarioFotoPanel(
+            previewPath: _fotoPreviewPath(),
+            compact: context.isFuncionarioCompactDesktop,
+            onTirarFoto: () => unawaited(_tirarFotoFuncionario()),
+            onEscolherArquivo: () => unawaited(_escolherFotoFuncionario()),
+            onRemover: _removerFotoFuncionario,
+          ),
+          const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerLeft,
             child: Wrap(
@@ -3451,7 +3633,34 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   }
 
   List<Widget> _conteudoAbaAcessos(BuildContext context) {
+    final theme = Theme.of(context);
     return [
+      Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.info_outline,
+                size: 20,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Funcionario e a ficha de RH (folha e documentos). '
+                  'Se tambem vende ou entra no sistema, use os vinculos abaixo. '
+                  'A senha de acesso e so do usuario; PIN do PDV e opcional no cadastro de Vendedores.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: 8),
       _buildSecaoVendedorPdv(context),
       const SizedBox(height: 8),
       _buildSecaoMotoristaEntregas(context),
@@ -3497,6 +3706,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       dataDemissaoFormatada: _dataDemissao != null
           ? _dateFormat.format(_dataDemissao!)
           : null,
+      fotoPath: _fotoPreviewPath(),
       compact: compactUi,
     );
   }

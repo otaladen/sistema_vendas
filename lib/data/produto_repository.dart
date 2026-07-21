@@ -5,8 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../model/historico_entrada.dart';
+import '../model/item_lista_compra.dart';
+import '../model/item_venda.dart';
 import '../model/movimento_estoque.dart';
 import '../model/produto.dart';
+import '../model/vinculo_fornecedor_produto.dart';
+import '../domain/produto_imagem_nome_arquivo.dart';
 import '../domain/pdv_consulta_similares_util.dart';
 import '../domain/produto_substitutos_util.dart';
 import '../domain/pdv_busca_inteligente.dart';
@@ -1345,6 +1349,35 @@ class ProdutoRepository extends ChangeNotifier {
     return alterados;
   }
 
+  /// Aplica o mesmo [fotoPath] a varios produtos (ex.: foto em lote na pesquisa).
+  int aplicarFotoEmVarios({
+    required Iterable<int> ids,
+    required String fotoPath,
+  }) {
+    final path = fotoPath.trim();
+    if (path.isEmpty) return 0;
+    final unicos = ids.where((id) => id > 0).toSet();
+    if (unicos.isEmpty) return 0;
+    final alteradosIds = <int>[];
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final id in unicos) {
+        final p = _db.produtoBox.get(id);
+        if (p == null) continue;
+        if (p.fotoPath.trim() == path) continue;
+        p.fotoPath = path;
+        _db.produtoBox.put(p);
+        alteradosIds.add(id);
+      }
+    });
+    for (final id in alteradosIds) {
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: id);
+    }
+    if (alteradosIds.isNotEmpty) {
+      invalidarCacheBusca();
+    }
+    return alteradosIds.length;
+  }
+
   bool remover(int id) {
     final ok = _db.produtoBox.remove(id);
     if (ok) {
@@ -1352,6 +1385,28 @@ class ProdutoRepository extends ChangeNotifier {
       invalidarCacheBusca();
     }
     return ok;
+  }
+
+  /// Exclui varios produtos de uma vez (cadastro / limpeza).
+  /// Retorna quantos foram removidos com sucesso.
+  int removerVarios(Iterable<int> ids) {
+    final unicos = ids.where((id) => id > 0).toSet().toList();
+    if (unicos.isEmpty) return 0;
+    final removidosIds = <int>[];
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final id in unicos) {
+        if (_db.produtoBox.remove(id)) {
+          removidosIds.add(id);
+        }
+      }
+    });
+    for (final id in removidosIds) {
+      registrarDeleteParaRede('produto', id);
+    }
+    if (removidosIds.isNotEmpty) {
+      invalidarCacheBusca();
+    }
+    return removidosIds.length;
   }
 
   /// Converte nomes em MAIUSCULO para titulo (ex.: Abracadeira de Nylon…).
@@ -1410,6 +1465,26 @@ class ProdutoRepository extends ChangeNotifier {
       }
     }
     return n;
+  }
+
+  /// Converte fotoPath absoluto (outro PC) para basename de imagem.
+  int normalizarFotoPathsParaSyncLan() {
+    var alterados = 0;
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final pr in _db.produtoBox.getAll()) {
+        final raw = pr.fotoPath.trim();
+        if (raw.isEmpty) continue;
+        final nome = ProdutoImagemNomeArquivo.extrairNomeParaLan(raw);
+        if (nome == null || nome == raw) continue;
+        pr.fotoPath = nome;
+        _db.produtoBox.put(pr);
+        alterados++;
+      }
+    });
+    if (alterados > 0) {
+      invalidarCacheBusca();
+    }
+    return alterados;
   }
 
   /// Une fotos com o mesmo conteudo em um unico arquivo e atualiza os produtos.
@@ -1544,20 +1619,163 @@ class ProdutoRepository extends ChangeNotifier {
     return removidas;
   }
 
+  /// Remove cadastros duplicados do mesmo codigo interno (mantem 1 por SKU).
+  ///
+  /// Criterio do sobrevivente: maior estoque, depois menor id (mais antigo).
+  /// Retorna quantos registros foram removidos.
+  Future<int> deduplicarProdutosMesmoSku({bool notificarRede = true}) async {
+    final porSku = <String, List<Produto>>{};
+    for (final p in _db.produtoBox.getAll()) {
+      final sku = p.codigoInterno.trim().toLowerCase();
+      if (sku.isEmpty) continue;
+      (porSku[sku] ??= <Produto>[]).add(p);
+    }
+
+    final gruposDup = <List<Produto>>[];
+    for (final g in porSku.values) {
+      if (g.length < 2) continue;
+      g.sort((a, b) {
+        final estoque = b.estoqueReal.compareTo(a.estoqueReal);
+        if (estoque != 0) return estoque;
+        return a.id.compareTo(b.id);
+      });
+      gruposDup.add(g);
+    }
+    if (gruposDup.isEmpty) return 0;
+
+    final idsDup = <int>[
+      for (final g in gruposDup)
+        for (var i = 1; i < g.length; i++) g[i].id,
+    ];
+    if (idsDup.isEmpty) return 0;
+
+    // Query por ToOne (nao varre todas as vendas da loja).
+    final qItens = _db.itemVendaBox
+        .query(ItemVenda_.produto.oneOf(idsDup))
+        .build();
+    final qHist = _db.historicoEntradaBox
+        .query(HistoricoEntrada_.produto.oneOf(idsDup))
+        .build();
+    final qMov = _db.movimentoEstoqueBox
+        .query(MovimentoEstoque_.produto.oneOf(idsDup))
+        .build();
+    final qVinc = _db.vinculoFornecedorProdutoBox
+        .query(VinculoFornecedorProduto_.produto.oneOf(idsDup))
+        .build();
+    final qLista = _db.itemListaCompraBox
+        .query(ItemListaCompra_.produto.oneOf(idsDup))
+        .build();
+    late final List<ItemVenda> itensVenda;
+    late final List<HistoricoEntrada> historicos;
+    late final List<MovimentoEstoque> movimentos;
+    late final List<VinculoFornecedorProduto> vinculos;
+    late final List<ItemListaCompra> listaCompra;
+    try {
+      itensVenda = qItens.find();
+      historicos = qHist.find();
+      movimentos = qMov.find();
+      vinculos = qVinc.find();
+      listaCompra = qLista.find();
+    } finally {
+      qItens.close();
+      qHist.close();
+      qMov.close();
+      qVinc.close();
+      qLista.close();
+    }
+
+    final keeperPorDupId = <int, Produto>{};
+    final removidos = <int>[];
+
+    _db.store.runInTransaction(TxMode.write, () {
+      for (final grupo in gruposDup) {
+        final keeper = grupo.first;
+        for (var i = 1; i < grupo.length; i++) {
+          final dup = grupo[i];
+          keeperPorDupId[dup.id] = keeper;
+          if (dup.estoqueReal != 0) {
+            keeper.estoqueReal += dup.estoqueReal;
+            keeper.estoqueAtual = keeper.estoqueReal;
+            keeper.estoqueVersao++;
+            _db.produtoBox.put(keeper);
+          }
+          _db.produtoBox.remove(dup.id);
+          removidos.add(dup.id);
+        }
+      }
+
+      for (final item in itensVenda) {
+        final k = keeperPorDupId[item.produto.targetId];
+        if (k == null) continue;
+        item.produto.target = k;
+        _db.itemVendaBox.put(item);
+      }
+      for (final h in historicos) {
+        final k = keeperPorDupId[h.produto.targetId];
+        if (k == null) continue;
+        h.produto.target = k;
+        _db.historicoEntradaBox.put(h);
+      }
+      for (final mv in movimentos) {
+        final k = keeperPorDupId[mv.produto.targetId];
+        if (k == null) continue;
+        mv.produto.target = k;
+        _db.movimentoEstoqueBox.put(mv);
+      }
+      for (final v in vinculos) {
+        final k = keeperPorDupId[v.produto.targetId];
+        if (k == null) continue;
+        v.produto.target = k;
+        _db.vinculoFornecedorProdutoBox.put(v);
+      }
+      for (final item in listaCompra) {
+        final k = keeperPorDupId[item.produto.targetId];
+        if (k == null) continue;
+        item.produto.target = k;
+        _db.itemListaCompraBox.put(item);
+      }
+    });
+
+    if (removidos.isEmpty) return 0;
+
+    invalidarCacheBusca();
+    await SyncDeleteOutbox.registrarVarios(
+      entity: 'produto',
+      entityIds: removidos,
+    );
+    if (notificarRede) {
+      notificarAlteracaoParaRede(entidade: 'produto', entidadeId: 0);
+    }
+    return removidos.length;
+  }
+
   Produto? obterPorId(int id) => _db.produtoBox.get(id);
 
   /// Busca por codigo interno (literal ou numerico sem zeros a esquerda).
   Produto? obterPorCodigoInterno(String codigo, {int? ignorarProdutoId}) {
+    final lista = listarPorCodigoInterno(
+      codigo,
+      ignorarProdutoId: ignorarProdutoId,
+    );
+    return lista.isEmpty ? null : lista.first;
+  }
+
+  /// Todos os produtos com o mesmo SKU (detecta duplicatas reais).
+  List<Produto> listarPorCodigoInterno(
+    String codigo, {
+    int? ignorarProdutoId,
+  }) {
     final alvo = codigo.trim();
-    if (alvo.isEmpty) return null;
+    if (alvo.isEmpty) return const [];
     _garantirCachesAtualizados();
     final norm = _normalizarTexto(alvo);
+    final out = <Produto>[];
     for (final doc in _cacheDocs) {
       final p = doc.produto;
       if (ignorarProdutoId != null && p.id == ignorarProdutoId) continue;
-      if (doc.correspondeCodigoInterno(norm)) return p;
+      if (doc.correspondeCodigoInterno(norm)) out.add(p);
     }
-    return null;
+    return out;
   }
 
   /// SKU automatico curto para PDV: 1, 2, 3… apos o maior numerico ja cadastrado.

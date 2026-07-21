@@ -52,6 +52,7 @@ class _ListaCompraPageState extends State<ListaCompraPage>
 
   @override
   void dispose() {
+    disposeSafeSyncRefresh();
     _tabController.dispose();
     super.dispose();
   }

@@ -19,9 +19,13 @@ class AuditoriaEvento {
   int id;
 
   @Property(type: PropertyType.dateUtc)
+  @Index()
   DateTime dataHora;
 
+  @Index()
   String usuarioLogin;
+
+  @Index()
   String modulo;
   String acao;
   String entidade;

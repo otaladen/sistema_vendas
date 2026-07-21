@@ -237,6 +237,7 @@ class Cliente {
 
   String origemCadastro;
 
+  @Index()
   bool ativo;
 
   @Property(type: PropertyType.dateUtc)

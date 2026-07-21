@@ -20,6 +20,7 @@ import '../../data/mensageria_repository.dart';
 import '../../data/produto_repository.dart';
 import '../../data/usuario_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
+import '../../data/sync/sync_refresh_hub.dart';
 import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
 import '../../domain/auditoria_catalogo.dart';
@@ -152,6 +153,7 @@ class _CaixaPageState extends State<CaixaPage> {
   final _valorRecebidoFocusNode = FocusNode();
   final ScrollController _itensScrollController = ScrollController();
   late final MensageriaRepository _mensageriaRepository;
+  VoidCallback? _syncHubListener;
   final _usuarioRepository = UsuarioRepository();
   PromocaoPrecoService? _promoPrecoCache;
   final _pesquisaProdutoConferenciaController = TextEditingController();
@@ -192,6 +194,7 @@ class _CaixaPageState extends State<CaixaPage> {
   late final FocusNfeService _focusNfeService;
   late final NfceReconciliacaoService _nfceReconciliacao;
   Timer? _timerReconciliacaoNfce;
+  Timer? _debounceSyncOrcamentos;
   UltimasVendasFinalizadasOrdenacao _ordenacaoUltimasVendas =
       UltimasVendasFinalizadasOrdenacao.padrao;
   bool _correcaoFinalizadaEmDisparada = false;
@@ -216,6 +219,16 @@ class _CaixaPageState extends State<CaixaPage> {
     _carregarLimiteDivergenciaCaixa();
     _carregarSessaoCaixa();
     _carregarOrcamentos();
+    _syncHubListener = () {
+      if (!mounted) return;
+      // Debounce: sync em rede dispara muitos eventos; evita rebuild em cascata.
+      _debounceSyncOrcamentos?.cancel();
+      _debounceSyncOrcamentos = Timer(const Duration(milliseconds: 160), () {
+        if (!mounted) return;
+        _atualizarOrcamentosAposSync();
+      });
+    };
+    SyncRefreshHub.instance.addListener(_syncHubListener!);
     unawaited(_carregarOrdenacaoUltimasVendas());
     unawaited(_reconciliarNfcePendentes(mostrarFeedback: false));
     _atualizarResumoNfcePendenteEmissao();
@@ -887,22 +900,41 @@ class _CaixaPageState extends State<CaixaPage> {
       _orcamentos = widget.vendaRepository.listarOrcamentosPendentes(
         limit: _caixaLimiteOrcamentosPendentes,
       );
-
-      if (_selecionado != null) {
-        _selecionado = _orcamentos
-            .where((v) => v.id == _selecionado!.id)
-            .firstOrNull;
-      }
-      if (_selecionado == null) {
-        _valorRecebidoController.clear();
-        _valorRecebido = null;
-        _valorRecebidoFocusNode.unfocus();
-        _disposeMistoEdicao();
-      } else if (_mistoPreparadoParaId != _selecionado!.id) {
-        _prepararEdicaoMisto(_selecionado!);
-        _sincronizarRecebidoPdVComOrcamento();
-      }
+      _aplicarSelecionadoAposListaOrcamentos();
     });
+  }
+
+  /// Sync de rede: atualiza a lista em memoria; so rebuilda a tela se houver
+  /// orcamento aberto na conferencia (itens/totais podem ter mudado).
+  void _atualizarOrcamentosAposSync() {
+    unawaited(_recarregarSessaoRede());
+    final novos = widget.vendaRepository.listarOrcamentosPendentes(
+      limit: _caixaLimiteOrcamentosPendentes,
+    );
+    _orcamentos = novos;
+    if (_selecionado == null) {
+      // Fila sem selecao: dialog de pesquisa escuta o hub sozinho.
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _aplicarSelecionadoAposListaOrcamentos());
+  }
+
+  void _aplicarSelecionadoAposListaOrcamentos() {
+    if (_selecionado != null) {
+      _selecionado = _orcamentos
+          .where((v) => v.id == _selecionado!.id)
+          .firstOrNull;
+    }
+    if (_selecionado == null) {
+      _valorRecebidoController.clear();
+      _valorRecebido = null;
+      _valorRecebidoFocusNode.unfocus();
+      _disposeMistoEdicao();
+    } else if (_mistoPreparadoParaId != _selecionado!.id) {
+      _prepararEdicaoMisto(_selecionado!);
+      _sincronizarRecebidoPdVComOrcamento();
+    }
   }
 
   bool _atalhoCaixaAtivo() {
@@ -970,6 +1002,9 @@ class _CaixaPageState extends State<CaixaPage> {
 
   Future<void> _abrirPesquisaOrcamento() async {
     if (_pesquisaOrcamentoDialogAberta) return;
+    // Puxa da rede antes de abrir — orcamento do celular precisa estar no PC.
+    await LanSyncScheduler.solicitarSyncCompleto();
+    if (!mounted) return;
     _carregarOrcamentos();
     _pesquisaOrcamentoDialogAberta = true;
     Venda? selecionado;
@@ -982,6 +1017,11 @@ class _CaixaPageState extends State<CaixaPage> {
           clienteDaVenda: _clienteDaVenda,
           rotuloVendedor: _rotuloVendedorUmLinha,
           formatarMoeda: _formatarMoeda,
+          buscarPorNumero: (n) =>
+              widget.vendaRepository.buscarOrcamentoPendentePorNumero(n),
+          recarregarLista: () => widget.vendaRepository.listarOrcamentosPendentes(
+            limit: _caixaLimiteOrcamentosPendentes,
+          ),
         ),
       );
     } finally {
@@ -3789,7 +3829,7 @@ class _CaixaPageState extends State<CaixaPage> {
         venda.id,
         permitirVendaSemEstoque: _permitirVendaSemEstoque,
       );
-      await LanSyncScheduler.solicitarSyncImediato();
+      await LanSyncScheduler.solicitarSyncPrioritario();
       if (!mounted) return;
       final vendaFinalizada = widget.vendaRepository.obterPorId(venda.id) ?? venda;
       final clienteId = vendaFinalizada.cliente.targetId;
@@ -5707,6 +5747,11 @@ class _CaixaPageState extends State<CaixaPage> {
 
   @override
   void dispose() {
+    if (_syncHubListener != null) {
+      SyncRefreshHub.instance.removeListener(_syncHubListener!);
+      _syncHubListener = null;
+    }
+    _debounceSyncOrcamentos?.cancel();
     HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwareCaixa);
     _timerReconciliacaoNfce?.cancel();
     _valorRecebidoController.dispose();
@@ -6789,12 +6834,16 @@ class _DialogoPesquisaOrcamento extends StatefulWidget {
     required this.clienteDaVenda,
     required this.rotuloVendedor,
     required this.formatarMoeda,
+    this.buscarPorNumero,
+    this.recarregarLista,
   });
 
   final List<Venda> orcamentos;
   final Cliente? Function(Venda venda) clienteDaVenda;
   final String Function(Venda venda) rotuloVendedor;
   final String Function(double valor) formatarMoeda;
+  final Venda? Function(int numero)? buscarPorNumero;
+  final List<Venda> Function()? recarregarLista;
 
   @override
   State<_DialogoPesquisaOrcamento> createState() =>
@@ -6805,8 +6854,10 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
   late final TextEditingController _pesquisaController;
   late final FocusNode _pesquisaFocusNode;
   late final ScrollController _listaScrollController;
+  late List<Venda> _base;
   late List<Venda> _resultados;
-  int _indiceSelecionado = 0;
+  final ValueNotifier<int> _indiceSelecionado = ValueNotifier(0);
+  Timer? _debounceSyncDialog;
 
   @override
   void initState() {
@@ -6814,12 +6865,29 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
     _pesquisaController = TextEditingController();
     _pesquisaFocusNode = FocusNode();
     _listaScrollController = ScrollController();
-    _resultados = List<Venda>.from(widget.orcamentos);
-    _indiceSelecionado = _resultados.isEmpty ? -1 : 0;
+    _base = List<Venda>.from(widget.orcamentos);
+    _resultados = List<Venda>.from(_base);
+    _indiceSelecionado.value = _resultados.isEmpty ? -1 : 0;
+    SyncRefreshHub.instance.addListener(_aoSyncRede);
+  }
+
+  void _aoSyncRede() {
+    if (!mounted) return;
+    _debounceSyncDialog?.cancel();
+    _debounceSyncDialog = Timer(const Duration(milliseconds: 160), () {
+      if (!mounted) return;
+      final nova = widget.recarregarLista?.call();
+      if (nova == null) return;
+      setState(() => _base = List<Venda>.from(nova));
+      _filtrar(_pesquisaController.text);
+    });
   }
 
   @override
   void dispose() {
+    SyncRefreshHub.instance.removeListener(_aoSyncRede);
+    _debounceSyncDialog?.cancel();
+    _indiceSelecionado.dispose();
     _pesquisaController.dispose();
     _pesquisaFocusNode.dispose();
     _listaScrollController.dispose();
@@ -6827,11 +6895,12 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
   }
 
   void _rolarParaIndiceSelecionado() {
-    if (!_listaScrollController.hasClients || _indiceSelecionado < 0) {
+    final indice = _indiceSelecionado.value;
+    if (!_listaScrollController.hasClients || indice < 0) {
       return;
     }
     const alturaEstimadaLinha = 72.0;
-    final posicaoDesejada = (_indiceSelecionado * alturaEstimadaLinha).clamp(
+    final posicaoDesejada = (indice * alturaEstimadaLinha).clamp(
       0.0,
       _listaScrollController.position.maxScrollExtent,
     );
@@ -6847,41 +6916,37 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
     Navigator.pop(context, _resultados[indice]);
   }
 
+  void _definirIndiceSelecionado(int indice) {
+    if (_indiceSelecionado.value == indice) return;
+    _indiceSelecionado.value = indice;
+  }
+
   KeyEventResult _tratarTeclaLista(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent || _resultados.isEmpty) {
       return KeyEventResult.ignored;
     }
 
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      setState(() {
-        if (_indiceSelecionado < 0) {
-          _indiceSelecionado = 0;
-        } else {
-          _indiceSelecionado = math.min(
-            _indiceSelecionado + 1,
-            _resultados.length - 1,
-          );
-        }
-      });
+      final atual = _indiceSelecionado.value;
+      final novo = atual < 0
+          ? 0
+          : math.min(atual + 1, _resultados.length - 1);
+      _definirIndiceSelecionado(novo);
       _rolarParaIndiceSelecionado();
       return KeyEventResult.handled;
     }
 
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      setState(() {
-        if (_indiceSelecionado < 0) {
-          _indiceSelecionado = 0;
-        } else {
-          _indiceSelecionado = math.max(_indiceSelecionado - 1, 0);
-        }
-      });
+      final atual = _indiceSelecionado.value;
+      final novo = atual < 0 ? 0 : math.max(atual - 1, 0);
+      _definirIndiceSelecionado(novo);
       _rolarParaIndiceSelecionado();
       return KeyEventResult.handled;
     }
 
     if (event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
-      final indice = _indiceSelecionado >= 0 ? _indiceSelecionado : 0;
+      final indice = _indiceSelecionado.value >= 0 ? _indiceSelecionado.value : 0;
       _selecionarIndice(indice);
       return KeyEventResult.handled;
     }
@@ -6898,17 +6963,34 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
     final termo = value.trim().toLowerCase();
     setState(() {
       if (termo.isEmpty) {
-        _resultados = List<Venda>.from(widget.orcamentos);
+        _resultados = List<Venda>.from(_base);
       } else {
-        _resultados = widget.orcamentos.where((orc) {
+        final filtrados = _base.where((orc) {
           final cliente = widget.clienteDaVenda(orc)?.nomeRazao ?? '';
           final vendedor = widget.rotuloVendedor(orc);
           return orc.numeroOrcamento.toString().contains(termo) ||
               cliente.toLowerCase().contains(termo) ||
               vendedor.toLowerCase().contains(termo);
         }).toList();
+
+        // Busca direta no ObjectBox: cobre orcamento que acabou de chegar
+        // e nao estava na lista limitada em memoria.
+        final numero = int.tryParse(termo);
+        if (numero != null && numero > 0) {
+          final direto = widget.buscarPorNumero?.call(numero);
+          if (direto != null &&
+              !filtrados.any((o) => o.id == direto.id)) {
+            filtrados.add(direto);
+          }
+        }
+        filtrados.sort((a, b) {
+          final na = a.numeroOrcamento > 0 ? a.numeroOrcamento : a.id;
+          final nb = b.numeroOrcamento > 0 ? b.numeroOrcamento : b.id;
+          return nb.compareTo(na);
+        });
+        _resultados = filtrados;
       }
-      _indiceSelecionado = _resultados.isEmpty ? -1 : 0;
+      _indiceSelecionado.value = _resultados.isEmpty ? -1 : 0;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_listaScrollController.hasClients) {
@@ -6949,7 +7031,8 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
                 onChanged: _filtrar,
                 onSubmitted: (_) {
                   if (_resultados.isEmpty) return;
-                  final indice = _indiceSelecionado >= 0 ? _indiceSelecionado : 0;
+                  final indice =
+                      _indiceSelecionado.value >= 0 ? _indiceSelecionado.value : 0;
                   _selecionarIndice(indice);
                 },
               ),
@@ -6960,27 +7043,23 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
                     : ListView.builder(
                         controller: _listaScrollController,
                         itemCount: _resultados.length,
+                        itemExtent: 72,
+                        cacheExtent: 280,
                         itemBuilder: (context, index) {
                           final orc = _resultados[index];
                           final cliente = widget.clienteDaVenda(orc)?.nomeRazao ??
                               'Sem cliente';
                           final descPdv = orc.descontoImplicitoTotal;
-                          final selecionado = index == _indiceSelecionado;
-                          return MouseRegion(
-                            onEnter: (_) {
-                              if (_indiceSelecionado == index) return;
-                              setState(() => _indiceSelecionado = index);
-                            },
-                            child: ListTile(
-                              selected: selecionado,
-                              selectedTileColor: corDestaque,
-                              title: Text('Orcamento ${orc.numeroOrcamento}'),
-                              subtitle: Text(
+                          return _OrcamentoPesquisaLinha(
+                            indice: index,
+                            indiceSelecionado: _indiceSelecionado,
+                            corDestaque: corDestaque,
+                            titulo: 'Orcamento ${orc.numeroOrcamento}',
+                            subtitulo:
                                 '$cliente | Itens: ${orc.itens.length} | Total: ${widget.formatarMoeda(orc.total)}'
                                 '${descPdv > 0.001 ? ' | Desc. PDV: -${widget.formatarMoeda(descPdv)}' : ''}',
-                              ),
-                              onTap: () => _selecionarIndice(index),
-                            ),
+                            onHover: () => _definirIndiceSelecionado(index),
+                            onTap: () => _selecionarIndice(index),
                           );
                         },
                       ),
@@ -6994,6 +7073,80 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
             child: const Text('Fechar (Esc)'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Linha que so rebuilda quando entra/sai da selecao (ValueNotifier).
+class _OrcamentoPesquisaLinha extends StatefulWidget {
+  const _OrcamentoPesquisaLinha({
+    required this.indice,
+    required this.indiceSelecionado,
+    required this.corDestaque,
+    required this.titulo,
+    required this.subtitulo,
+    required this.onHover,
+    required this.onTap,
+  });
+
+  final int indice;
+  final ValueNotifier<int> indiceSelecionado;
+  final Color corDestaque;
+  final String titulo;
+  final String subtitulo;
+  final VoidCallback onHover;
+  final VoidCallback onTap;
+
+  @override
+  State<_OrcamentoPesquisaLinha> createState() => _OrcamentoPesquisaLinhaState();
+}
+
+class _OrcamentoPesquisaLinhaState extends State<_OrcamentoPesquisaLinha> {
+  late bool _selecionado;
+
+  @override
+  void initState() {
+    super.initState();
+    _selecionado = widget.indiceSelecionado.value == widget.indice;
+    widget.indiceSelecionado.addListener(_aoMudarSelecao);
+  }
+
+  @override
+  void didUpdateWidget(covariant _OrcamentoPesquisaLinha oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.indiceSelecionado != widget.indiceSelecionado) {
+      oldWidget.indiceSelecionado.removeListener(_aoMudarSelecao);
+      widget.indiceSelecionado.addListener(_aoMudarSelecao);
+    }
+    final agora = widget.indiceSelecionado.value == widget.indice;
+    if (agora != _selecionado) {
+      _selecionado = agora;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.indiceSelecionado.removeListener(_aoMudarSelecao);
+    super.dispose();
+  }
+
+  void _aoMudarSelecao() {
+    final agora = widget.indiceSelecionado.value == widget.indice;
+    if (agora == _selecionado) return;
+    setState(() => _selecionado = agora);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => widget.onHover(),
+      child: ListTile(
+        selected: _selecionado,
+        selectedTileColor: widget.corDestaque,
+        title: Text(widget.titulo),
+        subtitle: Text(widget.subtitulo),
+        onTap: widget.onTap,
       ),
     );
   }

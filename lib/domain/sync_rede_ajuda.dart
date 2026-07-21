@@ -32,20 +32,26 @@ abstract final class SyncRedeAjuda {
     }
     if (m.contains('firewall') ||
         m.contains('nao alcanc') ||
+        m.contains('servidor local nao encontrado') ||
         m.contains('socket') ||
         m.contains('connection refused') ||
-        m.contains('timed out')) {
+        m.contains('timed out') ||
+        m.contains('dhcp')) {
       return const [
-        'Confirme que os dois PCs estao na mesma rede Wi-Fi ou cabo.',
-        'No servidor: use Liberar porta no firewall (secao Avancado).',
-        'Teste o IP com ipconfig no PC servidor (ex.: 192.168.0.3:8787).',
+        'Servidor local nao encontrado: confirme Wi-Fi/cabo na mesma rede.',
+        'No PC servidor: anote o IP atual (ipconfig) — DHCP pode ter mudado.',
+        'Atualize o endereco nos clientes (ex.: http://192.168.0.10:8787).',
+        'No servidor: Liberar porta no firewall (secao Avancado) e Iniciar servidor.',
         'Desative VPN temporariamente para testar.',
       ];
     }
-    if (m.contains('servico de sync') || m.contains('nao respondeu')) {
+    if (m.contains('servico de sync') ||
+        m.contains('nao respondeu') ||
+        m.contains('nao esta ativo')) {
       return const [
+        'Servidor local nao encontrado (servico parado).',
         'No PC servidor: marque Servidor neste PC e clique Iniciar servidor.',
-        'Use Configurar como servidor e sincronizar ou Salvar com sync ativa.',
+        'Use Ativar como servidor e sincronizar ou Salvar com sync ativa.',
       ];
     }
     return const [

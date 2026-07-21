@@ -40,6 +40,12 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
     _recarregar();
   }
 
+  @override
+  void dispose() {
+    disposeSafeSyncRefresh();
+    super.dispose();
+  }
+
   void _recarregar() {
     if (!mounted) return;
     setState(() => _recados = _repo.listarTodos());

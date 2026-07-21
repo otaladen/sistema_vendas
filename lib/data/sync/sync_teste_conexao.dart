@@ -34,7 +34,9 @@ Future<SyncTesteResultado> testarConexaoSyncLan({
       servidorAlcancavel: false,
       servicoSyncAtivo: false,
       tokenValido: false,
-      mensagem: 'Informe o endereco do servidor (ex.: 192.168.0.10:8787).',
+      mensagem:
+          'Servidor local nao encontrado. Informe o endereco '
+          '(ex.: 192.168.0.10:8787).',
     );
   }
 
@@ -44,7 +46,7 @@ Future<SyncTesteResultado> testarConexaoSyncLan({
       servidorAlcancavel: false,
       servicoSyncAtivo: false,
       tokenValido: false,
-      mensagem: 'Endereco invalido.',
+      mensagem: 'Servidor local nao encontrado. Endereco invalido.',
     );
   }
 
@@ -63,7 +65,9 @@ Future<SyncTesteResultado> testarConexaoSyncLan({
       servicoSyncAtivo: false,
       tokenValido: false,
       mensagem:
-          'Nao alcancou $host:$porta. Verifique rede e firewall. (${e.message})',
+          'Servidor local nao encontrado em $host:$porta. '
+          'Verifique se o PC servidor esta ligado, na mesma rede, '
+          'e se o IP nao mudou (DHCP). (${e.message})',
     );
   }
 
@@ -72,8 +76,9 @@ Future<SyncTesteResultado> testarConexaoSyncLan({
     servicoSyncAtivo: false,
     tokenValido: false,
     mensagem:
-        'Porta $host:$porta alcancavel, mas o servico de sync nao respondeu. '
-        'Inicie o servidor no PC principal.',
+        'Servidor local nao encontrado: a porta $host:$porta responde, '
+        'mas o servico de sync nao esta ativo. '
+        'No PC principal, inicie o servidor em Configuracoes > Rede.',
   );
 }
 

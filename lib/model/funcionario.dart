@@ -44,6 +44,7 @@ class Funcionario {
     this.epiObservacoes = '',
     this.podeOperarEmpilhadeira = false,
     this.podeOperarTranspalete = false,
+    this.fotoPath = '',
     DateTime? dataNascimento,
     DateTime? cnhValidade,
     DateTime? asoData,
@@ -58,7 +59,10 @@ class Funcionario {
   @Id(assignable: true)
   int id;
 
+  @Index()
   String codigoInterno;
+
+  @Index()
   String nomeCompleto;
 
   /// Campo legado (texto livre). Preferir [setor] + [funcao].
@@ -67,6 +71,7 @@ class Funcionario {
   String funcao;
   String funcaoOutro;
 
+  @Index()
   String cpf;
   String rg;
   String pis;
@@ -88,6 +93,8 @@ class Funcionario {
   String historicoFinanceiro;
   String valesJson;
   int diaPagamento;
+
+  @Index()
   bool ativo;
   String motivoDemissao;
   String motivoDemissaoOutro;
@@ -110,6 +117,9 @@ class Funcionario {
   String epiObservacoes;
   bool podeOperarEmpilhadeira;
   bool podeOperarTranspalete;
+
+  /// Caminho local da foto (arquivo em `funcionario_images`).
+  String fotoPath;
 
   @Property(type: PropertyType.dateUtc)
   DateTime? cnhValidade;

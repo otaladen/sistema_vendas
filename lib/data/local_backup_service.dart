@@ -67,6 +67,7 @@ class LocalBackupService {
     void report(double v, String etapa) => onProgress?.call(v, etapa);
 
     report(0.02, 'Validando dados locais…');
+    await Future<void>.delayed(Duration.zero);
     final baseDadosDir = await obterDiretorioBaseDadosApp();
     if (!baseDadosDir.existsSync()) {
       throw Exception('Pasta de dados local nao encontrada.');
@@ -83,6 +84,8 @@ class LocalBackupService {
     pastaBackup.createSync(recursive: true);
 
     if (escopo == LocalBackupEscopo.cadastroProdutos) {
+      report(0.08, 'Preparando exportacao de produtos…');
+      await Future<void>.delayed(Duration.zero);
       report(0.12, 'Exportando cadastro de produtos…');
       final resumo = await LocalBackupCadastroProdutosService.exportar(
         objectBox: objectBox,
@@ -161,7 +164,8 @@ class LocalBackupService {
                   final frac = copiados / totalArquivos;
                   report(
                     0.22 + frac * 0.52,
-                    'Copiando… ($copiados/$totalArquivos)',
+                    'Copiando… ${((0.22 + frac * 0.52) * 100).round()}% '
+                    '($copiados/$totalArquivos)',
                   );
                 }
               : null,

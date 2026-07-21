@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -9,8 +10,8 @@ import '../../data/caixa_sessao_repository.dart';
 import '../../data/menu_favoritos_repository.dart';
 import '../../data/recado_loja_repository.dart';
 import '../../data/sync/sync_log.dart';
+import '../../data/sync/sync_refresh_hub.dart';
 import '../../data/venda_repository.dart';
-import '../../domain/filtro_listagem_entregas.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../domain/dashboard_alertas.dart';
 import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
@@ -22,11 +23,11 @@ import '../../services/alertas_proativos_service.dart';
 import '../../services/lan_sync_server_manager.dart';
 import 'loja_ao_vivo_page.dart';
 import 'layout/app_layout.dart';
-import 'relatorios/relatorio_entregas_helper.dart';
 import 'shell/app_shell_aba_visibilidade.dart';
 import 'theme/app_modulo_cores.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
+import 'widgets/seletor_tema_app.dart';
 import 'recados_loja_page.dart';
 import 'widgets/recados_loja_faixa.dart';
 import 'widgets/dashboard_alertas_strip.dart';
@@ -96,10 +97,18 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
   List<RecadoLoja> _recadosNaoLidos = const [];
   Timer? _fiscalPendenciasTimer;
   bool _timersPeriodicosAtivos = false;
+  VoidCallback? _syncHubListener;
 
   @override
   void initState() {
     super.initState();
+    _syncHubListener = () {
+      if (!mounted) return;
+      // Celular: sync nao deve forcar rebuild do painel (ANR).
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) return;
+      unawaited(_carregarPainel());
+    };
+    SyncRefreshHub.instance.addListener(_syncHubListener!);
     WidgetsBinding.instance.addPostFrameCallback((_) => _inicializar());
   }
 
@@ -112,22 +121,46 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
   Future<void> _inicializar() async {
     final deps = MainMenuDeps.maybeOf(context);
     if (deps == null) return;
-    if (widget.onIniciarSync != null) {
-      await widget.onIniciarSync!();
-    } else {
-      final config = await deps.appConfigRepository.carregarEmpresaConfig();
-      if (Platform.isWindows &&
-          config.redeModoServidor &&
-          config.redeSincronizacaoAtiva) {
-        await LanSyncServerManager.iniciarServidor(
-          porta: config.redePortaServidor,
-        );
-      }
-      await deps.lanSyncScheduler.iniciar();
-    }
+
+    // KPIs locais primeiro — nunca esperar a sync de rede (no celular o bootstrap
+    // pode demorar e deixava os cards girando para sempre).
     await _carregarFavoritos();
     await _carregarPainel();
     if (mounted) _sincronizarTimersComVisibilidade();
+
+    unawaited(_iniciarSyncEmSegundoPlano(deps));
+  }
+
+  Future<void> _iniciarSyncEmSegundoPlano(MainMenuDeps deps) async {
+    try {
+      if (widget.onIniciarSync != null) {
+        await widget.onIniciarSync!();
+      } else {
+        final config = await deps.appConfigRepository.carregarEmpresaConfig();
+        if (Platform.isWindows &&
+            config.redeModoServidor &&
+            config.redeSincronizacaoAtiva) {
+          await LanSyncServerManager.iniciarServidor(
+            porta: config.redePortaServidor,
+            syncToken: config.redeSyncToken,
+            productImagesPath: deps.produtoRepository.productImagesDirPath,
+          );
+        }
+        await deps.lanSyncScheduler.iniciar();
+        if (Platform.isWindows &&
+            config.redeModoServidor &&
+            config.redeSincronizacaoAtiva) {
+          unawaited(deps.lanSyncScheduler.enviarFotosProdutosAgora());
+        }
+      }
+    } catch (_) {
+      // Sync falhou: painel ja foi carregado com dados locais.
+    }
+    // No celular nao recarrega o painel de novo (trabalho pesado); no PC atualiza.
+    if (mounted &&
+        (kIsWeb || !(Platform.isAndroid || Platform.isIOS))) {
+      await _carregarPainel();
+    }
   }
 
   bool _abaVisivelAgora() {
@@ -190,6 +223,22 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       produtoRepository: deps.produtoRepository,
       vendaRepository: deps.vendaRepository,
     );
+    // No celular atrasa o 1o disparo (varre produtos/vendas e congela).
+    final celular = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    if (celular) {
+      _alertasProativosTimer = Timer(const Duration(minutes: 5), () {
+        if (!_abaVisivelAgora()) return;
+        unawaited(_alertasProativosService?.verificarEEnviarSeDevido());
+        _alertasProativosTimer = Timer.periodic(
+          const Duration(minutes: 30),
+          (_) {
+            if (!_abaVisivelAgora()) return;
+            unawaited(_alertasProativosService?.verificarEEnviarSeDevido());
+          },
+        );
+      });
+      return;
+    }
     unawaited(_alertasProativosService!.verificarEEnviarSeDevido());
     _alertasProativosTimer = Timer.periodic(
       const Duration(minutes: 30),
@@ -202,6 +251,10 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
 
   @override
   void dispose() {
+    if (_syncHubListener != null) {
+      SyncRefreshHub.instance.removeListener(_syncHubListener!);
+      _syncHubListener = null;
+    }
     _pararTimersPeriodicos();
     super.dispose();
   }
@@ -262,99 +315,157 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     if (!mounted) return;
     setState(() => _carregandoResumo = true);
 
-    final deps = MainMenuDeps.of(context);
-    final config = await deps.appConfigRepository.carregarEmpresaConfig();
-    final sessao = await CaixaSessaoRepository().carregarSessaoLocal();
-    final agora = DateTime.now();
-    final inicio = DateTime(agora.year, agora.month, agora.day);
-    final fim = inicio
-        .add(const Duration(days: 1))
-        .subtract(const Duration(milliseconds: 1));
-    final todasVendas = deps.vendaRepository
-        .listarPorPeriodo(PeriodoFiltro(inicio: inicio, fim: fim))
-        .where((v) => !v.cancelada && v.status == 'finalizada');
-    final u = deps.usuarioLogado;
-    final verTotalLoja =
-        UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u);
-    final vendas = verTotalLoja
-        ? todasVendas
-        : todasVendas.where((v) => v.vendedor.targetId == u.vendedorId);
-    final faturamento = vendas.fold<double>(0, (s, v) => s + v.total);
+    final celular = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
-    const filtroEntregas = FiltroListagemEntregas(statusEntrega: 'todos');
-    final entRes = deps.vendaRepository.carregarListagemEntregasComResumo(
-      filtroLista: filtroEntregas,
-      filtroContagem: filtroEntregas.paraContagemResumo(),
-    );
-    final emAberto = entRes.entregas
-        .where((v) => !relatorioEntregaStatusFinalizado(v.statusEntrega))
-        .length;
+    try {
+      final deps = MainMenuDeps.of(context);
+      final config = await deps.appConfigRepository.carregarEmpresaConfig();
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return;
 
-    deps.vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
-    final podeFinanceiro =
-        UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro);
-    double? totalAReceber;
-    double? totalFiadoVencido;
-    if (podeFinanceiro) {
-      final titulosAbertos = deps.vendaRepository.titulos.listarTodosAbertos();
-      totalAReceber = titulosAbertos.fold<double>(
-        0,
-        (s, l) => s + l.titulo.saldo,
+      final sessao = await CaixaSessaoRepository().carregarSessaoLocal();
+      final agora = DateTime.now();
+      final inicio = DateTime(agora.year, agora.month, agora.day);
+      final fim = inicio
+          .add(const Duration(days: 1))
+          .subtract(const Duration(milliseconds: 1));
+      final u = deps.usuarioLogado;
+
+      // Celular: so KPI do dia + caixa. Nada de entregas/financeiro/alertas/fiscal.
+      if (celular) {
+        final vendasHoje = deps.vendaRepository
+            .listarPorPeriodo(PeriodoFiltro(inicio: inicio, fim: fim))
+            .where((v) => !v.cancelada && v.status == 'finalizada');
+        final verTotalLoja =
+            UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u);
+        final vendas = verTotalLoja
+            ? vendasHoje
+            : vendasHoje.where((v) => v.vendedor.targetId == u.vendedorId);
+        final lista = vendas.toList();
+        final faturamento = lista.fold<double>(0, (s, v) => s + v.total);
+        if (!mounted) return;
+        setState(() {
+          _config = config;
+          _recadosNaoLidos = const [];
+          _resumo = _MainMenuResumo(
+            vendasHoje: lista.length,
+            faturamentoHoje: faturamento,
+            caixaAberto: sessao.aberto,
+            entregasEmAberto: 0,
+            entregasAtrasadas: 0,
+            alertas: const [],
+            totalAReceber: null,
+            totalFiadoVencido: null,
+            fiscalPendencias: 0,
+            backupAlerta: false,
+          );
+          _carregandoResumo = false;
+        });
+        return;
+      }
+
+      // Query por data (nao varre todas as vendas do banco).
+      final todasVendas = deps.vendaRepository
+          .listarPorPeriodo(PeriodoFiltro(inicio: inicio, fim: fim))
+          .where((v) => !v.cancelada && v.status == 'finalizada');
+      final verTotalLoja =
+          UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u);
+      final vendas = verTotalLoja
+          ? todasVendas
+          : todasVendas.where((v) => v.vendedor.targetId == u.vendedorId);
+      final listaVendas = vendas.toList();
+      final faturamento =
+          listaVendas.fold<double>(0, (s, v) => s + v.total);
+
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return;
+
+      var emAberto = 0;
+      var atrasadas = 0;
+      if (UsuarioPermissaoHelper.podeVisualizarEntregas(u)) {
+        final ent = deps.vendaRepository.contarEntregasPainelResumo();
+        emAberto = ent.emAberto;
+        atrasadas = ent.atrasadas;
+      }
+
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return;
+
+      deps.vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+
+      final podeFinanceiro =
+          UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro);
+      double? totalAReceber;
+      double? totalFiadoVencido;
+      if (podeFinanceiro) {
+        final titulosAbertos =
+            deps.vendaRepository.titulos.listarTodosAbertos();
+        totalAReceber = titulosAbertos.fold<double>(
+          0,
+          (s, l) => s + l.titulo.saldo,
+        );
+        totalFiadoVencido = titulosAbertos
+            .where(ContasReceberHelper.ehVencido)
+            .fold<double>(0, (s, l) => s + l.titulo.saldo);
+      }
+
+      final backupManual =
+          await deps.appConfigRepository.carregarRegistroBackupManual();
+      final backupStatus = BackupStatusHelper.avaliar(
+        config: config,
+        manual: backupManual,
       );
-      totalFiadoVencido = titulosAbertos
-          .where(ContasReceberHelper.ehVencido)
-          .fold<double>(0, (s, l) => s + l.titulo.saldo);
+
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return;
+
+      final alertas = DashboardAlertasService.montar(
+        vendaRepository: deps.vendaRepository,
+        produtoRepository: deps.produtoRepository,
+        objectBox: deps.objectBox,
+        podeFinanceiro: podeFinanceiro,
+        podeEstoque: UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque),
+        podeEntregas: UsuarioPermissaoHelper.podeVisualizarEntregas(u),
+        empresaConfig: config,
+        backupManual: backupManual,
+        podeConfiguracoes: UsuarioPermissaoHelper.tem(
+          u,
+          PermissaoUsuario.configuracoes,
+        ),
+        podeOrcamentos: UsuarioPermissaoHelper.podeVerOrcamentosDashboard(u),
+      );
+
+      final fiscalPendencias =
+          UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(u)
+              ? FiscalPendenciasResumoService.contar(
+                  vendaRepository: deps.vendaRepository,
+                ).total
+              : 0;
+
+      final recadoRepo = RecadoLojaRepository(deps.objectBox);
+      final recadosNaoLidos = recadoRepo.listarNaoLidosParaUsuario(u);
+
+      if (!mounted) return;
+      setState(() {
+        _config = config;
+        _recadosNaoLidos = recadosNaoLidos;
+        _resumo = _MainMenuResumo(
+          vendasHoje: listaVendas.length,
+          faturamentoHoje: faturamento,
+          caixaAberto: sessao.aberto,
+          entregasEmAberto: emAberto,
+          entregasAtrasadas: atrasadas,
+          alertas: alertas,
+          totalAReceber: totalAReceber,
+          totalFiadoVencido: totalFiadoVencido,
+          fiscalPendencias: fiscalPendencias,
+          backupAlerta: backupStatus.exibirAlerta,
+        );
+        _carregandoResumo = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _carregandoResumo = false);
     }
-
-    final backupManual =
-        await deps.appConfigRepository.carregarRegistroBackupManual();
-    final backupStatus = BackupStatusHelper.avaliar(
-      config: config,
-      manual: backupManual,
-    );
-    final alertas = DashboardAlertasService.montar(
-      vendaRepository: deps.vendaRepository,
-      produtoRepository: deps.produtoRepository,
-      objectBox: deps.objectBox,
-      podeFinanceiro: UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro),
-      podeEstoque: UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque),
-      podeEntregas: UsuarioPermissaoHelper.podeVisualizarEntregas(u),
-      empresaConfig: config,
-      backupManual: backupManual,
-      podeConfiguracoes: UsuarioPermissaoHelper.tem(
-        u,
-        PermissaoUsuario.configuracoes,
-      ),
-      podeOrcamentos: UsuarioPermissaoHelper.podeVerOrcamentosDashboard(u),
-    );
-
-    final fiscalPendencias = UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(u)
-        ? FiscalPendenciasResumoService.contar(
-            vendaRepository: deps.vendaRepository,
-          ).total
-        : 0;
-
-    final recadoRepo = RecadoLojaRepository(deps.objectBox);
-    final recadosNaoLidos = recadoRepo.listarNaoLidosParaUsuario(u);
-
-    if (!mounted) return;
-    setState(() {
-      _config = config;
-      _recadosNaoLidos = recadosNaoLidos;
-      _resumo = _MainMenuResumo(
-        vendasHoje: vendas.length,
-        faturamentoHoje: faturamento,
-        caixaAberto: sessao.aberto,
-        entregasEmAberto: emAberto,
-        entregasAtrasadas: entRes.atrasadas,
-        alertas: alertas,
-        totalAReceber: totalAReceber,
-        totalFiadoVencido: totalFiadoVencido,
-        fiscalPendencias: fiscalPendencias,
-        backupAlerta: backupStatus.exibirAlerta,
-      );
-      _carregandoResumo = false;
-    });
   }
 
   void _abrirAlerta(DashboardAlerta alerta) {
@@ -653,6 +764,12 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         automaticallyImplyLeading: widget.onAbrirMenu == null,
         title: Text(tituloAppBar),
         actions: [
+          if (SeletorTemaApp.uiCompacta(context))
+            IconButton(
+              tooltip: 'Temas',
+              icon: const Icon(Icons.palette_outlined),
+              onPressed: () => SeletorTemaApp.mostrarFolha(context),
+            ),
           IconButton(
             tooltip: 'Atualizar painel',
             onPressed: _carregarPainel,

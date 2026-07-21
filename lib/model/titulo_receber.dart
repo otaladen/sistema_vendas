@@ -28,6 +28,7 @@ class TituloReceber {
   double saldo;
 
   /// [TituloReceberCatalogo]: aberto | quitado | cancelado
+  @Index()
   String status;
 
   @Property(type: PropertyType.dateUtc)

@@ -38,14 +38,18 @@ class CaixaSessaoRepository {
     var id = prefs.getString(_kTerminalId)?.trim() ?? '';
     if (id.isNotEmpty) return id;
     var host = '';
-    try {
-      host = Platform.localHostname.trim();
-    } catch (_) {
-      host = '';
+    // Platform.localHostname pode travar/demorar muito no Android — evita no mobile.
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      try {
+        host = Platform.localHostname.trim();
+      } catch (_) {
+        host = '';
+      }
     }
     id = host.isNotEmpty
         ? 'pc_$host'
-        : 'terminal_${DateTime.now().millisecondsSinceEpoch}';
+        : '${Platform.isAndroid || Platform.isIOS ? 'cel' : 'terminal'}'
+            '_${DateTime.now().millisecondsSinceEpoch}';
     await prefs.setString(_kTerminalId, id);
     return id;
   }

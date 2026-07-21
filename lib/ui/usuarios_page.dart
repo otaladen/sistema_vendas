@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/funcionario_repository.dart';
 import '../data/motorista_repository.dart';
 import '../data/usuario_repository.dart';
 import '../data/vendedor_repository.dart';
@@ -22,12 +23,14 @@ class UsuariosPage extends StatefulWidget {
     required this.usuarioRepository,
     required this.motoristaRepository,
     required this.vendedorRepository,
+    required this.funcionarioRepository,
     required this.usuarioLogado,
   });
 
   final UsuarioRepository usuarioRepository;
   final MotoristaRepository motoristaRepository;
   final VendedorRepository vendedorRepository;
+  final FuncionarioRepository funcionarioRepository;
   final UsuarioSistema usuarioLogado;
 
   @override
@@ -165,10 +168,32 @@ class _UsuariosPageState extends State<UsuariosPage>
   void _editar(UsuarioSistema u) {
     setState(() {
       _form.carregar(u);
+      _aplicarVendedorDoFuncionarioVinculado(u.id);
       _sincronizarControllers();
       _tabController.index = 1;
     });
     _mostrarSnack('Editando: ${u.nome}');
+  }
+
+  /// Se o RH ja vinculou este login a um funcionario com vendedor, preenche o dropdown.
+  void _aplicarVendedorDoFuncionarioVinculado(String usuarioId) {
+    final f = widget.funcionarioRepository.obterPorUsuarioSistemaId(usuarioId);
+    if (f == null || f.vendedorId <= 0) return;
+    final v = widget.vendedorRepository.obterPorId(f.vendedorId);
+    if (v == null || !v.ativo) return;
+    _form.definirVendedorId(f.vendedorId);
+  }
+
+  Future<void> _alinharFuncionarioComVendedor(
+    String usuarioId,
+    int vendedorId,
+  ) async {
+    final f = widget.funcionarioRepository.obterPorUsuarioSistemaId(usuarioId);
+    if (f == null) return;
+    if (vendedorId <= 0) return;
+    if (f.vendedorId == vendedorId) return;
+    f.vendedorId = vendedorId;
+    widget.funcionarioRepository.salvar(f);
   }
 
   Future<void> _salvar() async {
@@ -230,6 +255,7 @@ class _UsuariosPageState extends State<UsuariosPage>
         anterior: anterior,
         senhaPlainNova: senha.isEmpty ? null : senha,
       );
+      await _alinharFuncionarioComVendedor(usuario.id, usuario.vendedorId);
     } catch (e) {
       _mostrarSnack(e.toString(), erro: true);
       return;
@@ -629,6 +655,31 @@ class _UsuariosPageState extends State<UsuariosPage>
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Usuario e o login do sistema (permissoes e uma senha so). '
+                    'Para vender no PDV com este login, vincule o vendedor abaixo. '
+                    'Funcionario (RH) e Vendedor (comissao) sao cadastros separados.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
         if (editando)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -809,7 +860,8 @@ class _UsuariosPageState extends State<UsuariosPage>
             decoration: const InputDecoration(
               labelText: 'Vendedor vinculado (PDV)',
               helperText:
-                  'Permite identificar este usuario no bloqueio do PDV com login e senha.',
+                  'Permite desbloquear o PDV com o login e a senha deste usuario. '
+                  'Se o RH ja vinculou um funcionario, o vendedor e preenchido automaticamente.',
               border: OutlineInputBorder(),
             ),
             items: [

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,12 +26,14 @@ class SyncPushIdempotency {
     final raw = prefs.getString(_kMutations);
     if (batchId.isEmpty || raw == null || raw.trim().isEmpty) return null;
     try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return null;
-      final mutations = decoded
-          .whereType<Map>()
-          .map((m) => Map<String, dynamic>.from(m))
-          .toList();
+      final mutations = await Isolate.run(() {
+        final decoded = jsonDecode(raw);
+        if (decoded is! List) return <Map<String, dynamic>>[];
+        return decoded
+            .whereType<Map>()
+            .map((m) => Map<String, dynamic>.from(m))
+            .toList();
+      });
       if (mutations.isEmpty) return null;
       return (batchId: batchId, mutations: mutations);
     } catch (_) {
@@ -45,7 +48,8 @@ class SyncPushIdempotency {
     if (batchId.trim().isEmpty || mutations.isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kBatchId, batchId.trim());
-    await prefs.setString(_kMutations, jsonEncode(mutations));
+    final encoded = await Isolate.run(() => jsonEncode(mutations));
+    await prefs.setString(_kMutations, encoded);
   }
 
   static Future<void> limparPendente() async {

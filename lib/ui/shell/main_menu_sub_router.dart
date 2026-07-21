@@ -110,12 +110,14 @@ class MainMenuSubRouter {
       case MainMenuSubDestino.cadastrosVendedores:
         return VendedoresPage(
           vendedorRepository: deps.vendedorRepository,
+          usuarioRepository: UsuarioRepository(),
         );
       case MainMenuSubDestino.cadastrosUsuarios:
         return UsuariosPage(
           usuarioRepository: UsuarioRepository(),
           motoristaRepository: deps.motoristaRepository,
           vendedorRepository: deps.vendedorRepository,
+          funcionarioRepository: deps.funcionarioRepository,
           usuarioLogado: u,
         );
       case MainMenuSubDestino.fiscalImportarNfe:

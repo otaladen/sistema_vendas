@@ -25,6 +25,7 @@ class HistoricoEntrada {
   /// ide/nNF
   int numeroNota;
 
+  @Index()
   String chaveAcesso;
 
   @Property(type: PropertyType.dateUtc)

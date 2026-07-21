@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_semantic_helper.dart';
+import 'estoque_layout.dart';
 
 /// Faixa compacta de alertas operacionais do estoque.
 class EstoqueAlertaStrip extends StatelessWidget {
@@ -33,6 +34,7 @@ class EstoqueAlertaStrip extends StatelessWidget {
     final theme = Theme.of(context);
     final semantic = context.semanticColors;
     final scheme = theme.colorScheme;
+    final compact = EstoqueLayout.isCompact(context);
     final severo = criticosDiagnostico > 0;
     final fg = severo ? semantic.errorFg : semantic.warningFg;
     final bg = severo ? semantic.errorBg : semantic.warningBg;
@@ -41,12 +43,80 @@ class EstoqueAlertaStrip extends StatelessWidget {
     final partes = <String>[];
     if (_temDiagnostico) {
       partes.add(
-        '$criticosDiagnostico critico(s) e $alertasDiagnostico alerta(s) no estoque',
+        compact
+            ? '$criticosDiagnostico crit. · $alertasDiagnostico alerta(s)'
+            : '$criticosDiagnostico critico(s) e $alertasDiagnostico alerta(s) no estoque',
       );
     }
     if (_temPp) {
-      partes.add('$qtdCriticosPp produto(s) no ou abaixo do PP');
+      partes.add(
+        compact
+            ? '$qtdCriticosPp no PP'
+            : '$qtdCriticosPp produto(s) no ou abaixo do PP',
+      );
     }
+
+    final acoes = <Widget>[
+      if (_temDiagnostico && onVerDiagnostico != null)
+        compact
+            ? IconButton(
+                tooltip: 'Diagnostico',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                onPressed: onVerDiagnostico,
+                icon: Icon(Icons.health_and_safety_outlined, color: fg),
+              )
+            : TextButton(
+                onPressed: onVerDiagnostico,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text('Diagnostico'),
+              ),
+      if (_temPp && onFiltrarPp != null)
+        compact
+            ? IconButton(
+                tooltip: 'Filtrar PP',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                onPressed: onFiltrarPp,
+                icon: Icon(Icons.filter_alt_outlined, color: fg),
+              )
+            : TextButton(
+                onPressed: onFiltrarPp,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text('Filtrar PP'),
+              ),
+      if (_temPp && onListaCompra != null)
+        compact
+            ? IconButton(
+                tooltip: 'Lista de compras',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                onPressed: onListaCompra,
+                icon: Icon(Icons.playlist_add_check_outlined, color: fg),
+              )
+            : TextButton(
+                onPressed: onListaCompra,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text('Compras'),
+              ),
+      if (onDismiss != null)
+        IconButton(
+          tooltip: 'Ocultar alertas',
+          visualDensity: VisualDensity.compact,
+          iconSize: 18,
+          onPressed: onDismiss,
+          icon: Icon(Icons.close, color: scheme.onSurfaceVariant),
+        ),
+    ];
 
     return Material(
       color: bg.withValues(alpha: 0.55),
@@ -57,7 +127,10 @@ class EstoqueAlertaStrip extends StatelessWidget {
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 8 : 12,
+            vertical: compact ? 4 : 6,
+          ),
           child: Row(
             children: [
               Icon(
@@ -71,49 +144,16 @@ class EstoqueAlertaStrip extends StatelessWidget {
               Expanded(
                 child: Text(
                   partes.join(' · '),
-                  maxLines: 2,
+                  maxLines: compact ? 1 : 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurface,
                     fontWeight: FontWeight.w600,
+                    fontSize: compact ? 12 : null,
                   ),
                 ),
               ),
-              if (_temDiagnostico && onVerDiagnostico != null)
-                TextButton(
-                  onPressed: onVerDiagnostico,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                  child: const Text('Diagnostico'),
-                ),
-              if (_temPp && onFiltrarPp != null)
-                TextButton(
-                  onPressed: onFiltrarPp,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                  child: const Text('Filtrar PP'),
-                ),
-              if (_temPp && onListaCompra != null)
-                TextButton(
-                  onPressed: onListaCompra,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                  child: const Text('Compras'),
-                ),
-              if (onDismiss != null)
-                IconButton(
-                  tooltip: 'Ocultar alertas',
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 18,
-                  onPressed: onDismiss,
-                  icon: Icon(Icons.close, color: scheme.onSurfaceVariant),
-                ),
+              ...acoes,
             ],
           ),
         ),

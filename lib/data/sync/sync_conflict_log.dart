@@ -106,7 +106,41 @@ class SyncConflictLog {
   static Future<void> carregarSeNecessario() async {
     if (_carregado) return;
     final prefs = await SharedPreferences.getInstance();
-    recentes.value = List.unmodifiable(_ler(prefs));
+    var lista = _ler(prefs);
+    // Avisos de "edicao simultanea" / config mesclada nao pedem mais acao:
+    // o remoto ja e aplicado automaticamente na rede.
+    final filtrada = lista
+        .where(
+          (e) =>
+              e.tipo != SyncConflictTipo.editEdit &&
+              e.tipo != SyncConflictTipo.configMerge,
+        )
+        .toList();
+    if (filtrada.length != lista.length) {
+      await _gravar(prefs, filtrada);
+      lista = filtrada;
+    }
+    recentes.value = List.unmodifiable(lista);
+    _carregado = true;
+  }
+
+  /// Remove avisos antigos que exigiam "Aceitar remoto" (agora automatico).
+  static Future<void> limparAvisosDeAceiteRemoto() async {
+    final prefs = await SharedPreferences.getInstance();
+    final lista = _ler(prefs);
+    final filtrada = lista
+        .where(
+          (e) =>
+              e.tipo != SyncConflictTipo.editEdit &&
+              e.tipo != SyncConflictTipo.configMerge,
+        )
+        .toList();
+    if (filtrada.length == lista.length) {
+      recentes.value = List.unmodifiable(lista);
+      return;
+    }
+    await _gravar(prefs, filtrada);
+    recentes.value = List.unmodifiable(filtrada);
     _carregado = true;
   }
 

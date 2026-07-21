@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import '../../domain/main_menu_destino.dart';
 import '../../domain/main_menu_sub_destino.dart';
 import '../../model/usuario_sistema.dart';
+import '../theme/app_menu_modo_scope.dart';
 import '../theme/app_modulo_cores.dart';
+import '../theme/app_tema_scope.dart';
+import '../widgets/seletor_menu_modo_app.dart';
+import '../widgets/seletor_tema_app.dart';
 
 /// Menu em gaveta (drawer) para layout mobile / tablet estreito.
 class AppMenuDrawer extends StatelessWidget {
@@ -86,8 +90,53 @@ class AppMenuDrawer extends StatelessWidget {
                 ],
               ),
             ),
+            const Divider(height: 1),
+            const _DrawerPersonalizacao(),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _DrawerPersonalizacao extends StatelessWidget {
+  const _DrawerPersonalizacao();
+
+  @override
+  Widget build(BuildContext context) {
+    final temaScope = AppTemaScope.maybeOf(context);
+    final menuScope = AppMenuModoScope.maybeOf(context);
+    if (temaScope == null && menuScope == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+      child: Column(
+        children: [
+          if (temaScope != null)
+            ListTile(
+              leading: const Icon(Icons.palette_outlined),
+              title: const Text('Temas'),
+              subtitle: Text(temaScope.temaAtual.rotulo),
+              trailing: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: temaScope.temaAtual.corDestaque,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              onTap: () => SeletorTemaApp.mostrarFolha(context),
+            ),
+          if (menuScope != null)
+            ListTile(
+              leading: Icon(menuScope.modoAtual.icone),
+              title: const Text('Modo do menu'),
+              subtitle: Text(menuScope.modoAtual.rotulo),
+              onTap: () => SeletorMenuModoApp.mostrarFolha(context),
+            ),
+        ],
       ),
     );
   }

@@ -30,8 +30,10 @@ class Vendedor {
   int id;
 
   /// Codigo curto para cupons e identificacao interna (ex.: V03).
+  @Index()
   String codigoInterno;
 
+  @Index()
   String nomeCompleto;
 
   /// Nome impresso/em telas onde cabe menos texto.
@@ -47,6 +49,7 @@ class Vendedor {
 
   String observacoesComerciais;
 
+  @Index()
   bool ativo;
 
   /// Hash da senha/PIN para identificacao no PDV ([UsuarioSenhaCodec]).

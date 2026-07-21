@@ -16,6 +16,7 @@ import '../data/produto_busca_util.dart';
 import '../data/produto_repository.dart';
 import '../data/produto_sugestao_venda_repository.dart';
 import '../data/sugestao_venda_metrica_repository.dart';
+import '../data/sync/lan_sync_scheduler.dart';
 import '../domain/sugestao_venda_metrica_constantes.dart';
 import '../data/venda_repository.dart';
 import '../domain/promocao_info_vigente.dart';
@@ -123,6 +124,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   late final FocusNode _listaFocus;
   late final ScrollController _scrollController;
   Timer? _debounce;
+  Timer? _debouncePreview;
   late final SugestaoVendaMetricaRepository _sugestaoMetricaRepo;
 
   late String _precoListaAtivo;
@@ -131,7 +133,11 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       GlobalKey<PdvConsultaControlesAdicionarState>();
   List<Produto> _produtosBase = [];
   List<Produto> _produtos = [];
+  /// Preco/promo/estoque precalculados por linha (evita trabalho no itemBuilder).
+  List<_PdvConsultaLinhaVm> _linhasVm = const [];
   int? _indiceSelecionado;
+  /// Painel lateral atualizado com debounce no teclado (evita piscar foto/layout).
+  Produto? _produtoPreviewPainel;
   bool _painelPreviewVisivel = true;
   bool _filtrosExpandidos = false;
   bool _atalhosVisiveis = false;
@@ -171,6 +177,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _debouncePreview?.cancel();
     _pesquisaController.dispose();
     _pesquisaFocus.dispose();
     _listaFocus.dispose();
@@ -385,17 +392,40 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   void _reaplicarFiltrosLocais() {
     setState(() {
       _produtos = _filtrarProdutos(_produtosBase);
+      _remontarLinhasVm();
       _subtituloLista = _montarSubtituloLista(_produtosBase, _termoBuscaAtual);
       if (_produtos.isEmpty) {
         _indiceSelecionado = null;
+        _produtoPreviewPainel = null;
       } else {
         final atual = _indiceSelecionado ?? 0;
         _indiceSelecionado = atual.clamp(0, _produtos.length - 1);
+        _produtoPreviewPainel = _produtos[_indiceSelecionado!];
       }
     });
+    _debouncePreview?.cancel();
     if (_produtos.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollParaIndice());
     }
+  }
+
+  void _remontarLinhasVm() {
+    final tabela = _precoListaAtivo;
+    final lista = _produtos;
+    _linhasVm = List<_PdvConsultaLinhaVm>.generate(lista.length, (i) {
+      final item = lista[i];
+      final res = widget.resolverPromocao?.call(item, tabela);
+      final preco = res?.precoFinal ?? widget.precoUnitarioDe(item, tabela);
+      final emPromo = res?.emPromocao ?? false;
+      return _PdvConsultaLinhaVm(
+        produto: item,
+        precoFormatado: widget.formatarMoeda(preco),
+        emPromocao: emPromo,
+        precoDeFormatado:
+            emPromo ? widget.formatarMoeda(res!.precoBasePreco1) : null,
+        estoqueNivel: PdvEstoqueSemaforoUtil.nivelDe(item),
+      );
+    }, growable: false);
   }
 
   void _onFiltroSomenteComEstoqueChanged(bool value) {
@@ -420,22 +450,29 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     }
   }
 
+  static const double _alturaLinhaConsulta =
+      PdvConsultaLinhaProduto.alturaLinhaExpandida;
+
   double _alturaItemLista(int index) {
-    if (index < 0 || index >= _produtos.length) {
-      return PdvConsultaLinhaProduto.alturaLinha;
-    }
-    return PdvConsultaLinhaProduto.alturaPara(
-      expandido: _indiceSelecionado == index,
-      produto: _produtos[index],
-    );
+    // Altura fixa para itemExtent / scroll O(1).
+    return _alturaLinhaConsulta;
   }
 
   double _offsetAcumuladoItemLista(int index) {
-    var offset = 0.0;
-    for (var i = 0; i < index; i++) {
-      offset += _alturaItemLista(i);
+    if (index <= 0) return 0;
+    return index * _alturaLinhaConsulta;
+  }
+
+  Future<void> _puxarProdutosDaRede() async {
+    final erro = await LanSyncScheduler.solicitarSyncCompleto();
+    if (!mounted) return;
+    widget.produtoRepository.invalidarCacheBusca();
+    _atualizarLista(manterFocoNaPesquisa: true);
+    if (erro != null && erro.trim().isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sync: $erro')),
+      );
     }
-    return offset;
   }
 
   void _atualizarLista({
@@ -473,11 +510,14 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     setState(() {
       _produtosBase = lista;
       _produtos = filtrada;
+      _remontarLinhasVm();
       _termoBuscaAtual = termo;
       _subtituloLista = _montarSubtituloLista(lista, termo);
       _indiceSelecionado = filtrada.isEmpty ? null : 0;
+      _produtoPreviewPainel = filtrada.isEmpty ? null : filtrada.first;
       _quantidadeAdicionar = 1;
     });
+    _debouncePreview?.cancel();
 
     if (_produtos.isNotEmpty) {
       _reposicionarListaAposBusca();
@@ -549,17 +589,32 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     return out;
   }
 
-  void _scrollParaIndice() {
+  void _scrollParaIndice({bool forcarTopo = false}) {
     final i = _indiceSelecionado;
     if (i == null) return;
-    _scrollParaOffsetIndice(i);
+    _garantirIndiceVisivel(i, forcarTopo: forcarTopo);
   }
 
-  void _scrollParaOffsetIndice(int indice) {
+  /// So rola se o item estiver fora da area visivel (setas). Em busca nova,
+  /// [forcarTopo] alinha o 1º resultado no topo.
+  void _garantirIndiceVisivel(int indice, {bool forcarTopo = false}) {
     if (!_scrollController.hasClients) return;
-    final max = _scrollController.position.maxScrollExtent;
-    final target = _offsetAcumuladoItemLista(indice).clamp(0.0, max);
-    if ((_scrollController.offset - target).abs() > 0.5) {
+    final position = _scrollController.position;
+    final itemTop = _offsetAcumuladoItemLista(indice);
+    final itemBottom = itemTop + _alturaItemLista(indice);
+    final max = position.maxScrollExtent;
+    final viewTop = position.pixels;
+    final viewBottom = viewTop + position.viewportDimension;
+
+    double? target;
+    if (forcarTopo) {
+      target = itemTop.clamp(0.0, max);
+    } else if (itemTop < viewTop) {
+      target = itemTop.clamp(0.0, max);
+    } else if (itemBottom > viewBottom) {
+      target = (itemBottom - position.viewportDimension).clamp(0.0, max);
+    }
+    if (target != null && (position.pixels - target).abs() > 0.5) {
       _scrollController.jumpTo(target);
     }
   }
@@ -572,7 +627,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       if (!mounted) return;
       tentativas++;
       if (_scrollController.hasClients) {
-        _scrollParaOffsetIndice(_indiceSelecionado ?? 0);
+        _garantirIndiceVisivel(_indiceSelecionado ?? 0, forcarTopo: true);
         return;
       }
       if (tentativas < 4) {
@@ -756,11 +811,35 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     return _produtos[i];
   }
 
+  Produto? get _produtoParaPainel =>
+      _produtoPreviewPainel ?? _produtoSelecionado;
+
+  void _sincronizarPainelPreview({required bool imediato}) {
+    final atual = _produtoSelecionado;
+    if (imediato) {
+      _debouncePreview?.cancel();
+      if (_produtoPreviewPainel?.id == atual?.id) {
+        _produtoPreviewPainel = atual;
+        return;
+      }
+      _produtoPreviewPainel = atual;
+      return;
+    }
+    _debouncePreview?.cancel();
+    _debouncePreview = Timer(const Duration(milliseconds: 120), () {
+      if (!mounted) return;
+      final p = _produtoSelecionado;
+      if (_produtoPreviewPainel?.id == p?.id) return;
+      setState(() => _produtoPreviewPainel = p);
+    });
+  }
+
   void _selecionarIndice(int index) {
     if (index < 0 || index >= _produtos.length) return;
     setState(() {
       _indiceSelecionado = index;
       _quantidadeAdicionar = 1;
+      _sincronizarPainelPreview(imediato: true);
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -772,7 +851,10 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   void _selecionarTabelaPreco(String novaTabela) {
     final tabela = PdvTabelaPrecoUtil.normalizar(novaTabela);
     if (tabela == _precoListaAtivo) return;
-    setState(() => _precoListaAtivo = tabela);
+    setState(() {
+      _precoListaAtivo = tabela;
+      _remontarLinhasVm();
+    });
     if (_filtroSomentePromocao) {
       _reaplicarFiltrosLocais();
     }
@@ -820,6 +902,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       context,
       produto: p,
       campanhasVigentes: widget.campanhasVigentesDe?.call(p) ?? const [],
+      imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
     );
     if (!mounted) return;
     _listaFocus.requestFocus();
@@ -926,7 +1009,9 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   }
 
   KeyEventResult _onKeyLista(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
     if (_produtos.isEmpty) return KeyEventResult.ignored;
 
     final n = _produtos.length;
@@ -934,19 +1019,32 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     i = i.clamp(0, n - 1);
 
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      setState(() => _indiceSelecionado = (i + 1).clamp(0, n - 1));
+      final novo = (i + 1).clamp(0, n - 1);
+      if (novo == (_indiceSelecionado ?? i)) {
+        return KeyEventResult.handled;
+      }
+      setState(() {
+        _produtoPreviewPainel ??= _produtos[i];
+        _indiceSelecionado = novo;
+      });
+      _sincronizarPainelPreview(imediato: false);
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollParaIndice());
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
       if (i == 0) {
-        _focarCampoBusca();
+        if (event is KeyDownEvent) _focarCampoBusca();
         return KeyEventResult.handled;
       }
-      setState(() => _indiceSelecionado = i - 1);
+      setState(() {
+        _produtoPreviewPainel ??= _produtos[i];
+        _indiceSelecionado = i - 1;
+      });
+      _sincronizarPainelPreview(imediato: false);
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollParaIndice());
       return KeyEventResult.handled;
     }
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.f8) {
       _focarCampoBusca();
       return KeyEventResult.handled;
@@ -1128,6 +1226,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   Widget _buildPainelPreview(Produto produto, {required bool compacto}) {
     final campanhas = widget.campanhasVigentesDe?.call(produto) ?? const [];
     return PdvConsultaPreviewPanel(
+      key: ValueKey<int>(produto.id),
       produto: produto,
       precoListaAtivo: _precoListaAtivo,
       precoUnitarioDe: widget.precoUnitarioDe,
@@ -1154,6 +1253,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           ? _adicionarAgregadoSugerido
           : null,
       rotulosDeposito: widget.rotulosDeposito,
+      imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
     );
   }
 
@@ -1215,73 +1315,66 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           rotuloColunaPreco: widget.rotuloPreco(_precoListaAtivo),
         ),
         Expanded(
-          child: Focus(
-            focusNode: _listaFocus,
-            onKeyEvent: _onKeyLista,
-            child: ListView.builder(
-              key: ValueKey<String>(
-                'pdv-consulta-$_termoBuscaAtual-${_produtos.length}-'
-                '$_indiceSelecionado',
-              ),
-              controller: _scrollController,
-              itemCount: _produtos.length,
-              itemBuilder: (context, index) {
-                final item = _produtos[index];
+          child: RefreshIndicator(
+            onRefresh: _puxarProdutosDaRede,
+            child: Focus(
+              focusNode: _listaFocus,
+              onKeyEvent: _onKeyLista,
+              child: ListView.builder(
+                key: const ValueKey<String>('pdv-consulta-lista'),
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                itemExtent: _alturaLinhaConsulta,
+                cacheExtent: 280,
+                itemCount: _linhasVm.length,
+                itemBuilder: (context, index) {
+                final vm = _linhasVm[index];
+                final item = vm.produto;
                 final selecionado = _indiceSelecionado == index;
                 final qtdOrcamento =
                     widget.quantidadeNoOrcamentoDe?.call(item.id) ?? 0;
                 final scheme = Theme.of(context).colorScheme;
-                final res =
-                    widget.resolverPromocao?.call(item, _precoListaAtivo);
-                final preco = res?.precoFinal ??
-                    widget.precoUnitarioDe(item, _precoListaAtivo);
-                final emPromo = res?.emPromocao ?? false;
-                final precoDe = emPromo
-                    ? widget.formatarMoeda(res!.precoBasePreco1)
-                    : null;
-                final altura = _alturaItemLista(index);
-                return SizedBox(
-                  height: altura,
-                  child: Material(
-                    color: selecionado
-                        ? scheme.primaryContainer.withValues(alpha: 0.55)
-                        : (index.isOdd
-                            ? scheme.surfaceContainerLow
-                            : scheme.surface),
-                    child: InkWell(
-                      onTap: () => _selecionarIndice(index),
-                      onDoubleTap: () =>
-                          _confirmarProduto(item, adicionarDireto: true),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                              color:
-                                  scheme.outlineVariant.withValues(alpha: 0.55),
-                            ),
+                return Material(
+                  key: ValueKey<int>(item.id),
+                  color: selecionado
+                      ? scheme.primaryContainer.withValues(alpha: 0.55)
+                      : (index.isOdd
+                          ? scheme.surfaceContainerLow
+                          : scheme.surface),
+                  child: InkWell(
+                    onTap: () => _selecionarIndice(index),
+                    onDoubleTap: () =>
+                        _confirmarProduto(item, adicionarDireto: true),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color:
+                                scheme.outlineVariant.withValues(alpha: 0.55),
                           ),
                         ),
-                        child: PdvConsultaLinhaProduto(
-                          produto: item,
-                          termoBusca: _termoBuscaAtual,
-                          precoFormatado: widget.formatarMoeda(preco),
-                          emPromocao: emPromo,
-                          precoDeFormatado: precoDe,
-                          selecionado: selecionado,
-                          quantidadeNoOrcamento: qtdOrcamento,
-                          tooltipAdicionar:
-                              'Adicionar 1 (${widget.rotuloPreco(_precoListaAtivo)})',
-                          onAdicionar: () {
-                            Navigator.of(context).pop(
-                              PdvConsultaProdutoResult(
-                                produto: item,
-                                precoListaAtivo: _precoListaAtivo,
-                                adicaoDireta: true,
-                                abrirDialogoAdicionar: false,
-                              ),
-                            );
-                          },
-                        ),
+                      ),
+                      child: PdvConsultaLinhaProduto(
+                        produto: item,
+                        termoBusca: _termoBuscaAtual,
+                        precoFormatado: vm.precoFormatado,
+                        emPromocao: vm.emPromocao,
+                        precoDeFormatado: vm.precoDeFormatado,
+                        estoqueNivel: vm.estoqueNivel,
+                        selecionado: selecionado,
+                        quantidadeNoOrcamento: qtdOrcamento,
+                        tooltipAdicionar:
+                            'Adicionar 1 (${widget.rotuloPreco(_precoListaAtivo)})',
+                        onAdicionar: () {
+                          Navigator.of(context).pop(
+                            PdvConsultaProdutoResult(
+                              produto: item,
+                              precoListaAtivo: _precoListaAtivo,
+                              adicaoDireta: true,
+                              abrirDialogoAdicionar: false,
+                            ),
+                          );
+                        },
                       ),
                     ),
                   ),
@@ -1290,16 +1383,18 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
             ),
           ),
         ),
+        ),
       ],
     );
   }
 
   Widget _buildAreaListaComPreview() {
     final selecionado = _produtoSelecionado;
+    final painel = _produtoParaPainel;
     return LayoutBuilder(
       builder: (context, constraints) {
         final painelLateral = constraints.maxWidth >= _breakpointPainelLateral;
-        if (selecionado == null) {
+        if (selecionado == null || painel == null) {
           return _buildListaProdutos();
         }
         if (painelLateral) {
@@ -1312,7 +1407,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
               Expanded(child: _buildListaProdutos()),
               SizedBox(
                 width: _larguraPainelPreview,
-                child: _buildPainelPreview(selecionado, compacto: false),
+                child: _buildPainelPreview(painel, compacto: false),
               ),
             ],
           );
@@ -1370,16 +1465,17 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
         child: Builder(
           builder: (context) {
             final selecionado = _produtoSelecionado;
+            final painel = _produtoParaPainel;
             final usarDrawer =
                 selecionado != null &&
                 MediaQuery.sizeOf(context).width < _breakpointPainelLateral;
 
             return Scaffold(
               key: _scaffoldKey,
-              endDrawer: usarDrawer
+              endDrawer: usarDrawer && painel != null
                   ? Drawer(
                       width: _larguraPainelPreview,
-                      child: _buildPainelPreview(selecionado, compacto: true),
+                      child: _buildPainelPreview(painel, compacto: true),
                     )
                   : null,
               onEndDrawerChanged: (aberto) {
@@ -1451,4 +1547,21 @@ class _PdvConsultaFocoBuscaIntent extends Intent {
 
 class _PdvConsultaFecharIntent extends Intent {
   const _PdvConsultaFecharIntent();
+}
+
+/// Dados de linha precalculados (preco/promo/estoque) fora do [itemBuilder].
+class _PdvConsultaLinhaVm {
+  const _PdvConsultaLinhaVm({
+    required this.produto,
+    required this.precoFormatado,
+    required this.emPromocao,
+    required this.estoqueNivel,
+    this.precoDeFormatado,
+  });
+
+  final Produto produto;
+  final String precoFormatado;
+  final bool emPromocao;
+  final String? precoDeFormatado;
+  final PdvEstoqueSemaforoNivel estoqueNivel;
 }

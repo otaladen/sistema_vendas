@@ -56,45 +56,53 @@ class AuditoriaRepository {
   }
 
   List<AuditoriaEvento> listar({AuditoriaFiltro filtro = const AuditoriaFiltro()}) {
-    final q = _db.auditoriaEventoBox
-        .query()
+    Condition<AuditoriaEvento>? cond;
+    final inicio = filtro.inicio;
+    final fim = filtro.fim;
+    if (inicio != null) {
+      cond = AuditoriaEvento_.dataHora.greaterOrEqualDate(inicio.toUtc());
+    }
+    if (fim != null) {
+      final fimUtc = DateTime(
+        fim.year,
+        fim.month,
+        fim.day,
+        23,
+        59,
+        59,
+        999,
+      ).toUtc();
+      final cFim = AuditoriaEvento_.dataHora.lessOrEqualDate(fimUtc);
+      cond = cond == null ? cFim : cond.and(cFim);
+    }
+    final modulo = filtro.modulo?.trim();
+    if (modulo != null && modulo.isNotEmpty) {
+      final cMod = AuditoriaEvento_.modulo.equals(modulo);
+      cond = cond == null ? cMod : cond.and(cMod);
+    }
+
+    final q = (cond == null
+            ? _db.auditoriaEventoBox.query()
+            : _db.auditoriaEventoBox.query(cond))
         .order(AuditoriaEvento_.dataHora, flags: Order.descending)
         .build();
     try {
-      var lista = q.find();
-      final inicio = filtro.inicio;
-      final fim = filtro.fim;
-      if (inicio != null) {
-        final iniUtc = inicio.toUtc();
-        lista = lista
-            .where((e) => !e.dataHora.toUtc().isBefore(iniUtc))
-            .toList();
-      }
-      if (fim != null) {
-        final fimUtc = DateTime(
-          fim.year,
-          fim.month,
-          fim.day,
-          23,
-          59,
-          59,
-          999,
-        ).toUtc();
-        lista = lista
-            .where((e) => !e.dataHora.toUtc().isAfter(fimUtc))
-            .toList();
-      }
-      final modulo = filtro.modulo?.trim();
-      if (modulo != null && modulo.isNotEmpty) {
-        lista = lista.where((e) => e.modulo == modulo).toList();
-      }
       final usuario = filtro.usuarioLogin?.trim().toLowerCase();
+      final termo = filtro.termoBusca?.trim().toLowerCase();
+      final precisaFiltroTexto =
+          (usuario != null && usuario.isNotEmpty) ||
+          (termo != null && termo.isNotEmpty);
+      // Overfetch quando ha filtro textual em Dart; senao limita na query.
+      q.limit = precisaFiltroTexto
+          ? (filtro.limite * 8).clamp(filtro.limite, 20000)
+          : filtro.limite;
+
+      var lista = q.find();
       if (usuario != null && usuario.isNotEmpty) {
         lista = lista
             .where((e) => e.usuarioLogin.toLowerCase().contains(usuario))
             .toList();
       }
-      final termo = filtro.termoBusca?.trim().toLowerCase();
       if (termo != null && termo.isNotEmpty) {
         lista = lista.where((e) {
           final blob = [

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/sync/sync_api_client.dart';
@@ -9,6 +10,14 @@ import '../data/sync/sync_api_client.dart';
 class LanSyncServerManager {
   static const _kPid = 'lan_sync_server_pid';
   static const portaPadrao = 8787;
+
+  /// Mesma pasta usada pelo ObjectBox para fotos de produto.
+  static Future<String> caminhoPadraoProductImages() async {
+    final baseDir = Platform.isWindows
+        ? await getApplicationSupportDirectory()
+        : await getApplicationDocumentsDirectory();
+    return p.join(baseDir.path, 'product_images');
+  }
 
   /// Caminhos possiveis do executavel (instalacao e desenvolvimento).
   static Future<String?> localizarExecutavel() async {
@@ -19,13 +28,30 @@ class LanSyncServerManager {
       candidatos.add(
         p.join(exeDir, 'sync_server', 'sistema_vendas_sync_server.exe'),
       );
+      candidatos.add(
+        p.join(exeDir, 'sync_server', 'sistema_vendas_sync_server_presenca.exe'),
+      );
+      candidatos.add(
+        p.join(exeDir, 'sync_server', 'sistema_vendas_sync_server_novo.exe'),
+      );
       candidatos.add(p.join(exeDir, 'sistema_vendas_sync_server.exe'));
+      candidatos.add(p.join(exeDir, 'sistema_vendas_sync_server_presenca.exe'));
     } catch (_) {}
 
     var dir = Directory.current;
     for (var i = 0; i < 8; i++) {
       candidatos.add(
         p.join(dir.path, 'sync_server', 'sistema_vendas_sync_server.exe'),
+      );
+      candidatos.add(
+        p.join(
+          dir.path,
+          'sync_server',
+          'sistema_vendas_sync_server_presenca.exe',
+        ),
+      );
+      candidatos.add(
+        p.join(dir.path, 'sync_server', 'sistema_vendas_sync_server_novo.exe'),
       );
       final parent = dir.parent;
       if (parent.path == dir.path) break;
@@ -88,16 +114,49 @@ class LanSyncServerManager {
     return servidorRespondendo('http://localhost:$porta');
   }
 
+  /// Encerra o processo gravado e qualquer sync_server residual na porta.
+  static Future<void> pararServidor() async {
+    if (!Platform.isWindows) return;
+    final prefs = await SharedPreferences.getInstance();
+    final pid = prefs.getInt(_kPid);
+    if (pid != null && pid > 0) {
+      try {
+        await Process.run('taskkill', ['/PID', '$pid', '/F']);
+      } catch (_) {}
+      await prefs.remove(_kPid);
+    }
+    // Mata exes residuais (abertos a mao / sessao antiga) que apontam pasta errada.
+    for (final nome in const [
+      'sistema_vendas_sync_server.exe',
+      'sistema_vendas_sync_server_presenca.exe',
+      'sistema_vendas_sync_server_novo.exe',
+    ]) {
+      try {
+        await Process.run('taskkill', ['/IM', nome, '/F']);
+      } catch (_) {}
+    }
+  }
+
   /// Inicia o processo do servidor (Windows). Retorna mensagem de erro ou null se OK.
+  ///
+  /// Sempre define [SYNC_PRODUCT_IMAGES_PATH] para a pasta de fotos do app —
+  /// senao o exe usa uma pasta vazia ao lado dele e o celular toma "foto indisponivel"
+  /// mesmo com as imagens aparecendo no PC.
   static Future<String?> iniciarServidor({
     int porta = portaPadrao,
     String syncToken = '',
+    String? productImagesPath,
   }) async {
     if (!Platform.isWindows) {
       return 'Iniciar servidor pelo app so esta disponivel no Windows.';
     }
+
+    final fotos = (productImagesPath ?? await caminhoPadraoProductImages()).trim();
+
+    // Sempre reinicia: garante a pasta correta de fotos do app.
     if (await servidorRespondendoNaPorta(porta)) {
-      return null;
+      await pararServidor();
+      await Future<void>.delayed(const Duration(milliseconds: 800));
     }
 
     final exe = await localizarExecutavel();
@@ -113,6 +172,10 @@ class LanSyncServerManager {
       if (token.isNotEmpty) {
         env['SYNC_TOKEN'] = token;
         env['SYNC_REQUIRE_TOKEN'] = '1';
+      }
+      if (fotos.isNotEmpty) {
+        env['SYNC_PRODUCT_IMAGES_PATH'] = fotos;
+        Directory(fotos).createSync(recursive: true);
       }
       final process = await Process.start(
         exe,
@@ -134,19 +197,6 @@ class LanSyncServerManager {
           'Verifique o firewall do Windows.';
     } catch (e) {
       return 'Nao foi possivel iniciar o servidor: $e';
-    }
-  }
-
-  /// Encerra o processo gravado (se existir).
-  static Future<void> pararServidor() async {
-    if (!Platform.isWindows) return;
-    final prefs = await SharedPreferences.getInstance();
-    final pid = prefs.getInt(_kPid);
-    if (pid != null && pid > 0) {
-      try {
-        await Process.run('taskkill', ['/PID', '$pid', '/F']);
-      } catch (_) {}
-      await prefs.remove(_kPid);
     }
   }
 

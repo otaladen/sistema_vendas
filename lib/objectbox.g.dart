@@ -223,13 +223,15 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(11, 6060727120274258032),
         name: 'categoria',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(58, 4121276913947952129),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(12, 2904582454658343626),
         name: 'subcategoria',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(59, 5556295470180338407),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(13, 3028419417235337371),
@@ -481,7 +483,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(2, 9148258983918137274),
         name: 'data',
         type: 10,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(61, 6759176643467284999),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(3, 6039271794964740472),
@@ -505,19 +508,22 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(6, 3487146687259899031),
         name: 'cancelada',
         type: 1,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(64, 1876682273500786842),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(7, 9036576713029794994),
         name: 'status',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(62, 2537809778830820880),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(8, 5888505887334690258),
         name: 'numeroOrcamento',
         type: 6,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(63, 1329035664040107441),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(9, 5228539885091922933),
@@ -1001,7 +1007,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(19, 5153641913998207152),
         name: 'ativo',
         type: 1,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(56, 9218157758914014525),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(20, 6486430712394977568),
@@ -1147,13 +1154,15 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(2, 110391731621943108),
         name: 'codigoInterno',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(69, 9067673288514367834),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(3, 2278074910823669549),
         name: 'nomeCompleto',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(70, 4281381343929034028),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(4, 534013903122726007),
@@ -1201,7 +1210,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(11, 8320874757360384906),
         name: 'ativo',
         type: 1,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(71, 1493233917749634520),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(12, 3289138156469858386),
@@ -1271,7 +1281,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(7, 3249171710221978790),
     name: 'Funcionario',
-    lastPropertyId: const obx_int.IdUid(48, 230757213201281030),
+    lastPropertyId: const obx_int.IdUid(49, 5104611447230146497),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -1284,13 +1294,15 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(2, 7943140216547078444),
         name: 'codigoInterno',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(65, 7871079993211196085),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(3, 6409507848063539459),
         name: 'nomeCompleto',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(66, 5385532345151549211),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(4, 2813211527294797575),
@@ -1302,7 +1314,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(5, 131187214661116311),
         name: 'cpf',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(67, 1435189066855864971),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(6, 5870973830851317136),
@@ -1392,7 +1405,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(20, 5532033962013837299),
         name: 'ativo',
         type: 1,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(68, 4066150746431207493),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(21, 2257788251864933108),
@@ -1560,6 +1574,12 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(48, 230757213201281030),
         name: 'asoValidade',
         type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(49, 5104611447230146497),
+        name: 'fotoPath',
+        type: 9,
         flags: 0,
       ),
     ],
@@ -1898,7 +1918,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(3, 6356250174234336792),
         name: 'chaveAcesso',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(57, 8507690066942006089),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(4, 1679461900419267543),
@@ -2354,7 +2375,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(6, 3567165681344611975),
         name: 'status',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(60, 942376906524509277),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(7, 7034060097457663445),
@@ -2885,19 +2907,22 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(2, 9076494333508968551),
         name: 'dataHora',
         type: 10,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(53, 769999752743604777),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(3, 5407055659855695534),
         name: 'usuarioLogin',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(54, 982928444538879359),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(4, 8638775923593055728),
         name: 'modulo',
         type: 9,
-        flags: 0,
+        flags: 2048,
+        indexId: const obx_int.IdUid(55, 8202305037647164907),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(5, 2892429749402290712),
@@ -3506,7 +3531,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
     lastEntityId: const obx_int.IdUid(34, 3947576677985920049),
-    lastIndexId: const obx_int.IdUid(52, 4505790225737692998),
+    lastIndexId: const obx_int.IdUid(71, 1493233917749634520),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -5066,7 +5091,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final cnhCategoriaOffset = fbb.writeString(object.cnhCategoria);
         final tamanhoUniformeOffset = fbb.writeString(object.tamanhoUniforme);
         final epiObservacoesOffset = fbb.writeString(object.epiObservacoes);
-        fbb.startTable(49);
+        final fotoPathOffset = fbb.writeString(object.fotoPath);
+        fbb.startTable(50);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, codigoInternoOffset);
         fbb.addOffset(2, nomeCompletoOffset);
@@ -5115,6 +5141,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addInt64(45, object.cnhValidade?.millisecondsSinceEpoch);
         fbb.addInt64(46, object.asoData?.millisecondsSinceEpoch);
         fbb.addInt64(47, object.asoValidade?.millisecondsSinceEpoch);
+        fbb.addOffset(48, fotoPathOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -5294,6 +5321,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           92,
           false,
         );
+        final fotoPathParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 100, '');
         final dataNascimentoParam = DateTime.fromMillisecondsSinceEpoch(
           const fb.Int64Reader().vTableGet(buffer, rootOffset, 44, 0),
           isUtc: true,
@@ -5369,6 +5399,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           epiObservacoes: epiObservacoesParam,
           podeOperarEmpilhadeira: podeOperarEmpilhadeiraParam,
           podeOperarTranspalete: podeOperarTranspaleteParam,
+          fotoPath: fotoPathParam,
           dataNascimento: dataNascimentoParam,
           cnhValidade: cnhValidadeParam,
           asoData: asoDataParam,
@@ -9095,6 +9126,11 @@ class Funcionario_ {
   /// See [Funcionario.asoValidade].
   static final asoValidade = obx.QueryDateProperty<Funcionario>(
     _entities[6].properties[47],
+  );
+
+  /// See [Funcionario.fotoPath].
+  static final fotoPath = obx.QueryStringProperty<Funcionario>(
+    _entities[6].properties[48],
   );
 }
 

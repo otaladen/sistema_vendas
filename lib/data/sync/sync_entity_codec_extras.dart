@@ -77,6 +77,7 @@ class SyncEntityCodecExtras {
         'epiObservacoes': f.epiObservacoes,
         'podeOperarEmpilhadeira': f.podeOperarEmpilhadeira,
         'podeOperarTranspalete': f.podeOperarTranspalete,
+        'fotoPath': f.fotoPath,
         'criadoEm': _dt(f.criadoEm),
       };
 
@@ -129,6 +130,7 @@ class SyncEntityCodecExtras {
         epiObservacoes: (m['epiObservacoes'] ?? '').toString(),
         podeOperarEmpilhadeira: m['podeOperarEmpilhadeira'] == true,
         podeOperarTranspalete: m['podeOperarTranspalete'] == true,
+        fotoPath: (m['fotoPath'] ?? '').toString(),
         criadoEm: _parseDt((m['criadoEm'] ?? '').toString()),
       );
 
@@ -508,6 +510,7 @@ class SyncEntityCodecExtras {
     'redeSyncToken',
     'backupAutomaticoPasta',
     'ultimoBackupAutomaticoMs',
+    'backupSegundoDestinoPasta',
     'abrirGavetaAutomatica',
     'gavetaPino',
   };
@@ -532,7 +535,6 @@ class SyncEntityCodecExtras {
         'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
         'backupRetencaoMaxCopias': c.backupRetencaoMaxCopias,
         'backupSegundoDestinoAtivo': c.backupSegundoDestinoAtivo,
-        'backupSegundoDestinoPasta': c.backupSegundoDestinoPasta,
         'layoutImpressaoJson': c.layoutImpressaoJson,
         'auditoriaRetencaoDias': c.auditoriaRetencaoDias,
         'margemMinimaPercentualPadrao': c.margemMinimaPercentualPadrao,
@@ -609,9 +611,7 @@ class SyncEntityCodecExtras {
       backupSegundoDestinoAtivo:
           m['backupSegundoDestinoAtivo'] as bool? ??
               base.backupSegundoDestinoAtivo,
-      backupSegundoDestinoPasta:
-          (m['backupSegundoDestinoPasta'] ?? base.backupSegundoDestinoPasta)
-              .toString(),
+      // backupSegundoDestinoPasta: local por PC (S7) — preserva [base].
       layoutImpressaoJson:
           (m['layoutImpressaoJson'] ?? base.layoutImpressaoJson).toString(),
       auditoriaRetencaoDias: AuditoriaRetencaoOpcoes.normalizar(

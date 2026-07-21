@@ -67,9 +67,8 @@ class LocalBackupValidation {
   }
 
   static void validarCadastroProdutos(Directory pastaBackup) {
-    final jsonFile =
-        LocalBackupCadastroProdutosService.arquivoJsonNoBackup(pastaBackup);
-    if (!jsonFile.existsSync()) {
+    final jsonFile = _arquivoJsonCadastroFlexivel(pastaBackup);
+    if (jsonFile == null || !jsonFile.existsSync()) {
       throw LocalBackupInvalidoException(
         'Backup de cadastro de produtos invalido: '
         'arquivo ${LocalBackupCadastroProdutosService.arquivoProdutos} ausente.',
@@ -82,11 +81,25 @@ class LocalBackupValidation {
     }
   }
 
+  /// Aceita pasta raiz do backup ou a subpasta `cadastro_produtos`.
+  static File? _arquivoJsonCadastroFlexivel(Directory pastaBackup) {
+    final aninhado =
+        LocalBackupCadastroProdutosService.arquivoJsonNoBackup(pastaBackup);
+    if (aninhado.existsSync()) return aninhado;
+    final direto = File(
+      p.join(
+        pastaBackup.path,
+        LocalBackupCadastroProdutosService.arquivoProdutos,
+      ),
+    );
+    if (direto.existsSync()) return direto;
+    return null;
+  }
+
   static int? contarProdutosCadastroBackup(Directory pastaBackup) {
     try {
-      final jsonFile =
-          LocalBackupCadastroProdutosService.arquivoJsonNoBackup(pastaBackup);
-      if (!jsonFile.existsSync()) return null;
+      final jsonFile = _arquivoJsonCadastroFlexivel(pastaBackup);
+      if (jsonFile == null || !jsonFile.existsSync()) return null;
       final map = jsonDecode(jsonFile.readAsStringSync()) as Map;
       final q = map['quantidade'];
       if (q is num) return q.toInt();

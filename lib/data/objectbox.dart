@@ -79,6 +79,7 @@ class ObjectBox {
   late Box<RecadoLoja> recadoLojaBox;
   late Box<ConferenciaCargaRomaneio> conferenciaCargaRomaneioBox;
   late Directory productImagesDir;
+  late Directory funcionarioImagesDir;
   late String storeDirectoryPath;
 
   void _inicializarBoxes() {
@@ -138,16 +139,22 @@ class ObjectBox {
         : await getApplicationDocumentsDirectory();
     final objectBoxDir = Directory(p.join(baseDir.path, 'objectbox'));
     final productImagesDir = Directory(p.join(baseDir.path, 'product_images'));
+    final funcionarioImagesDir =
+        Directory(p.join(baseDir.path, 'funcionario_images'));
     if (!objectBoxDir.existsSync()) {
       objectBoxDir.createSync(recursive: true);
     }
     if (!productImagesDir.existsSync()) {
       productImagesDir.createSync(recursive: true);
     }
+    if (!funcionarioImagesDir.existsSync()) {
+      funcionarioImagesDir.createSync(recursive: true);
+    }
 
     final store = await openStore(directory: objectBoxDir.path);
     final instance = ObjectBox._create(store);
     instance.productImagesDir = productImagesDir;
+    instance.funcionarioImagesDir = funcionarioImagesDir;
     instance.storeDirectoryPath = objectBoxDir.path;
     return instance;
   }

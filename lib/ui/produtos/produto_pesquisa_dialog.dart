@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -9,8 +8,10 @@ import '../../data/produto_busca_util.dart';
 import '../../data/produto_repository.dart';
 import '../../domain/produto_unidade_exibicao.dart';
 import '../../model/produto.dart';
+import '../../services/produto_imagem_service.dart';
 import '../layout/app_layout.dart';
 import '../widgets/produto_busca_input.dart';
+import '../widgets/produto_foto_view.dart';
 
 const int _kLoteInicialExibicao = 35;
 const int _kLoteScrollExibicao = 35;
@@ -51,11 +52,14 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   var _somenteInativos = false;
   var _carregados = <Produto>[];
   var _exibidos = 0;
-  var _indiceSelecionado = -1;
+  final ValueNotifier<int> _indiceSelecionado = ValueNotifier(-1);
   var _temMaisNoRepo = true;
   var _carregando = false;
   var _buscaComTexto = false;
   var _fechando = false;
+  final _idsMarcados = <int>{};
+  var _excluindo = false;
+  var _aplicandoFoto = false;
 
   @override
   void initState() {
@@ -70,6 +74,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _indiceSelecionado.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _pesquisaController.dispose();
@@ -93,9 +98,172 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   void _reiniciarLista() {
     _carregados = [];
     _exibidos = 0;
-    _indiceSelecionado = -1;
+    _indiceSelecionado.value = -1;
     _temMaisNoRepo = true;
     _buscaComTexto = false;
+    _idsMarcados.clear();
+  }
+
+  List<Produto> get _visiveis {
+    final n = math.min(_exibidos, _carregados.length);
+    return _carregados.take(n).toList();
+  }
+
+  bool get _todosVisiveisMarcados {
+    final visiveis = _visiveis;
+    if (visiveis.isEmpty) return false;
+    return visiveis.every((p) => _idsMarcados.contains(p.id));
+  }
+
+  bool get _algunsVisiveisMarcados {
+    final visiveis = _visiveis;
+    if (visiveis.isEmpty) return false;
+    final n = visiveis.where((p) => _idsMarcados.contains(p.id)).length;
+    return n > 0 && n < visiveis.length;
+  }
+
+  void _alternarMarca(int id) {
+    setState(() {
+      if (_idsMarcados.contains(id)) {
+        _idsMarcados.remove(id);
+      } else {
+        _idsMarcados.add(id);
+      }
+    });
+  }
+
+  void _alternarMarcarTodosVisiveis() {
+    setState(() {
+      final visiveis = _visiveis;
+      if (_todosVisiveisMarcados) {
+        for (final p in visiveis) {
+          _idsMarcados.remove(p.id);
+        }
+      } else {
+        for (final p in visiveis) {
+          _idsMarcados.add(p.id);
+        }
+      }
+    });
+  }
+
+  Future<void> _aplicarFotoAosMarcados() async {
+    if (_aplicandoFoto || _excluindo || _idsMarcados.isEmpty) return;
+    setState(() => _aplicandoFoto = true);
+    try {
+      final imgSvc = ProdutoImagemService(
+        imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
+      );
+      final origem = await imgSvc.selecionarImagemLocal();
+      if (origem == null || !mounted) return;
+
+      final processada = await imgSvc.processarESalvarImagemProduto(
+        sourceImagePath: origem,
+        productIdentifier: 'lote_${_idsMarcados.length}',
+      );
+      if (!mounted) return;
+      if (processada == null || processada.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Nao foi possivel processar a foto selecionada.'),
+          ),
+        );
+        return;
+      }
+
+      final ids = _idsMarcados.toList();
+      final alterados = widget.produtoRepository.aplicarFotoEmVarios(
+        ids: ids,
+        fotoPath: processada,
+      );
+      if (!mounted) return;
+
+      final idsSet = ids.toSet();
+      setState(() {
+        _carregados = [
+          for (final p in _carregados)
+            if (idsSet.contains(p.id))
+              (p..fotoPath = processada)
+            else
+              p,
+        ];
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            alterados == 0
+                ? 'Nenhum produto teve a foto alterada.'
+                : 'Foto aplicada a $alterados produto(s).',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _aplicandoFoto = false);
+    }
+  }
+
+  Future<void> _excluirMarcados() async {
+    if (_excluindo || _idsMarcados.isEmpty) return;
+    final ids = _idsMarcados.toList();
+    final nomes = _carregados
+        .where((p) => ids.contains(p.id))
+        .map((p) => p.nome)
+        .take(8)
+        .toList();
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Excluir ${ids.length} produto(s)?'),
+        content: Text(
+          'Essa acao nao pode ser desfeita.\n\n'
+          '${nomes.map((n) => '• $n').join('\n')}'
+          '${ids.length > nomes.length ? '\n• … e mais ${ids.length - nomes.length}' : ''}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+
+    setState(() => _excluindo = true);
+    final removidos = widget.produtoRepository.removerVarios(ids);
+    if (!mounted) return;
+    setState(() {
+      _excluindo = false;
+      if (removidos > 0) {
+        final removidosSet = ids.toSet();
+        _carregados =
+            _carregados.where((p) => !removidosSet.contains(p.id)).toList();
+        _idsMarcados.removeAll(removidosSet);
+        _exibidos = math.min(_exibidos, _carregados.length);
+        if (_indiceSelecionado.value >= _carregados.length) {
+          _indiceSelecionado.value =
+              _carregados.isEmpty ? -1 : _carregados.length - 1;
+        }
+      }
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          removidos == 0
+              ? 'Nenhum produto foi excluido.'
+              : '$removidos produto(s) excluido(s).',
+        ),
+      ),
+    );
   }
 
   Future<void> _carregarProximaPaginaRepo() async {
@@ -115,8 +283,8 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
       _carregados = [..._carregados, ...pagina];
       _exibidos = _carregados.length;
       _temMaisNoRepo = pagina.length >= _kLoteRepoVazio;
-      if (_indiceSelecionado < 0 && _carregados.isNotEmpty) {
-        _indiceSelecionado = 0;
+      if (_indiceSelecionado.value < 0 && _carregados.isNotEmpty) {
+        _indiceSelecionado.value = 0;
       }
       _carregando = false;
     });
@@ -134,7 +302,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
       _buscaComTexto = true;
       _carregados = [];
       _exibidos = 0;
-      _indiceSelecionado = -1;
+      _indiceSelecionado.value = -1;
       _temMaisNoRepo = false;
     });
 
@@ -149,7 +317,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
     setState(() {
       _carregados = lista;
       _exibidos = math.min(_kLoteInicialExibicao, lista.length);
-      _indiceSelecionado = lista.isEmpty ? -1 : 0;
+      _indiceSelecionado.value = lista.isEmpty ? -1 : 0;
       _carregando = false;
     });
     if (_scrollController.hasClients) {
@@ -186,17 +354,18 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   }
 
   void _garantirIndiceVisivel() {
-    if (_indiceSelecionado < 0) return;
-    if (_indiceSelecionado >= _exibidos && _indiceSelecionado < _carregados.length) {
+    final indice = _indiceSelecionado.value;
+    if (indice < 0) return;
+    if (indice >= _exibidos && indice < _carregados.length) {
       setState(() {
         _exibidos = math.min(
-          _indiceSelecionado + 1,
+          indice + 1,
           _carregados.length,
         );
       });
     }
     if (!_scrollController.hasClients) return;
-    final alvo = (_indiceSelecionado * _kAlturaLinha).clamp(
+    final alvo = (indice * _kAlturaLinha).clamp(
       0.0,
       _scrollController.position.maxScrollExtent,
     );
@@ -209,8 +378,13 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
 
   void _confirmarSelecionado() {
     if (_carregados.isEmpty) return;
-    final indice = _indiceSelecionado >= 0 ? _indiceSelecionado : 0;
+    final indice = _indiceSelecionado.value >= 0 ? _indiceSelecionado.value : 0;
     _fechar(_carregados[indice]);
+  }
+
+  void _definirIndiceSelecionado(int indice) {
+    if (_indiceSelecionado.value == indice) return;
+    _indiceSelecionado.value = indice;
   }
 
   String? _helperBusca() {
@@ -257,19 +431,15 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
           return KeyEventResult.ignored;
         }
         if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-          setState(() {
-            _indiceSelecionado = math.min(
-              _indiceSelecionado + 1,
-              _carregados.length - 1,
-            );
-          });
+          _definirIndiceSelecionado(math.min(
+            _indiceSelecionado.value + 1,
+            _carregados.length - 1,
+          ));
           _garantirIndiceVisivel();
           return KeyEventResult.handled;
         }
         if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-          setState(() {
-            _indiceSelecionado = math.max(_indiceSelecionado - 1, 0);
-          });
+          _definirIndiceSelecionado(math.max(_indiceSelecionado.value - 1, 0));
           _garantirIndiceVisivel();
           return KeyEventResult.handled;
         }
@@ -315,6 +485,26 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
+                  const Spacer(),
+                  if (_visiveis.isNotEmpty) ...[
+                    SizedBox(
+                      height: 28,
+                      width: 28,
+                      child: Checkbox(
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                        tristate: true,
+                        value: _todosVisiveisMarcados
+                            ? true
+                            : (_algunsVisiveisMarcados ? null : false),
+                        onChanged: (_) => _alternarMarcarTodosVisiveis(),
+                      ),
+                    ),
+                    Text(
+                      'Marcar exibidos',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 6),
@@ -361,12 +551,14 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
                             return _ProdutoPesquisaLinha(
                               produto: produto,
                               consulta: _pesquisaController.text.trim(),
-                              selecionado: index == _indiceSelecionado,
+                              indice: index,
+                              indiceSelecionado: _indiceSelecionado,
+                              marcado: _idsMarcados.contains(produto.id),
+                              imagesDirectoryPath:
+                                  widget.produtoRepository.productImagesDirPath,
+                              onToggleMarca: () => _alternarMarca(produto.id),
                               onTap: () => _fechar(produto),
-                              onHover: () {
-                                if (_indiceSelecionado == index) return;
-                                setState(() => _indiceSelecionado = index);
-                              },
+                              onHover: () => _definirIndiceSelecionado(index),
                             );
                           },
                         ),
@@ -374,7 +566,9 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
               ),
               const SizedBox(height: 6),
               Text(
-                _rodapeLista(),
+                _idsMarcados.isEmpty
+                    ? _rodapeLista()
+                    : '${_rodapeLista()} · ${_idsMarcados.length} marcado(s)',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -383,8 +577,44 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
           ),
         ),
         actions: [
+          if (_idsMarcados.isNotEmpty) ...[
+            Tooltip(
+              message: 'Aplicar a mesma foto a todos os produtos marcados',
+              child: TextButton.icon(
+                onPressed: (_excluindo || _aplicandoFoto)
+                    ? null
+                    : _aplicarFotoAosMarcados,
+                icon: _aplicandoFoto
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.photo_outlined, size: 18),
+                label: const Text('Foto'),
+                style: TextButton.styleFrom(
+                  foregroundColor:
+                      Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: (_excluindo || _aplicandoFoto) ? null : _excluirMarcados,
+              icon: _excluindo
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.delete_outline),
+              label: Text('Excluir ${_idsMarcados.length}'),
+              style: FilledButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ],
           TextButton(
-            onPressed: _fechar,
+            onPressed: (_excluindo || _aplicandoFoto) ? null : _fechar,
             child: const Text('Fechar'),
           ),
         ],
@@ -393,20 +623,67 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   }
 }
 
-class _ProdutoPesquisaLinha extends StatelessWidget {
+class _ProdutoPesquisaLinha extends StatefulWidget {
   const _ProdutoPesquisaLinha({
     required this.produto,
     required this.consulta,
-    required this.selecionado,
+    required this.indice,
+    required this.indiceSelecionado,
+    required this.marcado,
+    required this.imagesDirectoryPath,
+    required this.onToggleMarca,
     required this.onTap,
     required this.onHover,
   });
 
   final Produto produto;
   final String consulta;
-  final bool selecionado;
+  final int indice;
+  final ValueNotifier<int> indiceSelecionado;
+  final bool marcado;
+  final String imagesDirectoryPath;
+  final VoidCallback onToggleMarca;
   final VoidCallback onTap;
   final VoidCallback onHover;
+
+  @override
+  State<_ProdutoPesquisaLinha> createState() => _ProdutoPesquisaLinhaState();
+}
+
+class _ProdutoPesquisaLinhaState extends State<_ProdutoPesquisaLinha> {
+  late bool _selecionado;
+
+  @override
+  void initState() {
+    super.initState();
+    _selecionado = widget.indiceSelecionado.value == widget.indice;
+    widget.indiceSelecionado.addListener(_aoMudarSelecao);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ProdutoPesquisaLinha oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.indiceSelecionado != widget.indiceSelecionado) {
+      oldWidget.indiceSelecionado.removeListener(_aoMudarSelecao);
+      widget.indiceSelecionado.addListener(_aoMudarSelecao);
+    }
+    final agora = widget.indiceSelecionado.value == widget.indice;
+    if (agora != _selecionado) {
+      _selecionado = agora;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.indiceSelecionado.removeListener(_aoMudarSelecao);
+    super.dispose();
+  }
+
+  void _aoMudarSelecao() {
+    final agora = widget.indiceSelecionado.value == widget.indice;
+    if (agora == _selecionado) return;
+    setState(() => _selecionado = agora);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -418,88 +695,80 @@ class _ProdutoPesquisaLinha extends StatelessWidget {
     final estiloSubtitulo =
         Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
     final subtitulo =
-        'SKU: ${produto.codigoInterno} | '
-        'Un: ${rotuloUnidadeProdutoLista(produto)} | '
-        'Categoria: ${produto.categoria.isEmpty ? '-' : produto.categoria}'
-        '${produto.ativo ? '' : ' · Inativo'}';
+        'SKU: ${widget.produto.codigoInterno} | '
+        'Un: ${rotuloUnidadeProdutoLista(widget.produto)} | '
+        'Categoria: ${widget.produto.categoria.isEmpty ? '-' : widget.produto.categoria}'
+        '${widget.produto.ativo ? '' : ' · Inativo'}';
 
     return RepaintBoundary(
       child: MouseRegion(
-        onEnter: (_) => onHover(),
+        onEnter: (_) => widget.onHover(),
         child: ListTile(
           dense: true,
           visualDensity: VisualDensity.compact,
           contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          selected: selecionado,
-          selectedTileColor: scheme.primary.withValues(alpha: 0.08),
-          leading: _ProdutoFotoMiniatura(fotoPath: produto.fotoPath),
+          selected: _selecionado || widget.marcado,
+          selectedTileColor: widget.marcado
+              ? scheme.error.withValues(alpha: 0.08)
+              : scheme.primary.withValues(alpha: 0.08),
+          leading: _ProdutoFotoMiniatura(
+            fotoPath: widget.produto.fotoPath,
+            imagesDirectoryPath: widget.imagesDirectoryPath,
+          ),
           title: _TextoComDestaque(
-            texto: produto.nome,
-            termo: consulta,
+            texto: widget.produto.nome,
+            termo: widget.consulta,
             estilo: estiloTitulo,
           ),
           subtitle: _TextoComDestaque(
             texto: subtitulo,
-            termo: consulta,
+            termo: widget.consulta,
             estilo: estiloSubtitulo,
           ),
-          onTap: onTap,
+          trailing: Checkbox(
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+            value: widget.marcado,
+            onChanged: (_) => widget.onToggleMarca(),
+          ),
+          onTap: widget.onTap,
+          onLongPress: widget.onToggleMarca,
         ),
       ),
     );
   }
 }
 
-/// Miniatura 40px: decode so no tamanho da tela (nao carrega o JPEG inteiro).
+/// Miniatura 40px: so arquivo local (nunca baixa na lista — evita travar o celular).
 class _ProdutoFotoMiniatura extends StatelessWidget {
-  const _ProdutoFotoMiniatura({required this.fotoPath});
+  const _ProdutoFotoMiniatura({
+    required this.fotoPath,
+    required this.imagesDirectoryPath,
+  });
 
   final String fotoPath;
+  final String imagesDirectoryPath;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final path = fotoPath.trim();
-    final placeholder = DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Icon(
-        Icons.image_outlined,
-        size: 20,
-        color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
-      ),
-    );
-
-    if (path.isEmpty) {
-      return SizedBox(
-        width: _kMiniaturaPx,
-        height: _kMiniaturaPx,
-        child: placeholder,
-      );
-    }
-
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final cachePx = (_kMiniaturaPx * dpr).round().clamp(40, 96);
-
     return SizedBox(
       width: _kMiniaturaPx,
       height: _kMiniaturaPx,
-      child: ClipRRect(
+      child: ProdutoFotoView(
+        fotoPath: fotoPath,
+        imagesDirectoryPath: imagesDirectoryPath,
+        width: _kMiniaturaPx,
+        height: _kMiniaturaPx,
+        fit: BoxFit.cover,
         borderRadius: BorderRadius.circular(6),
-        child: Image.file(
-          File(path),
-          key: ValueKey(path),
-          width: _kMiniaturaPx,
-          height: _kMiniaturaPx,
-          fit: BoxFit.cover,
-          cacheWidth: cachePx,
-          cacheHeight: cachePx,
-          filterQuality: FilterQuality.low,
-          gaplessPlayback: true,
-          errorBuilder: (_, _, _) => placeholder,
-        ),
+        placeholderLabel: '',
+        errorLabel: '',
+        cacheWidth: cachePx,
+        cacheHeight: cachePx,
+        filterQuality: FilterQuality.low,
+        modo: ProdutoFotoModo.somenteLocal,
       ),
     );
   }

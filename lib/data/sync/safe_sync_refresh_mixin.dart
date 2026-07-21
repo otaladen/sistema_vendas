@@ -7,6 +7,8 @@ import 'sync_refresh_hub.dart';
 /// Escuta [SyncRefreshHub] com debounce e evita recarregar a UI durante edicao ou dialogos.
 mixin SafeSyncRefreshMixin<T extends StatefulWidget> on State<T> {
   static const Duration debouncePadrao = Duration(milliseconds: 2500);
+  static const Duration _intervaloMinimoSnackbarRede = Duration(seconds: 45);
+  static DateTime? _ultimoSnackbarRedeEm;
 
   Timer? _syncDebounceTimer;
   Duration _syncDebounce = debouncePadrao;
@@ -91,7 +93,18 @@ mixin SafeSyncRefreshMixin<T extends StatefulWidget> on State<T> {
         final daRede = _syncUltimaOrigemRede;
         _syncUltimaOrigemRede = false;
         _syncOnReload?.call();
-        _syncAoConcluir?.call(daRede: daRede);
+        // Evita spam de "Dados atualizados da rede" a cada sync.
+        if (daRede) {
+          final agora = DateTime.now();
+          final ultimo = _ultimoSnackbarRedeEm;
+          if (ultimo == null ||
+              agora.difference(ultimo) >= _intervaloMinimoSnackbarRede) {
+            _ultimoSnackbarRedeEm = agora;
+            _syncAoConcluir?.call(daRede: true);
+          }
+        } else {
+          _syncAoConcluir?.call(daRede: false);
+        }
         if (_syncReloadPendente && podeAtualizarUi()) {
           _syncReloadPendente = false;
           agendarRecargaSegura(daRede: daRede);

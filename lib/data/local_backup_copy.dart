@@ -18,6 +18,7 @@ Future<void> copiarDiretorioRecursivo({
 }) async {
   if (!origem.existsSync()) return;
   destino.createSync(recursive: true);
+  var n = 0;
   await for (final entidade in origem.list(recursive: false)) {
     final nome = p.basename(entidade.path);
     final destinoPath = p.join(destino.path, nome);
@@ -30,6 +31,11 @@ Future<void> copiarDiretorioRecursivo({
     } else if (entidade is File) {
       await entidade.copy(destinoPath);
       onArquivoCopiado?.call();
+      n++;
+      // Libera o UI periodicamente em pastas grandes.
+      if (n % 8 == 0) {
+        await Future<void>.delayed(Duration.zero);
+      }
     }
   }
 }

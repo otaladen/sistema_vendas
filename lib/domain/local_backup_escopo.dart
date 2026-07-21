@@ -18,16 +18,16 @@ extension LocalBackupEscopoJson on LocalBackupEscopo {
       };
 
   String get rotulo => switch (this) {
-        LocalBackupEscopo.completo => 'Completo',
-        LocalBackupEscopo.somenteBanco => 'Somente banco',
-        LocalBackupEscopo.cadastroProdutos => 'Cadastro de produtos',
+        LocalBackupEscopo.completo => 'Completo (recomendado)',
+        LocalBackupEscopo.somenteBanco => 'So o banco de dados',
+        LocalBackupEscopo.cadastroProdutos => 'So cadastro de produtos',
       };
 
   String get descricaoCurta => switch (this) {
         LocalBackupEscopo.completo =>
-          'Banco, fotos, POD e configuracoes deste PC',
+          'Tudo deste PC: banco, fotos, entregas e configuracoes',
         LocalBackupEscopo.somenteBanco =>
-          'Apenas o banco ObjectBox (data.mdb)',
+          'Apenas o banco de dados (sem fotos e arquivos extras)',
         LocalBackupEscopo.cadastroProdutos =>
           'Produtos, precos, fiscal e fotos (sem vendas)',
       };

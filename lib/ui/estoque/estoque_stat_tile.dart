@@ -9,6 +9,7 @@ class EstoqueStatTile extends StatelessWidget {
     required this.valor,
     this.onTap,
     this.destaqueCor,
+    this.faixaCompacta = false,
   });
 
   final IconData icon;
@@ -17,6 +18,9 @@ class EstoqueStatTile extends StatelessWidget {
   final VoidCallback? onTap;
   final Color? destaqueCor;
 
+  /// Modo faixa horizontal (celular / tablet estreito).
+  final bool faixaCompacta;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -24,8 +28,11 @@ class EstoqueStatTile extends StatelessWidget {
     final accent = destaqueCor ?? scheme.primary;
 
     final conteudo = Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      width: faixaCompacta ? 132 : double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: faixaCompacta ? 10 : 14,
+        vertical: faixaCompacta ? 8 : 12,
+      ),
       decoration: BoxDecoration(
         color: scheme.surface,
         borderRadius: BorderRadius.circular(8),
@@ -35,11 +42,16 @@ class EstoqueStatTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: accent.withValues(alpha: 0.9)),
-          const SizedBox(width: 10),
+          Icon(
+            icon,
+            size: faixaCompacta ? 18 : 20,
+            color: accent.withValues(alpha: 0.9),
+          ),
+          SizedBox(width: faixaCompacta ? 8 : 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
                   titulo,
@@ -48,16 +60,18 @@ class EstoqueStatTile extends StatelessWidget {
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
+                    fontSize: faixaCompacta ? 10 : null,
                   ),
                 ),
-                const SizedBox(height: 2),
+                SizedBox(height: faixaCompacta ? 1 : 2),
                 Text(
                   valor,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: (faixaCompacta
+                          ? theme.textTheme.labelLarge
+                          : theme.textTheme.titleSmall)
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ],
             ),

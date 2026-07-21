@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/produto_embalagem.dart';
 import '../../model/produto.dart';
 import '../theme/app_semantic_helper.dart';
 import '../widgets/pdv_consulta_semaforo_estoque.dart';
@@ -15,6 +16,7 @@ class EstoqueCardLinha extends StatelessWidget {
     required this.resumoLinha,
     required this.vendaFormatada,
     required this.onAcao,
+    this.ppExibicao,
   });
 
   final Produto produto;
@@ -23,6 +25,7 @@ class EstoqueCardLinha extends StatelessWidget {
   final String resumoLinha;
   final String vendaFormatada;
   final EstoqueAcaoProduto onAcao;
+  final double? ppExibicao;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +41,18 @@ class EstoqueCardLinha extends StatelessWidget {
             zebra,
           )
         : zebra;
+
+    final sku = produto.codigoInterno.trim();
+    final disp = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      produto.estoqueLivreParaVenda,
+      comUnidade: true,
+    );
+    final fisico = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      produto.estoqueReal,
+      comUnidade: false,
+    );
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -59,7 +74,7 @@ class EstoqueCardLinha extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -100,19 +115,47 @@ class EstoqueCardLinha extends StatelessWidget {
                         child: PdvConsultaSemaforoEstoque(produto: produto),
                       ),
                       Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              produto.nome,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (sku.isNotEmpty)
+                              Text(
+                                sku,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2, left: 4),
                         child: Text(
-                          produto.nome,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
+                          vendaFormatada,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                       ),
                       PopupMenuButton<String>(
                         tooltip: 'Acoes',
                         padding: EdgeInsets.zero,
-                        iconSize: 20,
+                        constraints: const BoxConstraints(
+                          minWidth: 40,
+                          minHeight: 40,
+                        ),
+                        iconSize: 22,
                         onSelected: (v) => onAcao(v, produto),
                         itemBuilder: (ctx) => const [
                           PopupMenuItem(
@@ -143,29 +186,76 @@ class EstoqueCardLinha extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    resumoLinha,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      _chip(
+                        context,
+                        label: 'Disp $disp',
+                        destaque: produto.estoqueLivreParaVenda <=
+                            produto.quantidadeMinima,
+                      ),
+                      _chip(context, label: 'Est $fisico'),
+                      _chip(
+                        context,
+                        label: 'Min ${produto.quantidadeMinima}',
+                      ),
+                      if (ppExibicao != null)
+                        _chip(
+                          context,
+                          label: 'PP ${ppExibicao!.toStringAsFixed(1)}',
+                          destaque: criticoPp,
+                        ),
+                    ],
                   ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      vendaFormatada,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
+                  if (resumoLinha.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      resumoLinha,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(
+    BuildContext context, {
+    required String label,
+    bool destaque = false,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = context.semanticColors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: destaque
+            ? semantic.warningBg.withValues(alpha: 0.55)
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: destaque
+              ? semantic.warningBorder.withValues(alpha: 0.7)
+              : scheme.outlineVariant.withValues(alpha: 0.55),
+        ),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: destaque ? semantic.warningFg : scheme.onSurface,
         ),
       ),
     );

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../domain/produto_embalagem.dart';
@@ -13,6 +11,7 @@ import 'produto_detalhe_venda_page.dart';
 import 'widgets/pdv_consulta_painel_insights.dart';
 import 'widgets/pdv_estoque_resumo_panel.dart';
 import 'widgets/pdv_sugestoes_carrinho_strip.dart';
+import 'widgets/produto_foto_view.dart';
 import 'widgets/promocao_badge.dart';
 
 /// Tres listas de preco do produto (ativo em destaque; clicavel na consulta).
@@ -154,6 +153,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
     this.sugestoesOrigemNome = '',
     this.onFecharSugestoesCarrinho,
     this.onAdicionarSugestaoCarrinho,
+    this.imagesDirectoryPath = '',
   });
 
   final Produto produto;
@@ -186,6 +186,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
   final String sugestoesOrigemNome;
   final VoidCallback? onFecharSugestoesCarrinho;
   final ValueChanged<PdvConsultaAgregadoVenda>? onAdicionarSugestaoCarrinho;
+  final String imagesDirectoryPath;
 
   bool get _temSugestoesCarrinho =>
       sugestoesCarrinho.isNotEmpty && onAdicionarSugestaoCarrinho != null;
@@ -349,6 +350,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
       _FotoPreview(
         key: ValueKey<String>('pdv-consulta-foto-${produto.id}'),
         fotoPath: produto.fotoPath,
+        imagesDirectoryPath: imagesDirectoryPath,
         altura: alturaFoto,
       ),
       const SizedBox(height: 10),
@@ -758,69 +760,29 @@ class _FotoPreview extends StatelessWidget {
   const _FotoPreview({
     super.key,
     required this.fotoPath,
+    required this.imagesDirectoryPath,
     required this.altura,
   });
 
   final String fotoPath;
+  final String imagesDirectoryPath;
   final double altura;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final path = fotoPath.trim();
-
-    if (path.isEmpty) {
-      return _placeholder(
-        context,
-        scheme,
-        child: Text(
-          'Sem foto',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-        ),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: SizedBox(
-        height: altura,
-        width: double.infinity,
-        child: Image.file(
-          File(path),
-          fit: BoxFit.contain,
-          gaplessPlayback: true,
-          filterQuality: FilterQuality.medium,
-          errorBuilder: (context, error, stackTrace) => _placeholder(
-            context,
-            scheme,
-            child: Text(
-              'Foto indisponivel',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _placeholder(
-    BuildContext context,
-    ColorScheme scheme, {
-    required Widget child,
-  }) {
-    return Container(
+    return ProdutoFotoView(
+      fotoPath: fotoPath,
+      imagesDirectoryPath: imagesDirectoryPath,
       height: altura,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.5),
-        ),
-      ),
-      child: child,
+      width: double.infinity,
+      fit: BoxFit.contain,
+      borderRadius: BorderRadius.circular(8),
+      placeholderLabel: 'Sem foto',
+      errorLabel: 'Foto indisponivel',
+      // Decode reduzido: preview ~300px evita bitmap full-res na UI thread.
+      cacheWidth: 300,
+      cacheHeight: 300,
+      filterQuality: FilterQuality.medium,
     );
   }
 }

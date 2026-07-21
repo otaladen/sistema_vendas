@@ -176,6 +176,8 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
               thumbVisibility: true,
               child: ListView.builder(
                 itemCount: itens.length,
+                itemExtent: ListagemVendasLayout.alturaLinhaTabela,
+                cacheExtent: 400,
                 itemBuilder: (context, index) {
                   final item = itens[index];
                   final zebra = index.isOdd
@@ -189,75 +191,73 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                     child: InkWell(
                       onTap: () => widget.onTapItem(item),
                       hoverColor: scheme.primary.withValues(alpha: 0.07),
-                      child: SizedBox(
-                        height: ListagemVendasLayout.alturaLinhaTabela,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: ListagemVendasLayout.colControle,
-                                child: _BadgeNumero(texto: item.badgeNumero),
-                              ),
-                              SizedBox(
-                                width: ListagemVendasLayout.colDocumento,
-                                child: Text(
-                                  item.titulo,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: item.cancelada
-                                        ? scheme.error
-                                        : scheme.onSurface,
-                                    decoration: item.cancelada
-                                        ? TextDecoration.lineThrough
-                                        : null,
-                                  ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: ListagemVendasLayout.colControle,
+                              child: _BadgeNumero(texto: item.badgeNumero),
+                            ),
+                            SizedBox(
+                              width: ListagemVendasLayout.colDocumento,
+                              child: Text(
+                                item.titulo,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: item.cancelada
+                                      ? scheme.error
+                                      : scheme.onSurface,
+                                  decoration: item.cancelada
+                                      ? TextDecoration.lineThrough
+                                      : null,
                                 ),
                               ),
-                              SizedBox(
-                                width: ListagemVendasLayout.colStatus,
-                                child: _StatusChip(
-                                  texto: item.status,
-                                  cor: item.statusCor,
-                                  detalhe: item.statusDetalhe,
+                            ),
+                            SizedBox(
+                              width: ListagemVendasLayout.colStatus,
+                              child: _StatusChip(
+                                texto: item.status,
+                                cor: item.statusCor,
+                                detalhe: item.statusDetalhe,
+                              ),
+                            ),
+                            SizedBox(
+                              width: ListagemVendasLayout.colData,
+                              child: Text(
+                                item.dataHora,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
                                 ),
                               ),
-                              SizedBox(
-                                width: ListagemVendasLayout.colData,
-                                child: Text(
-                                  item.dataHora,
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures(),
-                                    ],
-                                  ),
+                            ),
+                            Expanded(
+                              flex: ListagemVendasLayout.flexCliente,
+                              child: Text(
+                                item.cliente,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
-                              Expanded(
-                                flex: ListagemVendasLayout.flexCliente,
-                                child: Text(
-                                  item.cliente,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                            ),
+                            Expanded(
+                              flex: ListagemVendasLayout.flexVendedor,
+                              child: Text(
+                                item.vendedor,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
                                 ),
                               ),
-                              Expanded(
-                                flex: ListagemVendasLayout.flexVendedor,
-                                child: Text(
-                                  item.vendedor,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ),
+                            ),
                               SizedBox(
                                 width: ListagemVendasLayout.colPagamento,
                                 child: Text(
@@ -308,8 +308,7 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                           ),
                         ),
                       ),
-                    ),
-                  );
+                    );
                 },
               ),
             ),

@@ -15,6 +15,24 @@ class FuncionarioRepository {
 
   ObjectBox get objectBox => _db;
 
+  String get funcionarioImagesDirPath => _db.funcionarioImagesDir.path;
+
+  int contarFuncionariosComFotoPath(
+    String absolutePath, {
+    int? excluirFuncionarioId,
+  }) {
+    final alvo = absolutePath.trim();
+    if (alvo.isEmpty) return 0;
+    var n = 0;
+    for (final f in listarTodos()) {
+      if (excluirFuncionarioId != null && f.id == excluirFuncionarioId) {
+        continue;
+      }
+      if (f.fotoPath.trim() == alvo) n++;
+    }
+    return n;
+  }
+
   List<Funcionario> listarTodos() {
     final query = _db.funcionarioBox
         .query()
@@ -70,6 +88,15 @@ class FuncionarioRepository {
       _fechamentos ??= FechamentoRhRepository(_db);
 
   Funcionario? obterPorId(int id) => _db.funcionarioBox.get(id);
+
+  Funcionario? obterPorUsuarioSistemaId(String usuarioId) {
+    final id = usuarioId.trim();
+    if (id.isEmpty) return null;
+    for (final f in listarTodos()) {
+      if (f.usuarioSistemaId.trim() == id) return f;
+    }
+    return null;
+  }
 
   bool existeCpfParaOutro({
     required String cpfSomenteDigitos,

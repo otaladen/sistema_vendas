@@ -46,6 +46,7 @@ import '../domain/promocao_preco_service.dart';
 import '../data/produto_busca_util.dart';
 import '../data/produto_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
+import '../data/sync/sync_service.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
@@ -77,6 +78,7 @@ import 'widgets/pdv_calculadora_panel.dart';
 import 'widgets/pdv_obra_calculadora_panel.dart';
 import 'widgets/pdv_barcode_scanner_page.dart';
 import 'widgets/pdv_barcode_scanner_support.dart';
+import 'widgets/pdv_mobile_ui.dart';
 import 'widgets/pdv_carrinho_linha_compacta.dart';
 import 'widgets/pdv_tipo_entrega_item.dart';
 import 'widgets/plano_fiado_pdv_panel.dart';
@@ -145,7 +147,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       );
 
   bool get _pdvAlvosTouchAmplos =>
+      pdvPlataformaCelular ||
       MediaQuery.sizeOf(context).width < AppBreakpoints.desktop;
+
+  bool get _pdvUiCelular => pdvPlataformaCelular;
 
   void _pdvErro(String mensagem) {
     if (!mounted) return;
@@ -256,8 +261,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   /// Linha selecionada no carrinho (navegacao com setas).
   int? _indiceLinhaCarrinho;
 
-  /// Epoch local: muda so a selecao de linha sem rebuildar AppBar/busca.
-  final ValueNotifier<int> _selecaoCarrinhoEpoch = ValueNotifier(0);
+  /// Epoch do painel carrinho/preview: qty, preco, selecao, etc. sem rebuildar AppBar.
+  final ValueNotifier<int> _carrinhoUiEpoch = ValueNotifier(0);
 
   /// Tabela de preco para novos itens (F1–F3 sem linha selecionada).
   String _precoListaAtivo = 'preco1';
@@ -345,15 +350,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
   }
 
+  void _notificarUiCarrinho() {
+    _carrinhoUiEpoch.value++;
+  }
+
   void _alternarTipoEntregaLinhaCarrinho(int index) {
     if (index < 0 || index >= _carrinho.length) return;
     final tipoAnterior = EntregaVendaHelper.normalizarTipoItem(
       _carrinho[index].tipoEntregaItem,
     );
     final tipoNovo = EntregaVendaHelper.proximoTipoItem(tipoAnterior);
-    setState(() {
-      _carrinho[index].tipoEntregaItem = tipoNovo;
-    });
+    _carrinho[index].tipoEntregaItem = tipoNovo;
+    _notificarUiCarrinho();
     if (_pdvExigirClienteRetiradaFutura &&
         tipoNovo == EntregaVendaHelper.tipoRetiradaFutura &&
         _pdvClienteAusente) {
@@ -361,9 +369,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         _garantirClientePdvParaRetiradaFutura(
           reverter: () {
             if (!mounted || index >= _carrinho.length) return;
-            setState(() {
-              _carrinho[index].tipoEntregaItem = tipoAnterior;
-            });
+            _carrinho[index].tipoEntregaItem = tipoAnterior;
+            _notificarUiCarrinho();
           },
         ),
       );
@@ -372,17 +379,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   void _alternarTabelaPrecoLinhaCarrinho(int index) {
     if (index < 0 || index >= _carrinho.length) return;
-    setState(() {
-      final linha = _carrinho[index];
-      final proxima = PdvTabelaPrecoUtil.proxima(linha.precoTipo);
-      _aplicarTabelaPrecoNaLinha(linha, proxima);
-      _promoCarrinho.aplicarRegrasCarrinho(
-        _carrinho,
-        dataReferencia: DateTime.now(),
-        segmentoCliente: _segmentoClienteAtivo,
-      );
-      _indiceLinhaCarrinho = index;
-    });
+    final linha = _carrinho[index];
+    final proxima = PdvTabelaPrecoUtil.proxima(linha.precoTipo);
+    _aplicarTabelaPrecoNaLinha(linha, proxima);
+    _promoCarrinho.aplicarRegrasCarrinho(
+      _carrinho,
+      dataReferencia: DateTime.now(),
+      segmentoCliente: _segmentoClienteAtivo,
+    );
+    _indiceLinhaCarrinho = index;
+    _notificarUiCarrinho();
   }
 
   int? _indiceLinhaParaMesclar(
@@ -456,6 +462,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       );
       _indiceLinhaCarrinho = index + 1;
     });
+    _notificarUiCarrinho();
     _carrinhoFocus.requestFocus();
   }
 
@@ -1000,7 +1007,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     _enderecoEntregaController.dispose();
     _observacaoEntregaController.dispose();
     _disposeLinhasPagamentoMisto();
-    _selecaoCarrinhoEpoch.dispose();
+    _carrinhoUiEpoch.dispose();
     super.dispose();
   }
 
@@ -1550,15 +1557,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
 
   void _entrarFocoCarrinhoPdv({bool selecionarUltimaLinha = false}) {
     if (_carrinho.isEmpty) return;
-    setState(() {
-      if (selecionarUltimaLinha) {
-        _indiceLinhaCarrinho = (_indiceLinhaCarrinho ?? _carrinho.length - 1)
-            .clamp(0, _carrinho.length - 1);
-      } else {
-        _indiceLinhaCarrinho =
-            (_indiceLinhaCarrinho ?? 0).clamp(0, _carrinho.length - 1);
-      }
-    });
+    final novo = selecionarUltimaLinha
+        ? (_indiceLinhaCarrinho ?? _carrinho.length - 1)
+            .clamp(0, _carrinho.length - 1)
+        : (_indiceLinhaCarrinho ?? 0).clamp(0, _carrinho.length - 1);
+    _definirIndiceLinhaCarrinho(novo, isolado: true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _carrinhoFocus.requestFocus();
@@ -2014,32 +2017,30 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     }
     _aplicarMutacaoCarrinhoAposLayout(() {
       if (index < 0 || index >= _carrinho.length) return;
-      setState(() {
-        final item = _carrinho[index];
-        final nova = item.quantidade + deltaArmazenado;
-        if (nova <= 0) {
-          _carrinho.removeAt(index);
-          _ajustarIndiceAposRemoverCarrinho(index);
-        } else {
-          item.quantidade = nova;
-          _recalcularPrecoLinhaCarrinho(item);
-          _promoCarrinho.aplicarRegrasCarrinho(
-            _carrinho,
-            dataReferencia: DateTime.now(),
-            segmentoCliente: _segmentoClienteAtivo,
-          );
-        }
-      });
+      final item = _carrinho[index];
+      final nova = item.quantidade + deltaArmazenado;
+      if (nova <= 0) {
+        _carrinho.removeAt(index);
+        _ajustarIndiceAposRemoverCarrinho(index);
+      } else {
+        item.quantidade = nova;
+        _recalcularPrecoLinhaCarrinho(item);
+        _promoCarrinho.aplicarRegrasCarrinho(
+          _carrinho,
+          dataReferencia: DateTime.now(),
+          segmentoCliente: _segmentoClienteAtivo,
+        );
+      }
+      _notificarUiCarrinho();
     });
   }
 
   void _removerItemCarrinho(int index) {
     _aplicarMutacaoCarrinhoAposLayout(() {
       if (index < 0 || index >= _carrinho.length) return;
-      setState(() {
-        _carrinho.removeAt(index);
-        _ajustarIndiceAposRemoverCarrinho(index);
-      });
+      _carrinho.removeAt(index);
+      _ajustarIndiceAposRemoverCarrinho(index);
+      _notificarUiCarrinho();
     });
   }
 
@@ -2048,7 +2049,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     if (_indiceLinhaCarrinho == index) return;
     _indiceLinhaCarrinho = index;
     if (isolado) {
-      _selecaoCarrinhoEpoch.value++;
+      _notificarUiCarrinho();
     }
   }
 
@@ -3549,23 +3550,22 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     );
     if (result == null || !mounted) return;
 
-    setState(() {
-      linha.precoUnitario = result.novoPreco;
-      linha.precoUnitarioManual = result.manual;
-      if (!result.manual) {
-        final r = _resolverPrecoProduto(
-          linha.produto,
-          precoTipoLista: linha.precoTipo,
-          quantidade: linha.quantidadeEstoque,
-        );
-        linha.precoUnitario = r.precoFinal;
-        linha.promocaoId = r.promocaoId;
-        linha.promocaoNome = r.promocaoNome;
-      } else {
-        linha.promocaoId = 0;
-        linha.promocaoNome = '';
-      }
-    });
+    linha.precoUnitario = result.novoPreco;
+    linha.precoUnitarioManual = result.manual;
+    if (!result.manual) {
+      final r = _resolverPrecoProduto(
+        linha.produto,
+        precoTipoLista: linha.precoTipo,
+        quantidade: linha.quantidadeEstoque,
+      );
+      linha.precoUnitario = r.precoFinal;
+      linha.promocaoId = r.promocaoId;
+      linha.promocaoNome = r.promocaoNome;
+    } else {
+      linha.promocaoId = 0;
+      linha.promocaoNome = '';
+    }
+    _notificarUiCarrinho();
     _carrinhoFocus.requestFocus();
   }
 
@@ -3582,6 +3582,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       context,
       produto: linha.produto,
       campanhasVigentes: campanhas,
+      imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
     );
     if (!mounted) return;
     _carrinhoFocus.requestFocus();
@@ -3622,6 +3623,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       onFecharSugestoesCarrinho: _fecharSugestoesCarrinho,
       onAdicionarSugestaoCarrinho: (s) =>
           unawaited(_adicionarSugestaoAgregadaDoCarrinho(s)),
+      imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
     );
   }
 
@@ -3648,6 +3650,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               ),
             ],
           );
+        }
+        // No celular o preview empilhado (360px) come a tela — so carrinho.
+        if (_pdvUiCelular) {
+          return painel;
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3720,9 +3726,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       onContinuarFechamento: () {
         unawaited(_abrirPassoFechamentoVenda());
       },
-      labelBotaoContinuar: _orcamentoEmEdicaoId != null
-          ? 'Continuar para atualizar (F10)'
-          : 'Continuar para salvar (F10)',
+      labelBotaoContinuar: _pdvUiCelular
+          ? (_orcamentoEmEdicaoId != null
+              ? 'Continuar para atualizar'
+              : 'Continuar para salvar')
+          : (_orcamentoEmEdicaoId != null
+              ? 'Continuar para atualizar (F10)'
+              : 'Continuar para salvar (F10)'),
+      modoCelular: _pdvUiCelular,
     );
   }
 
@@ -3886,6 +3897,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
       );
       _aplicarSugestaoFormaPagamentoParaCarrinhoAtual();
     });
+    // setState ja cobre AppBar (tabela) + carrinho; epoch mantem listeners alinhados.
+    _notificarUiCarrinho();
   }
 
   void _atualizarEntregaCarrinhoComTipo(String novoTipo) {
@@ -4755,6 +4768,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
   }
 
   Widget _buildCheckoutDicaAtalhosTeclado() {
+    if (_pdvUiCelular) return const SizedBox.shrink();
     return Wrap(
       spacing: 6,
       runSpacing: 6,
@@ -4808,7 +4822,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             ),
           ),
           IconButton(
-            tooltip: 'Fechar (Esc)',
+            tooltip: _pdvUiCelular ? 'Fechar' : 'Fechar (Esc)',
             onPressed: () => Navigator.pop(dialogContext),
             icon: const Icon(Icons.close),
           ),
@@ -4825,41 +4839,65 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final confirmarLabel = _orcamentoEmEdicaoId != null
         ? 'Confirmar atualizacao'
         : 'Enviar ao caixa';
+    final celular = _pdvUiCelular;
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+    final botaoConfirmar = Focus(
+      focusNode: _focusCheckoutAcaoPrimaria,
+      child: FilledButton.icon(
+        onPressed: () => unawaited(
+          _confirmarCheckoutEEnviar(
+            fechamentoDialogContext: dialogContext,
+          ),
+        ),
+        style: celular
+            ? FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              )
+            : null,
+        icon: const Icon(Icons.point_of_sale_outlined),
+        label: Text(celular ? confirmarLabel : '$confirmarLabel (F10)'),
+      ),
+    );
+    final botaoFechar = TextButton(
+      onPressed: () => Navigator.pop(dialogContext),
+      child: Text(celular ? 'Fechar' : 'Fechar (Esc)'),
+    );
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+      padding: EdgeInsets.fromLTRB(
+        16,
+        celular ? 8 : 10,
+        16,
+        celular ? 12 + viewInsets.bottom.clamp(0.0, 24.0) : 14,
+      ),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest.withValues(alpha: 0.55),
         border: Border(
-          top: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.7)),
+          top: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.7),
+          ),
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildCheckoutDicaAtalhosTeclado(),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Fechar (Esc)'),
-              ),
-              const Spacer(),
-              Focus(
-                focusNode: _focusCheckoutAcaoPrimaria,
-                child: FilledButton.icon(
-                  onPressed: () => unawaited(
-                    _confirmarCheckoutEEnviar(
-                      fechamentoDialogContext: dialogContext,
-                    ),
-                  ),
-                  icon: const Icon(Icons.point_of_sale_outlined),
-                  label: Text('$confirmarLabel (F10)'),
-                ),
-              ),
-            ],
-          ),
+          if (!celular) ...[
+            _buildCheckoutDicaAtalhosTeclado(),
+            const SizedBox(height: 12),
+          ],
+          if (celular) ...[
+            botaoConfirmar,
+            const SizedBox(height: 8),
+            botaoFechar,
+          ] else
+            Row(
+              children: [
+                botaoFechar,
+                const Spacer(),
+                botaoConfirmar,
+              ],
+            ),
         ],
       ),
     );
@@ -4924,28 +4962,44 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               });
             }
             final theme = Theme.of(context);
+            final celular = _pdvUiCelular;
+            final viewInsets = MediaQuery.viewInsetsOf(context);
+            final screen = MediaQuery.sizeOf(context);
+            // Dialog amplo no desktop: misto + carreto cabem sem “caixinha”.
+            final dialogWidth = celular ? screen.width : 960.0;
+            final dialogHeight = celular
+                ? null
+                : (screen.height * 0.88).clamp(560.0, 860.0);
             return Dialog(
               backgroundColor: theme.colorScheme.surface,
-              insetPadding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 24,
-              ),
+              insetPadding: celular
+                  ? EdgeInsets.fromLTRB(
+                      8,
+                      12,
+                      8,
+                      8 + viewInsets.bottom,
+                    )
+                  : const EdgeInsets.symmetric(
+                      horizontal: 28,
+                      vertical: 16,
+                    ),
               clipBehavior: Clip.antiAlias,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(celular ? 10 : 14),
               ),
               child: AdaptiveDialogPane(
-                desktopWidth: 580,
-                desktopHeight: (MediaQuery.sizeOf(context).height * 0.58)
-                    .clamp(420.0, 560.0),
+                desktopWidth: dialogWidth,
+                desktopHeight: dialogHeight,
+                mobileHeightFactor: celular ? 0.94 : 0.86,
+                horizontalMargin: celular ? 8 : 28,
                 child: Theme(
                   data: theme.copyWith(
-                    visualDensity: VisualDensity.compact,
+                    visualDensity: VisualDensity.standard,
                     inputDecorationTheme: theme.inputDecorationTheme.copyWith(
-                      isDense: true,
+                      isDense: false,
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 10,
+                        horizontal: 12,
+                        vertical: 14,
                       ),
                     ),
                   ),
@@ -4954,21 +5008,31 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                     children: [
                       _buildCheckoutDialogCabecalho(dialogContext),
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        padding: EdgeInsets.fromLTRB(
+                          celular ? 14 : 20,
+                          14,
+                          celular ? 14 : 20,
+                          10,
+                        ),
                         child: _buildCheckoutResumoFixo(setDialogState),
                       ),
                       Expanded(
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: celular ? 14 : 20,
+                          ),
                           child: Scrollbar(
                             controller: scrollCheckout,
-                            thumbVisibility: true,
+                            thumbVisibility: !celular,
                             interactive: true,
                             child: SingleChildScrollView(
                               controller: scrollCheckout,
                               primary: false,
                               physics: const AlwaysScrollableScrollPhysics(),
-                              padding: const EdgeInsets.only(right: 4, bottom: 8),
+                              padding: const EdgeInsets.only(
+                                right: 6,
+                                bottom: 12,
+                              ),
                               child: FocusTraversalGroup(
                                 policy: OrderedTraversalPolicy(),
                                 child: _buildFormularioFechamentoVenda(
@@ -5414,11 +5478,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     final theme = Theme.of(context);
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
@@ -5426,17 +5490,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
         children: [
           Row(
             children: [
-              Icon(icone, size: 18, color: theme.colorScheme.primary),
+              Icon(icone, size: 20, color: theme.colorScheme.primary),
               const SizedBox(width: 8),
               Text(
                 titulo,
                 style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           ...children,
         ],
       ),
@@ -5621,13 +5685,19 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
     ScrollController? scrollCheckout,
   }) {
     final theme = Theme.of(context);
-    return Column(
+    final duasColunas = !_pdvUiCelular &&
+        MediaQuery.sizeOf(context).width >= 980 &&
+        _checkoutExibeSecaoEntrega;
+
+    final colunaPagamento = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _buildCheckoutBannerEdicao(setDialogState),
-        _buildCheckoutResumoLinhaItens(),
-        const SizedBox(height: 10),
+        if (!duasColunas) ...[
+          _buildCheckoutBannerEdicao(setDialogState),
+          _buildCheckoutResumoLinhaItens(),
+          const SizedBox(height: 10),
+        ],
         _buildCheckoutSecaoPagamento(
           setDialogState: setDialogState,
           scrollCheckout: scrollCheckout,
@@ -5645,12 +5715,42 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           ),
         ],
         _buildCheckoutSecaoDesconto(setDialogState),
-        if (_checkoutExibeSecaoEntrega) ...[
-          _buildCheckoutSecaoEntrega(
+      ],
+    );
+
+    final colunaEntrega = _checkoutExibeSecaoEntrega
+        ? _buildCheckoutSecaoEntrega(
             setDialogState: setDialogState,
             scrollCheckout: scrollCheckout,
+          )
+        : const SizedBox.shrink();
+
+    if (duasColunas) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildCheckoutBannerEdicao(setDialogState),
+          _buildCheckoutResumoLinhaItens(),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 11, child: colunaPagamento),
+              const SizedBox(width: 16),
+              Expanded(flex: 10, child: colunaEntrega),
+            ],
           ),
         ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        colunaPagamento,
+        if (_checkoutExibeSecaoEntrega) colunaEntrega,
       ],
     );
   }
@@ -6029,9 +6129,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
           permitirVendaSemEstoque: _permitirVendaSemEstoque,
         );
       }
-      await LanSyncScheduler.solicitarSyncImediato();
+      await LanSyncScheduler.solicitarSyncPrioritario();
       if (!mounted) return;
-      final vendaSalva = widget.vendaRepository.obterPorId(orcamentoId);
+      // Apos o PUSH, o servidor pode ter remapeado o id e/ou renumerado o
+      // orcamento (ACK numeroCorrections). Nunca confiar so no id local.
+      var vendaSalva = widget.vendaRepository.obterPorId(orcamentoId);
+      if (vendaSalva == null) {
+        final globalId = SyncService.globalIdVendaAposPush(orcamentoId);
+        if (globalId != null && globalId > 0) {
+          vendaSalva = widget.vendaRepository.obterPorId(globalId);
+        }
+      }
       final numeroOrcamentoSalvo =
           vendaSalva?.numeroOrcamento ?? _orcamentoEmEdicaoNumero;
       if (fechamentoDialogContext != null && fechamentoDialogContext.mounted) {
@@ -7250,60 +7358,120 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
             behavior: HitTestBehavior.translucent,
             onPointerDown: (_) => _registrarAtividadePdvVendedor(),
             child: Scaffold(
+          resizeToAvoidBottomInset: true,
           appBar: AppBar(
-            titleSpacing: 0,
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Flexible(
-                  child: Text(
-                    'Ponto de Venda',
-                    overflow: TextOverflow.ellipsis,
+            titleSpacing: _pdvUiCelular ? 8 : 0,
+            title: _pdvUiCelular
+                ? const Text('PDV')
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Flexible(
+                        child: Text(
+                          'Ponto de Venda',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      _buildSeletorVendedorAppBarPdv(),
+                      const SizedBox(width: 4),
+                      _buildSeletorPrecoListaAppBarPdv(),
+                      const SizedBox(width: 4),
+                      _buildSeletorEntregaPadraoAppBarPdv(),
+                      const SizedBox(width: 4),
+                      _buildSeletorClienteAppBarPdv(),
+                    ],
                   ),
-                ),
-                const SizedBox(width: 6),
-                _buildSeletorVendedorAppBarPdv(),
-                const SizedBox(width: 4),
-                _buildSeletorPrecoListaAppBarPdv(),
-                const SizedBox(width: 4),
-                _buildSeletorEntregaPadraoAppBarPdv(),
-                const SizedBox(width: 4),
-                _buildSeletorClienteAppBarPdv(),
-              ],
-            ),
-            actions: [
-              IconButton(
-                tooltip: 'Calculadora de obra (F12)',
-                onPressed: _toggleObraCalculadoraPdv,
-                icon: const Icon(Icons.construction_outlined),
-              ),
-              IconButton(
-                tooltip: 'Calculadora (F11)',
-                onPressed: _toggleCalculadoraPdv,
-                icon: const Icon(Icons.calculate_outlined),
-              ),
-              IconButton(
-                tooltip: 'Consultar produtos (F4)',
-                onPressed: () => unawaited(_abrirConsultaProdutos()),
-                icon: const Icon(Icons.search),
-              ),
-              IconButton(
-                tooltip: 'Ler orcamento para editar',
-                onPressed: _abrirLeitorOrcamento,
-                icon: const Icon(Icons.description_outlined),
-              ),
-              IconButton(
-                tooltip: 'Inserir kit de orcamento',
-                onPressed: _inserirKitNoOrcamento,
-                icon: const Icon(Icons.widgets_outlined),
-              ),
-            ],
+            actions: _pdvUiCelular
+                ? [
+                    IconButton(
+                      tooltip: 'Consultar produtos',
+                      onPressed: () => unawaited(_abrirConsultaProdutos()),
+                      icon: const Icon(Icons.search),
+                    ),
+                    if (pdvLeitorCameraDisponivel)
+                      IconButton(
+                        tooltip: 'Bipar codigo de barras',
+                        onPressed: () => unawaited(_abrirLeitorCameraPdv()),
+                        icon: const Icon(Icons.qr_code_scanner),
+                      ),
+                    PopupMenuButton<String>(
+                      tooltip: 'Mais acoes',
+                      onSelected: (v) {
+                        switch (v) {
+                          case 'obra':
+                            _toggleObraCalculadoraPdv();
+                          case 'calc':
+                            _toggleCalculadoraPdv();
+                          case 'orcamento':
+                            _abrirLeitorOrcamento();
+                          case 'kit':
+                            _inserirKitNoOrcamento();
+                        }
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          value: 'obra',
+                          child: Text('Calculadora de obra'),
+                        ),
+                        PopupMenuItem(
+                          value: 'calc',
+                          child: Text('Calculadora'),
+                        ),
+                        PopupMenuItem(
+                          value: 'orcamento',
+                          child: Text('Ler orcamento'),
+                        ),
+                        PopupMenuItem(
+                          value: 'kit',
+                          child: Text('Inserir kit'),
+                        ),
+                      ],
+                    ),
+                  ]
+                : [
+                    IconButton(
+                      tooltip: 'Calculadora de obra (F12)',
+                      onPressed: _toggleObraCalculadoraPdv,
+                      icon: const Icon(Icons.construction_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Calculadora (F11)',
+                      onPressed: _toggleCalculadoraPdv,
+                      icon: const Icon(Icons.calculate_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Consultar produtos (F4)',
+                      onPressed: () => unawaited(_abrirConsultaProdutos()),
+                      icon: const Icon(Icons.search),
+                    ),
+                    IconButton(
+                      tooltip: 'Ler orcamento para editar',
+                      onPressed: _abrirLeitorOrcamento,
+                      icon: const Icon(Icons.description_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Inserir kit de orcamento',
+                      onPressed: _inserirKitNoOrcamento,
+                      icon: const Icon(Icons.widgets_outlined),
+                    ),
+                  ],
           ),
-          body: Padding(
-            padding: const EdgeInsets.all(12),
+          body: SafeArea(
+            child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              _pdvUiCelular ? 10 : 12,
+              _pdvUiCelular ? 8 : 12,
+              _pdvUiCelular ? 10 : 12,
+              _pdvUiCelular ? 8 : 12,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (_pdvUiCelular) ...[
+                  _buildFaixaSeletoresMobilePdv(),
+                  const SizedBox(height: 8),
+                ],
                 if (widget.intentTrocaComNota != null && _trocaComNotaBannerVisivel)
                   TrocaComNotaPdvBanner(
                     intent: widget.intentTrocaComNota!,
@@ -7317,10 +7485,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                   order: const NumericFocusOrder(5),
                   child: _PdvHeaderPesquisa(
                     modoBarraCarrinho: true,
+                    modoCelular: _pdvUiCelular,
                     pesquisaFocus: _pesquisaFocus,
                     pesquisaController: _pesquisaController,
-                    mostrarAjudaAtalhos: _mostrarAjudaAtalhos,
-                    mostrarBotaoCamera: pdvLeitorCameraDisponivel,
+                    mostrarAjudaAtalhos:
+                        _pdvUiCelular ? false : _mostrarAjudaAtalhos,
+                    mostrarBotaoCamera:
+                        pdvLeitorCameraDisponivel && !_pdvUiCelular,
                     onLimparBusca: _limparPesquisaAtalho,
                     onAbrirConsulta: () => unawaited(_abrirConsultaProdutos()),
                     onAbrirCamera: () => unawaited(_abrirLeitorCameraPdv()),
@@ -7337,7 +7508,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
                 const SizedBox(height: 8),
                 Expanded(
                   child: ValueListenableBuilder<int>(
-                    valueListenable: _selecaoCarrinhoEpoch,
+                    valueListenable: _carrinhoUiEpoch,
                     builder: (context, epoch, child) =>
                         _buildAreaCarrinhoComPreviewPdv(),
                   ),
@@ -7345,9 +7516,28 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage> with SafeSyncRefres
               ],
             ),
           ),
+          ),
         ),
         ),
         ),
+      ),
+    );
+  }
+
+  /// Seletores (vendedor, tabela, entrega, cliente) em faixa rolavel no celular.
+  Widget _buildFaixaSeletoresMobilePdv() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _buildSeletorVendedorAppBarPdv(),
+          const SizedBox(width: 6),
+          _buildSeletorPrecoListaAppBarPdv(),
+          const SizedBox(width: 6),
+          _buildSeletorEntregaPadraoAppBarPdv(),
+          const SizedBox(width: 6),
+          _buildSeletorClienteAppBarPdv(),
+        ],
       ),
     );
   }
@@ -7367,9 +7557,11 @@ class _PdvHeaderPesquisa extends StatelessWidget {
     required this.onToggleAjudaAtalhos,
     this.mostrarBotaoCamera = false,
     this.onAbrirCamera,
+    this.modoCelular = false,
   });
 
   final bool modoBarraCarrinho;
+  final bool modoCelular;
   final FocusNode pesquisaFocus;
   final TextEditingController pesquisaController;
   final bool mostrarAjudaAtalhos;
@@ -7384,6 +7576,9 @@ class _PdvHeaderPesquisa extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final hintCelular = mostrarBotaoCamera
+        ? 'Pesquisar ou bipar codigo'
+        : 'Pesquisar produto';
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
@@ -7400,7 +7595,12 @@ class _PdvHeaderPesquisa extends StatelessWidget {
         ),
       ),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(8, modoBarraCarrinho ? 6 : 10, 8, 6),
+        padding: EdgeInsets.fromLTRB(
+          8,
+          modoCelular ? 8 : (modoBarraCarrinho ? 6 : 10),
+          8,
+          modoCelular ? 8 : 6,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
@@ -7414,16 +7614,21 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                   ? Theme.of(context).textTheme.bodyMedium
                   : null,
               decoration: InputDecoration(
-                isDense: modoBarraCarrinho,
+                isDense: modoBarraCarrinho && !modoCelular,
                 filled: true,
                 fillColor: scheme.surface.withValues(alpha: 0.92),
                 contentPadding: modoBarraCarrinho
-                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
+                    ? EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: modoCelular ? 14 : 10,
+                      )
                     : null,
                 hintText: modoBarraCarrinho
-                    ? mostrarBotaoCamera
-                        ? 'Pesquisar ou bipar com a camera · Enter/F4 consulta'
-                        : 'Pesquisar produto · Enter/F4 consulta · unico resultado entra direto'
+                    ? (modoCelular
+                        ? hintCelular
+                        : (mostrarBotaoCamera
+                            ? 'Pesquisar ou bipar com a camera · Enter/F4 consulta'
+                            : 'Pesquisar produto · Enter/F4 consulta · unico resultado entra direto'))
                     : null,
                 labelText: modoBarraCarrinho
                     ? null
@@ -7448,7 +7653,9 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                       icon: const Icon(Icons.clear, size: 20),
                     ),
                     IconButton(
-                      tooltip: 'Abrir consulta de produtos (F4)',
+                      tooltip: modoCelular
+                          ? 'Abrir consulta de produtos'
+                          : 'Abrir consulta de produtos (F4)',
                       visualDensity: VisualDensity.compact,
                       onPressed: onAbrirConsulta,
                       icon: const Icon(Icons.search, size: 20),
@@ -7464,53 +7671,55 @@ class _PdvHeaderPesquisa extends StatelessWidget {
               ),
               onSubmitted: (_) => onSubmitEntrada(),
             ),
-            if (!modoBarraCarrinho) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: onToggleAjudaAtalhos,
-                  icon: Icon(
-                    mostrarAjudaAtalhos
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                  ),
-                  label: Text(
-                    mostrarAjudaAtalhos
-                        ? 'Ocultar atalhos'
-                        : 'Ajuda de atalhos',
-                  ),
-                ),
-              ),
-            ] else
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: onToggleAjudaAtalhos,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text(
-                    mostrarAjudaAtalhos ? 'Ocultar atalhos' : 'Atalhos',
-                    style: Theme.of(context).textTheme.labelSmall,
+            if (!modoCelular) ...[
+              if (!modoBarraCarrinho) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: onToggleAjudaAtalhos,
+                    icon: Icon(
+                      mostrarAjudaAtalhos
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                    ),
+                    label: Text(
+                      mostrarAjudaAtalhos
+                          ? 'Ocultar atalhos'
+                          : 'Ajuda de atalhos',
+                    ),
                   ),
                 ),
+              ] else
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: onToggleAjudaAtalhos,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Text(
+                      mostrarAjudaAtalhos ? 'Ocultar atalhos' : 'Atalhos',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 2),
+              AnimatedCrossFade(
+                crossFadeState: mostrarAjudaAtalhos
+                    ? CrossFadeState.showFirst
+                    : CrossFadeState.showSecond,
+                duration: const Duration(milliseconds: 180),
+                firstChild: Padding(
+                  padding: const EdgeInsets.only(top: 6, bottom: 4),
+                  child: const PdvAtalhosAjudaPesquisa(),
+                ),
+                secondChild: const SizedBox.shrink(),
               ),
-            const SizedBox(height: 2),
-            AnimatedCrossFade(
-              crossFadeState: mostrarAjudaAtalhos
-                  ? CrossFadeState.showFirst
-                  : CrossFadeState.showSecond,
-              duration: const Duration(milliseconds: 180),
-              firstChild: Padding(
-                padding: const EdgeInsets.only(top: 6, bottom: 4),
-                child: const PdvAtalhosAjudaPesquisa(),
-              ),
-              secondChild: const SizedBox.shrink(),
-            ),
+            ],
           ],
         ),
       ),
@@ -7582,7 +7791,10 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
   void _rolarParaIndice(int? indice) {
     if (indice == null || !_scrollController.hasClients) return;
     final max = _scrollController.position.maxScrollExtent;
-    final alvo = (indice * PdvCarrinhoLinhaCompacta.alturaLinha).clamp(0.0, max);
+    final altura = PdvCarrinhoLinhaCompacta.alturaParaLista(
+      alvosTouchAmplos: widget.alvosTouchAmplos,
+    );
+    final alvo = (indice * altura).clamp(0.0, max);
     _scrollController.jumpTo(alvo);
   }
 
@@ -7590,6 +7802,9 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final alturaLinha = PdvCarrinhoLinhaCompacta.alturaParaLista(
+      alvosTouchAmplos: widget.alvosTouchAmplos,
+    );
 
     if (widget.itens.isEmpty) {
       return Center(
@@ -7624,13 +7839,15 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
                   icon: const Icon(Icons.search),
                   label: const Text('Pesquisar produto para venda'),
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  'Atalho: F8 ou F4',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: scheme.outline,
+                if (!pdvPlataformaCelular) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Atalho: F8 ou F4',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.outline,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -7644,7 +7861,7 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
       child: ListView.builder(
         controller: _scrollController,
         padding: EdgeInsets.zero,
-        itemExtent: PdvCarrinhoLinhaCompacta.alturaLinha,
+        itemExtent: alturaLinha,
         itemCount: widget.itens.length,
         itemBuilder: (context, index) {
           final item = widget.itens[index];
@@ -7715,6 +7932,7 @@ class _PdvPainelCheckout extends StatelessWidget {
     required this.focusSalvarOrcamento,
     required this.onContinuarFechamento,
     required this.labelBotaoContinuar,
+    this.modoCelular = false,
   });
 
   /// Em coluna (telas estreitas), o painel ignora recolhimento e usa largura total.
@@ -7743,6 +7961,7 @@ class _PdvPainelCheckout extends StatelessWidget {
   final FocusNode focusSalvarOrcamento;
   final VoidCallback onContinuarFechamento;
   final String labelBotaoContinuar;
+  final bool modoCelular;
 
   @override
   Widget build(BuildContext context) {
@@ -7958,8 +8177,15 @@ class _PdvPainelCheckout extends StatelessWidget {
                           child: FilledButton.icon(
                             onPressed: onContinuarFechamento,
                             style: FilledButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              visualDensity: modoCelular
+                                  ? VisualDensity.standard
+                                  : VisualDensity.compact,
+                              minimumSize: modoCelular
+                                  ? const Size.fromHeight(48)
+                                  : null,
+                              padding: EdgeInsets.symmetric(
+                                vertical: modoCelular ? 14 : 10,
+                              ),
                             ),
                             icon: const Icon(Icons.arrow_forward, size: 20),
                             label: Text(labelBotaoContinuar),

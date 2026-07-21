@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/app_config_repository.dart';
 import '../../data/sync/sync_api_client.dart';
+import '../../data/sync/sync_presence_hub.dart';
 import 'seletor_menu_modo_app.dart';
 import 'seletor_tema_app.dart';
 
@@ -45,14 +48,37 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
     _relogioTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _atualizarRelogio();
     });
+    SyncPresenceHub.instance.addListener(_onPresencaHub);
+    _aplicarHubSeDisponivel();
     unawaited(_iniciarMonitorSync());
   }
 
   @override
   void dispose() {
+    SyncPresenceHub.instance.removeListener(_onPresencaHub);
     _relogioTimer?.cancel();
     _presencaTimer?.cancel();
     super.dispose();
+  }
+
+  void _onPresencaHub() {
+    if (!mounted) return;
+    final hub = SyncPresenceHub.instance;
+    setState(() {
+      _consultandoPresenca = false;
+      _estacoesOnline = hub.activeCount;
+      _rotulosEstacoes = List<String>.from(hub.labels);
+    });
+  }
+
+  void _aplicarHubSeDisponivel() {
+    final hub = SyncPresenceHub.instance;
+    if (!hub.temLeitura) return;
+    setState(() {
+      _consultandoPresenca = false;
+      _estacoesOnline = hub.activeCount;
+      _rotulosEstacoes = List<String>.from(hub.labels);
+    });
   }
 
   Future<void> _iniciarMonitorSync() async {
@@ -67,16 +93,21 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
     });
     _presencaTimer?.cancel();
     if (!ativa) return;
+    _aplicarHubSeDisponivel();
     await _atualizarPresenca();
+    final celular = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    // Celular: poll mais espaçado (heartbeat do scheduler tambem atualiza).
     _presencaTimer = Timer.periodic(
-      const Duration(seconds: 45),
+      Duration(seconds: celular ? 30 : 15),
       (_) => unawaited(_atualizarPresenca()),
     );
   }
 
   Future<void> _atualizarPresenca() async {
     if (!_syncAtiva || _syncUrl.isEmpty) return;
-    if (mounted) setState(() => _consultandoPresenca = true);
+    if (mounted && _estacoesOnline == null) {
+      setState(() => _consultandoPresenca = true);
+    }
     final client = SyncApiClient(
       baseUrl: _syncUrl,
       syncToken: _syncToken,
@@ -85,6 +116,7 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
       final map = await client.obterPresenca();
       if (!mounted) return;
       if (map == null) {
+        SyncPresenceHub.instance.marcarIndisponivel();
         setState(() {
           _consultandoPresenca = false;
           _estacoesOnline = null;
@@ -92,34 +124,35 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
         });
         return;
       }
-      final n = (map['activeCount'] as num?)?.toInt() ?? 0;
-      final raw = map['stations'];
-      final rotulos = <String>[];
-      if (raw is List) {
-        for (final e in raw) {
-          final m = e is Map<String, dynamic>
-              ? e
-              : e is Map
-                  ? Map<String, dynamic>.from(e)
-                  : null;
-          if (m == null) continue;
-          final lab = (m['label'] ?? '').toString().trim();
-          rotulos.add(lab.isEmpty ? 'PC' : lab);
-        }
-      }
-      setState(() {
-        _consultandoPresenca = false;
-        _estacoesOnline = n;
-        _rotulosEstacoes = rotulos;
-      });
+      SyncPresenceHub.instance.aplicarMap(map);
+      // Hub listener ja atualiza; reforca caso o valor seja identico.
+      _aplicarHubSeDisponivel();
+      if (mounted) setState(() => _consultandoPresenca = false);
     } catch (_) {
       if (!mounted) return;
+      SyncPresenceHub.instance.marcarIndisponivel();
       setState(() {
         _consultandoPresenca = false;
         _estacoesOnline = null;
         _rotulosEstacoes = [];
       });
     }
+  }
+
+  String get _syncTooltip {
+    final offline = _estacoesOnline == null && !_consultandoPresenca;
+    if (offline) {
+      return 'Servidor local nao encontrado. '
+          'Verifique se o PC servidor esta ligado, o IP nao mudou '
+          'e Configuracoes > Rede > Testar conexao.';
+    }
+    if (_rotulosEstacoes.isEmpty) {
+      return _estacoesOnline == null
+          ? 'Sync'
+          : 'Sync · ${_estacoesOnline!} online';
+    }
+    return '${_rotulosEstacoes.length} estacao(oes):\n'
+        '${_rotulosEstacoes.map((l) => '• $l').join('\n')}';
   }
 
   Widget _buildIndicadorSync(ThemeData tema) {
@@ -131,17 +164,11 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
     final texto = _consultandoPresenca && _estacoesOnline == null
         ? 'Sync · …'
         : offline
-            ? 'Sync · offline'
+            ? 'Sync · servidor nao encontrado'
             : 'Sync · ${_estacoesOnline!} online';
 
-    final tooltip = offline
-        ? 'Servidor de sincronizacao indisponivel'
-        : _rotulosEstacoes.isEmpty
-            ? texto
-            : '${_rotulosEstacoes.length} estacao(oes):\n${_rotulosEstacoes.map((l) => '• $l').join('\n')}';
-
     return Tooltip(
-      message: tooltip,
+      message: _syncTooltip,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -165,6 +192,48 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
     );
   }
 
+  /// Indicador compacto no celular: ponto + contagem (ex.: "2 online").
+  Widget _buildIndicadorSyncCompacto(ThemeData tema) {
+    final onVar = tema.colorScheme.onSurfaceVariant;
+    final offline = _estacoesOnline == null && !_consultandoPresenca;
+    final cor = offline
+        ? tema.colorScheme.error
+        : Colors.green.shade700;
+    final texto = _consultandoPresenca && _estacoesOnline == null
+        ? '…'
+        : offline
+            ? 'off'
+            : '${_estacoesOnline!} online';
+
+    return Tooltip(
+      message: _syncTooltip,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: _consultandoPresenca && _estacoesOnline == null
+                  ? onVar
+                  : cor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            texto,
+            style: tema.textTheme.labelSmall?.copyWith(
+              color: offline ? tema.colorScheme.error : onVar,
+              fontWeight: FontWeight.w700,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _atualizarRelogio() {
     final novo = _dataHora.format(DateTime.now());
     if (!mounted || novo == _agora) return;
@@ -176,6 +245,8 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
     final tema = Theme.of(context);
     final login = widget.usuarioLogin?.trim();
     final nome = widget.usuarioNome?.trim();
+    final celular = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final altura = celular ? 52.0 : 32.0;
 
     return Material(
       color: tema.colorScheme.surfaceContainerHighest.withValues(
@@ -183,21 +254,30 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
       ),
       child: SafeArea(
         top: false,
+        minimum: EdgeInsets.zero,
         child: SizedBox(
-          height: 32,
+          height: altura,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: EdgeInsets.symmetric(horizontal: celular ? 4 : 10),
             child: Row(
               children: [
                 const SeletorMenuModoApp(compacto: true),
-                const SizedBox(width: 2),
                 const SeletorTemaApp(compacto: true),
-                if (_syncAtiva) ...[
-                  const SizedBox(width: 12),
-                  _buildIndicadorSync(tema),
+                if (_syncAtiva && !celular) ...[
+                  const SizedBox(width: 8),
+                  Flexible(child: _buildIndicadorSync(tema)),
+                ],
+                if (_syncAtiva && celular) ...[
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _buildIndicadorSyncCompacto(tema),
+                    ),
+                  ),
                 ],
                 const Spacer(),
-                if (login != null && login.isNotEmpty)
+                if (login != null && login.isNotEmpty && !celular)
                   Flexible(
                     child: Text(
                       nome != null && nome.isNotEmpty ? '$nome ($login)' : login,
@@ -208,7 +288,7 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
                       textAlign: TextAlign.end,
                     ),
                   ),
-                if (login != null && login.isNotEmpty)
+                if (login != null && login.isNotEmpty && !celular)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     child: Text(
@@ -218,12 +298,13 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
                       ),
                     ),
                   ),
-                Text(
-                  _agora,
-                  style: tema.textTheme.labelSmall?.copyWith(
-                    color: tema.colorScheme.onSurfaceVariant,
+                if (!celular)
+                  Text(
+                    _agora,
+                    style: tema.textTheme.labelSmall?.copyWith(
+                      color: tema.colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
               ],
             ),
           ),

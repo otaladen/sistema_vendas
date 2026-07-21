@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,6 +11,7 @@ import '../../data/sync/sync_api_client.dart';
 import '../../data/sync/sync_conflict_log.dart';
 import '../../data/sync/sync_conflict_resolver.dart';
 import '../../data/sync/sync_log.dart';
+import '../../data/sync/sync_priority.dart';
 import '../../data/sync/sync_teste_conexao.dart';
 import '../../domain/sync_rede_ajuda.dart';
 import '../../domain/sync_token_util.dart';
@@ -43,6 +46,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   bool _salvando = false;
   bool _testandoRede = false;
   bool _sincronizando = false;
+  bool _enviandoFotos = false;
   bool _iniciandoServidor = false;
   bool _parandoServidor = false;
   bool _tokenVisivel = false;
@@ -57,7 +61,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   @override
   void initState() {
     super.initState();
-    SyncConflictLog.carregarSeNecessario();
+    unawaited(SyncConflictLog.limparAvisosDeAceiteRemoto());
     _carregar();
   }
 
@@ -243,6 +247,8 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         final err = await LanSyncServerManager.iniciarServidor(
           porta: _porta,
           syncToken: token,
+          productImagesPath:
+              await LanSyncServerManager.caminhoPadraoProductImages(),
         );
         if (err != null && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -308,9 +314,21 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     if (!mounted) return;
 
     final testeOk = _servidorOnline && (_tokenAceitoPeloServidor ?? true);
-    if (testeOk) {
-      await _sincronizarAgora();
-    }
+    if (!testeOk) return;
+
+    // Nao espera o pull completo aqui: no celular (banco vazio) isso pode
+    // travar a tela por minutos. Conexao ja esta ok; sync sobe em background.
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Conectado ao servidor. Baixando/enviando dados em segundo plano… '
+          'Pode sair desta tela; o rodape mostrara quando estiver online.',
+        ),
+        duration: Duration(seconds: 6),
+      ),
+    );
+    unawaited(_sincronizarAgora(avisarConclusao: true));
   }
 
   Future<void> _testarConexao({bool silencioso = false}) async {
@@ -319,6 +337,15 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       final resultado = await testarConexaoSyncLan(
         baseUrl: _urlController.text,
         syncToken: _tokenAtual,
+      ).timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => const SyncTesteResultado(
+          servidorAlcancavel: false,
+          servicoSyncAtivo: false,
+          tokenValido: false,
+          mensagem: 'Tempo esgotado ao testar o servidor (8s). '
+              'Confira IP, Wi-Fi e se o sync esta ligado no PC.',
+        ),
       );
       if (!mounted) return;
       setState(() {
@@ -348,10 +375,11 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   Future<void> _iniciarServidor() async {
     setState(() => _iniciandoServidor = true);
     try {
-      final err = await LanSyncServerManager.iniciarServidor(
-        porta: _porta,
-        syncToken: _tokenAtual,
-      );
+        final err = await LanSyncServerManager.iniciarServidor(
+          porta: _porta,
+          syncToken: _tokenAtual,
+          productImagesPath: await LanSyncServerManager.caminhoPadraoProductImages(),
+        );
       if (!mounted) return;
       if (err != null) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
@@ -394,7 +422,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     );
   }
 
-  Future<void> _sincronizarAgora() async {
+  Future<void> _sincronizarAgora({bool avisarConclusao = true}) async {
     final agendador = widget.lanSyncScheduler;
     if (agendador == null) {
       if (!mounted) return;
@@ -412,10 +440,14 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       );
       return;
     }
+    if (_sincronizando) return;
     setState(() => _sincronizando = true);
     try {
-      final erro = await agendador.sincronizarAgora();
-      if (!mounted) return;
+      final erro = await agendador.sincronizarAgora(
+        forcar: true,
+        modo: SyncModo.completo,
+      );
+      if (!mounted || !avisarConclusao) return;
       if (erro != null && erro.trim().isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Sync: $erro'), backgroundColor: Colors.red),
@@ -427,6 +459,42 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       }
     } finally {
       if (mounted) setState(() => _sincronizando = false);
+    }
+  }
+
+  Future<void> _enviarFotosAoServidor() async {
+    final agendador = widget.lanSyncScheduler;
+    if (agendador == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Agendador de sync indisponivel.')),
+      );
+      return;
+    }
+    setState(() => _enviandoFotos = true);
+    try {
+      final r = await agendador.enviarFotosProdutosAgora();
+      if (!mounted) return;
+      final msg = (r.detalhe != null && r.detalhe!.trim().isNotEmpty)
+          ? r.detalhe!
+          : 'Fotos: ${r.enviados} enviada(s), ${r.ignorados} ja ok, '
+              '${r.falhas} falha(s).';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Falha ao enviar fotos: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _enviandoFotos = false);
     }
   }
 
@@ -500,8 +568,11 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   }
 
   String _rotuloBotaoPrincipal() {
-    if (_salvando) {
+    if (_salvando || _testandoRede) {
       return _modoServidor ? 'Ativando servidor...' : 'Conectando...';
+    }
+    if (_sincronizando) {
+      return 'Sincronizando em segundo plano...';
     }
     return _modoServidor
         ? 'Ativar como servidor e sincronizar'
@@ -523,7 +594,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       rotuloSemaforo = 'Sync desligada';
     } else if (!_servidorOnline) {
       corSemaforo = erro;
-      rotuloSemaforo = 'Servidor offline';
+      rotuloSemaforo = 'Servidor local nao encontrado';
     } else if (ultimoLog != null && !ultimoLog.sucesso) {
       corSemaforo = Colors.orange.shade800;
       rotuloSemaforo = 'Sync com falha';
@@ -629,8 +700,8 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: _salvando ? null : _configurarRedeCompleta,
-            icon: _salvando
+            onPressed: (_salvando || _testandoRede) ? null : _configurarRedeCompleta,
+            icon: (_salvando || _testandoRede || _sincronizando)
                 ? const SizedBox(
                     width: 18,
                     height: 18,
@@ -736,6 +807,36 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
             ),
           ],
         ),
+        if (!kIsWeb && Platform.isWindows) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed:
+                (_enviandoFotos || _salvando) ? null : _enviarFotosAoServidor,
+            icon: _enviandoFotos
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.photo_library_outlined, size: 18),
+            label: Text(
+              _enviandoFotos
+                  ? 'Enviando fotos...'
+                  : 'Reenviar fotos (opcional)',
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'No PC servidor as fotos ja ficam no disco. So use isto se o '
+              'celular ainda mostrar "foto indisponivel" (servidor antigo '
+              'aberto fora do app).',
+              style: tema.textTheme.bodySmall?.copyWith(
+                color: tema.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         _buildControlesServidorAvancado(tema),
       ],
@@ -943,7 +1044,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
           titulo: 'Servidor alcancavel na rede',
           subtitulo: _servidorOnline
               ? 'Teste de conexao OK'
-              : 'Use Testar conexao (mesma Wi-Fi/cabo)',
+              : 'Servidor local nao encontrado — Testar conexao / conferir IP',
         ),
         _CheckItem(
           ok: _tokenPreenchido && !tokenPendente,

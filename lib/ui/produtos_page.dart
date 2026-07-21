@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'theme/app_semantic_helper.dart';
 import '../data/lista_compra_repository.dart';
+import '../data/local_backup_cadastro_produtos_service.dart';
 import '../data/produto_repository.dart';
 import '../data/produto_sugestao_venda_repository.dart';
 import '../domain/permissao_usuario.dart';
@@ -24,8 +25,10 @@ import '../domain/produto_substitutos_util.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
+import '../data/sync/lan_sync_scheduler.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
+import '../domain/fiscal/ncm_cest_sugestao.dart';
 import '../domain/fiscal/produto_fiscal_catalog.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_nome_titulo_normalizer.dart';
@@ -40,15 +43,18 @@ import '../services/compras_preditivas_service.dart';
 import '../services/produto_imagem_busca_service.dart';
 import '../services/trusted_http_client.dart';
 import '../services/produto_imagem_service.dart';
+import '../services/produto_imagem_lan_service.dart';
 import 'layout/app_layout.dart';
 import 'widgets/abas_historico_produto_widget.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'produtos/importar_chacal_backup_flow.dart';
+import 'produtos/ncm_materiais_seletor_dialog.dart';
 import 'produtos/preco_mercado_busca_dialog.dart';
 import 'produtos/produto_pesquisa_dialog.dart';
 import 'produtos/produtos_sugestoes_venda_section.dart';
 import 'produtos/zerar_cadastro_produtos_flow.dart';
+import '../domain/fiscal/ncm_materiais_catalogo.dart';
 import '../services/preco_mercado_service.dart';
 import 'widgets/pdv_barcode_scanner_page.dart';
 import 'widgets/pdv_barcode_scanner_support.dart';
@@ -286,7 +292,12 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   Future<void> _consolidarFotosDuplicadasEmSegundoPlano() async {
     try {
+      // Repara fotoPath relativo/de outra maquina apos restore antigo.
+      LocalBackupCadastroProdutosService.corrigirFotoPathsLocais(
+        widget.produtoRepository.objectBox,
+      );
       await widget.produtoRepository.consolidarFotosDuplicadas();
+      if (mounted) setState(() {});
     } catch (_) {}
   }
 
@@ -363,6 +374,22 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
+  Future<void> _puxarCadastroDaRede() async {
+    final erro = await LanSyncScheduler.solicitarSyncCompleto();
+    if (!mounted) return;
+    widget.produtoRepository.invalidarCacheBusca();
+    setState(() {});
+    if (erro != null && erro.trim().isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sync: $erro')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Produtos e precos atualizados da rede')),
+      );
+    }
+  }
+
   @override
   void dispose() {
     disposeSafeSyncRefresh();
@@ -410,20 +437,75 @@ class _ProdutosPageState extends State<ProdutosPage>
     super.dispose();
   }
 
-  bool _skuJaExiste(String skuNormalizado) {
-    final alvo = normalizarCodigoInternoPersistido(skuNormalizado).toLowerCase();
-    final produtos = widget.produtoRepository.listarTodos();
-    for (final produto in produtos) {
-      final mesmoSku = normalizarCodigoInternoPersistido(
-            produto.codigoInterno,
-          ).toLowerCase() ==
-          alvo;
-      final emEdicao =
-          _produtoEmEdicaoId != null && produto.id == _produtoEmEdicaoId;
-      if (mesmoSku && !emEdicao) {
-        return true;
-      }
+  /// Se o id local sumiu apos sync/remap, recupera o produto pelo SKU do formulario.
+  void _reconciliarProdutoEmEdicao() {
+    final id = _produtoEmEdicaoId;
+    if (id != null && widget.produtoRepository.obterPorId(id) != null) {
+      return;
     }
+
+    final sku = _codigoInternoController.text.trim();
+    if (sku.isEmpty) {
+      _produtoEmEdicaoId = null;
+      return;
+    }
+    final candidatos = widget.produtoRepository.listarPorCodigoInterno(sku);
+    if (candidatos.length == 1) {
+      _produtoEmEdicaoId = candidatos.first.id;
+    } else if (id != null) {
+      // Id sumiu e ha 0 ou varios com o SKU — nao adivinhar.
+      _produtoEmEdicaoId = null;
+    }
+  }
+
+  /// Outro produto (nao o que esta em edicao) com o mesmo SKU, se houver.
+  Produto? _outroProdutoComMesmoSku(String sku) {
+    final alvo = sku.trim();
+    if (alvo.isEmpty) return null;
+    _reconciliarProdutoEmEdicao();
+    return widget.produtoRepository.obterPorCodigoInterno(
+      alvo,
+      ignorarProdutoId: _produtoEmEdicaoId,
+    );
+  }
+
+  Future<bool> _tratarConflitoSku({
+    required String sku,
+    required Produto conflito,
+  }) async {
+    if (!mounted) return false;
+    final abrir = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('SKU ja cadastrado'),
+        content: Text(
+          'O SKU "$sku" ja pertence a '
+          '"${ProdutoNomeExibicao.paraTela(conflito)}" (#${conflito.id}).\n\n'
+          'Isso costuma ser duplicata de importacao/sync (ex.: nome abreviado). '
+          'Abra o outro cadastro ou altere o SKU deste antes de salvar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Corrigir SKU'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Abrir o outro produto'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return false;
+    if (abrir == true) {
+      _editarProdutoNoCabecalho(conflito);
+      return true;
+    }
+    _definirStatus(
+      'SKU "$sku" ja cadastrado no produto '
+      '"${ProdutoNomeExibicao.paraTela(conflito)}".',
+      erro: true,
+    );
     return false;
   }
 
@@ -470,7 +552,8 @@ class _ProdutosPageState extends State<ProdutosPage>
       return _fotoOrigemLocalPath;
     }
     if (_fotoPathAtual.trim().isNotEmpty) {
-      return _fotoPathAtual;
+      return _produtoImagemService.resolverArquivoExistente(_fotoPathAtual) ??
+          _fotoPathAtual;
     }
     return null;
   }
@@ -1209,34 +1292,65 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   List<Widget> _buildCamposNcmCadastro(BuildContext context) {
+    final ncmDigits = _ncmController.text.replaceAll(RegExp(r'\D'), '');
+    final doCatalogo = NcmMateriaisCatalogo.porCodigo(ncmDigits);
     return [
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _erpFieldLabel('NCM', context),
-          SizedBox(
-            width: _wNcm,
-            child: TextFormField(
-              controller: _ncmController,
-              keyboardType: TextInputType.number,
-              maxLength: 10,
-              validator: _validarNcm,
-              onChanged: (_) {
-                if (_infoNcmBrasilApi.isNotEmpty) {
-                  setState(() => _infoNcmBrasilApi = '');
-                }
-              },
-              decoration: _erpInputDecoration(
-                context,
-                helper: '8 digitos — obrigatorio p/ NFC-e',
-                suffixIcon: _suffixConsultaBrasilApi(
-                  carregando: _consultandoNcm,
-                  tooltip: 'Conferir descricao oficial do NCM',
-                  onPressed:
-                      _consultandoNcm ? null : _consultarNcmBrasilApi,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: _wNcm,
+                child: TextFormField(
+                  controller: _ncmController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 10,
+                  validator: _validarNcm,
+                  onChanged: (_) {
+                    setState(() {
+                      if (_infoNcmBrasilApi.isNotEmpty) {
+                        _infoNcmBrasilApi = '';
+                      }
+                      _aplicarCestSugeridoDoNcmSeVazio(_ncmController.text);
+                    });
+                  },
+                  decoration: _erpInputDecoration(
+                    context,
+                    helper: '8 digitos — obrigatorio p/ NFC-e',
+                    suffixIcon: _suffixConsultaBrasilApi(
+                      carregando: _consultandoNcm,
+                      tooltip: 'Conferir descricao oficial do NCM',
+                      onPressed:
+                          _consultandoNcm ? null : _consultarNcmBrasilApi,
+                    ),
+                  ),
                 ),
               ),
-            ),
+              OutlinedButton.icon(
+                onPressed: _abrirSeletorNcmMateriais,
+                icon: const Icon(Icons.list_alt_outlined),
+                label: const Text('Selecionar da tabela'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            doCatalogo != null
+                ? doCatalogo.descricao
+                : 'Pode digitar qualquer NCM ou escolher na tabela de materiais '
+                    'de construcao (como no sistema antigo).',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: doCatalogo != null
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight:
+                      doCatalogo != null ? FontWeight.w600 : FontWeight.w400,
+                ),
           ),
           if (_infoNcmBrasilApi.isNotEmpty)
             Padding(
@@ -1252,6 +1366,27 @@ class _ProdutosPageState extends State<ProdutosPage>
         ],
       ),
     ];
+  }
+
+  Future<void> _abrirSeletorNcmMateriais() async {
+    final resultado = await mostrarSeletorNcmMateriais(
+      context,
+      ncmAtual: _ncmController.text,
+    );
+    if (!mounted || resultado == null) return;
+
+    switch (resultado) {
+      case NcmSelecaoManual():
+        _snackbarBrasilApi(
+          'Digite o NCM manualmente no campo (fora da lista de sugestao).',
+        );
+      case NcmSelecaoDaLista(:final item):
+        setState(() {
+          _ncmController.text = _formatarNcmExibicao(item.codigo);
+          _infoNcmBrasilApi = 'Tabela local: ${item.descricao}';
+          _aplicarCestSugeridoDoNcmSeVazio(item.codigo);
+        });
+    }
   }
 
   Widget _erpRodapeAcaoCadastroProduto(BuildContext context) {
@@ -1618,6 +1753,17 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   Future<void> _importarFotoProduto() async {
     final pathSelecionado = await _produtoImagemService.selecionarImagemLocal();
+    if (pathSelecionado == null) {
+      return;
+    }
+    setState(() {
+      _fotoOrigemLocalPath = pathSelecionado;
+      _fotoFoiRemovida = false;
+    });
+  }
+
+  Future<void> _tirarFotoProduto() async {
+    final pathSelecionado = await _produtoImagemService.capturarFotoCamera();
     if (pathSelecionado == null) {
       return;
     }
@@ -3267,10 +3413,34 @@ class _ProdutosPageState extends State<ProdutosPage>
         if (dados.cest.length == 7 && _cestController.text.trim().isEmpty) {
           _cestController.text = dados.cest;
         }
+        _aplicarCestSugeridoDoNcmSeVazio(ncm8);
       });
     } catch (_) {
       // Falha na Brasil API nao invalida sugestao da IA.
+      if (mounted) {
+        setState(() => _aplicarCestSugeridoDoNcmSeVazio(ncm8));
+      }
     }
+  }
+
+  /// Preenche CEST via tabela local NCM→CEST se o campo ainda estiver vazio.
+  /// Retorna true se preencheu agora.
+  bool _aplicarCestSugeridoDoNcmSeVazio(String? ncm) {
+    final atual = NcmCestSugestao.normalizarCest(_cestController.text);
+    if (atual.length == 7) return false;
+    final ncmDigitos = NcmCestSugestao.normalizarNcm(
+      ncm ?? _ncmController.text,
+    );
+    final sugerido = NcmCestSugestao.sugerirCest(ncmDigitos);
+    if (sugerido == null || sugerido.length != 7) return false;
+    _cestController.text = sugerido;
+    // Itens com CEST tipico de materiais costumam ser ST no cadastro da loja.
+    if (_grupoTributarioSelecionado ==
+        GrupoTributarioProduto.tributado.codigo) {
+      _grupoTributarioSelecionado =
+          GrupoTributarioProduto.substituicaoTributaria.codigo;
+    }
+    return true;
   }
 
   String _mapearUnidadeGeminiParaSistema(String unidadeGemini) {
@@ -3356,6 +3526,9 @@ class _ProdutosPageState extends State<ProdutosPage>
           _cestController.text = model.cest;
         }
         _grupoTributarioSelecionado = model.grupoTributario;
+        if (model.ncm.length == 8) {
+          _aplicarCestSugeridoDoNcmSeVazio(model.ncm);
+        }
       });
 
       if (model.ncm.length == 8) {
@@ -3364,10 +3537,12 @@ class _ProdutosPageState extends State<ProdutosPage>
 
       if (!mounted) return;
       final semantic = context.semanticColors;
+      final cestFinal =
+          NcmCestSugestao.normalizarCest(_cestController.text);
       final extras = <String>[
         if (codigoBarras.isNotEmpty) 'cod. barras',
         if (model.ncm.length == 8) 'NCM',
-        if (model.cest.length == 7) 'CEST',
+        if (cestFinal.length == 7) 'CEST',
         'grupo tributario',
       ];
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3439,6 +3614,7 @@ class _ProdutosPageState extends State<ProdutosPage>
         }
         if (dados.ncm.length == 8) {
           _ncmController.text = _formatarNcmExibicao(dados.ncm);
+          _aplicarCestSugeridoDoNcmSeVazio(dados.ncm);
         }
       });
 
@@ -3516,7 +3692,19 @@ class _ProdutosPageState extends State<ProdutosPage>
         if (dados.cest.length == 7 && _cestController.text.trim().isEmpty) {
           _cestController.text = dados.cest;
         }
+        _aplicarCestSugeridoDoNcmSeVazio(
+          dados.codigoDigitos.isNotEmpty ? dados.codigoDigitos : digitos,
+        );
       });
+
+      final cestFmt = NcmCestSugestao.normalizarCest(_cestController.text);
+      if (cestFmt.length == 7) {
+        _snackbarBrasilApi(
+          'NCM validado. CEST sugerido: '
+          '${NcmCestSugestao.formatarCestExibicao(cestFmt)} '
+          '(confira com o contador).',
+        );
+      }
     } on BrasilApiException catch (e) {
       if (mounted) setState(() => _infoNcmBrasilApi = '');
       _snackbarBrasilApi(e.message, erro: true);
@@ -3832,8 +4020,10 @@ class _ProdutosPageState extends State<ProdutosPage>
     if (sku.isEmpty) {
       return 'Informe o SKU ou habilite geracao automatica.';
     }
-    if (_skuJaExiste(sku.toLowerCase())) {
-      return 'SKU ja cadastrado.';
+    final conflito = _outroProdutoComMesmoSku(sku);
+    if (conflito != null) {
+      final nome = conflito.nome.trim().isEmpty ? 'sem nome' : conflito.nome.trim();
+      return 'SKU ja cadastrado em "$nome" (#${conflito.id}).';
     }
     return null;
   }
@@ -4041,9 +4231,29 @@ class _ProdutosPageState extends State<ProdutosPage>
   Future<void> _salvarProduto() async {
     setState(() {
       _tentouSalvar = true;
+      _reconciliarProdutoEmEdicao();
     });
+
+    // Validacao de SKU sempre aqui: o TextFormField some fora da aba Principal
+    // e o Form.validate() nao rodaria o _validarSku nesses casos.
+    if (!_gerarSkuAutomatico) {
+      final skuChecagem = _codigoInternoController.text.trim();
+      final conflitoSku = _outroProdutoComMesmoSku(skuChecagem);
+      if (conflitoSku != null) {
+        await _tratarConflitoSku(sku: skuChecagem, conflito: conflitoSku);
+        return;
+      }
+    }
+
     final formValido = _formKey.currentState?.validate() ?? false;
     if (!formValido) {
+      final sku = _codigoInternoController.text.trim();
+      final conflito =
+          !_gerarSkuAutomatico ? _outroProdutoComMesmoSku(sku) : null;
+      if (conflito != null) {
+        await _tratarConflitoSku(sku: sku, conflito: conflito);
+        return;
+      }
       _definirStatus('Revise os campos destacados em vermelho.', erro: true);
       return;
     }
@@ -4066,7 +4276,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     final estoqueCd = (int.tryParse(_estoqueCdController.text.trim()) ?? 0)
         .clamp(0, 999999999);
     final precoCusto = _parseValorMonetario(_precoCustoController.text);
-    final produtoExistente = _produtoEmEdicaoId == null
+    Produto? produtoExistente = _produtoEmEdicaoId == null
         ? null
         : widget.produtoRepository.obterPorId(_produtoEmEdicaoId!);
     final pc = precoCusto!;
@@ -4094,9 +4304,11 @@ class _ProdutosPageState extends State<ProdutosPage>
     _nomeController.text = nomePadrao;
 
     final fotoPathExistente = produtoExistente?.fotoPath ?? '';
-    final identificadorFoto = codigoInternoFinal.isNotEmpty
-        ? codigoInternoFinal
-        : 'produto_${DateTime.now().millisecondsSinceEpoch}';
+    final identificadorFoto = nomePadrao.isNotEmpty
+        ? nomePadrao
+        : (codigoInternoFinal.isNotEmpty
+            ? codigoInternoFinal
+            : 'produto_${DateTime.now().millisecondsSinceEpoch}');
     var fotoPathFinal = fotoPathExistente;
 
     if (_fotoOrigemLocalPath != null &&
@@ -4135,6 +4347,39 @@ class _ProdutosPageState extends State<ProdutosPage>
         ),
       );
       fotoPathFinal = '';
+    }
+
+    // Apos await da foto, sync pode ter remapeado ids — reconcilia de novo.
+    if (!mounted) return;
+    _reconciliarProdutoEmEdicao();
+    produtoExistente = _produtoEmEdicaoId == null
+        ? null
+        : widget.produtoRepository.obterPorId(_produtoEmEdicaoId!);
+    if (produtoExistente == null &&
+        !_gerarSkuAutomatico &&
+        codigoInternoFinal.isNotEmpty) {
+      final mesmosSku =
+          widget.produtoRepository.listarPorCodigoInterno(codigoInternoFinal);
+      if (mesmosSku.length == 1) {
+        produtoExistente = mesmosSku.first;
+        _produtoEmEdicaoId = produtoExistente.id;
+      } else if (mesmosSku.length > 1) {
+        await _tratarConflitoSku(
+          sku: codigoInternoFinal,
+          conflito: mesmosSku.first,
+        );
+        return;
+      }
+    }
+    if (!_gerarSkuAutomatico && codigoInternoFinal.isNotEmpty) {
+      final conflito = widget.produtoRepository.obterPorCodigoInterno(
+        codigoInternoFinal,
+        ignorarProdutoId: produtoExistente?.id,
+      );
+      if (conflito != null) {
+        await _tratarConflitoSku(sku: codigoInternoFinal, conflito: conflito);
+        return;
+      }
     }
 
     final produto = Produto(
@@ -4193,13 +4438,28 @@ class _ProdutosPageState extends State<ProdutosPage>
     final estavaEditando = _produtoEmEdicaoId != null;
     try {
       final idSalvo = widget.produtoRepository.salvar(produto);
+      if (fotoPathFinal.trim().isNotEmpty) {
+        unawaited(
+          ProdutoImagemLanService(
+            imagesDirectoryPath:
+                widget.produtoRepository.productImagesDirPath,
+          ).enviarSeRedeAtiva(fotoPathFinal),
+        );
+      }
       await _finalizarSalvarProduto(
         produto: produto,
         idSalvo: idSalvo,
         estavaEditando: estavaEditando,
       );
     } on ProdutoSkuDuplicadoException catch (e) {
-      _definirStatus(e.toString(), erro: true);
+      final conflito = e.produtoExistenteId != null
+          ? widget.produtoRepository.obterPorId(e.produtoExistenteId!)
+          : widget.produtoRepository.obterPorCodigoInterno(e.sku);
+      if (conflito != null) {
+        await _tratarConflitoSku(sku: e.sku, conflito: conflito);
+      } else {
+        _definirStatus(e.toString(), erro: true);
+      }
     }
   }
 
@@ -5163,6 +5423,11 @@ class _ProdutosPageState extends State<ProdutosPage>
         title: const Text('Cadastro de Produtos'),
         actions: [
           IconButton(
+            tooltip: 'Atualizar produtos da rede (pull completo)',
+            icon: const Icon(Icons.cloud_download_outlined),
+            onPressed: _puxarCadastroDaRede,
+          ),
+          IconButton(
             tooltip: 'Importar backup Chacal (.s3db / .sql / .txt)',
             icon: const Icon(Icons.archive_outlined),
             onPressed: _importarBackupChacal,
@@ -5278,9 +5543,13 @@ class _ProdutosPageState extends State<ProdutosPage>
                                         trackVisibility: true,
                                         thickness: 10,
                                         radius: const Radius.circular(6),
-                                        child: SingleChildScrollView(
+                                        child: RefreshIndicator(
+                                          onRefresh: _puxarCadastroDaRede,
+                                          child: SingleChildScrollView(
                                           primary: false,
                                           controller: _scrollController,
+                                          physics:
+                                              const AlwaysScrollableScrollPhysics(),
                                           padding: const EdgeInsets.only(
                                             right: _erpScrollbarGutter,
                                             bottom: _erpGap16,
@@ -5316,31 +5585,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                             ),
                                                             label: const Text(
                                                               'Pesquisar produto',
-                                                            ),
-                                                          ),
-                                                          const SizedBox(
-                                                            height: _erpGap8,
-                                                          ),
-                                                          OutlinedButton.icon(
-                                                            style: OutlinedButton
-                                                                .styleFrom(
-                                                              padding:
-                                                                  const EdgeInsets
-                                                                      .symmetric(
-                                                                horizontal:
-                                                                    _erpGap16,
-                                                                vertical: 12,
-                                                              ),
-                                                            ),
-                                                            onPressed:
-                                                                _espelharProdutoComoNovo,
-                                                            icon: const Icon(
-                                                              Icons
-                                                                  .copy_all_outlined,
-                                                              size: 20,
-                                                            ),
-                                                            label: const Text(
-                                                              'Espelhar como novo',
                                                             ),
                                                           ),
                                                           const SizedBox(
@@ -5400,7 +5644,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                 .center,
                                                         children: [
                                                           Expanded(
-                                                            flex: 2,
                                                             child: OutlinedButton
                                                                 .icon(
                                                               style: OutlinedButton
@@ -5421,34 +5664,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               ),
                                                               label: const Text(
                                                                 'Pesquisar produto',
-                                                              ),
-                                                            ),
-                                                          ),
-                                                          const SizedBox(
-                                                            width: _erpGap8,
-                                                          ),
-                                                          Expanded(
-                                                            child: OutlinedButton
-                                                                .icon(
-                                                              style: OutlinedButton
-                                                                  .styleFrom(
-                                                                padding:
-                                                                    const EdgeInsets
-                                                                        .symmetric(
-                                                                  horizontal:
-                                                                      12,
-                                                                  vertical: 12,
-                                                                ),
-                                                              ),
-                                                              onPressed:
-                                                                  _espelharProdutoComoNovo,
-                                                              icon: const Icon(
-                                                                Icons
-                                                                    .copy_all_outlined,
-                                                                size: 20,
-                                                              ),
-                                                              label: const Text(
-                                                                'Espelhar',
                                                               ),
                                                             ),
                                                           ),
@@ -5613,6 +5828,24 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                             spacing: _erpGap8,
                                                             runSpacing: _erpGap8,
                                                             children: [
+                                                              if (ProdutoImagemService
+                                                                  .cameraDisponivel)
+                                                                OutlinedButton.icon(
+                                                                  style:
+                                                                      _estiloBotaoContornoCompacto,
+                                                                  onPressed:
+                                                                      _buscandoFoto
+                                                                          ? null
+                                                                          : _tirarFotoProduto,
+                                                                  icon: const Icon(
+                                                                    Icons
+                                                                        .photo_camera_outlined,
+                                                                    size: 18,
+                                                                  ),
+                                                                  label: const Text(
+                                                                    'Tirar foto',
+                                                                  ),
+                                                                ),
                                                               OutlinedButton.icon(
                                                                 style:
                                                                     _estiloBotaoContornoCompacto,
@@ -5620,16 +5853,26 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                     _buscandoFoto
                                                                         ? null
                                                                         : _importarFotoProduto,
-                                                                icon: const Icon(
-                                                                  Icons
-                                                                      .add_a_photo_outlined,
+                                                                icon: Icon(
+                                                                  ProdutoImagemService
+                                                                          .cameraDisponivel
+                                                                      ? Icons
+                                                                          .photo_library_outlined
+                                                                      : Icons
+                                                                          .add_a_photo_outlined,
                                                                   size: 18,
                                                                 ),
                                                                 label: Text(
                                                                   _fotoPreviewPath() ==
                                                                           null
-                                                                      ? 'Importar foto'
-                                                                      : 'Trocar foto',
+                                                                      ? (ProdutoImagemService
+                                                                              .cameraDisponivel
+                                                                          ? 'Galeria'
+                                                                          : 'Importar foto')
+                                                                      : (ProdutoImagemService
+                                                                              .cameraDisponivel
+                                                                          ? 'Trocar da galeria'
+                                                                          : 'Trocar foto'),
                                                                 ),
                                                               ),
                                                               OutlinedButton.icon(
@@ -6658,6 +6901,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                               ],
                                             ],
                                           ),
+                                        ),
                                         ),
                                       ),
                                     ),

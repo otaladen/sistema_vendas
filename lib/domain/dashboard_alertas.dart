@@ -65,8 +65,12 @@ class DashboardAlertasService {
     BackupRegistroManual? backupManual,
     bool podeConfiguracoes = false,
     bool podeOrcamentos = false,
+    /// No celular: pula varreduras pesadas (catalogo, entregas, migracao).
+    bool modoLeve = false,
   }) {
-    vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+    if (!modoLeve) {
+      vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+    }
     final alertas = <DashboardAlerta>[];
 
     if (podeFinanceiro) {
@@ -110,7 +114,7 @@ class DashboardAlertasService {
         );
       }
 
-      final cpAtrasadas = _contarContasPagarAtrasadas(objectBox);
+      final cpAtrasadas = modoLeve ? 0 : _contarContasPagarAtrasadas(objectBox);
       if (cpAtrasadas > 0) {
         alertas.add(
           DashboardAlerta(
@@ -126,7 +130,7 @@ class DashboardAlertasService {
       }
     }
 
-    if (podeEntregas) {
+    if (podeEntregas && !modoLeve) {
       final entregas = vendaRepository.listarEntregas();
       final atrasadas =
           entregas.where(EntregaFiltroUtil.ehAtrasada).length;
@@ -163,25 +167,27 @@ class DashboardAlertasService {
         );
       }
 
-      final critico = produtoRepository
-          .listarTodos()
-          .where((p) => p.estoqueReal < p.quantidadeMinima)
-          .length;
-      if (critico > 0) {
-        alertas.add(
-          DashboardAlerta(
-            tipo: DashboardAlertaTipo.estoqueCritico,
-            titulo: 'Estoque abaixo do minimo',
-            detalhe: '$critico produto(s) precisam reposicao',
-            icone: Icons.inventory_2_outlined,
-            destino: MainMenuDestino.estoque,
-            prioridade: 30,
-          ),
-        );
+      if (!modoLeve) {
+        final critico = produtoRepository
+            .listarTodos()
+            .where((p) => p.estoqueReal < p.quantidadeMinima)
+            .length;
+        if (critico > 0) {
+          alertas.add(
+            DashboardAlerta(
+              tipo: DashboardAlertaTipo.estoqueCritico,
+              titulo: 'Estoque abaixo do minimo',
+              detalhe: '$critico produto(s) precisam reposicao',
+              icone: Icons.inventory_2_outlined,
+              destino: MainMenuDestino.estoque,
+              prioridade: 30,
+            ),
+          );
+        }
       }
     }
 
-    if (podeOrcamentos) {
+    if (podeOrcamentos && !modoLeve) {
       final orcs = vendaRepository.listarOrcamentosPendentes();
       final hoje = DateTime.now();
       final orcsAntigos = orcs.where((v) {

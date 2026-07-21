@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_menu_modo_id.dart';
 import '../theme/app_menu_modo_scope.dart';
+import 'seletor_tema_app.dart';
 
 /// Botao para alternar o estilo visual do menu principal.
 class SeletorMenuModoApp extends StatelessWidget {
@@ -16,6 +17,24 @@ class SeletorMenuModoApp extends StatelessWidget {
 
     final tema = Theme.of(context);
     final atual = scope.modoAtual;
+    final compacta = SeletorTemaApp.uiCompacta(context);
+
+    if (compacta) {
+      return IconButton(
+        tooltip: 'Modo do menu (${atual.rotulo})',
+        style: IconButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          tapTargetSize: MaterialTapTargetSize.padded,
+          visualDensity: VisualDensity.standard,
+        ),
+        onPressed: () => _escolherEAplicar(context, scope),
+        icon: Icon(
+          atual.icone,
+          size: 22,
+          color: tema.colorScheme.onSurface,
+        ),
+      );
+    }
 
     return PopupMenuButton<AppMenuModoId>(
       tooltip: 'Modo do menu lateral',
@@ -95,5 +114,57 @@ class SeletorMenuModoApp extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static Future<void> mostrarFolha(BuildContext context) async {
+    final scope = AppMenuModoScope.maybeOf(context);
+    if (scope == null) return;
+    await _escolherEAplicar(context, scope);
+  }
+
+  static Future<void> _escolherEAplicar(
+    BuildContext context,
+    AppMenuModoScope scope,
+  ) async {
+    final atual = scope.modoAtual;
+    final escolhido = await showDialog<AppMenuModoId>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) {
+        final tema = Theme.of(ctx);
+        return AlertDialog(
+          title: const Text('Modo do menu'),
+          contentPadding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final opcao in AppMenuModoId.values)
+                  ListTile(
+                    leading: Icon(opcao.icone),
+                    title: Text(opcao.rotulo),
+                    subtitle: Text(opcao.descricao),
+                    trailing: opcao == atual
+                        ? Icon(
+                            Icons.check_circle,
+                            color: tema.colorScheme.primary,
+                          )
+                        : null,
+                    onTap: () => Navigator.of(ctx).pop(opcao),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancelar'),
+            ),
+          ],
+        );
+      },
+    );
+    if (escolhido == null) return;
+    await scope.definirModo(escolhido);
   }
 }

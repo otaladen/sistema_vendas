@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import 'domain/auditoria_catalogo.dart';
-
 import 'data/app_config_repository.dart';
 import 'data/app_menu_modo_repository.dart';
 import 'data/app_tema_repository.dart';
@@ -14,12 +13,14 @@ import 'data/auditoria_repository.dart';
 import 'data/auto_backup_service.dart';
 import 'data/backup_agendado_headless_service.dart';
 import 'data/backup_ao_fechar_service.dart';
+import 'data/cadastro_duplicados_limpeza.dart';
 import 'data/cliente_repository.dart';
 import 'data/funcionario_repository.dart';
 import 'data/motorista_repository.dart';
 import 'data/objectbox.dart';
 import 'data/produto_repository.dart';
 import 'data/sync/lan_sync_scheduler.dart';
+import 'data/sync/sync_primeira_carga.dart';
 import 'data/sync/sync_service.dart';
 import 'data/usuario_repository.dart';
 import 'data/venda_repository.dart';
@@ -36,6 +37,7 @@ import 'ui/app_startup_error_page.dart';
 import 'ui/layout/app_layout.dart';
 import 'ui/login_page.dart';
 import 'ui/main_menu_page.dart';
+import 'ui/primeira_carga_page.dart';
 import 'ui/theme/app_menu_modo_id.dart';
 import 'ui/theme/app_menu_modo_scope.dart';
 import 'ui/theme/app_tema_id.dart';
@@ -95,6 +97,10 @@ Future<void> main(List<String> args) async {
         objectBox: objectBox,
         configRepository: appConfigRepository,
       );
+      await _executarMigracaoCadastroDuplicados(
+        objectBox: objectBox,
+        configRepository: appConfigRepository,
+      );
       final syncService = SyncService(
         objectBox: objectBox,
         configRepository: appConfigRepository,
@@ -103,6 +109,7 @@ Future<void> main(List<String> args) async {
       runApp(
         MyApp(
           objectBox: objectBox,
+          syncService: syncService,
           lanSyncScheduler: lanSyncScheduler,
           appConfigRepository: appConfigRepository,
         ),
@@ -135,6 +142,24 @@ Future<void> _executarMigracaoSkuZerosEsquerda({
   await configRepository.marcarMigracaoSkuZerosEsquerdaConcluida();
 }
 
+Future<void> _executarMigracaoCadastroDuplicados({
+  required ObjectBox objectBox,
+  required AppConfigRepository configRepository,
+}) async {
+  final jaConcluida =
+      await configRepository.migracaoCadastroDuplicadosConcluida();
+  if (jaConcluida) return;
+  try {
+    final r = await CadastroDuplicadosLimpeza.executar(objectBox);
+    if (r.houveLimpeza) {
+      debugPrint('Limpeza cadastros duplicados: $r');
+    }
+  } catch (e, st) {
+    debugPrint('Falha na limpeza de cadastros duplicados: $e\n$st');
+  }
+  await configRepository.marcarMigracaoCadastroDuplicadosConcluida();
+}
+
 Future<void> _tentarSincronizarHorarioSistemaNoInicio() async {
   if (!Platform.isWindows) {
     return;
@@ -154,11 +179,13 @@ class MyApp extends StatefulWidget {
   const MyApp({
     super.key,
     required this.objectBox,
+    required this.syncService,
     required this.lanSyncScheduler,
     required this.appConfigRepository,
   });
 
   final ObjectBox objectBox;
+  final SyncService syncService;
   final LanSyncScheduler lanSyncScheduler;
   final AppConfigRepository appConfigRepository;
 
@@ -173,6 +200,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
   Timer? _timerBackupAutomatico;
   late final PrintService _printService;
+
+  /// Apos login: bloqueia shell ate a carga inicial (banco vazio).
+  bool _aguardandoPrimeiraCarga = false;
+  bool _checandoPrimeiraCarga = false;
 
   @override
   void initState() {
@@ -206,6 +237,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      LanSyncScheduler.aoRetomarApp();
+    }
     if (state == AppLifecycleState.detached) {
       unawaited(_executarBackupAoFechar());
     }
@@ -239,21 +273,26 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   }
 
   Future<void> _definirTema(AppTemaId tema) async {
-    await AppTemaRepository.salvar(
-      tema,
-      login: _usuarioLogado?.login,
-    );
+    // Aplica na hora — nao espera SharedPreferences (pode falhar/atrasar no Android).
     if (!mounted) return;
     setState(() => _temaAtual = tema);
+    try {
+      await AppTemaRepository.salvar(
+        tema,
+        login: _usuarioLogado?.login,
+      );
+    } catch (_) {}
   }
 
   Future<void> _definirMenuModo(AppMenuModoId modo) async {
-    await AppMenuModoRepository.salvar(
-      modo,
-      login: _usuarioLogado?.login,
-    );
     if (!mounted) return;
     setState(() => _menuModoAtual = modo);
+    try {
+      await AppMenuModoRepository.salvar(
+        modo,
+        login: _usuarioLogado?.login,
+      );
+    } catch (_) {}
   }
 
   Future<void> _entrar(UsuarioSistema usuario) async {
@@ -269,10 +308,31 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       AppMenuModoRepository.carregar(login: usuario.login),
     ]);
     if (!mounted) return;
+
     setState(() {
       _usuarioLogado = usuario;
       _temaAtual = personalizacao[0] as AppTemaId;
       _menuModoAtual = personalizacao[1] as AppMenuModoId;
+      _checandoPrimeiraCarga = true;
+      _aguardandoPrimeiraCarga = false;
+    });
+
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final precisa = await SyncPrimeiraCarga.precisa(
+      objectBox: widget.objectBox,
+      redeSincronizacaoAtiva: config.redeSincronizacaoAtiva,
+      redeModoServidor: config.redeModoServidor,
+      redeServidorUrl: config.redeServidorUrl,
+    );
+    // Celular novo sem URL ainda: se o banco estiver vazio, obriga a tela
+    // para o usuario informar o servidor (em vez de abrir o PDV vazio).
+    final bancoVazio = await SyncPrimeiraCarga.precisaPorBanco(widget.objectBox);
+    final forcarGateCliente = !config.redeModoServidor && bancoVazio;
+
+    if (!mounted) return;
+    setState(() {
+      _checandoPrimeiraCarga = false;
+      _aguardandoPrimeiraCarga = precisa || forcarGateCliente;
     });
   }
 
@@ -296,58 +356,84 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() {
       _usuarioLogado = null;
+      _aguardandoPrimeiraCarga = false;
+      _checandoPrimeiraCarga = false;
       _temaAtual = personalizacao[0] as AppTemaId;
       _menuModoAtual = personalizacao[1] as AppMenuModoId;
     });
   }
 
+  void _concluirPrimeiraCarga() {
+    if (!mounted) return;
+    setState(() => _aguardandoPrimeiraCarga = false);
+  }
+
+  Widget _buildHomeLogado() {
+    if (_checandoPrimeiraCarga) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_aguardandoPrimeiraCarga) {
+      return PrimeiraCargaPage(
+        objectBox: widget.objectBox,
+        syncService: widget.syncService,
+        appConfigRepository: widget.appConfigRepository,
+        onConcluido: _concluirPrimeiraCarga,
+        onLogout: () => unawaited(_sair()),
+      );
+    }
+
+    final produtoRepository = ProdutoRepository(widget.objectBox);
+    final vendaRepository = VendaRepository(
+      widget.objectBox,
+      onAposEscrita: produtoRepository.atualizarCacheAposMovimentoEstoque,
+    );
+    return MainAppShellPage(
+      objectBox: widget.objectBox,
+      produtoRepository: produtoRepository,
+      clienteRepository: ClienteRepository(widget.objectBox),
+      vendaRepository: vendaRepository,
+      vendedorRepository: VendedorRepository(widget.objectBox),
+      funcionarioRepository: FuncionarioRepository(widget.objectBox),
+      motoristaRepository: MotoristaRepository(widget.objectBox),
+      usuarioLogado: _usuarioLogado!,
+      onLogout: () => unawaited(_sair()),
+      lanSyncScheduler: widget.lanSyncScheduler,
+      appConfigRepository: widget.appConfigRepository,
+      printService: _printService,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AppTemaScope(
-      temaAtual: _temaAtual,
-      definirTema: _definirTema,
-      child: AppMenuModoScope(
-        modoAtual: _menuModoAtual,
-        definirModo: _definirMenuModo,
-        child: MaterialApp(
-          title: 'Sistema de Vendas',
-          builder: buildAdaptiveAppShell,
-          theme: AppThemeBuilder.build(_temaAtual),
-          home: _usuarioLogado == null
-              ? LoginPage(
-                  usuarioRepository: _usuarioRepository,
-                  onLoginSuccess: _entrar,
-                )
-              : Builder(
-                  builder: (context) {
-                    final produtoRepository =
-                        ProdutoRepository(widget.objectBox);
-                    final vendaRepository = VendaRepository(
-                      widget.objectBox,
-                      onAposEscrita:
-                          produtoRepository.atualizarCacheAposMovimentoEstoque,
-                    );
-                    return MainAppShellPage(
-                      objectBox: widget.objectBox,
-                      produtoRepository: produtoRepository,
-                      clienteRepository: ClienteRepository(widget.objectBox),
-                      vendaRepository: vendaRepository,
-                      vendedorRepository:
-                          VendedorRepository(widget.objectBox),
-                      funcionarioRepository:
-                          FuncionarioRepository(widget.objectBox),
-                      motoristaRepository:
-                          MotoristaRepository(widget.objectBox),
-                      usuarioLogado: _usuarioLogado!,
-                      onLogout: () => unawaited(_sair()),
-                      lanSyncScheduler: widget.lanSyncScheduler,
-                      appConfigRepository: widget.appConfigRepository,
-                      printService: _printService,
-                    );
-                  },
-                ),
-        ),
-      ),
+    final temaData = AppThemeBuilder.build(_temaAtual);
+    return MaterialApp(
+      key: const ValueKey<String>('sistema-vendas-app'),
+      title: 'Sistema de Vendas',
+      theme: temaData,
+      darkTheme: temaData,
+      themeMode: ThemeMode.light,
+      builder: (context, child) {
+        return AppTemaScope(
+          temaAtual: _temaAtual,
+          definirTema: _definirTema,
+          child: AppMenuModoScope(
+            modoAtual: _menuModoAtual,
+            definirModo: _definirMenuModo,
+            child: Theme(
+              data: temaData,
+              child: buildAdaptiveAppShell(context, child),
+            ),
+          ),
+        );
+      },
+      home: _usuarioLogado == null
+          ? LoginPage(
+              usuarioRepository: _usuarioRepository,
+              onLoginSuccess: _entrar,
+            )
+          : _buildHomeLogado(),
     );
   }
 }

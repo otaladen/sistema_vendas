@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../domain/auditoria_catalogo.dart';
 import '../domain/sessao_operacional_guard.dart';
 import 'app_config_repository.dart';
@@ -24,6 +26,8 @@ class AutoBackupService {
     LanSyncScheduler? lanSyncScheduler,
   }) async {
     if (_emExecucao) return;
+    // Celular: backup automatico fecha o ObjectBox e congela o app.
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) return;
     // Fecha o ObjectBox: nao interromper PDV aberto (use backup agendado headless).
     if (SessaoOperacionalGuard.pdvEmUso) return;
     final config = await repository.carregarEmpresaConfig();

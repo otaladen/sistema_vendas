@@ -39,9 +39,13 @@ Regras:
 - unidade_medida deve ser a unidade comercial mais adequada (UN, KG, MT, etc.).
 - ncm: 8 digitos da NCM mais provavel para o item (material de construcao no Brasil).
   Deixe vazio se nao tiver seguranca razoavel.
-- cest: 7 digitos quando o produto for tipico de substituicao tributaria; vazio caso contrario.
+- cest: SEMPRE tente preencher com 7 digitos quando o NCM for de item tipico de
+  substituicao tributaria em loja de materiais (cimento, tinta, PVC, argamassa,
+  tubos, conexoes, torneiras, telhas, fio/cabo). So deixe vazio se realmente
+  nao houver enquadramento CEST usual. Nunca invente CEST aleatorio.
 - grupo_tributario: tributado (maioria), isento ou substituicao_tributaria (materiais ST comuns
   em lojas de construcao: tintas, tubos PVC, cimentos cola, etc. — use criterio fiscal usual).
+  Se preencher cest com 7 digitos, prefira grupo_tributario = substituicao_tributaria.
 - codigo_barras: preencha SOMENTE se o GTIN/EAN estiver explicito no texto de entrada
   (8, 12, 13 ou 14 digitos). Caso contrario retorne vazio — nao invente codigo de barras.
 - Nao invente precos.
@@ -143,7 +147,8 @@ class GeminiService {
         nullable: true,
       ),
       'cest': Schema.string(
-        description: 'CEST 7 digitos ou string vazia.',
+        description:
+            'CEST 7 digitos quando houver enquadramento ST tipico; senao string vazia.',
         nullable: true,
       ),
       'grupo_tributario': Schema.enumString(

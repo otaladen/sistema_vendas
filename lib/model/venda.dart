@@ -76,12 +76,19 @@ class Venda {
   int id;
 
   @Property(type: PropertyType.dateUtc)
+  @Index()
   DateTime data;
+
   double total;
   double custoTotal;
   double lucroTotal;
+
+  @Index()
   String status;
+
+  @Index()
   int numeroOrcamento;
+
   String formaPagamento;
   int quantidadeParcelas;
   /// JSON lista [PagamentoOrcamentoLinha]; vazio se pagamento unico (legado).
@@ -109,6 +116,8 @@ class Venda {
   bool carretoReservaAteSaida;
 
   bool entregaPendente;
+
+  @Index()
   bool cancelada;
   String motivoCancelamento;
   String canceladaPor;

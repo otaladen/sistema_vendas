@@ -6,11 +6,14 @@ class SyncImplantacaoConfig {
 
   final AppConfigRepository _repository;
 
-  static const intervaloSyncNormal = Duration(seconds: 30);
-  static const intervaloSyncImplantacao = Duration(seconds: 60);
-  /// Agrupa varias gravações locais (itens de venda, etc.) numa única sync.
-  static const debounceRedeNormal = Duration(seconds: 2);
-  static const debounceRedeImplantacao = Duration(seconds: 5);
+  static const intervaloSyncNormal = Duration(seconds: 90);
+  static const intervaloSyncImplantacao = Duration(seconds: 120);
+  /// Agrupa varias gravações locais de prioridade media numa unica sync.
+  static const debounceRedeNormal = Duration(seconds: 3);
+  static const debounceRedeImplantacao = Duration(seconds: 6);
+  /// Venda/estoque: curto o bastante para coalescer, longo o bastante
+  /// para o dirty do SharedPreferences ja estar gravado.
+  static const debouncePrioritario = Duration(milliseconds: 250);
 
   Future<bool> modoImplantacaoAtivo() =>
       _repository.carregarModoImplantacaoLocal();

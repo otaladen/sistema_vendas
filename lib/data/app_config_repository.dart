@@ -543,6 +543,8 @@ class AppConfigRepository {
       'config_migracao_motorista_entrega_concluida';
   static const _kMigracaoSkuZerosEsquerdaConcluida =
       'config_migracao_sku_zeros_esquerda_concluida';
+  static const _kMigracaoCadastroDuplicadosConcluida =
+      'config_migracao_cadastro_duplicados_v2';
   static const _kLayoutImpressaoJson = 'config_layout_impressao_json';
   static const _kAuditoriaRetencaoDias = 'config_auditoria_retencao_dias';
   static const _kMargemMinimaPercentualPadrao =
@@ -1088,6 +1090,16 @@ class AppConfigRepository {
   Future<void> marcarMigracaoSkuZerosEsquerdaConcluida() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kMigracaoSkuZerosEsquerdaConcluida, true);
+  }
+
+  Future<bool> migracaoCadastroDuplicadosConcluida() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kMigracaoCadastroDuplicadosConcluida) ?? false;
+  }
+
+  Future<void> marcarMigracaoCadastroDuplicadosConcluida() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kMigracaoCadastroDuplicadosConcluida, true);
   }
 
   /// Preferencia local deste PC — nao entra em [EmpresaConfig] / sync LAN.

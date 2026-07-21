@@ -1,17 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/usuario_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../domain/usuario_senha_codec.dart';
 import 'theme/app_semantic_helper.dart';
+import '../model/usuario_sistema.dart';
 import '../model/vendedor.dart';
 
 /// Cadastro de **vendedores** (balcao, comissoes, contato com cliente).
-/// Nao substitui tela futura de **Funcionarios** (RH / contratacao).
+/// Separado de **Funcionarios** (RH) e **Usuarios** (login do sistema).
 class VendedoresPage extends StatefulWidget {
-  const VendedoresPage({super.key, required this.vendedorRepository});
+  const VendedoresPage({
+    super.key,
+    required this.vendedorRepository,
+    required this.usuarioRepository,
+  });
 
   final VendedorRepository vendedorRepository;
+  final UsuarioRepository usuarioRepository;
 
   @override
   State<VendedoresPage> createState() => _VendedoresPageState();
@@ -56,6 +65,7 @@ class _VendedoresPageState extends State<VendedoresPage> {
   bool _ativo = true;
   bool _ocultarSenhaPdv = true;
   String _status = '';
+  UsuarioSistema? _usuarioVinculadoAoVendedor;
 
   late final _telefoneFormatter = _DigitosMaxFormatter(11);
   late final _emailFormatter = _EmailLowercaseFormatter();
@@ -108,8 +118,15 @@ class _VendedoresPageState extends State<VendedoresPage> {
       _senhaPdvController.clear();
       _ativo = true;
       _vendedorEmEdicaoId = null;
+      _usuarioVinculadoAoVendedor = null;
       _status = '';
     });
+  }
+
+  Future<void> _carregarUsuarioVinculado(int vendedorId) async {
+    final u = await widget.usuarioRepository.obterAtivoPorVendedorId(vendedorId);
+    if (!mounted) return;
+    setState(() => _usuarioVinculadoAoVendedor = u);
   }
 
   void _editar(Vendedor v) {
@@ -130,8 +147,10 @@ class _VendedoresPageState extends State<VendedoresPage> {
       _observacoesController.text = v.observacoesComerciais;
       _senhaPdvController.clear();
       _ativo = v.ativo;
+      _usuarioVinculadoAoVendedor = null;
       _status = 'Editando: ${v.nomeCompleto}';
     });
+    unawaited(_carregarUsuarioVinculado(v.id));
   }
 
   Future<void> _confirmarRemover(Vendedor v) async {
@@ -273,9 +292,10 @@ class _VendedoresPageState extends State<VendedoresPage> {
                             ),
                           ),
                           Text(
-                            'Use este cadastro para quem atende no balcao, recebe comissao e aparece em '
-                            'orcamentos e relatarios de venda. Um cadastro futuro de Funcionarios '
-                            'tera dados de RH (contrato, cargo administrativo etc.).',
+                            'Quem aparece nas vendas, comissoes e orcamentos. '
+                            'Separado de Funcionarios (RH) e Usuarios (login). '
+                            'PIN do balcao e opcional — se a pessoa ja tem usuario no sistema, '
+                            'o PDV pode desbloquear com a senha do login.',
                             style: theme.textTheme.bodyMedium,
                           ),
                         ],
@@ -510,20 +530,56 @@ class _VendedoresPageState extends State<VendedoresPage> {
               const SizedBox(height: 8),
               _buildSectionCard(
                 context: context,
-                title: 'Senha do PDV',
+                title: 'PIN do PDV (opcional)',
                 icon: Icons.lock_outline,
                 children: [
+                  if (_usuarioVinculadoAoVendedor != null) ...[
+                    Material(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .secondaryContainer
+                          .withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              Icons.person_outline,
+                              size: 18,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Ja existe usuario vinculado: '
+                                '${_usuarioVinculadoAoVendedor!.nome} '
+                                '(${_usuarioVinculadoAoVendedor!.login}). '
+                                'No PDV, prefira a senha do sistema; o PIN abaixo '
+                                'fica so para balcao rapido (legado).',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   TextFormField(
                     controller: _senhaPdvController,
                     obscureText: _ocultarSenhaPdv,
                     decoration: InputDecoration(
                       labelText: emEdicao
-                          ? 'Nova senha do PDV (opcional)'
-                          : 'Senha do PDV (opcional)',
-                      helperText: emEdicao
-                          ? 'Deixe em branco para manter a senha atual. '
-                              'Necessaria quando o bloqueio vendedor esta ativo.'
-                          : 'Usada no bloqueio vendedor do terminal PDV.',
+                          ? 'Novo PIN do balcao (opcional)'
+                          : 'PIN do balcao (opcional)',
+                      helperText: _usuarioVinculadoAoVendedor != null
+                          ? 'Deixe em branco se for usar so o login do sistema no PDV.'
+                          : emEdicao
+                              ? 'Deixe em branco para manter o PIN atual. '
+                                  'Use so se a pessoa nao tiver login no sistema.'
+                              : 'So necessario se a pessoa nao usar login do sistema no PDV.',
                       isDense: true,
                       suffixIcon: IconButton(
                         tooltip: _ocultarSenhaPdv

@@ -17,8 +17,8 @@ Future<Vendedor?> solicitarIdentificacaoVendedorPdv({
   bool permitirCancelar = true,
   String titulo = 'Identificacao do vendedor',
   String mensagem =
-      'Informe a senha do vendedor ou o login do sistema para liberar '
-      'o terminal. O PDV identifica automaticamente quem esta vendendo.',
+      'Use a senha do sistema (login) se o vendedor tem usuario vinculado, '
+      'ou o PIN do vendedor para desbloqueio rapido no balcao.',
   String rotuloConfirmar = 'Entrar',
 }) async {
   final comSenha = vendedorRepository.contarAtivosComSenhaPdv();
@@ -31,10 +31,10 @@ Future<Vendedor?> solicitarIdentificacaoVendedorPdv({
       builder: (ctx) => AlertDialog(
         title: const Text('Bloqueio vendedor'),
         content: const Text(
-          'Nenhum vendedor ativo tem senha do PDV cadastrada e nenhum usuario '
+          'Nenhum vendedor ativo tem PIN do PDV cadastrado e nenhum usuario '
           'tem vendedor vinculado.\n\n'
-          'Configure em Cadastros → Vendedores (senha do PDV) ou '
-          'Cadastros → Usuarios (vendedor vinculado), '
+          'Configure em Cadastros → Usuarios (vendedor vinculado + senha do sistema) '
+          'ou Cadastros → Vendedores (PIN do balcao), '
           'ou desative o bloqueio em Configuracoes.',
         ),
         actions: [
@@ -76,7 +76,8 @@ Future<String?> solicitarOperadorRetiradaNaLoja({
     vendedorRepository: vendedorRepository,
     usuarioRepository: usuarioRepository,
     titulo: 'Autorizar retirada',
-    mensagem: 'Senha do vendedor ou login do sistema.',
+    mensagem:
+        'Informe a senha do sistema (login) ou o PIN do vendedor (balcao).',
     rotuloConfirmar: 'Confirmar',
   );
   if (vendedor == null) return null;
@@ -127,10 +128,11 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
     _senhaController = TextEditingController();
     _loginController = TextEditingController();
     _senhaUsuarioController = TextEditingController();
-    if (widget.permiteSenhaVendedor) {
-      _modo = _ModoIdentificacaoVendedorPdv.senhaVendedor;
-    } else {
+    // Prefere login do sistema quando disponivel (senha unica do ERP).
+    if (widget.permiteUsuarioSistema) {
       _modo = _ModoIdentificacaoVendedorPdv.usuarioSistema;
+    } else {
+      _modo = _ModoIdentificacaoVendedorPdv.senhaVendedor;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _focarCampoAtual());
   }
@@ -179,7 +181,7 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
       if (senha.isEmpty) {
         setState(() {
           _autenticando = false;
-          _erro = 'Informe a senha do vendedor.';
+          _erro = 'Informe o PIN do vendedor.';
         });
         return;
       }
@@ -187,7 +189,7 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
       if (vendedor == null && mounted) {
         setState(() {
           _autenticando = false;
-          _erro = 'Senha invalida ou ambigua. Verifique o cadastro do vendedor.';
+          _erro = 'PIN invalido ou ambiguo. Verifique o cadastro do vendedor.';
         });
         return;
       }
@@ -197,7 +199,7 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
       if (login.isEmpty || senha.isEmpty) {
         setState(() {
           _autenticando = false;
-          _erro = 'Informe usuario e senha.';
+          _erro = 'Informe login e senha do sistema.';
         });
         return;
       }
@@ -230,6 +232,7 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
   Widget build(BuildContext context) {
     final mostrarSeletorModo =
         widget.permiteSenhaVendedor && widget.permiteUsuarioSistema;
+    final theme = Theme.of(context);
 
     return AlertDialog(
       title: Text(widget.titulo),
@@ -240,19 +243,31 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(widget.mensagem),
+            if (widget.permiteUsuarioSistema) ...[
+              const SizedBox(height: 8),
+              Text(
+                widget.permiteSenhaVendedor
+                    ? 'Recomendado: senha do sistema (login). '
+                        'O PIN do vendedor e so para balcao rapido.'
+                    : 'Use a senha do sistema (mesma do login do app).',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
             if (mostrarSeletorModo) ...[
               const SizedBox(height: 12),
               SegmentedButton<_ModoIdentificacaoVendedorPdv>(
                 segments: const [
                   ButtonSegment(
-                    value: _ModoIdentificacaoVendedorPdv.senhaVendedor,
-                    label: Text('Senha PDV'),
-                    icon: Icon(Icons.pin_outlined, size: 18),
+                    value: _ModoIdentificacaoVendedorPdv.usuarioSistema,
+                    label: Text('Senha sistema'),
+                    icon: Icon(Icons.person_outline, size: 18),
                   ),
                   ButtonSegment(
-                    value: _ModoIdentificacaoVendedorPdv.usuarioSistema,
-                    label: Text('Usuario'),
-                    icon: Icon(Icons.person_outline, size: 18),
+                    value: _ModoIdentificacaoVendedorPdv.senhaVendedor,
+                    label: Text('PIN balcao'),
+                    icon: Icon(Icons.pin_outlined, size: 18),
                   ),
                 ],
                 selected: {_modo},
@@ -269,7 +284,8 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => unawaited(_confirmar()),
                 decoration: InputDecoration(
-                  labelText: 'Senha do vendedor',
+                  labelText: 'PIN do vendedor (balcao)',
+                  helperText: 'Cadastro em Vendedores — opcional se ja usa login.',
                   errorText: _erro.isEmpty ? null : _erro,
                   suffixIcon: IconButton(
                     tooltip: _ocultarSenha ? 'Mostrar senha' : 'Ocultar senha',
@@ -290,7 +306,7 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
                 autofocus: true,
                 textInputAction: TextInputAction.next,
                 decoration: InputDecoration(
-                  labelText: 'Usuario',
+                  labelText: 'Login do sistema',
                   errorText: _erro.isEmpty ? null : _erro,
                 ),
               ),
@@ -302,7 +318,8 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => unawaited(_confirmar()),
                 decoration: InputDecoration(
-                  labelText: 'Senha',
+                  labelText: 'Senha do sistema',
+                  helperText: 'Mesma senha usada para entrar no app.',
                   suffixIcon: IconButton(
                     tooltip: _ocultarSenha ? 'Mostrar senha' : 'Ocultar senha',
                     onPressed: () =>

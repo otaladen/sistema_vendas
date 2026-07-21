@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/pdv_consulta_detalhe_linha.dart';
+import '../../domain/pdv_estoque_semaforo_util.dart';
 import '../../domain/produto_embalagem.dart';
 import '../../domain/produto_unidade_exibicao.dart';
 import '../../model/produto.dart';
@@ -20,6 +21,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
     this.tooltipAdicionar,
     this.emPromocao = false,
     this.precoDeFormatado,
+    this.estoqueNivel,
     this.selecionado = false,
     this.quantidadeNoOrcamento = 0,
   });
@@ -29,6 +31,8 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
   final String precoFormatado;
   final bool emPromocao;
   final String? precoDeFormatado;
+  /// Nivel base (sem qtd no orcamento). Se [quantidadeNoOrcamento] > 0, recalcula.
+  final PdvEstoqueSemaforoNivel? estoqueNivel;
   final VoidCallback onAdicionar;
   final String? tooltipAdicionar;
   final bool selecionado;
@@ -47,9 +51,8 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
     required bool expandido,
     required Produto produto,
   }) {
-    if (expandido) return alturaLinhaExpandida;
-    if (exibirBadgesCompactos(produto)) return alturaLinhaComBadges;
-    return alturaLinha;
+    // Altura fixa (ignora expandido): evita "piscar" ao navegar com setas.
+    return alturaLinhaExpandida;
   }
 
   @override
@@ -121,6 +124,9 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                 child: PdvConsultaSemaforoEstoque(
                   produto: produto,
                   quantidadeNoOrcamento: quantidadeNoOrcamento,
+                  nivelPrecalculado: quantidadeNoOrcamento > 0
+                      ? null
+                      : estoqueNivel,
                 ),
               ),
               SizedBox(

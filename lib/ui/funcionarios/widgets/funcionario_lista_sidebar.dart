@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../../model/funcionario.dart';
@@ -134,7 +136,10 @@ class FuncionarioListaSidebar extends StatelessWidget {
                                     backgroundColor: f.ativo
                                         ? scheme.primary.withValues(alpha: 0.12)
                                         : scheme.errorContainer.withValues(alpha: 0.35),
-                                    child: Text(
+                                    backgroundImage: _fotoArquivo(f.fotoPath),
+                                    child: _fotoArquivo(f.fotoPath) != null
+                                        ? null
+                                        : Text(
                                       f.nomeCompleto.isNotEmpty
                                           ? f.nomeCompleto.trim()[0].toUpperCase()
                                           : '?',
@@ -184,5 +189,13 @@ class FuncionarioListaSidebar extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  FileImage? _fotoArquivo(String fotoPath) {
+    final path = fotoPath.trim();
+    if (path.isEmpty) return null;
+    final file = File(path);
+    if (!file.existsSync()) return null;
+    return FileImage(file);
   }
 }

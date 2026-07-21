@@ -433,38 +433,45 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   }
 
   List<Widget> _acoesAppBarEstoque({required bool verCusto}) {
-    final largo =
+    final compact = EstoqueLayout.isCompact(context);
+    final largo = !compact &&
         MediaQuery.sizeOf(context).width >= EstoqueLayout.breakpointDesktopLargo;
     final acoes = <Widget>[
-      if (largo)
-        TextButton.icon(
-          onPressed: _abrirListaCompra,
-          icon: const Icon(Icons.playlist_add_check_outlined, size: 20),
-          label: const Text('Lista de compras'),
-        )
-      else
-        IconButton(
-          tooltip: 'Lista de compras',
-          icon: const Icon(Icons.playlist_add_check_outlined),
-          onPressed: _abrirListaCompra,
-        ),
-      if (largo)
-        FilledButton.tonalIcon(
-          onPressed: _abrirSugestaoCompra,
-          icon: const Icon(Icons.shopping_cart_outlined, size: 20),
-          label: const Text('Sugestao de compra'),
-        )
-      else
-        IconButton(
-          tooltip: 'Sugestao de compra',
-          icon: const Icon(Icons.shopping_cart_outlined),
-          onPressed: _abrirSugestaoCompra,
-        ),
+      if (!compact) ...[
+        if (largo)
+          TextButton.icon(
+            onPressed: _abrirListaCompra,
+            icon: const Icon(Icons.playlist_add_check_outlined, size: 20),
+            label: const Text('Lista de compras'),
+          )
+        else
+          IconButton(
+            tooltip: 'Lista de compras',
+            icon: const Icon(Icons.playlist_add_check_outlined),
+            onPressed: _abrirListaCompra,
+          ),
+        if (largo)
+          FilledButton.tonalIcon(
+            onPressed: _abrirSugestaoCompra,
+            icon: const Icon(Icons.shopping_cart_outlined, size: 20),
+            label: const Text('Sugestao de compra'),
+          )
+        else
+          IconButton(
+            tooltip: 'Sugestao de compra',
+            icon: const Icon(Icons.shopping_cart_outlined),
+            onPressed: _abrirSugestaoCompra,
+          ),
+      ],
       PopupMenuButton<String>(
         tooltip: 'Mais acoes',
         icon: const Icon(Icons.more_vert),
         onSelected: (value) async {
           switch (value) {
+            case 'lista_compra':
+              await _abrirListaCompra();
+            case 'sugestao':
+              await _abrirSugestaoCompra();
             case 'diagnostico':
               await _abrirDiagnosticoEstoque();
             case 'historico':
@@ -487,6 +494,25 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
               ? ' (${diag.quantidadeCriticos + diag.quantidadeAlertas})'
               : '';
           return [
+            if (compact) ...[
+              const PopupMenuItem<String>(
+                value: 'lista_compra',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.playlist_add_check_outlined),
+                  title: Text('Lista de compras'),
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'sugestao',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.shopping_cart_outlined),
+                  title: Text('Sugestao de compra'),
+                ),
+              ),
+              const PopupMenuDivider(),
+            ],
             PopupMenuItem<String>(
               value: 'diagnostico',
               child: ListTile(
@@ -553,24 +579,27 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           ];
         },
       ),
-      const SizedBox(width: 8),
+      if (!compact) const SizedBox(width: 8),
     ];
     return acoes;
   }
 
   Widget _painelKpisEstoque({required bool verCusto}) {
     final semantic = context.semanticColors;
+    final faixa = EstoqueLayout.isKpisFaixa(context);
     final kpis = <Widget>[
       EstoqueStatTile(
         icon: Icons.inventory_2_outlined,
         titulo: 'SKUs ativos',
         valor: '$_produtosAtivosCount',
+        faixaCompacta: faixa,
       ),
       EstoqueStatTile(
         icon: Icons.trending_down,
         titulo: 'Abaixo minimo',
         valor: '$_totalAbaixoMinimo',
         destaqueCor: semantic.errorFg,
+        faixaCompacta: faixa,
         onTap: () => setState(() {
           _filtroOperacional = FiltroEstoqueOperacional.abaixoMinimo;
           _filtrosExpandidos = true;
@@ -582,6 +611,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
         titulo: 'PP critico',
         valor: '$_qtdCriticosPp',
         destaqueCor: semantic.warningFg,
+        faixaCompacta: faixa,
         onTap: _qtdCriticosPp > 0
             ? () => setState(() {
                   _filtroOperacional = FiltroEstoqueOperacional.ppCritico;
@@ -595,12 +625,14 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           icon: Icons.payments_outlined,
           titulo: 'Valor em estoque',
           valor: _formatarMoedaBRL(_valorEstoqueTotalCache),
+          faixaCompacta: faixa,
         ),
       EstoqueStatTile(
         icon: Icons.lock_outline,
         titulo: 'Total reservado',
         valor: '$_totalReservadoCache un.',
         destaqueCor: semantic.warningFg,
+        faixaCompacta: faixa,
         onTap: () => setState(() {
           _filtroOperacional = FiltroEstoqueOperacional.comReserva;
           _filtrosExpandidos = true;
@@ -609,29 +641,26 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       ),
     ];
 
-    return LayoutBuilder(
-      builder: (context, c) {
-        final estreito = c.maxWidth < 900;
-        if (estreito) {
-          return Column(
-            children: [
-              for (var i = 0; i < kpis.length; i++) ...[
-                if (i > 0) const SizedBox(height: 8),
-                kpis[i],
-              ],
-            ],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var i = 0; i < kpis.length; i++) ...[
-              if (i > 0) const SizedBox(width: 10),
-              Expanded(child: kpis[i]),
-            ],
-          ],
-        );
-      },
+    if (faixa) {
+      return SizedBox(
+        height: 58,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: kpis.length,
+          separatorBuilder: (context, index) => const SizedBox(width: 8),
+          itemBuilder: (context, i) => kpis[i],
+        ),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < kpis.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Expanded(child: kpis[i]),
+        ],
+      ],
     );
   }
 
@@ -933,22 +962,13 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   }
 
   String _montarResumoCardMobile(
-    Produto produto,
-    double ppExibicao, {
+    Produto produto, {
     required bool verCusto,
   }) {
-    final sku = produto.codigoInterno.trim();
-    final skuRotulo = sku.isEmpty ? 'Sem SKU' : sku;
-    final disp = ProdutoEmbalagem.formatarEstoque(
-      produto,
-      produto.estoqueLivreParaVenda,
-      comUnidade: true,
-    );
     final cobertura = EstoqueListaMetricas.formatarCobertura(produto);
-    final base =
-        '$skuRotulo · Disp $disp · Min ${produto.quantidadeMinima} · PP ${ppExibicao.toStringAsFixed(1)} · Cob $cobertura';
-    if (!verCusto) return base;
-    return '$base · Marg ${EstoqueListaMetricas.formatarMargem(produto)}';
+    if (!verCusto) return 'Cobertura $cobertura';
+    return 'Cob $cobertura · Marg ${EstoqueListaMetricas.formatarMargem(produto)} · '
+        'Custo ${_formatarMoedaBRL(EstoqueListaMetricas.custoExibicao(produto))}';
   }
 
   Widget _rodapeStatusLista({
@@ -996,22 +1016,30 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     final categorias = _categoriasDisponiveis;
     final fornecedores = _fornecedoresDisponiveis;
     final theme = Theme.of(context);
+    final compact = EstoqueLayout.isCompact(context);
+    final padH = compact ? 10.0 : 16.0;
 
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 64,
-        titleSpacing: 16,
+        toolbarHeight: compact ? 52 : 64,
+        titleSpacing: compact ? 8 : 16,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('Estoque', style: theme.textTheme.titleLarge),
             Text(
-              _subtituloAppBar(verCusto: verCusto),
+              'Estoque',
+              style: compact ? theme.textTheme.titleMedium : theme.textTheme.titleLarge,
+            ),
+            Text(
+              compact
+                  ? '$_produtosAtivosCount SKUs · $_totalAbaixoMinimo min'
+                  : _subtituloAppBar(verCusto: verCusto),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
+                fontSize: compact ? 11 : null,
               ),
             ),
           ],
@@ -1041,11 +1069,11 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
               onDismiss: () => setState(() => _alertaStripOculto = true),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            padding: EdgeInsets.fromLTRB(padH, compact ? 8 : 12, padH, compact ? 6 : 8),
             child: _painelKpisEstoque(verCusto: verCusto),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: EdgeInsets.fromLTRB(padH, 0, padH, compact ? 6 : 8),
             child: _painelFiltrosEstoque(
               produtos: produtos,
               produtosFiltrados: produtosFiltrados,
@@ -1076,10 +1104,12 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     final scheme = theme.colorScheme;
     final estiloRodape = theme.textTheme.bodySmall;
     final corMuted = scheme.onSurfaceVariant;
+    final compact = EstoqueLayout.isCompact(context);
+    final larguraDrop = MediaQuery.sizeOf(context).width - (compact ? 44 : 64);
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(compact ? 10 : 14),
       decoration: BoxDecoration(
         color: scheme.surface,
         borderRadius: BorderRadius.circular(8),
@@ -1092,7 +1122,10 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
         children: [
           TextField(
             controller: _buscaController,
+            style: compact ? theme.textTheme.bodyMedium : null,
             decoration: produtoBuscaInputDecoration(
+              isDense: compact,
+              helperText: compact ? '' : null,
               suffixIcon: _filtroBusca.isEmpty
                   ? null
                   : IconButton(
@@ -1110,12 +1143,16 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             ),
             onChanged: _onBuscaChanged,
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: compact ? 4 : 8),
           Row(
             children: [
               TextButton.icon(
                 onPressed: () => setState(
                   () => _filtrosExpandidos = !_filtrosExpandidos,
+                ),
+                style: TextButton.styleFrom(
+                  visualDensity:
+                      compact ? VisualDensity.compact : VisualDensity.standard,
                 ),
                 icon: Icon(
                   _filtrosExpandidos ? Icons.expand_less : Icons.tune,
@@ -1155,6 +1192,9 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                     child: FilterChip(
                       label: Text(f.rotulo),
                       selected: _filtroOperacional == f,
+                      visualDensity: compact
+                          ? VisualDensity.compact
+                          : VisualDensity.standard,
                       onSelected: (_) {
                         setState(() {
                           _filtroOperacional = f;
@@ -1170,11 +1210,12 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
-                runSpacing: 4,
+                runSpacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   if (categorias.isNotEmpty)
                     DropdownMenu<String?>(
+                      width: compact ? larguraDrop : null,
                       label: const Text('Categoria'),
                       initialSelection: _filtroCategoria,
                       dropdownMenuEntries: [
@@ -1195,6 +1236,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                     ),
                   if (fornecedores.isNotEmpty)
                     DropdownMenu<String?>(
+                      width: compact ? larguraDrop : null,
                       label: const Text('Fornecedor'),
                       initialSelection: _filtroFornecedor,
                       dropdownMenuEntries: [
@@ -1233,18 +1275,20 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
               ),
             ],
           ],
-          const SizedBox(height: 8),
-          Divider(
-            height: 1,
-            color: scheme.outlineVariant.withValues(alpha: 0.5),
-          ),
-          const SizedBox(height: 6),
-          _rodapeStatusLista(
-            totalItens: produtosFiltrados.length,
-            exibidos: math.min(_limiteExibicaoLista, produtosFiltrados.length),
-            estiloRodape: estiloRodape,
-            corMuted: corMuted,
-          ),
+          if (!compact) ...[
+            const SizedBox(height: 8),
+            Divider(
+              height: 1,
+              color: scheme.outlineVariant.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 6),
+            _rodapeStatusLista(
+              totalItens: produtosFiltrados.length,
+              exibidos: math.min(_limiteExibicaoLista, produtosFiltrados.length),
+              estiloRodape: estiloRodape,
+              corMuted: corMuted,
+            ),
+          ],
         ],
       ),
     );
@@ -1297,38 +1341,33 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     final itemCount = itensExibidos + (temMaisItens ? 1 : 0);
     return Scrollbar(
       controller: _listaVerticalScrollController,
-      thumbVisibility: true,
-      interactive: true,
+      thumbVisibility: false,
       child: ListView.builder(
         controller: _listaVerticalScrollController,
         primary: false,
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        padding: const EdgeInsets.fromLTRB(10, 4, 10, 16),
         itemCount: itemCount,
         itemBuilder: (context, index) {
           if (index >= itensExibidos) {
             return _rodapeCarregandoMaisLista();
           }
-        final produto = produtosFiltrados[index];
-        final criticoPp = _criticoPpPorProdutoId[produto.id] ?? false;
-        final ppExibicao = _comprasSvc.calcularPontoPedidoExibicao(produto);
-        var resumo = _montarResumoCardMobile(
-          produto,
-          ppExibicao,
-          verCusto: verCusto,
-        );
-        if (verCusto) {
-          resumo =
-              '$resumo · Custo ${_formatarMoedaBRL(EstoqueListaMetricas.custoExibicao(produto))}';
-        }
-        return EstoqueCardLinha(
-          produto: produto,
-          indice: index,
-          criticoPp: criticoPp,
-          resumoLinha: resumo,
-          vendaFormatada: _formatarMoedaBRL(_precoAVista(produto)),
-          onAcao: _onAcaoProdutoTabela,
-        );
-      },
+          final produto = produtosFiltrados[index];
+          final criticoPp = _criticoPpPorProdutoId[produto.id] ?? false;
+          final ppExibicao = _comprasSvc.calcularPontoPedidoExibicao(produto);
+          final resumo = _montarResumoCardMobile(
+            produto,
+            verCusto: verCusto,
+          );
+          return EstoqueCardLinha(
+            produto: produto,
+            indice: index,
+            criticoPp: criticoPp,
+            resumoLinha: resumo,
+            vendaFormatada: _formatarMoedaBRL(_precoAVista(produto)),
+            ppExibicao: ppExibicao,
+            onAcao: _onAcaoProdutoTabela,
+          );
+        },
       ),
     );
   }

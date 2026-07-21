@@ -36,6 +36,7 @@ abstract final class ProdutoEstoqueSync {
     final versaoLoc = local.estoqueVersao;
 
     if (versaoRem > versaoLoc) {
+      _preservarFotoSeRemotoVazio(merged, local);
       return ProdutoMergeRemoto(produto: merged);
     }
     if (versaoLoc > versaoRem) {
@@ -43,12 +44,22 @@ abstract final class ProdutoEstoqueSync {
       merged.estoqueReservado = local.estoqueReservado;
       merged.estoqueAtual = local.estoqueAtual;
       merged.estoqueVersao = local.estoqueVersao;
+      _preservarFotoSeRemotoVazio(merged, local);
       return ProdutoMergeRemoto(
         produto: merged,
         estoqueLocalPreservado: true,
       );
     }
     // Empate: aplica remoto (mesma regra de LWW do sync).
+    _preservarFotoSeRemotoVazio(merged, local);
     return ProdutoMergeRemoto(produto: merged);
+  }
+
+  /// Evita que um push antigo sem foto apague a foto ja conhecida.
+  static void _preservarFotoSeRemotoVazio(Produto merged, Produto local) {
+    if (merged.fotoPath.trim().isNotEmpty) return;
+    final localFoto = SyncEntityCodec.fotoPathParaSync(local.fotoPath);
+    if (localFoto.isEmpty) return;
+    merged.fotoPath = localFoto;
   }
 }

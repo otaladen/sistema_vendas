@@ -22,6 +22,7 @@ import '../../data/produto_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/backup_historico_item.dart';
+import '../../domain/backup_pasta_risco.dart';
 import '../../domain/backup_retencao.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../services/auditoria_registrar.dart';
@@ -49,6 +50,15 @@ class BackupConfiguracaoSection extends StatefulWidget {
       _BackupConfiguracaoSectionState();
 }
 
+class _ProgressoBackupUi {
+  const _ProgressoBackupUi({this.valor = 0, this.etapa = ''});
+
+  final double valor;
+  final String etapa;
+
+  int get percentual => (valor * 100).round().clamp(0, 100);
+}
+
 class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   static final _dataHora = DateFormat('dd/MM/yyyy HH:mm');
 
@@ -57,6 +67,10 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   bool _restauracaoEmAndamento = false;
   double _progresso = 0;
   String _etapaProgresso = '';
+  final ValueNotifier<_ProgressoBackupUi> _progressoUi =
+      ValueNotifier(const _ProgressoBackupUi());
+  bool _dialogoProgressoAberto = false;
+  BuildContext? _ctxDialogoProgresso;
 
   BackupRegistroManual _manual = const BackupRegistroManual();
   BackupStatusResumo? _status;
@@ -73,6 +87,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   int _backupRetencaoMaxCopias = 15;
   int _ultimoBackupAutomaticoMs = 0;
   LocalBackupEscopo _backupAutomaticoEscopo = LocalBackupEscopo.completo;
+  LocalBackupEscopo _escopoBackupParcial = LocalBackupEscopo.somenteBanco;
 
   bool _backupSegundoDestinoAtivo = false;
   String _backupSegundoDestinoPasta = '';
@@ -84,6 +99,12 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   void initState() {
     super.initState();
     unawaited(_recarregar());
+  }
+
+  @override
+  void dispose() {
+    _progressoUi.dispose();
+    super.dispose();
   }
 
   Future<void> _recarregar() async {
@@ -204,12 +225,18 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     if (value) {
       var pasta = _backupSegundoDestinoPasta.trim();
       if (pasta.isEmpty) {
-        final escolhida = await FilePicker.platform.getDirectoryPath(
+        final escolhida = await _escolherPastaComAvisoRisco(
           dialogTitle:
               'Segundo destino (rede, nuvem ou pasta do servidor)',
         );
-        if (escolhida == null || escolhida.trim().isEmpty || !mounted) return;
-        pasta = escolhida.trim();
+        if (escolhida == null || !mounted) return;
+        pasta = escolhida;
+      } else if (!await _confirmarPastaSeRisco(pasta)) {
+        final outra = await _escolherPastaComAvisoRisco(
+          dialogTitle: 'Escolha outro segundo destino',
+        );
+        if (outra == null || !mounted) return;
+        pasta = outra;
       }
       if (!mounted) return;
       setState(() {
@@ -224,11 +251,11 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   }
 
   Future<void> _escolherPastaSegundoDestino() async {
-    final escolhida = await FilePicker.platform.getDirectoryPath(
+    final escolhida = await _escolherPastaComAvisoRisco(
       dialogTitle: 'Segundo destino do backup',
     );
-    if (escolhida == null || escolhida.trim().isEmpty || !mounted) return;
-    setState(() => _backupSegundoDestinoPasta = escolhida.trim());
+    if (escolhida == null || !mounted) return;
+    setState(() => _backupSegundoDestinoPasta = escolhida);
     await _persistirPreferenciasBackupAutomatico();
     await _recarregar();
   }
@@ -347,6 +374,35 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
 
   Future<void> _zerarCadastroProdutos() async {
     if (_backupEmAndamento || _restauracaoEmAndamento) return;
+    final backupAntes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Antes de zerar o cadastro'),
+        content: const Text(
+          'Zerar produtos apaga o catalogo atual. '
+          'Recomendado criar um backup completo agora, antes de continuar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Zerar sem backup'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Backup e continuar'),
+          ),
+        ],
+      ),
+    );
+    if (backupAntes == null || !mounted) return;
+    if (backupAntes) {
+      final ok = await _criarBackupDados(escopo: LocalBackupEscopo.completo);
+      if (!ok || !mounted) return;
+    }
     await executarZerarCadastroProdutos(
       context: context,
       produtoRepository: widget.produtoRepository,
@@ -407,7 +463,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     setState(() {
       _restauracaoEmAndamento = true;
       _progresso = 0.1;
-      _etapaProgresso = 'Extraindo ZIP…';
+      _etapaProgresso = 'Extraindo ZIP… 10%';
     });
     Directory? tempDir;
     try {
@@ -426,6 +482,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       try {
         await tempDir?.delete(recursive: true);
       } catch (_) {}
+      _fecharDialogoProgresso();
       if (mounted) {
         setState(() {
           _restauracaoEmAndamento = false;
@@ -520,10 +577,157 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
 
   void _atualizarProgresso(double v, String etapa) {
     if (!mounted) return;
+    final clamped = v.clamp(0.0, 1.0);
     setState(() {
-      _progresso = v.clamp(0, 1);
+      _progresso = clamped;
       _etapaProgresso = etapa;
     });
+    _progressoUi.value = _ProgressoBackupUi(valor: clamped, etapa: etapa);
+  }
+
+  Future<void> _abrirDialogoProgresso({required String titulo}) async {
+    if (_dialogoProgressoAberto || !mounted) return;
+    _dialogoProgressoAberto = true;
+    final dialogoPronto = Completer<void>();
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        useRootNavigator: true,
+        builder: (ctx) {
+          _ctxDialogoProgresso = ctx;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!dialogoPronto.isCompleted) dialogoPronto.complete();
+          });
+          final theme = Theme.of(ctx);
+          return PopScope(
+            canPop: false,
+            child: ValueListenableBuilder<_ProgressoBackupUi>(
+              valueListenable: _progressoUi,
+              builder: (context, p, _) {
+                final pct = p.percentual;
+                return AlertDialog(
+                  title: Text(titulo),
+                  content: SizedBox(
+                    width: 380,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '$pct%',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.displaySmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        LinearProgressIndicator(
+                          value: p.valor > 0 ? p.valor : null,
+                          minHeight: 10,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          p.etapa.isEmpty ? 'Preparando…' : p.etapa,
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Nao feche o programa enquanto a tarefa estiver em andamento.',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
+        },
+      ).whenComplete(() {
+        _dialogoProgressoAberto = false;
+        _ctxDialogoProgresso = null;
+      }),
+    );
+    // Espera o dialogo existir na pilha antes do trabalho pesado (evita pop falho).
+    await dialogoPronto.future.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () {},
+    );
+  }
+
+  void _fecharDialogoProgresso() {
+    if (!_dialogoProgressoAberto) return;
+    final ctx = _ctxDialogoProgresso;
+    if (ctx != null && ctx.mounted) {
+      Navigator.of(ctx).pop();
+    } else if (mounted) {
+      Navigator.of(context, rootNavigator: true).maybePop();
+    }
+    _dialogoProgressoAberto = false;
+    _ctxDialogoProgresso = null;
+  }
+
+  Future<bool> _confirmarPastaSeRisco(String pasta) async {
+    if (!BackupPastaRisco.pareceRisco(pasta)) return true;
+    if (!mounted) return false;
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pasta pouco segura'),
+        content: Text(BackupPastaRisco.mensagemAviso(pasta)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Escolher outra'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Usar mesmo assim'),
+          ),
+        ],
+      ),
+    );
+    return r == true;
+  }
+
+  Future<String?> _escolherPastaComAvisoRisco({
+    required String dialogTitle,
+  }) async {
+    while (true) {
+      final escolhida = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: dialogTitle,
+      );
+      if (escolhida == null || escolhida.trim().isEmpty || !mounted) {
+        return null;
+      }
+      final pasta = escolhida.trim();
+      if (await _confirmarPastaSeRisco(pasta)) return pasta;
+      if (!mounted) return null;
+    }
+  }
+
+  String _rotuloRelativoUltimoBackup() {
+    if (_manual.ultimoMs <= 0) return 'Nenhum backup manual ainda';
+    final dt = DateTime.fromMillisecondsSinceEpoch(_manual.ultimoMs);
+    final diff = DateTime.now().difference(dt);
+    String quando;
+    if (diff.inMinutes < 1) {
+      quando = 'agora';
+    } else if (diff.inMinutes < 60) {
+      quando = 'ha ${diff.inMinutes} min';
+    } else if (diff.inHours < 48) {
+      quando = 'ha ${diff.inHours} h';
+    } else {
+      quando = 'ha ${diff.inDays} dia(s)';
+    }
+    return 'Ultimo backup: $quando · ${_dataHora.format(dt)}';
   }
 
   Future<void> _definirEscopoBackupAutomatico(LocalBackupEscopo? escopo) async {
@@ -532,21 +736,27 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     await widget.appConfigRepository.salvarBackupAutomaticoEscopo(escopo);
   }
 
-  Future<void> _criarBackupDados({
+  Future<bool> _criarBackupDados({
     String? pastaDestino,
     required LocalBackupEscopo escopo,
   }) async {
-    if (_backupEmAndamento) return;
+    if (_backupEmAndamento) return false;
     var destinoRaiz = pastaDestino?.trim() ?? '';
     if (destinoRaiz.isEmpty) {
       destinoRaiz = _manual.pastaPadrao.trim();
     }
     if (destinoRaiz.isEmpty) {
-      final escolhida = await FilePicker.platform.getDirectoryPath(
+      final escolhida = await _escolherPastaComAvisoRisco(
         dialogTitle: 'Escolha a pasta para salvar o backup',
       );
-      if (escolhida == null || escolhida.trim().isEmpty || !mounted) return;
-      destinoRaiz = escolhida.trim();
+      if (escolhida == null || !mounted) return false;
+      destinoRaiz = escolhida;
+    } else if (!await _confirmarPastaSeRisco(destinoRaiz)) {
+      final outra = await _escolherPastaComAvisoRisco(
+        dialogTitle: 'Escolha outra pasta para o backup',
+      );
+      if (outra == null || !mounted) return false;
+      destinoRaiz = outra;
     }
 
     setState(() {
@@ -554,6 +764,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       _progresso = 0;
       _etapaProgresso = 'Iniciando…';
     });
+    _progressoUi.value = const _ProgressoBackupUi(valor: 0, etapa: 'Iniciando…');
+    await _abrirDialogoProgresso(titulo: 'Backup em andamento');
     try {
       final resultado = await LocalBackupService.executar(
         destinoRaiz: Directory(destinoRaiz),
@@ -564,6 +776,10 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         lanSyncScheduler: widget.lanSyncScheduler,
         onProgress: _atualizarProgresso,
       );
+
+      // Fecha o modal assim que a copia/exportacao termina; o pos-processamento
+      // (retencao, historico) nao deve deixar a tela presa em 100%.
+      _fecharDialogoProgresso();
 
       await widget.appConfigRepository.salvarRegistroBackupManual(
         ultimoMs: resultado.criadoEm.millisecondsSinceEpoch,
@@ -594,7 +810,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         },
       );
 
-      if (!mounted) return;
+      if (!mounted) return false;
       await _recarregar();
       final mensagemSucesso = escopo == LocalBackupEscopo.cadastroProdutos
           ? 'Backup de cadastro concluido com '
@@ -602,7 +818,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
               'Pasta:\n${resultado.pastaBackup.path}'
           : 'Backup ${escopo.rotulo.toLowerCase()} concluido com sucesso.\n\n'
               'Pasta:\n${resultado.pastaBackup.path}';
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 6),
@@ -614,7 +830,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
           ),
         ),
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -628,20 +844,24 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
           ],
         ),
       );
+      return true;
     } on LocalBackupInvalidoException catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.message),
           backgroundColor: Colors.red.shade700,
         ),
       );
+      return false;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Falha ao criar backup: $e')),
       );
+      return false;
     } finally {
+      _fecharDialogoProgresso();
       if (mounted) {
         setState(() {
           _backupEmAndamento = false;
@@ -664,6 +884,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       _progresso = 0;
       _etapaProgresso = 'Iniciando…';
     });
+    _progressoUi.value = const _ProgressoBackupUi(valor: 0, etapa: 'Iniciando…');
+    await _abrirDialogoProgresso(titulo: 'Backup em andamento');
     try {
       final resultado = await LocalBackupService.executar(
         destinoRaiz: Directory(_backupAutomaticoPasta.trim()),
@@ -674,6 +896,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         lanSyncScheduler: widget.lanSyncScheduler,
         onProgress: _atualizarProgresso,
       );
+      _fecharDialogoProgresso();
       await widget.appConfigRepository.atualizarUltimoBackupAutomaticoMs(
         resultado.criadoEm.millisecondsSinceEpoch,
       );
@@ -699,6 +922,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         SnackBar(content: Text('Falha no backup: $e')),
       );
     } finally {
+      _fecharDialogoProgresso();
       if (mounted) {
         setState(() {
           _backupEmAndamento = false;
@@ -713,12 +937,18 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     if (value) {
       var pasta = _backupAutomaticoPasta.trim();
       if (pasta.isEmpty) {
-        final escolhida = await FilePicker.platform.getDirectoryPath(
+        final escolhida = await _escolherPastaComAvisoRisco(
           dialogTitle:
               'Pasta para backups automaticos (subpastas com data e hora)',
         );
-        if (escolhida == null || escolhida.trim().isEmpty || !mounted) return;
-        pasta = escolhida.trim();
+        if (escolhida == null || !mounted) return;
+        pasta = escolhida;
+      } else if (!await _confirmarPastaSeRisco(pasta)) {
+        final outra = await _escolherPastaComAvisoRisco(
+          dialogTitle: 'Escolha outra pasta para backups automaticos',
+        );
+        if (outra == null || !mounted) return;
+        pasta = outra;
       }
       if (!mounted) return;
       setState(() {
@@ -740,11 +970,11 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   }
 
   Future<void> _escolherPastaBackupAutomatico() async {
-    final escolhida = await FilePicker.platform.getDirectoryPath(
+    final escolhida = await _escolherPastaComAvisoRisco(
       dialogTitle: 'Pasta para backups automaticos',
     );
-    if (escolhida == null || escolhida.trim().isEmpty || !mounted) return;
-    setState(() => _backupAutomaticoPasta = escolhida.trim());
+    if (escolhida == null || !mounted) return;
+    setState(() => _backupAutomaticoPasta = escolhida);
     await _persistirPreferenciasBackupAutomatico();
     await _recarregar();
   }
@@ -820,6 +1050,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     } catch (e) {
       await _tratarErroRestauracao('Falha ao restaurar backup: $e');
     } finally {
+      _fecharDialogoProgresso();
       if (mounted) {
         setState(() {
           _restauracaoEmAndamento = false;
@@ -852,6 +1083,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     } catch (e) {
       await _tratarErroRestauracao('Falha ao restaurar backup: $e');
     } finally {
+      _fecharDialogoProgresso();
       if (mounted) {
         setState(() {
           _restauracaoEmAndamento = false;
@@ -928,14 +1160,27 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                       ),
                     ],
                     const Text(
-                      'Recomendado: criar um backup de seguranca antes.\n\n'
-                      'O programa fechara sozinho apos copiar o backup.',
+                      'O programa fechara sozinho apos copiar o backup.\n'
+                      'Sem backup de seguranca, nao ha como desfazer se algo der errado.',
                     ),
                     const SizedBox(height: 8),
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
                       controlAffinity: ListTileControlAffinity.leading,
                       title: const Text('Criar backup de seguranca antes'),
+                      subtitle: Text(
+                        criarBackupAntes
+                            ? 'Recomendado — salva o estado atual antes de sobrescrever.'
+                            : 'Atencao: restaurar sem backup de seguranca e irreversivel.',
+                        style: TextStyle(
+                          color: criarBackupAntes
+                              ? null
+                              : Theme.of(context).colorScheme.error,
+                          fontWeight: criarBackupAntes
+                              ? FontWeight.w400
+                              : FontWeight.w700,
+                        ),
+                      ),
                       value: criarBackupAntes,
                       onChanged: (v) =>
                           setDialogState(() => criarBackupAntes = v ?? true),
@@ -976,14 +1221,18 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     if (confirmar != true || !mounted) return;
 
     if (criarBackupAntes) {
-      _atualizarProgresso(0.12, 'Criando backup de seguranca…');
+      await _abrirDialogoProgresso(titulo: 'Restauracao em andamento');
+      _atualizarProgresso(0.05, 'Criando backup de seguranca… 5%');
       var destino = _backupAutomaticoPasta.trim();
       if (destino.isEmpty) destino = _manual.pastaPadrao.trim();
       if (destino.isEmpty) {
         final escolhida = await FilePicker.platform.getDirectoryPath(
           dialogTitle: 'Pasta para backup de seguranca',
         );
-        if (escolhida == null || escolhida.trim().isEmpty || !mounted) return;
+        if (escolhida == null || escolhida.trim().isEmpty || !mounted) {
+          _fecharDialogoProgresso();
+          return;
+        }
         destino = escolhida.trim();
       }
       try {
@@ -994,7 +1243,10 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
           objectBox: widget.objectBox,
           escopo: LocalBackupEscopo.completo,
           lanSyncScheduler: widget.lanSyncScheduler,
-          onProgress: _atualizarProgresso,
+          onProgress: (v, etapa) {
+            // Reserva 0–40% para o backup de seguranca.
+            _atualizarProgresso(v * 0.4, etapa);
+          },
         );
         await widget.appConfigRepository.salvarRegistroBackupManual(
           ultimoMs: seguranca.criadoEm.millisecondsSinceEpoch,
@@ -1008,6 +1260,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         );
       } catch (e) {
         if (!mounted) return;
+        _fecharDialogoProgresso();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Falha no backup de seguranca: $e')),
         );
@@ -1022,8 +1275,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     String mensagem, {
     bool invalido = false,
   }) async {
+    _fecharDialogoProgresso();
     if (mounted) {
-      Navigator.of(context, rootNavigator: true).maybePop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(mensagem),
@@ -1042,17 +1295,19 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   }
 
   Future<void> _executarRestauracao(Directory origemSelecionada) async {
-    _atualizarProgresso(0.15, 'Validando backup…');
+    _atualizarProgresso(0.02, 'Validando backup… 2%');
+    await _abrirDialogoProgresso(titulo: 'Restauracao em andamento');
     final escopo = await LocalBackupService.lerEscopoManifest(origemSelecionada);
 
     if (escopo == LocalBackupEscopo.cadastroProdutos) {
       LocalBackupValidation.validarCadastroProdutos(origemSelecionada);
-      _atualizarProgresso(0.35, 'Importando cadastro de produtos…');
+      _atualizarProgresso(0.05, 'Importando cadastro de produtos… 5%');
       final resumo = await restaurarDadosLocais(
         pastaBackupSelecionada: origemSelecionada,
         destinoBase: await obterDiretorioBaseDadosApp(),
         limparDestino: _limparDiretorio,
         objectBox: widget.objectBox,
+        onProgress: _atualizarProgresso,
       );
       AuditoriaRegistrar.registrar(
         modulo: AuditoriaModulo.backup,
@@ -1065,17 +1320,20 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         },
       );
       if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).maybePop();
+      _fecharDialogoProgresso();
       final msg =
           'Cadastro restaurado com sucesso.\n\n'
           'Novos: ${resumo?.inseridos ?? 0}\n'
-          'Atualizados: ${resumo?.atualizados ?? 0}\n\n'
+          'Atualizados: ${resumo?.atualizados ?? 0}\n'
+          'Fotos restauradas: ${resumo?.fotosRestauradas ?? 0}'
+          '${(resumo?.fotosFaltando ?? 0) > 0 ? '\nFotos faltando no backup: ${resumo!.fotosFaltando}' : ''}\n\n'
           'Estoque local foi preservado nos produtos existentes.';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             'Cadastro restaurado: ${resumo?.inseridos ?? 0} novo(s), '
-            '${resumo?.atualizados ?? 0} atualizado(s).',
+            '${resumo?.atualizados ?? 0} atualizado(s), '
+            '${resumo?.fotosRestauradas ?? 0} foto(s).',
           ),
           duration: const Duration(seconds: 8),
         ),
@@ -1111,38 +1369,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       );
     }
 
-    _atualizarProgresso(0.35, 'Restaurando arquivos…');
-
-    if (!mounted) return;
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return PopScope(
-          canPop: false,
-          child: AlertDialog(
-            content: Row(
-              children: [
-                const SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: CircularProgressIndicator(strokeWidth: 2.5),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    Platform.isWindows
-                        ? 'Restaurando backup… O aplicativo sera fechado ao terminar.'
-                        : 'Restaurando backup… Aguarde.',
-                    style: Theme.of(dialogContext).textTheme.bodyMedium,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    _atualizarProgresso(0.08, 'Preparando arquivos… 8%');
 
     await widget.lanSyncScheduler?.parar();
     await widget.objectBox.fecharParaCopiaDeArquivos();
@@ -1150,6 +1377,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       pastaBackupSelecionada: origemSelecionada,
       destinoBase: baseDir,
       limparDestino: _limparDiretorio,
+      onProgress: _atualizarProgresso,
     );
     AuditoriaRegistrar.registrar(
       modulo: AuditoriaModulo.backup,
@@ -1165,7 +1393,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       exit(0);
     }
 
-    Navigator.of(context, rootNavigator: true).pop();
+    _fecharDialogoProgresso();
 
     final cores = Theme.of(context).colorScheme;
     await showDialog<void>(
@@ -1425,19 +1653,28 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Copia manual, restauracao e acesso a pasta de dados.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                Text(
-                  'Completo: tudo. Somente banco: data.mdb. '
-                  'Cadastro de produtos: use o botao dedicado abaixo.',
+                  'Proteger os dados, recuperar um backup ou ferramentas avancadas.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 10),
+                _buildResumoUltimoBackup(context),
+                const SizedBox(height: 14),
+                Text(
+                  'Proteger',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Copia completa recomendada para o dia a dia da loja.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 8),
                 FilledButton.icon(
                   onPressed: ocupado
                       ? null
@@ -1453,39 +1690,25 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                         : 'Backup completo agora',
                   ),
                 ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: ocupado
-                      ? null
-                      : () => unawaited(
-                            _criarBackupDados(
-                              escopo: LocalBackupEscopo.somenteBanco,
-                            ),
-                          ),
-                  icon: const Icon(Icons.storage_outlined),
-                  label: const Text('Backup somente banco agora'),
+                const SizedBox(height: 14),
+                Text(
+                  'Recuperar',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Sobrescreve os dados deste PC. Pede confirmacao e backup de seguranca.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: ocupado
                       ? null
-                      : () => unawaited(
-                            _criarBackupDados(
-                              escopo: LocalBackupEscopo.cadastroProdutos,
-                            ),
-                          ),
-                  icon: const Icon(Icons.inventory_2_outlined),
-                  label: const Text('Backup cadastro de produtos agora'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: ocupado ? null : _abrirPastaDados,
-                  icon: const Icon(Icons.folder_open_outlined),
-                  label: const Text('Abrir pasta de dados'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: ocupado ? null : () => unawaited(_restaurarBackupDados()),
+                      : () => unawaited(_restaurarBackupDados()),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: theme.colorScheme.error,
                     side: BorderSide(color: theme.colorScheme.error),
@@ -1494,42 +1717,112 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                   label: Text(
                     _restauracaoEmAndamento
                         ? 'Restaurando…'
-                        : 'Restaurar backup',
+                        : 'Restaurar backup (pasta)',
                   ),
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
-                  onPressed: ocupado
-                      ? null
-                      : () => unawaited(_importarBackupChacal()),
-                  icon: const Icon(Icons.archive_outlined),
-                  label: const Text('Importar backup Chacal (.s3db / .sql / .txt)'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: ocupado
-                      ? null
-                      : () => unawaited(_zerarCadastroProdutos()),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: theme.colorScheme.error,
-                    side: BorderSide(color: theme.colorScheme.error),
-                  ),
-                  icon: const Icon(Icons.delete_forever_outlined),
-                  label: const Text('Zerar cadastro de produtos'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: ocupado ? null : () => unawaited(_restaurarDeArquivoZip()),
+                  onPressed:
+                      ocupado ? null : () => unawaited(_restaurarDeArquivoZip()),
                   icon: const Icon(Icons.unarchive_outlined),
                   label: const Text('Restaurar de arquivo ZIP'),
                 ),
-                if (_manual.ultimoPath.trim().isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Ultimo manual: ${_manual.ultimoPath}',
-                    style: theme.textTheme.bodySmall,
+                const SizedBox(height: 8),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 4),
+                  title: Text(
+                    'Ferramentas avancadas',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ],
+                  subtitle: Text(
+                    'Backup parcial, pasta de dados, migracao e limpeza.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Backup parcial (nao substitui o completo no dia a dia)',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<LocalBackupEscopo>(
+                      value: _escopoBackupParcial,
+                      decoration: const InputDecoration(
+                        labelText: 'O que incluir',
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final e in LocalBackupEscopo.values)
+                          if (e != LocalBackupEscopo.completo)
+                            DropdownMenuItem(
+                              value: e,
+                              child: Text(e.rotulo),
+                            ),
+                      ],
+                      onChanged: ocupado
+                          ? null
+                          : (v) {
+                              if (v == null) return;
+                              setState(() => _escopoBackupParcial = v);
+                            },
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _escopoBackupParcial.descricaoCurta,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: ocupado
+                          ? null
+                          : () => unawaited(
+                                _criarBackupDados(escopo: _escopoBackupParcial),
+                              ),
+                      icon: const Icon(Icons.tune_outlined),
+                      label: const Text('Backup parcial agora'),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: ocupado ? null : _abrirPastaDados,
+                      icon: const Icon(Icons.folder_open_outlined),
+                      label: const Text('Abrir pasta de dados'),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: ocupado
+                          ? null
+                          : () => unawaited(_importarBackupChacal()),
+                      icon: const Icon(Icons.archive_outlined),
+                      label: const Text(
+                        'Importar sistema antigo (Chacal)',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: ocupado
+                          ? null
+                          : () => unawaited(_zerarCadastroProdutos()),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: theme.colorScheme.error,
+                        side: BorderSide(color: theme.colorScheme.error),
+                      ),
+                      icon: const Icon(Icons.delete_forever_outlined),
+                      label: const Text('Zerar cadastro de produtos'),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -1545,17 +1838,105 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    _etapaProgresso,
+                    '${(_progresso * 100).round().clamp(0, 100)}%',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _etapaProgresso.isEmpty ? 'Preparando…' : _etapaProgresso,
+                    textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(value: _progresso > 0 ? _progresso : null),
+                  LinearProgressIndicator(
+                    value: _progresso > 0 ? _progresso : null,
+                    minHeight: 10,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
                 ],
               ),
             ),
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildResumoUltimoBackup(BuildContext context) {
+    final theme = Theme.of(context);
+    final path = _manual.ultimoPath.trim();
+    final risco = path.isNotEmpty && BackupPastaRisco.pareceRisco(path);
+    final destinoPadrao = _manual.pastaPadrao.trim().isNotEmpty
+        ? _manual.pastaPadrao.trim()
+        : (_backupAutomaticoPasta.trim().isNotEmpty
+            ? _backupAutomaticoPasta.trim()
+            : '');
+    final riscoDestino =
+        destinoPadrao.isNotEmpty && BackupPastaRisco.pareceRisco(destinoPadrao);
+
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _rotuloRelativoUltimoBackup(),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (path.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              SelectableText(
+                path,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => unawaited(_abrirPastaBackup(path)),
+                  icon: const Icon(Icons.folder_open_outlined, size: 18),
+                  label: const Text('Abrir pasta do ultimo backup'),
+                ),
+              ),
+            ],
+            if (risco || riscoDestino) ...[
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    size: 18,
+                    color: theme.colorScheme.error,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Pasta em Area de Trabalho, Downloads ou nuvem '
+                      '(OneDrive etc.) — prefira um disco local dedicado.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 

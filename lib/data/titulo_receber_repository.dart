@@ -236,7 +236,12 @@ class TituloReceberRepository {
   }
 
   /// Vendas finalizadas fiado sem titulos (legado).
-  void migrarTitulosLegadoSeNecessario() {
+  /// Roda no maximo uma vez por sessao do app (evita ANR no login do celular).
+  static bool _migracaoLegadoFeitaNestaSessao = false;
+
+  void migrarTitulosLegadoSeNecessario({bool forcar = false}) {
+    if (_migracaoLegadoFeitaNestaSessao && !forcar) return;
+    _migracaoLegadoFeitaNestaSessao = true;
     final q = _db.vendaBox
         .query(
           Venda_.status.equals('finalizada') &

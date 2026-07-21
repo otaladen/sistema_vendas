@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../data/app_config_repository.dart';
@@ -98,9 +99,12 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       forcarNovaInstancia: true,
     ));
     _carregarFavoritos();
-    unawaited(_atualizarBadgesMenu());
+    // Badge fiscal no celular: nao na entrada (congela). So no timer de 60s+.
+    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
+      unawaited(_atualizarBadgesMenu());
+    }
     _fiscalPendenciasTimer = Timer.periodic(
-      const Duration(seconds: 60),
+      const Duration(seconds: 120),
       (_) => unawaited(_atualizarBadgesMenu()),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -152,9 +156,17 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
         config.redeSincronizacaoAtiva) {
       await LanSyncServerManager.iniciarServidor(
         porta: config.redePortaServidor,
+        syncToken: config.redeSyncToken,
+        productImagesPath: widget.produtoRepository.productImagesDirPath,
       );
     }
     await widget.lanSyncScheduler.iniciar();
+    // Garante que o servidor LAN (mesmo processo) tem os JPEGs que o PC ja exibe.
+    if (Platform.isWindows &&
+        config.redeModoServidor &&
+        config.redeSincronizacaoAtiva) {
+      unawaited(widget.lanSyncScheduler.enviarFotosProdutosAgora());
+    }
   }
 
   Future<void> _carregarFavoritos() async {

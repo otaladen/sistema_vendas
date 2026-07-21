@@ -24,6 +24,9 @@ late Database _db;
 /// Clientes WebSocket para aviso instantaneo de novas revisoes apos push.
 final List<StreamSink<Object?>> _wsClientes = [];
 
+/// Serializa pushes HTTP (dois celulares ao mesmo tempo nao estouram SQLITE_BUSY).
+Future<void> _mutexPush = Future<void>.value();
+
 /// Ultimo heartbeat por estacao ([stationId] = epoch ms UTC). TTL define "online".
 const int _presenceTtlMs = 90000;
 
@@ -46,7 +49,7 @@ bool _syncAutorizado(Request request) {
   return header == _syncToken || query == _syncToken;
 }
 
-Middleware _syncAuthMiddleware(Handler inner) {
+Handler _syncAuthMiddleware(Handler inner) {
   return (Request request) {
     if (_syncAutorizado(request)) return inner(request);
     return Response.forbidden(
@@ -91,6 +94,10 @@ void main(List<String> args) async {
       '${_diretorioBaseInstalacao()}${Platform.pathSeparator}sistema_vendas_sync.db';
 
   _db = sqlite3.open(dbPath);
+  // WAL + busy_timeout: 2+ celulares podem push/pull em paralelo sem 500 "database is locked".
+  _db.execute('PRAGMA journal_mode=WAL;');
+  _db.execute('PRAGMA busy_timeout=5000;');
+  _db.execute('PRAGMA synchronous=NORMAL;');
   _initSchema(_db);
 
   final router = Router()
@@ -98,26 +105,49 @@ void main(List<String> args) async {
     ..get('/sync/presence', _presence)
     ..post('/sync/heartbeat', _heartbeat)
     ..get('/sync/meta', _meta)
+    ..get('/sync/version', _version)
     ..get('/sync/pull', _pull)
     ..get(
       '/sync/stream',
-      webSocketHandler((WebSocketChannel channel, _) {
-        final sink = channel.sink;
-        _wsClientes.add(sink);
-        channel.stream.listen(
-          (_) {},
-          onDone: () => _wsClientes.remove(sink),
-          onError: (_) => _wsClientes.remove(sink),
-        );
-      }),
+      webSocketHandler(
+        (WebSocketChannel channel, _) {
+          final sink = channel.sink;
+          _wsClientes.add(sink);
+          // Snapshot imediato: cliente que acabou de conectar nao espera o proximo push.
+          try {
+            final rev = _maxRevisionAtual();
+            sink.add(jsonEncode({'type': 'revision', 'revision': rev}));
+            final snap = _presenceSnapshot();
+            sink.add(jsonEncode({
+              'type': 'presence',
+              'activeCount': snap['activeCount'],
+              'ttlSeconds': snap['ttlSeconds'],
+              'stations': snap['stations'],
+            }));
+          } catch (_) {}
+          channel.stream.listen(
+            (_) {},
+            onDone: () => _wsClientes.remove(sink),
+            onError: (_) => _wsClientes.remove(sink),
+          );
+        },
+        // Mantem 2+ celulares vivos apos blip de Wi-Fi (detecta half-open).
+        pingInterval: const Duration(seconds: 25),
+      ),
     )
     ..post('/sync/push', _push)
     ..get('/sync/pod/<fileName>', _podDownload)
-    ..post('/sync/pod', _podUpload);
+    ..post('/sync/pod', _podUpload)
+    ..get('/sync/product-image/<fileName>', _productImageDownload)
+    ..post('/sync/product-image', _productImageUpload);
 
   final podDir = _diretorioPodEntrega();
   if (!Directory(podDir).existsSync()) {
     Directory(podDir).createSync(recursive: true);
+  }
+  final productImagesDir = _diretorioProductImages();
+  if (!Directory(productImagesDir).existsSync()) {
+    Directory(productImagesDir).createSync(recursive: true);
   }
 
   final handler = Pipeline()
@@ -129,6 +159,7 @@ void main(List<String> args) async {
   // ignore: avoid_print
   print(
     'sistema_vendas sync server | db=$dbPath | pod=$podDir | '
+    'product_images=$productImagesDir | '
     'http://${server.address.address}:$port | ws=/sync/stream | '
     'auth=${_syncToken.isEmpty ? (_syncRequireToken ? "BLOQUEADA-defina_SYNC_TOKEN" : "desligada") : "token ativo"}',
   );
@@ -150,7 +181,16 @@ String _diretorioPodEntrega() {
   return '${_diretorioBaseInstalacao()}${Platform.pathSeparator}pod_entrega';
 }
 
+String _diretorioProductImages() {
+  final env = (Platform.environment['SYNC_PRODUCT_IMAGES_PATH'] ?? '').trim();
+  if (env.isNotEmpty) return env;
+  return '${_diretorioBaseInstalacao()}${Platform.pathSeparator}product_images';
+}
+
 final RegExp _regexNomeArquivoPod = RegExp(r'^venda_\d+_\d{8}_\d{6}\.jpg$');
+final RegExp _regexNomeArquivoProduto =
+    RegExp(r'^(shared_[a-fA-F0-9]{40}\.jpg|[a-zA-Z0-9._\-]+\.(jpe?g|png|webp))$',
+        caseSensitive: false);
 
 bool _nomeArquivoPodValido(String raw) {
   final name = raw.trim();
@@ -158,6 +198,18 @@ bool _nomeArquivoPodValido(String raw) {
     return false;
   }
   return _regexNomeArquivoPod.hasMatch(name);
+}
+
+bool _nomeArquivoProdutoValido(String raw) {
+  final name = Uri.decodeComponent(raw.trim());
+  if (name.isEmpty ||
+      name.contains('..') ||
+      name.contains('/') ||
+      name.contains(r'\')) {
+    return false;
+  }
+  if (name.length > 180) return false;
+  return _regexNomeArquivoProduto.hasMatch(name);
 }
 
 Future<Response> _podUpload(Request request) async {
@@ -229,7 +281,7 @@ Future<Response> _podUpload(Request request) async {
 Response _podDownload(Request request, String fileName) {
   if (!_nomeArquivoPodValido(fileName)) {
     return Response.notFound(
-      body: jsonEncode({'ok': false, 'error': 'nao_encontrado'}),
+      jsonEncode({'ok': false, 'error': 'nao_encontrado'}),
       headers: {'content-type': 'application/json'},
     );
   }
@@ -238,7 +290,7 @@ Response _podDownload(Request request, String fileName) {
   final arquivo = File(path);
   if (!arquivo.existsSync()) {
     return Response.notFound(
-      body: jsonEncode({'ok': false, 'error': 'nao_encontrado'}),
+      jsonEncode({'ok': false, 'error': 'nao_encontrado'}),
       headers: {'content-type': 'application/json'},
     );
   }
@@ -252,11 +304,165 @@ Response _podDownload(Request request, String fileName) {
   );
 }
 
+Future<Response> _productImageUpload(Request request) async {
+  try {
+    final body = await request.readAsString();
+    final decoded = jsonDecode(body);
+    if (decoded is! Map<String, dynamic>) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'json_invalido'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    final fileName = (decoded['fileName'] ?? '').toString();
+    if (!_nomeArquivoProdutoValido(fileName)) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'nome_arquivo_invalido'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    final b64 = (decoded['contentBase64'] ?? '').toString();
+    if (b64.isEmpty) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'contentBase64_vazio'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    List<int> bytes;
+    try {
+      bytes = base64Decode(b64);
+    } catch (_) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'base64_invalido'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (bytes.isEmpty) {
+      return Response.badRequest(
+        body: jsonEncode({'ok': false, 'error': 'arquivo_vazio'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (bytes.length > 6 * 1024 * 1024) {
+      return Response(
+        413,
+        body: jsonEncode({'ok': false, 'error': 'arquivo_muito_grande'}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    final dir = Directory(_diretorioProductImages());
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    File('${dir.path}${Platform.pathSeparator}$fileName')
+        .writeAsBytesSync(bytes);
+    return Response.ok(
+      jsonEncode({
+        'ok': true,
+        'path': 'product_images/$fileName',
+        'bytes': bytes.length,
+      }),
+      headers: {'content-type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'ok': false, 'error': '$e'}),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+}
+
+Response _productImageDownload(Request request, String fileName) {
+  final nome = Uri.decodeComponent(fileName.trim());
+  if (!_nomeArquivoProdutoValido(nome)) {
+    return Response.notFound(
+      jsonEncode({'ok': false, 'error': 'nao_encontrado'}),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+  final path =
+      '${_diretorioProductImages()}${Platform.pathSeparator}$nome';
+  final arquivo = File(path);
+  if (!arquivo.existsSync()) {
+    return Response.notFound(
+      jsonEncode({'ok': false, 'error': 'nao_encontrado'}),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+  final bytes = arquivo.readAsBytesSync();
+  return Response.ok(
+    bytes,
+    headers: {
+      'content-type': 'image/jpeg',
+      'cache-control': 'private, max-age=86400',
+    },
+  );
+}
+
+int _maxRevisionAtual() {
+  final maxRevRs = _db.select(
+    'SELECT COALESCE(MAX(revision), 0) AS r FROM changelog',
+  );
+  return maxRevRs.isEmpty ? 0 : (maxRevRs.first['r'] as int?) ?? 0;
+}
+
 void _broadcastNovaRevision(int revision) {
   final msg = jsonEncode({'type': 'revision', 'revision': revision});
+  final mortos = <StreamSink<Object?>>[];
   for (final sink in List<StreamSink<Object?>>.from(_wsClientes)) {
     try {
       sink.add(msg);
+    } catch (_) {
+      mortos.add(sink);
+    }
+  }
+  for (final s in mortos) {
+    _wsClientes.remove(s);
+    try {
+      s.close();
+    } catch (_) {}
+  }
+}
+
+Map<String, dynamic> _presenceSnapshot() {
+  _pruneHeartbeats();
+  final stations = <Map<String, dynamic>>[];
+  for (final e in _heartbeatLastMs.entries) {
+    final id = e.key;
+    final ts = e.value;
+    stations.add({
+      'stationId': id,
+      'label': _heartbeatLabels[id] ?? '',
+      'lastSeen': DateTime.fromMillisecondsSinceEpoch(ts, isUtc: true)
+          .toIso8601String(),
+    });
+  }
+  return {
+    'ok': true,
+    'ttlSeconds': _presenceTtlMs ~/ 1000,
+    'activeCount': stations.length,
+    'stations': stations,
+  };
+}
+
+void _broadcastPresence() {
+  final snap = _presenceSnapshot();
+  final msg = jsonEncode({
+    'type': 'presence',
+    'activeCount': snap['activeCount'],
+    'ttlSeconds': snap['ttlSeconds'],
+    'stations': snap['stations'],
+  });
+  final mortos = <StreamSink<Object?>>[];
+  for (final sink in List<StreamSink<Object?>>.from(_wsClientes)) {
+    try {
+      sink.add(msg);
+    } catch (_) {
+      mortos.add(sink);
+    }
+  }
+  for (final s in mortos) {
+    _wsClientes.remove(s);
+    try {
+      s.close();
     } catch (_) {}
   }
 }
@@ -289,6 +495,10 @@ CREATE TABLE IF NOT EXISTS orcamento_seq (
 ''');
   db.execute(
     'CREATE INDEX IF NOT EXISTS idx_changelog_entity ON changelog (entity, entity_id);',
+  );
+  db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_changelog_entity_rev '
+    'ON changelog (entity, entity_id, revision);',
   );
   db.execute(
     'INSERT OR IGNORE INTO orcamento_seq (id, next_num) VALUES (1, 1);',
@@ -345,21 +555,66 @@ void _alinharOrcamentoSeqAoHistorico(Database db) {
 }
 
 /// Proximo numero de orcamento unico na rede (transacao BEGIN IMMEDIATE ja deve estar ativa).
+/// Nunca devolve numero que ja exista no changelog (evita 123 "fantasma" enquanto
+/// o celular tinha 349 e o seq local do servidor estava desatualizado).
 int _alocarNumeroOrcamentoServidor(Database db) {
   final sel = db.prepare('SELECT next_num FROM orcamento_seq WHERE id = 1');
   final rs = sel.select([]);
   sel.dispose();
+  var candidato = 1;
   if (rs.isEmpty) {
     db.execute(
       'INSERT OR REPLACE INTO orcamento_seq (id, next_num) VALUES (1, 2);',
     );
-    return 1;
+  } else {
+    candidato = (rs.first['next_num'] as int?) ?? 1;
   }
-  final atual = (rs.first['next_num'] as int?) ?? 1;
+
+  for (var i = 0; i < 5000; i++) {
+    final ocupado = db.select(
+      "SELECT 1 AS x FROM changelog WHERE entity = 'venda' AND op = 'upsert' "
+      "AND json_extract(payload, '\$.numeroOrcamento') = ? LIMIT 1",
+      [candidato],
+    );
+    if (ocupado.isEmpty) {
+      db.execute(
+        'UPDATE orcamento_seq SET next_num = ? WHERE id = 1',
+        [candidato + 1],
+      );
+      return candidato;
+    }
+    candidato++;
+  }
   db.execute(
-    'UPDATE orcamento_seq SET next_num = next_num + 1 WHERE id = 1',
+    'UPDATE orcamento_seq SET next_num = ? WHERE id = 1',
+    [candidato + 1],
   );
-  return atual;
+  return candidato;
+}
+
+/// Mantem o numero do cliente se ainda nao existir na rede; senao aloca novo.
+/// Evita celular mostrar 342 e caixa so ter 350 (ou vice-versa).
+int _reservarNumeroOrcamentoCliente(Database db, int desejado) {
+  if (desejado <= 0) return _alocarNumeroOrcamentoServidor(db);
+
+  final rs = db.select(
+    "SELECT 1 AS x FROM changelog WHERE entity = 'venda' AND op = 'upsert' "
+    "AND json_extract(payload, '\$.numeroOrcamento') = ? LIMIT 1",
+    [desejado],
+  );
+  if (rs.isNotEmpty) {
+    return _alocarNumeroOrcamentoServidor(db);
+  }
+
+  final sel = db.select('SELECT next_num FROM orcamento_seq WHERE id = 1');
+  final atual = sel.isEmpty ? 1 : (sel.first['next_num'] as int?) ?? 1;
+  if (desejado >= atual) {
+    db.execute(
+      'UPDATE orcamento_seq SET next_num = ? WHERE id = 1',
+      [desejado + 1],
+    );
+  }
+  return desejado;
 }
 
 Response _health(Request request) {
@@ -376,25 +631,8 @@ Response _health(Request request) {
 }
 
 Response _presence(Request request) {
-  _pruneHeartbeats();
-  final stations = <Map<String, dynamic>>[];
-  for (final e in _heartbeatLastMs.entries) {
-    final id = e.key;
-    final ts = e.value;
-    stations.add({
-      'stationId': id,
-      'label': _heartbeatLabels[id] ?? '',
-      'lastSeen': DateTime.fromMillisecondsSinceEpoch(ts, isUtc: true)
-          .toIso8601String(),
-    });
-  }
   return Response.ok(
-    jsonEncode({
-      'ok': true,
-      'ttlSeconds': _presenceTtlMs ~/ 1000,
-      'activeCount': stations.length,
-      'stations': stations,
-    }),
+    jsonEncode(_presenceSnapshot()),
     headers: {'content-type': 'application/json'},
   );
 }
@@ -418,19 +656,47 @@ Future<Response> _heartbeat(Request request) async {
   final now = DateTime.now().millisecondsSinceEpoch;
   _heartbeatLastMs[stationId] = now;
   _heartbeatLabels[stationId] = label;
-  _pruneHeartbeats();
+  final snap = _presenceSnapshot();
+  _broadcastPresence();
   return Response.ok(
-    jsonEncode({'ok': true}),
+    jsonEncode(snap),
     headers: {'content-type': 'application/json'},
   );
 }
 
 Response _meta(Request request) {
   final now = DateTime.now().toUtc().toIso8601String();
+  final lastRev = _ultimaRevisionChangelog();
   return Response.ok(
-    jsonEncode({'serverTime': now, 'schemaVersion': 2}),
+    jsonEncode({
+      'serverTime': now,
+      'schemaVersion': 2,
+      'lastRevision': lastRev,
+      'productImagesPath': _diretorioProductImages(),
+    }),
     headers: {'content-type': 'application/json'},
   );
+}
+
+/// Endpoint leve: cliente compara [lastRevision] local e so faz pull pesado se mudar.
+Response _version(Request request) {
+  final lastRev = _ultimaRevisionChangelog();
+  return Response.ok(
+    jsonEncode({
+      'lastRevision': lastRev,
+      'schemaVersion': 2,
+      'serverTime': DateTime.now().toUtc().toIso8601String(),
+    }),
+    headers: {'content-type': 'application/json'},
+  );
+}
+
+int _ultimaRevisionChangelog() {
+  final rs = _db.select(
+    'SELECT COALESCE(MAX(revision), 0) AS r FROM changelog',
+  );
+  if (rs.isEmpty) return 0;
+  return (rs.first['r'] as int?) ?? 0;
 }
 
 int _maxEntityId(Database db, String entity) {
@@ -447,11 +713,30 @@ int _allocateGlobalId(Database db, String entity) {
   return _maxEntityId(db, entity) + 1;
 }
 
+bool _queryFlagTrue(Request request, String name) {
+  final v = (request.url.queryParameters[name] ?? '').trim().toLowerCase();
+  return v == '1' || v == 'true' || v == 'yes';
+}
+
+/// Janela de orcamentos/vendas recentes na carga inicial do celular.
+const int _bootstrapVendaDias = 7;
+
 Response _pull(Request request) {
   final since =
       int.tryParse(request.url.queryParameters['since'] ?? '0') ?? 0;
-  final limit =
-      int.tryParse(request.url.queryParameters['limit'] ?? '2000') ?? 2000;
+  final bootstrap = _queryFlagTrue(request, 'bootstrap');
+  final defaultLimit = bootstrap ? 1000 : 2000;
+  var limit =
+      int.tryParse(request.url.queryParameters['limit'] ?? '$defaultLimit') ??
+          defaultLimit;
+  // Bootstrap: lotes grandes (menos HTTP). Incremental: teto seguro na LAN.
+  final maxLimit = bootstrap ? 2000 : 5000;
+  if (limit < 1) limit = 1;
+  if (limit > maxLimit) limit = maxLimit;
+
+  if (bootstrap) {
+    return _pullBootstrap(since: since, limit: limit);
+  }
 
   final rs = _db.select(
     'SELECT revision, entity, entity_id, op, payload, ts FROM changelog '
@@ -459,6 +744,81 @@ Response _pull(Request request) {
     [since, limit],
   );
 
+  return _pullRespostaDeRows(
+    rs: rs,
+    since: since,
+    limit: limit,
+    bootstrap: false,
+  );
+}
+
+/// Carga seletiva (pruning) para celular novo: so estado atual util na loja.
+///
+/// Filtros:
+/// - produto: apenas ativos (`ativo != false`); deletes sempre passam
+/// - venda: so orcamentos abertos (`status = orcamento`) OU criados nos
+///   ultimos [_bootstrapVendaDias] dias; historico finalizado antigo fica de fora
+/// - demais entidades: inalteradas
+/// - alem disso: so a **ultima** revision por (entity, entity_id), para nao
+///   reenviar o historico inteiro de updates do changelog
+Response _pullBootstrap({required int since, required int limit}) {
+  final cutoffIso = DateTime.now()
+      .toUtc()
+      .subtract(const Duration(days: _bootstrapVendaDias))
+      .toIso8601String();
+
+  // JOIN no MAX(revision) por entidade: 1 linha atual por registro (nao o log todo).
+  final rs = _db.select(
+    '''
+SELECT c.revision, c.entity, c.entity_id, c.op, c.payload, c.ts
+FROM changelog c
+INNER JOIN (
+  SELECT entity, entity_id, MAX(revision) AS max_rev
+  FROM changelog
+  GROUP BY entity, entity_id
+) latest
+  ON latest.entity = c.entity
+ AND latest.entity_id = c.entity_id
+ AND latest.max_rev = c.revision
+WHERE c.revision > ?
+  AND (
+    c.entity NOT IN ('produto', 'venda')
+    OR (
+      c.entity = 'produto'
+      AND (
+        c.op = 'delete'
+        OR COALESCE(json_extract(c.payload, '\$.ativo'), 1) IN (1, 'true', '1')
+      )
+    )
+    OR (
+      c.entity = 'venda'
+      AND c.op != 'delete'
+      AND (
+        json_extract(c.payload, '\$.status') = 'orcamento'
+        OR IFNULL(json_extract(c.payload, '\$.data'), '') >= ?
+      )
+    )
+  )
+ORDER BY c.revision ASC
+LIMIT ?
+''',
+    [since, cutoffIso, limit],
+  );
+
+  return _pullRespostaDeRows(
+    rs: rs,
+    since: since,
+    limit: limit,
+    bootstrap: true,
+  );
+}
+
+Response _pullRespostaDeRows({
+  required ResultSet rs,
+  required int since,
+  required int limit,
+  required bool bootstrap,
+}) {
   final changes = <Map<String, dynamic>>[];
   var lastRev = since;
   for (final row in rs) {
@@ -474,10 +834,26 @@ Response _pull(Request request) {
     });
   }
 
+  final hasMore = rs.length >= limit;
+  // Bootstrap: ao terminar a pagina filtrada, avanca o cursor ate o MAX do
+  // changelog (linhas podadas nao devem deixar o celular "atrasado" eterno).
+  if (bootstrap && !hasMore) {
+    final maxRev = _ultimaRevisionChangelog();
+    if (maxRev > lastRev) lastRev = maxRev;
+  }
+  // Pagina vazia no bootstrap (so restavam registros podados): fecha no MAX.
+  if (bootstrap && rs.isEmpty) {
+    final maxRev = _ultimaRevisionChangelog();
+    if (maxRev > lastRev) lastRev = maxRev;
+  }
+
   final body = jsonEncode({
     'lastRevision': lastRev,
     'changes': changes,
-    'hasMore': rs.length >= limit,
+    'hasMore': hasMore,
+    if (bootstrap) 'bootstrap': true,
+    if (bootstrap) 'pruned': true,
+    if (bootstrap) 'vendaDias': _bootstrapVendaDias,
   });
 
   return Response.ok(body, headers: {'content-type': 'application/json'});
@@ -498,31 +874,65 @@ Future<Response> _push(Request request) async {
   }
 
   final pushBatchId = (body['pushBatchId'] ?? '').toString().trim();
-  if (pushBatchId.isNotEmpty) {
-    final cached = _db.select(
-      'SELECT response_json FROM push_batches WHERE device_id = ? AND batch_id = ?',
-      [deviceId, pushBatchId],
-    );
-    if (cached.isNotEmpty) {
-      final raw = cached.first['response_json']?.toString() ?? '{}';
-      return Response.ok(
-        raw,
-        headers: {'content-type': 'application/json'},
-      );
-    }
-  }
-
   final mutations = body['mutations'];
   if (mutations is! List) {
     return Response(400, body: 'mutations deve ser lista');
   }
 
+  // Serializa pushes concorrentes (Celular A + B).
+  final anterior = _mutexPush;
+  final liberado = Completer<void>();
+  _mutexPush = liberado.future;
+  await anterior;
+  try {
+    return _pushAplicar(
+      deviceId: deviceId,
+      pushBatchId: pushBatchId,
+      mutations: mutations,
+    );
+  } finally {
+    liberado.complete();
+  }
+}
+
+Response _pushAplicar({
+  required String deviceId,
+  required String pushBatchId,
+  required List<dynamic> mutations,
+}) {
   final mappings = <Map<String, dynamic>>[];
   final numeroCorrections = <Map<String, dynamic>>[];
   final now = DateTime.now().millisecondsSinceEpoch;
 
   try {
     _db.execute('BEGIN IMMEDIATE');
+
+    // Idempotencia DENTRO do lock: evita TOCTOU entre 2 retries.
+    if (pushBatchId.isNotEmpty) {
+      final cached = _db.select(
+        'SELECT response_json FROM push_batches WHERE device_id = ? AND batch_id = ?',
+        [deviceId, pushBatchId],
+      );
+      if (cached.isNotEmpty) {
+        final rawCached = cached.first['response_json']?.toString() ?? '{}';
+        _db.execute('COMMIT');
+        // Re-avisa clientes: quem perdeu o 1o WS ainda recebe o evento.
+        try {
+          final decoded = jsonDecode(rawCached);
+          final rev = decoded is Map
+              ? (decoded['appliedRevision'] as num?)?.toInt()
+              : null;
+          _broadcastNovaRevision(rev ?? _maxRevisionAtual());
+        } catch (_) {
+          _broadcastNovaRevision(_maxRevisionAtual());
+        }
+        return Response.ok(
+          rawCached,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+    }
+
     for (final m in mutations) {
       if (m is! Map) continue;
       final map = Map<String, dynamic>.from(m);
@@ -572,7 +982,7 @@ Future<Response> _push(Request request) async {
       }
 
       final payloadRaw = map['payload'];
-      final payload = payloadRaw is Map<String, dynamic>
+      final payload = payloadRaw is Map
           ? Map<String, dynamic>.from(payloadRaw)
           : <String, dynamic>{};
 
@@ -612,10 +1022,14 @@ Future<Response> _push(Request request) async {
       payload['id'] = globalId;
 
       if (entity == 'venda' && vendaNovaNaRede) {
-        final servidorNum = _alocarNumeroOrcamentoServidor(_db);
+        final clienteNum = (payload['numeroOrcamento'] as num?)?.toInt() ?? 0;
+        final servidorNum = _reservarNumeroOrcamentoCliente(_db, clienteNum);
         payload['numeroOrcamento'] = servidorNum;
+        // Sempre ACK o numero oficial (mesmo se manteve o do cliente): o PDV
+        // precisa confirmar na UI o comprovante alinhado com o caixa.
         numeroCorrections.add({
           'globalId': globalId,
+          'localId': localIdInt,
           'numeroOrcamento': servidorNum,
         });
       }
@@ -633,7 +1047,37 @@ Future<Response> _push(Request request) async {
       stmt.dispose();
     }
 
+    final appliedRevision = _maxRevisionAtual();
+    final responseBody = jsonEncode({
+      'ok': true,
+      'appliedRevision': appliedRevision,
+      'mappings': mappings,
+      'numeroCorrections': numeroCorrections,
+      'idempotentReplay': false,
+    });
+
+    // Cache do lote NA MESMA transacao (crash entre commit e insert nao perde idempotencia).
+    if (pushBatchId.isNotEmpty) {
+      final insBatch = _db.prepare(
+        'INSERT OR REPLACE INTO push_batches (device_id, batch_id, response_json, created_ts) VALUES (?, ?, ?, ?)',
+      );
+      insBatch.execute([deviceId, pushBatchId, responseBody, now]);
+      insBatch.dispose();
+    }
+
     _db.execute('COMMIT');
+
+    if (pushBatchId.isNotEmpty) {
+      _prunePushBatches(deviceId);
+    }
+
+    // Avisa TODOS os clientes WS (Celular B, C, PC) — incluindo o remetente.
+    _broadcastNovaRevision(appliedRevision);
+
+    return Response.ok(
+      responseBody,
+      headers: {'content-type': 'application/json'},
+    );
   } catch (e, st) {
     try {
       _db.execute('ROLLBACK');
@@ -642,36 +1086,6 @@ Future<Response> _push(Request request) async {
       body: 'Erro ao aplicar push: $e\n$st',
     );
   }
-
-  final maxRevRs = _db.select(
-    'SELECT COALESCE(MAX(revision), 0) AS r FROM changelog',
-  );
-  final appliedRevision =
-      maxRevRs.isEmpty ? 0 : (maxRevRs.first['r'] as int?) ?? 0;
-
-  _broadcastNovaRevision(appliedRevision);
-
-  final responseBody = jsonEncode({
-    'ok': true,
-    'appliedRevision': appliedRevision,
-    'mappings': mappings,
-    'numeroCorrections': numeroCorrections,
-    'idempotentReplay': false,
-  });
-
-  if (pushBatchId.isNotEmpty) {
-    final insBatch = _db.prepare(
-      'INSERT OR REPLACE INTO push_batches (device_id, batch_id, response_json, created_ts) VALUES (?, ?, ?, ?)',
-    );
-    insBatch.execute([deviceId, pushBatchId, responseBody, now]);
-    insBatch.dispose();
-    _prunePushBatches(deviceId);
-  }
-
-  return Response.ok(
-    responseBody,
-    headers: {'content-type': 'application/json'},
-  );
 }
 
 void _prunePushBatches(String deviceId) {

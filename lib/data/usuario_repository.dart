@@ -187,6 +187,15 @@ class UsuarioRepository {
     return lista.where((u) => u.ativo && u.vendedorId > 0).length;
   }
 
+  Future<UsuarioSistema?> obterAtivoPorVendedorId(int vendedorId) async {
+    if (vendedorId <= 0) return null;
+    final lista = await listarTodos();
+    for (final u in lista) {
+      if (u.ativo && u.vendedorId == vendedorId) return u;
+    }
+    return null;
+  }
+
   /// Login do sistema com vendedor vinculado ativo (identificacao no PDV).
   Future<UsuarioSistema?> autenticarComVendedorVinculado(
     String login,

@@ -1134,13 +1134,21 @@ class VendaRepository {
     }
     final query = _db.vendaBox
         .query(cond)
-        .order(Venda_.data, flags: Order.descending)
+        .order(Venda_.numeroOrcamento, flags: Order.descending)
         .build();
     try {
       if (limit != null && limit > 0) {
         query.limit = limit;
       }
-      return query.find();
+      final lista = query.find();
+      // Garante ordem por numero mesmo se algum registro tiver numero 0
+      // (cai para id) apos sync/remap.
+      lista.sort((a, b) {
+        final na = a.numeroOrcamento > 0 ? a.numeroOrcamento : a.id;
+        final nb = b.numeroOrcamento > 0 ? b.numeroOrcamento : b.id;
+        return nb.compareTo(na);
+      });
+      return lista;
     } finally {
       query.close();
     }
@@ -1427,13 +1435,38 @@ class VendaRepository {
   List<Venda> listarPorPeriodo(PeriodoFiltro periodo) {
     final inicioUtc = periodo.inicio.toUtc();
     final fimUtc = periodo.fim.toUtc();
-    return listarTodas()
-        .where(
-          (venda) =>
-              !venda.data.toUtc().isBefore(inicioUtc) &&
-              !venda.data.toUtc().isAfter(fimUtc),
+    final q = _db.vendaBox
+        .query(
+          Venda_.data
+              .greaterOrEqualDate(inicioUtc)
+              .and(Venda_.data.lessOrEqualDate(fimUtc)),
         )
-        .toList();
+        .build();
+    try {
+      return q.find();
+    } finally {
+      q.close();
+    }
+  }
+
+  /// Contadores do painel (uma passagem, sem ordenar lista completa).
+  ({int emAberto, int atrasadas}) contarEntregasPainelResumo() {
+    final candidatas = _consultarEntregasCarretoNoBanco(
+      statusEntrega: 'todos',
+      inicio: null,
+      fim: null,
+      dataMarcadaInicio: null,
+      dataMarcadaFim: null,
+    );
+    var emAberto = 0;
+    var atrasadas = 0;
+    for (final v in candidatas) {
+      final st = v.statusEntrega.trim().toLowerCase();
+      final finalizado = st == 'entregue' || st == 'cancelada';
+      if (!finalizado) emAberto++;
+      if (EntregaFiltroUtil.ehAtrasada(v)) atrasadas++;
+    }
+    return (emAberto: emAberto, atrasadas: atrasadas);
   }
 
   /// Linhas de vendas finalizadas com promocao aplicada no periodo.
@@ -3172,6 +3205,8 @@ class VendaRepository {
         .order(Venda_.id, flags: Order.descending)
         .build();
     try {
+      // Overfetch: filtro final usa getter calculado.
+      query.limit = (limite * 4).clamp(limite, 400);
       return query
           .find()
           .where((v) => v.nfceProcessandoPendenteFocus)
@@ -3207,6 +3242,7 @@ class VendaRepository {
         .build();
     try {
       final desdeUtc = desde?.toUtc();
+      query.limit = (limite * 4).clamp(limite, 800);
       return query
           .find()
           .where((v) {

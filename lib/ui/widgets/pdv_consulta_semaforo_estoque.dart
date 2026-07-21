@@ -10,19 +10,22 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
     required this.produto,
     this.quantidadeNoOrcamento = 0,
     this.mostrarNumero = true,
+    this.nivelPrecalculado,
   });
 
   final Produto produto;
   final num quantidadeNoOrcamento;
   final bool mostrarNumero;
+  final PdvEstoqueSemaforoNivel? nivelPrecalculado;
 
   @override
   Widget build(BuildContext context) {
     final disponivel = produto.estoqueLivreParaVenda;
-    final nivel = PdvEstoqueSemaforoUtil.nivelDe(
-      produto,
-      quantidadeNoOrcamento: quantidadeNoOrcamento,
-    );
+    final nivel = nivelPrecalculado ??
+        PdvEstoqueSemaforoUtil.nivelDe(
+          produto,
+          quantidadeNoOrcamento: quantidadeNoOrcamento,
+        );
     final cor = PdvEstoqueSemaforoUtil.corDe(context, nivel);
     final tooltip = PdvEstoqueSemaforoUtil.tooltipDe(
       produto,

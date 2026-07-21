@@ -5,13 +5,16 @@ import 'package:intl/intl.dart';
 
 import '../domain/promocao_info_vigente.dart';
 import '../model/produto.dart';
+import '../services/produto_imagem_lan_service.dart';
 import 'theme/app_modulo_cores.dart';
+import 'widgets/produto_foto_view.dart';
 
 /// Modal compacto com foto e descricao (PDV e demais telas de venda).
 Future<void> mostrarModalDetalheProdutoVenda(
   BuildContext context, {
   required Produto produto,
   List<PromocaoInfoVigente> campanhasVigentes = const [],
+  String imagesDirectoryPath = '',
 }) {
   return showDialog<void>(
     context: context,
@@ -29,6 +32,7 @@ Future<void> mostrarModalDetalheProdutoVenda(
           child: ProdutoDetalheVendaConteudo(
             produto: produto,
             campanhasVigentes: campanhasVigentes,
+            imagesDirectoryPath: imagesDirectoryPath,
           ),
         ),
       );
@@ -42,13 +46,20 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
     super.key,
     required this.produto,
     this.campanhasVigentes = const [],
+    this.imagesDirectoryPath = '',
   });
 
   final Produto produto;
   final List<PromocaoInfoVigente> campanhasVigentes;
+  final String imagesDirectoryPath;
 
   Future<void> _abrirZoomFoto(BuildContext context) async {
     if (produto.fotoPath.trim().isEmpty) return;
+    final path = await ProdutoImagemLanService(
+      imagesDirectoryPath: imagesDirectoryPath,
+    ).resolverOuBaixar(produto.fotoPath);
+    if (!context.mounted) return;
+    if (path == null || path.isEmpty || !File(path).existsSync()) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => Dialog(
@@ -75,7 +86,7 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
                     minScale: 1,
                     maxScale: 4,
                     child: Image.file(
-                      File(produto.fotoPath),
+                      File(path),
                       fit: BoxFit.contain,
                     ),
                   ),
@@ -91,50 +102,29 @@ class ProdutoDetalheVendaConteudo extends StatelessWidget {
   Widget _buildFoto(BuildContext context, {required double altura}) {
     final scheme = Theme.of(context).colorScheme;
     final semFoto = produto.fotoPath.trim().isEmpty;
-    final foto = semFoto
-        ? Container(
-            height: altura,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              'Sem foto',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-            ),
-          )
-        : ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Material(
-              color: scheme.surfaceContainerHighest,
-              child: InkWell(
-                onTap: () => _abrirZoomFoto(context),
-                child: SizedBox(
-                  height: altura,
-                  width: double.infinity,
-                  child: Image.file(
-                    File(produto.fotoPath),
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) => Center(
-                      child: Text(
-                        'Foto indisponivel',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
+    final foto = ProdutoFotoView(
+      fotoPath: produto.fotoPath,
+      imagesDirectoryPath: imagesDirectoryPath,
+      height: altura,
+      width: double.infinity,
+      fit: BoxFit.contain,
+      borderRadius: BorderRadius.circular(8),
+      placeholderLabel: 'Sem foto',
+      errorLabel: 'Foto indisponivel',
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        foto,
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: semFoto ? null : () => _abrirZoomFoto(context),
+            borderRadius: BorderRadius.circular(8),
+            child: foto,
+          ),
+        ),
         if (!semFoto)
           Padding(
             padding: const EdgeInsets.only(top: 4),

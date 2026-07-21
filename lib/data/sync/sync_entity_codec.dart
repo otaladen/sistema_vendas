@@ -3,9 +3,16 @@ import '../../model/item_venda.dart';
 import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../../model/vendedor.dart';
+import '../../domain/produto_imagem_nome_arquivo.dart';
 
 /// Serializacao para sync LAN (JSON).
 class SyncEntityCodec {
+  /// Basename da foto na rede (shared_* ou outro jpg/png seguro).
+  /// Nunca devolve caminho absoluto de Windows/macOS.
+  static String fotoPathParaSync(String? fotoPath) {
+    return ProdutoImagemNomeArquivo.extrairNomeParaLan(fotoPath ?? '') ?? '';
+  }
+
   static Map<String, dynamic> produtoParaMap(Produto p) {
     return {
       'id': p.id,
@@ -21,7 +28,7 @@ class SyncEntityCodec {
       'fabricante': p.fabricante,
       'codigoBarras': p.codigoBarras,
       'apelidosBusca': p.apelidosBusca,
-      'fotoPath': p.fotoPath,
+      'fotoPath': fotoPathParaSync(p.fotoPath),
       'localizacao': p.localizacao,
       'estoqueCd': p.estoqueCd,
       'substitutosIds': p.substitutosIds,
@@ -74,7 +81,7 @@ class SyncEntityCodec {
       fabricante: (m['fabricante'] ?? '').toString(),
       codigoBarras: (m['codigoBarras'] ?? '').toString(),
       apelidosBusca: (m['apelidosBusca'] ?? '').toString(),
-      fotoPath: (m['fotoPath'] ?? '').toString(),
+      fotoPath: fotoPathParaSync((m['fotoPath'] ?? '').toString()),
       localizacao: (m['localizacao'] ?? '').toString(),
       estoqueCd: (m['estoqueCd'] as num?)?.toInt() ?? 0,
       substitutosIds: (m['substitutosIds'] ?? '').toString(),

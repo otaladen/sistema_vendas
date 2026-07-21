@@ -99,6 +99,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   int? _vendedorIdFiltro;
 
   List<Venda> _resultados = [];
+  /// Itens ja resolvidos (sem query no build).
+  List<ListagemVendaItemUi> _itensUi = [];
+  List<Cliente> _clientesAtivosCache = [];
+  List<Vendedor> _vendedoresAtivosCache = [];
   List<String> _distintosCanceladaPor = [];
   int _offsetListagem = 0;
   int _totalListagemVendas = 0;
@@ -109,7 +113,11 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   void initState() {
     super.initState();
     _distintosCanceladaPor = widget.vendaRepository.listarDistintosCanceladaPor();
-    _pesquisar();
+    _atualizarCachesFiltro();
+    // Theme.of so funciona apos o 1o frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _pesquisar();
+    });
   }
 
   @override
@@ -120,48 +128,62 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
 
-  String _rotuloCupomFiscalLista(Venda v) {
+  void _atualizarCachesFiltro() {
+    _clientesAtivosCache = widget.clienteRepository
+        .listarTodos()
+        .where((c) => c.ativo)
+        .toList();
+    _vendedoresAtivosCache = widget.vendedorRepository.listarAtivos();
+  }
+
+  /// Resolve NF-e 55 uma vez (preferindo campos ja na venda).
+  VendaDocumentoNfe55Resumo? _nfe55ResumoDeVenda(Venda v) {
+    if (v.nfe55Autorizada) {
+      return VendaDocumentoNfe55Resumo(
+        numero: v.nfeNumero,
+        autorizada: true,
+      );
+    }
     final nfe55 = widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id);
+    if (nfe55 == null) return null;
+    return VendaDocumentoNfe55Resumo(
+      numero: nfe55.numero,
+      autorizada: nfe55.autorizada,
+    );
+  }
+
+  String _rotuloCupomFiscalLista(
+    Venda v, {
+    VendaDocumentoNfe55Resumo? nfe55,
+  }) {
     return VendaDocumentoRotuloHelper.rotuloIdentificacaoLista(
       v,
-      nfe55: nfe55 == null
-          ? null
-          : VendaDocumentoNfe55Resumo(
-              numero: nfe55.numero,
-              autorizada: nfe55.autorizada,
-            ),
+      nfe55: nfe55 ?? _nfe55ResumoDeVenda(v),
     );
   }
 
-  VendaDocumentoNfe55Resumo? _nfe55Resumo(Venda v) {
-    final nfe55 = widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id);
-    return nfe55 == null
-        ? null
-        : VendaDocumentoNfe55Resumo(
-            numero: nfe55.numero,
-            autorizada: nfe55.autorizada,
-          );
-  }
-
-  String _statusOperacionalLista(Venda v) {
+  String _statusOperacionalLista(
+    Venda v, {
+    VendaDocumentoNfe55Resumo? nfe55,
+  }) {
     return VendaDocumentoRotuloHelper.statusOperacionalLista(
       v,
-      nfe55: _nfe55Resumo(v),
+      nfe55: nfe55 ?? _nfe55ResumoDeVenda(v),
     );
   }
 
-  String _statusOperacionalResumidoLista(Venda v) {
+  String _statusOperacionalResumidoLista(
+    Venda v, {
+    VendaDocumentoNfe55Resumo? nfe55,
+  }) {
     return VendaDocumentoRotuloHelper.statusOperacionalResumidoLista(
       v,
-      nfe55: _nfe55Resumo(v),
+      nfe55: nfe55 ?? _nfe55ResumoDeVenda(v),
     );
   }
 
-  Color _corStatusOperacionalLista(Venda v) {
-    return VendaDocumentoRotuloHelper.corStatusLista(
-      v,
-      Theme.of(context).colorScheme,
-    );
+  Color _corStatusOperacionalLista(Venda v, ColorScheme scheme) {
+    return VendaDocumentoRotuloHelper.corStatusLista(v, scheme);
   }
 
   Future<void> _verDanfeNfce(Venda v) async {
@@ -778,8 +800,12 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       limite: _tamPaginaListagem,
     );
     final distintosCancel = widget.vendaRepository.listarDistintosCanceladaPor();
+    _atualizarCachesFiltro();
+    final scheme = Theme.of(context).colorScheme;
+    final itensUi = _mapearVendasParaItensUi(pagina.vendas, scheme);
     setState(() {
       _resultados = pagina.vendas;
+      _itensUi = itensUi;
       _totalListagemVendas = pagina.total;
       _offsetListagem = pagina.vendas.length;
       _distintosCanceladaPor = distintosCancel;
@@ -799,9 +825,12 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       offset: _offsetListagem,
       limite: _tamPaginaListagem,
     );
+    final scheme = Theme.of(context).colorScheme;
     setState(() {
       _resultados.addAll(pagina.vendas);
       _offsetListagem += pagina.vendas.length;
+      // Remonta a pagina inteira uma vez (batch), nao no build.
+      _itensUi = _mapearVendasParaItensUi(_resultados, scheme);
     });
   }
 
@@ -858,31 +887,69 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   double get _valorTotalExibido =>
       _resultados.fold(0.0, (s, v) => s + v.total);
 
-  ListagemVendaItemUi _buildItemUi(Venda v) {
+  /// Pre-carrega NFe / frete / devolucao em lote e monta o ViewModel.
+  /// Chamado so apos pesquisa/pagina — nunca dentro de [build].
+  List<ListagemVendaItemUi> _mapearVendasParaItensUi(
+    List<Venda> vendas,
+    ColorScheme scheme,
+  ) {
+    final freteIds = <int>{};
+    for (final v in vendas) {
+      final idFrete = v.idOrcamentoFreteRetiradaAberto;
+      if (idFrete != 0) freteIds.add(idFrete);
+    }
+    final fretePorId = <int, Venda?>{
+      for (final id in freteIds) id: widget.vendaRepository.obterPorId(id),
+    };
+
+    final nfePorId = <int, VendaDocumentoNfe55Resumo?>{};
+    final devTrocaPorId = <int, ({double dev, double troca})>{};
+    for (final v in vendas) {
+      nfePorId[v.id] = _nfe55ResumoDeVenda(v);
+      if (!v.cancelada && v.status == 'finalizada') {
+        final dev = widget.vendaRepository
+            .valorReferenciaDevolvidoAcumuladoVenda(v.id);
+        final troca =
+            widget.vendaRepository.valorSaidaTrocaAcumuladoVenda(v.id);
+        if (dev > 0.005 || troca > 0.005) {
+          devTrocaPorId[v.id] = (dev: dev, troca: troca);
+        }
+      }
+    }
+
+    return [
+      for (final v in vendas)
+        _montarItemUi(
+          v,
+          scheme: scheme,
+          nfe55: nfePorId[v.id],
+          freteFilho: fretePorId[v.idOrcamentoFreteRetiradaAberto],
+          devTroca: devTrocaPorId[v.id],
+        ),
+    ];
+  }
+
+  ListagemVendaItemUi _montarItemUi(
+    Venda v, {
+    required ColorScheme scheme,
+    VendaDocumentoNfe55Resumo? nfe55,
+    Venda? freteFilho,
+    ({double dev, double troca})? devTroca,
+  }) {
     final cliente = _clienteDaVenda(v);
     final alertas = <String>[];
 
-    if (!v.cancelada &&
-        v.status == 'finalizada' &&
-        (widget.vendaRepository.valorReferenciaDevolvidoAcumuladoVenda(v.id) >
-                0.005 ||
-            widget.vendaRepository.valorSaidaTrocaAcumuladoVenda(v.id) >
-                0.005)) {
-      final dev = widget.vendaRepository
-          .valorReferenciaDevolvidoAcumuladoVenda(v.id);
-      final troca =
-          widget.vendaRepository.valorSaidaTrocaAcumuladoVenda(v.id);
-      final liq = troca - dev;
+    if (devTroca != null) {
+      final liq = devTroca.troca - devTroca.dev;
       alertas.add(
-        'Dev/troca: devolvido ${_formatarMoeda(dev)} · saida '
-        '${_formatarMoeda(troca)} · liquido ${_formatarMoeda(liq)}',
+        'Dev/troca: devolvido ${_formatarMoeda(devTroca.dev)} · saida '
+        '${_formatarMoeda(devTroca.troca)} · liquido ${_formatarMoeda(liq)}',
       );
     }
     if (v.idOrcamentoFreteRetiradaAberto != 0) {
-      final filho = widget.vendaRepository
-          .obterPorId(v.idOrcamentoFreteRetiradaAberto);
+      final filho = freteFilho;
       final n = filho?.numeroOrcamento ?? 0;
-      final rot = n > 0 ? '#$n' : '(id ${filho?.id})';
+      final rot = n > 0 ? '#$n' : '(id ${filho?.id ?? v.idOrcamentoFreteRetiradaAberto})';
       alertas.add('Frete carreto pendente no caixa $rot');
     }
     if (_temRegistroRetiradaOuEntrega(v)) {
@@ -903,19 +970,20 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     }
 
     final statusCompleto =
-        v.cancelada ? 'Venda cancelada' : _statusOperacionalLista(v);
-    final statusResumido =
-        v.cancelada ? 'Cancelada' : _statusOperacionalResumidoLista(v);
+        v.cancelada ? 'Venda cancelada' : _statusOperacionalLista(v, nfe55: nfe55);
+    final statusResumido = v.cancelada
+        ? 'Cancelada'
+        : _statusOperacionalResumidoLista(v, nfe55: nfe55);
 
     return ListagemVendaItemUi(
       venda: v,
-      titulo: _rotuloCupomFiscalLista(v),
+      titulo: _rotuloCupomFiscalLista(v, nfe55: nfe55),
       status: statusResumido,
       statusDetalhe:
           statusCompleto != statusResumido ? statusCompleto : null,
       statusCor: v.cancelada
-          ? Theme.of(context).colorScheme.error
-          : _corStatusOperacionalLista(v),
+          ? scheme.error
+          : _corStatusOperacionalLista(v, scheme),
       dataHora: _dataHora.format(v.data.toLocal()),
       cliente: cliente?.nomeRazao ?? 'Sem cliente',
       vendedor: _rotuloVendedorUmLinha(v),
@@ -1211,14 +1279,11 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   @override
   Widget build(BuildContext context) {
-    final clientes = widget.clienteRepository
-        .listarTodos()
-        .where((c) => c.ativo)
-        .toList();
-    final vendedores = widget.vendedorRepository.listarAtivos();
+    final clientes = _clientesAtivosCache;
+    final vendedores = _vendedoresAtivosCache;
     final usarTabela =
         MediaQuery.sizeOf(context).width >= ListagemVendasLayout.breakpointTabela;
-    final itensUiBrutos = _resultados.map(_buildItemUi).toList();
+    final itensUiBrutos = _itensUi;
     final itensUi = usarTabela
         ? itensUiBrutos
         : ordenarItensListagemVendas(
@@ -1825,7 +1890,7 @@ class _DialogoFreteCarretoRetiradaFuturaState
             ? null
             : widget.vendaMae.vendedor.targetId,
       );
-      await LanSyncScheduler.solicitarSyncImediato();
+      await LanSyncScheduler.solicitarSyncPrioritario();
       if (!mounted) return;
       final filho = widget.vendaRepository.obterPorId(idFilho);
       final n = filho?.numeroOrcamento ?? 0;

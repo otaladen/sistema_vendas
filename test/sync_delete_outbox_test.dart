@@ -44,4 +44,32 @@ void main() {
     expect(restantes.length, 1);
     expect(restantes.first['entityId'], 2);
   });
+
+  test(
+    'lista de mutacoes aceita upsert com payload Map<String, dynamic>',
+    () async {
+      await SyncDeleteOutbox.registrar(entity: 'produto', entityId: 1);
+      final mutacoes = <Map<String, dynamic>>[
+        ...await SyncDeleteOutbox.mutacoesParaPush(),
+      ];
+
+      // Regressao: sem tipagem explicita o List virava Map<String, Object>
+      // e este add estourava no bootstrap do sync.
+      expect(
+        () => mutacoes.add(<String, dynamic>{
+          'entity': 'fornecedor_nfe',
+          'op': 'upsert',
+          'localId': 9,
+          'payload': <String, dynamic>{
+            'id': 9,
+            'cnpj': '123',
+            'razaoSocial': 'Teste',
+          },
+        }),
+        returnsNormally,
+      );
+      expect(mutacoes.length, 2);
+      expect(mutacoes.last['payload'], isA<Map<String, dynamic>>());
+    },
+  );
 }

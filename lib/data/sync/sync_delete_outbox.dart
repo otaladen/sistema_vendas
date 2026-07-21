@@ -53,16 +53,17 @@ class SyncDeleteOutbox {
 
   static Future<List<Map<String, dynamic>>> mutacoesParaPush() async {
     final lista = await _listar();
-    return lista
-        .map(
-          (e) => {
-            'entity': e.entity,
-            'op': 'delete',
-            'entityId': e.entityId,
-            'localId': e.localId,
-          },
-        )
-        .toList();
+    // Tipar explicitamente: map literal so com String/int vira Map<String, Object>
+    // e List.add de payload Map<String, dynamic> quebra no bootstrap do sync.
+    return [
+      for (final e in lista)
+        <String, dynamic>{
+          'entity': e.entity,
+          'op': 'delete',
+          'entityId': e.entityId,
+          'localId': e.localId,
+        },
+    ];
   }
 
   static Future<void> limparEnviadas(

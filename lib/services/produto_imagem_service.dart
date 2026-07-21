@@ -4,8 +4,12 @@ import 'dart:ui' as ui;
 
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
+
+import '../domain/produto_imagem_nome_arquivo.dart';
 
 /// Fotos de produto com reuso: mesma imagem = um arquivo, varios produtos.
 class ProdutoImagemService {
@@ -13,7 +17,31 @@ class ProdutoImagemService {
 
   final String imagesDirectoryPath;
 
+  static bool get cameraDisponivel =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+  /// Caminho absoluto existente, ou relativo na pasta de imagens.
+  String? resolverArquivoExistente(String? fotoPath) {
+    final raw = (fotoPath ?? '').trim();
+    if (raw.isEmpty) return null;
+    final abs = File(p.normalize(raw));
+    if (abs.existsSync()) return abs.path;
+    final nome = ProdutoImagemNomeArquivo.nomeArquivoSeguro(raw);
+    if (nome == null) return null;
+    final rel = File(p.join(imagesDirectoryPath, nome));
+    if (rel.existsSync()) return p.normalize(rel.absolute.path);
+    return null;
+  }
+
   Future<String?> selecionarImagemLocal() async {
+    if (cameraDisponivel) {
+      final x = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 88,
+        maxWidth: 1600,
+      );
+      return x?.path;
+    }
     final resultado = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
@@ -25,7 +53,18 @@ class ProdutoImagemService {
     return resultado.files.first.path;
   }
 
-  /// Processa e grava como `shared_<sha1>.jpg`.
+  Future<String?> capturarFotoCamera() async {
+    if (!cameraDisponivel) return null;
+    final x = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      preferredCameraDevice: CameraDevice.rear,
+      imageQuality: 88,
+      maxWidth: 1600,
+    );
+    return x?.path;
+  }
+
+  /// Processa e grava como `<produto>_<sha1_curto>.jpg`.
   ///
   /// Decodifica com o codec nativo do Flutter (Skia) para preservar cores
   /// de WebP/JPEG progressivo etc.; o pacote `image` sozinho corrompe algumas.
@@ -54,7 +93,10 @@ class ProdutoImagemService {
     // JPEG ja no tamanho: copia sem reencodar (qualidade e cores intactas).
     if (_ehJpeg(bytesOriginais) &&
         await _larguraJpegOuZero(bytesOriginais) <= maxWidth) {
-      return _gravarBytesCompartilhados(bytesOriginais);
+      return _gravarBytesCompartilhados(
+        bytesOriginais,
+        productIdentifier: productIdentifier,
+      );
     }
 
     final rgb = await _decodificarParaRgb(bytesOriginais, maxWidth: maxWidth);
@@ -63,12 +105,24 @@ class ProdutoImagemService {
     final bytesJpeg = Uint8List.fromList(
       img.encodeJpg(rgb, quality: jpegQuality),
     );
-    return _gravarBytesCompartilhados(bytesJpeg);
+    return _gravarBytesCompartilhados(
+      bytesJpeg,
+      productIdentifier: productIdentifier,
+    );
   }
 
-  Future<String> _gravarBytesCompartilhados(Uint8List bytesJpeg) async {
+  /// Gera nome legivel: `cola_branca_cascorez_500gr_a1b2c3d4.jpg`
+  /// (prefixo do produto + hash curto para unicidade).
+  Future<String> _gravarBytesCompartilhados(
+    Uint8List bytesJpeg, {
+    String productIdentifier = '',
+  }) async {
     final hash = sha1.convert(bytesJpeg).toString();
-    final destinoPath = p.join(imagesDirectoryPath, 'shared_$hash.jpg');
+    final nomeArquivo = ProdutoImagemNomeArquivo.gerarNomeArquivo(
+      productIdentifier: productIdentifier,
+      hashCompleto: hash,
+    );
+    final destinoPath = p.join(imagesDirectoryPath, nomeArquivo);
     final arquivoDestino = File(destinoPath);
     if (!arquivoDestino.existsSync()) {
       await Directory(imagesDirectoryPath).create(recursive: true);

@@ -17,6 +17,8 @@ class SyncLocalConfig {
   static const _kLogo = 'sync_local_logo_path';
   static const _kBackupPasta = 'sync_local_backup_automatico_pasta';
   static const _kBackupUltimoMs = 'sync_local_backup_automatico_ultimo_ms';
+  static const _kBackupSegundoDestinoPasta =
+      'sync_local_backup_segundo_destino_pasta';
   static const _kAbrirGavetaAutomatica = 'sync_local_abrir_gaveta_automatica';
   static const _kGavetaPino = 'sync_local_gaveta_pino';
 
@@ -33,12 +35,24 @@ class SyncLocalConfig {
     await prefs.setString(_kLogo, legado.logoPath);
     await prefs.setString(_kBackupPasta, legado.backupAutomaticoPasta);
     await prefs.setInt(_kBackupUltimoMs, legado.ultimoBackupAutomaticoMs);
+    await prefs.setString(
+      _kBackupSegundoDestinoPasta,
+      legado.backupSegundoDestinoPasta,
+    );
     await prefs.setBool(_kMigrado, true);
   }
 
   static Future<EmpresaConfig> aplicarSobre(EmpresaConfig base) async {
     final prefs = await SharedPreferences.getInstance();
     await migrarLegadoSeNecessario(base);
+    // Migracao pontual: pasta do 2o destino passou a ser so local (S7).
+    if (!prefs.containsKey(_kBackupSegundoDestinoPasta) &&
+        base.backupSegundoDestinoPasta.trim().isNotEmpty) {
+      await prefs.setString(
+        _kBackupSegundoDestinoPasta,
+        base.backupSegundoDestinoPasta.trim(),
+      );
+    }
     final porta = prefs.getInt(_kPorta);
     return base.copyWith(
       redeSyncToken: prefs.getString(_kToken) ?? base.redeSyncToken,
@@ -58,6 +72,8 @@ class SyncLocalConfig {
           prefs.getString(_kBackupPasta) ?? base.backupAutomaticoPasta,
       ultimoBackupAutomaticoMs:
           prefs.getInt(_kBackupUltimoMs) ?? base.ultimoBackupAutomaticoMs,
+      backupSegundoDestinoPasta: prefs.getString(_kBackupSegundoDestinoPasta) ??
+          base.backupSegundoDestinoPasta,
       abrirGavetaAutomatica:
           prefs.getBool(_kAbrirGavetaAutomatica) ?? base.abrirGavetaAutomatica,
       gavetaPino: () {
@@ -87,6 +103,10 @@ class SyncLocalConfig {
       config.ultimoBackupAutomaticoMs < 0
           ? 0
           : config.ultimoBackupAutomaticoMs,
+    );
+    await prefs.setString(
+      _kBackupSegundoDestinoPasta,
+      config.backupSegundoDestinoPasta.trim(),
     );
     await prefs.setBool(_kAbrirGavetaAutomatica, config.abrirGavetaAutomatica);
     await prefs.setInt(_kGavetaPino, config.gavetaPino.clamp(0, 1));

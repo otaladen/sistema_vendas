@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:http/http.dart' as http;
 
@@ -67,6 +68,38 @@ class SyncApiClient {
     return u.replace(queryParameters: {...u.queryParameters, ...query});
   }
 
+  /// GET `/sync/version` — leve: so lastRevision (cliente evita pull pesado).
+  /// Fallback: `/sync/meta.lastRevision` em servidores antigos.
+  Future<({int lastRevision, int schemaVersion})?> obterVersao() async {
+    if (!configurado) return null;
+    try {
+      final r = await http
+          .get(_uri('/sync/version'), headers: _headersJson())
+          .timeout(const Duration(seconds: 5));
+      if (r.statusCode == 200) {
+        final map = jsonDecode(r.body);
+        if (map is Map) {
+          return (
+            lastRevision: (map['lastRevision'] as num?)?.toInt() ?? 0,
+            schemaVersion: (map['schemaVersion'] as num?)?.toInt() ?? 0,
+          );
+        }
+      }
+    } catch (_) {
+      // Servidor antigo sem /sync/version — tenta meta.
+    }
+    try {
+      final meta = await obterMeta();
+      if (meta == null) return null;
+      return (
+        lastRevision: (meta['lastRevision'] as num?)?.toInt() ?? 0,
+        schemaVersion: (meta['schemaVersion'] as num?)?.toInt() ?? 0,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> health() async {
     if (!configurado) return false;
     try {
@@ -80,11 +113,12 @@ class SyncApiClient {
   }
 
   /// Heartbeat para o servidor contar estacoes com o app aberto (LAN).
-  Future<bool> heartbeat({
+  /// Retorna o snapshot de presenca quando o servidor envia (versoes novas).
+  Future<Map<String, dynamic>?> heartbeat({
     required String stationId,
     required String label,
   }) async {
-    if (!configurado) return false;
+    if (!configurado) return null;
     try {
       final r = await http
           .post(
@@ -96,9 +130,15 @@ class SyncApiClient {
             }),
           )
           .timeout(const Duration(seconds: 8));
-      return r.statusCode == 200;
+      if (r.statusCode != 200) return null;
+      try {
+        final decoded = jsonDecode(r.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+      return const {'ok': true};
     } catch (_) {
-      return false;
+      return null;
     }
   }
 
@@ -121,6 +161,9 @@ class SyncApiClient {
     required int since,
     required String deviceId,
     int limit = 2000,
+    /// Carga inicial do celular: servidor aplica pruning (produtos ativos,
+    /// orcamentos abertos/recentes) e lotes maiores.
+    bool bootstrap = false,
   }) async {
     final r = await http
         .get(
@@ -128,6 +171,7 @@ class SyncApiClient {
             'since': '$since',
             'deviceId': deviceId,
             'limit': '$limit',
+            if (bootstrap) 'bootstrap': '1',
           }),
           headers: _headersJson(),
         )
@@ -141,11 +185,14 @@ class SyncApiClient {
     if (r.statusCode != 200) {
       throw StateError('pull HTTP ${r.statusCode}: ${r.body}');
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map<String, dynamic>) {
-      throw StateError('pull: resposta invalida');
-    }
-    return decoded;
+    final body = r.body;
+    return Isolate.run(() {
+      final decoded = jsonDecode(body);
+      if (decoded is! Map) {
+        throw StateError('pull: resposta invalida');
+      }
+      return Map<String, dynamic>.from(decoded);
+    });
   }
 
   /// POST `/sync/pod` — envia JPEG (base64) para pasta central do servidor.
@@ -192,21 +239,121 @@ class SyncApiClient {
     }
   }
 
+  /// GET `/sync/meta` — metadados do servidor (inclui pasta de fotos quando disponivel).
+  Future<Map<String, dynamic>?> obterMeta() async {
+    if (!configurado) return null;
+    try {
+      final r = await http
+          .get(_uri('/sync/meta'), headers: _headersJson())
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return null;
+      final decoded = jsonDecode(r.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// POST `/sync/product-image` — envia JPEG de produto para pasta do servidor.
+  /// Retorna path ou null; [ultimoErro] recebe detalhe da falha.
+  Future<String?> uploadProductImage({
+    required String fileName,
+    required List<int> jpegBytes,
+    void Function(String motivo)? onErro,
+  }) async {
+    if (!configurado) {
+      onErro?.call('URL do servidor vazia.');
+      return null;
+    }
+    try {
+      final r = await http
+          .post(
+            _uri('/sync/product-image'),
+            headers: _headersJson(),
+            body: jsonEncode({
+              'fileName': fileName,
+              'contentBase64': base64Encode(jpegBytes),
+            }),
+          )
+          .timeout(const Duration(seconds: 90));
+      if (r.statusCode == 401 || r.statusCode == 403) {
+        onErro?.call('Token de sync recusado (HTTP ${r.statusCode}).');
+        return null;
+      }
+      if (r.statusCode == 404) {
+        onErro?.call(
+          'Servidor sem rota de fotos (exe antigo). Atualize o sync_server.',
+        );
+        return null;
+      }
+      if (r.statusCode != 200) {
+        onErro?.call('Upload HTTP ${r.statusCode}: ${r.body}');
+        return null;
+      }
+      final decoded = jsonDecode(r.body);
+      if (decoded is! Map) {
+        onErro?.call('Resposta invalida do servidor.');
+        return null;
+      }
+      final map = Map<String, dynamic>.from(decoded);
+      if (map['ok'] != true) {
+        onErro?.call((map['error'] ?? 'upload_falhou').toString());
+        return null;
+      }
+      return (map['path'] ?? '').toString();
+    } catch (e) {
+      onErro?.call('$e');
+      return null;
+    }
+  }
+
+  /// GET `/sync/product-image/<fileName>` — baixa JPEG de produto.
+  Future<List<int>?> downloadProductImage({required String fileName}) async {
+    if (!configurado) return null;
+    final nome = fileName.trim();
+    if (nome.isEmpty) return null;
+    Future<List<int>?> tentar(String pathSuffix) async {
+      try {
+        final r = await http
+            .get(
+              _uri('/sync/product-image/$pathSuffix'),
+              headers: _headersJson(),
+            )
+            .timeout(const Duration(seconds: 60));
+        if (r.statusCode != 200) return null;
+        if (r.bodyBytes.isEmpty) return null;
+        final ct = r.headers['content-type'] ?? '';
+        if (ct.contains('application/json')) return null;
+        return r.bodyBytes;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // 1) path simples  2) encoded (nomes com espaco etc.)
+    return await tentar(nome) ?? await tentar(Uri.encodeComponent(nome));
+  }
+
   Future<Map<String, dynamic>> push({
     required String deviceId,
     required List<Map<String, dynamic>> mutations,
     String? pushBatchId,
   }) async {
+    final batch = pushBatchId?.trim();
+    final body = await Isolate.run(() {
+      return jsonEncode({
+        'deviceId': deviceId,
+        'mutations': mutations,
+        if (batch != null && batch.isNotEmpty) 'pushBatchId': batch,
+      });
+    });
     final r = await http
         .post(
           _uri('/sync/push'),
           headers: _headersJson(),
-          body: jsonEncode({
-            'deviceId': deviceId,
-            'mutations': mutations,
-            if (pushBatchId != null && pushBatchId.trim().isNotEmpty)
-              'pushBatchId': pushBatchId.trim(),
-          }),
+          body: body,
         )
         .timeout(const Duration(seconds: 120));
     if (r.statusCode == 401 || r.statusCode == 403) {
@@ -217,10 +364,13 @@ class SyncApiClient {
     if (r.statusCode != 200) {
       throw StateError('push HTTP ${r.statusCode}: ${r.body}');
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map<String, dynamic>) {
-      throw StateError('push: resposta invalida');
-    }
-    return decoded;
+    final respBody = r.body;
+    return Isolate.run(() {
+      final decoded = jsonDecode(respBody);
+      if (decoded is! Map) {
+        throw StateError('push: resposta invalida');
+      }
+      return Map<String, dynamic>.from(decoded);
+    });
   }
 }

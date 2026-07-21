@@ -75,8 +75,13 @@ class Produto {
 
   String descricao;
   String unidade;
+
+  @Index()
   String categoria;
+
+  @Index()
   String subcategoria;
+
   String marca;
   String fornecedor;
   String fabricante;
