@@ -3,9 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/caixa_sessao_repository.dart';
-import '../../data/cliente_repository.dart';
+import '../../data/api/lan_api_client.dart';
 import '../../data/objectbox.dart';
-import '../../data/venda_repository.dart';
 import '../../domain/dashboard_alertas.dart';
 import '../../domain/filtro_contas_pagar.dart';
 import '../../domain/filtro_contas_receber.dart';
@@ -24,28 +23,34 @@ import '../widgets/dashboard_alertas_strip.dart';
 import '../widgets/hub_nav_button.dart';
 import 'contas_pagar_page.dart';
 import 'contas_receber_page.dart';
+import 'obrigacoes_mensais_page.dart';
 import 'widgets/financeiro_resumo_painel.dart';
+import '../../data/api/obrigacao_mensal_api_repository.dart';
 
 /// Hub do modulo Financeiro com painel executivo de tesouraria.
 class FinanceiroHubPage extends StatefulWidget {
   const FinanceiroHubPage({
     super.key,
-    required this.objectBox,
+    this.objectBox,
     required this.vendaRepository,
     required this.clienteRepository,
     required this.usuarioLogado,
     required this.onLogout,
     this.filtroContasReceberInicial,
     this.filtroContasPagarInicial,
+    this.lanApiClient,
+    this.contaPagarRepository,
   });
 
-  final ObjectBox objectBox;
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
+  final ObjectBox? objectBox;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
   final UsuarioSistema usuarioLogado;
   final VoidCallback onLogout;
   final FiltroContasReceber? filtroContasReceberInicial;
   final FiltroContasPagar? filtroContasPagarInicial;
+  final LanApiClient? lanApiClient;
+  final dynamic contaPagarRepository;
 
   @override
   State<FinanceiroHubPage> createState() => _FinanceiroHubPageState();
@@ -81,11 +86,17 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
               .toDouble()
           : null;
 
-      final resumo = FinanceiroResumoService.montar(
-        vendaRepository: widget.vendaRepository,
-        objectBox: widget.objectBox,
-        sessaoCaixaLocal: sessao,
-      );
+      final FinanceiroResumoSnapshot resumo;
+      if (widget.lanApiClient != null) {
+        final m = await widget.lanApiClient!.financeiroResumo();
+        resumo = FinanceiroResumoSnapshot.fromMap(m);
+      } else {
+        resumo = FinanceiroResumoService.montar(
+          vendaRepository: widget.vendaRepository,
+          objectBox: widget.objectBox!,
+          sessaoCaixaLocal: sessao,
+        );
+      }
 
       final alertas = <DashboardAlerta>[];
       if (resumo.aReceberVencido > 0.01) {
@@ -198,8 +209,31 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
       MaterialPageRoute(
         builder: (_) => ContasPagarPage(
           objectBox: widget.objectBox,
+          contaPagarRepository: widget.contaPagarRepository,
           saldoCaixaReferencia: _saldoCaixaRef,
           filtroInicial: filtro,
+        ),
+      ),
+    ).then((_) => _carregar());
+  }
+
+  void _abrirObrigacoesMensais() {
+    if (!_podeFinanceiro) return;
+    if (AppShellScope.maybeOf(context) != null) {
+      HubNavigation.abrirSub(
+        context,
+        MainMenuSubDestino.financeiroObrigacoesMensais,
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ObrigacoesMensaisPage(
+          objectBox: widget.objectBox,
+          obrigacaoRepository: widget.lanApiClient != null
+              ? ObrigacaoMensalApiRepository(widget.lanApiClient!)
+              : null,
         ),
       ),
     ).then((_) => _carregar());
@@ -254,6 +288,7 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
     if (widget.filtroContasPagarInicial != null && _podeFinanceiro) {
       return ContasPagarPage(
         objectBox: widget.objectBox,
+        contaPagarRepository: widget.contaPagarRepository,
         saldoCaixaReferencia: _saldoCaixaRef,
         filtroInicial: widget.filtroContasPagarInicial!,
       );
@@ -589,6 +624,14 @@ class _FinanceiroHubPageState extends State<FinanceiroHubPage> {
             : 'Fornecedores, NF-e e despesas',
         habilitado: _podeFinanceiro,
         onTap: () => _abrirPagar(),
+      ),
+      HubNavButton(
+        icon: Icons.event_repeat_outlined,
+        corDestaque: AppModuloCores.modulo(context, AppModuloId.contasPagar),
+        titulo: 'Obrigacoes fixas',
+        subtitulo: 'Semanal, mensal ou anual (gera em Contas a pagar)',
+        habilitado: _podeFinanceiro,
+        onTap: _abrirObrigacoesMensais,
       ),
     ];
 

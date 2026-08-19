@@ -6,23 +6,21 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../domain/cliente_cadastro.dart';
-import '../data/cliente_repository.dart';
-import '../data/mensageria_repository.dart';
-import '../data/venda_repository.dart';
-import '../data/vendedor_repository.dart';
+import '../data/api/cliente_api_repository.dart';
+import '../data/api/venda_api_repository.dart';
 import '../model/cliente.dart';
-import '../model/mensagem_log.dart';
+import '../model/item_venda.dart';
 import '../model/vendedor.dart';
 import '../services/brasil_api_cep_service.dart';
 import 'widgets/cliente_endereco_ibge_selector.dart';
 import '../services/brasil_api_cnpj_service.dart';
-import '../model/mensagem_template.dart';
 import '../model/venda.dart';
 import 'layout/app_layout.dart';
 import 'theme/app_semantic_helper.dart';
 import 'widgets/cliente/cliente_cadastro_header.dart';
 import 'widgets/cliente/cliente_cadastro_rodape.dart';
 import 'widgets/extrato_fiado_cliente_card.dart';
+import 'widgets/lan_api_feedback.dart';
 import 'widgets/mascaras_cadastro_input.dart';
 
 class _CadastroClienteSalvarIntent extends Intent {
@@ -43,9 +41,9 @@ class ClientesPage extends StatefulWidget {
     this.clienteIdInicial,
   });
 
-  final ClienteRepository clienteRepository;
-  final VendaRepository vendaRepository;
-  final VendedorRepository? vendedorRepository;
+  final dynamic clienteRepository;
+  final dynamic vendaRepository;
+  final dynamic vendedorRepository;
   final bool retornarClienteAoSalvar;
   /// Abre direto o cadastro deste cliente (ex.: drill-down de relatorios).
   final int? clienteIdInicial;
@@ -83,15 +81,23 @@ class _ClientesPageState extends State<ClientesPage>
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       );
 
-  static const double _wTipoPessoa = 172;
   static const double _wDoc = 228;
   static const double _wIe = 200;
   static const double _wCep = 120;
   static const double _wNumero = 88;
   static const double _wUf = 72;
-  static const double _maxLarguraFormulario = 1120;
+  /// Padding unico dos campos do cadastro (mesma altura do dropdown Tipo).
+  static const EdgeInsets _padCampoCadastro =
+      EdgeInsets.symmetric(horizontal: 10, vertical: 10);
+  static const BoxConstraints _iconCampoCadastro = BoxConstraints(
+    minWidth: 28,
+    minHeight: 28,
+    maxWidth: 32,
+    maxHeight: 32,
+  );
 
   final _nomeRazaoController = TextEditingController();
+  final _nomeRazaoFocus = FocusNode(debugLabel: 'clienteNomeRazao');
   final _nomeFantasiaController = TextEditingController();
   final _documentoController = TextEditingController();
   final _inscricaoController = TextEditingController();
@@ -109,6 +115,7 @@ class _ClientesPageState extends State<ClientesPage>
   final _limiteController = TextEditingController();
   final _observacoesController = TextEditingController();
   final _rgController = TextEditingController();
+  final _nascimentoController = TextEditingController();
   final _ocupacaoController = TextEditingController();
   final _codigoInternoController = TextEditingController();
   final _inscricaoMunicipalController = TextEditingController();
@@ -117,11 +124,12 @@ class _ClientesPageState extends State<ClientesPage>
   final _motivoBloqueioController = TextEditingController();
   final _prazoPagamentoController = TextEditingController();
   String _sexoCliente = '';
-  DateTime? _dataNascimentoCliente;
   final List<_EnderecoFormControllers> _enderecosExtras = [];
   bool _principalPadraoCarreto = true;
 
   int? _clienteEmEdicaoId;
+  /// Saldo de fiado (cache); no Terminal Leve e atualizado via API.
+  double _saldoFiadoCache = 0;
   String _tipoPessoa = 'fisica';
   String _segmento = '';
   String _categoriaComercial = '';
@@ -139,11 +147,12 @@ class _ClientesPageState extends State<ClientesPage>
   late final _cepFormatter = _CepInputFormatter();
   late final _emailFormatter = _EmailInputFormatter();
   late final _limiteCreditoFormatter = _MoedaInputFormatter();
-  final MensageriaRepository _mensageriaRepository = MensageriaRepository();
   final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
   final DateFormat _dataNascimentoFmt = DateFormat('dd/MM/yyyy');
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   String _periodoHistorico = 'todo';
+  List<Venda> _comprasClienteCache = [];
+  bool _carregandoCompras = false;
 
   Timer? _debounceConsultaCnpj;
   Timer? _debounceConsultaCep;
@@ -151,28 +160,66 @@ class _ClientesPageState extends State<ClientesPage>
   bool _consultaCnpjEmAndamento = false;
   bool _consultaCepEmAndamento = false;
   TextEditingController? _cepControllerEmConsulta;
-  final ScrollController _scrollAbaIdentificacao = ScrollController();
-  final ScrollController _scrollAbaContato = ScrollController();
-  final ScrollController _scrollAbaComercial = ScrollController();
-  final ScrollController _scrollAbaEndereco = ScrollController();
-  final ScrollController _scrollAbaRelacionamento = ScrollController();
-
+  final ScrollController _scrollFormulario = ScrollController();
+  final ScrollController _scrollRelacionamento = ScrollController();
   late final TabController _tabController;
+
+  void _onClienteApiChanged() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
     _documentoController.addListener(_onDocumentoChanged);
+    final repo = widget.clienteRepository;
+    if (repo is ClienteApiRepository) {
+      repo.addListener(_onClienteApiChanged);
+      unawaited(_hidratarClientesTerminal());
+    }
     _vendedoresAtivos =
         widget.vendedorRepository?.listarAtivos() ?? const [];
     final idInicial = widget.clienteIdInicial;
     if (idInicial != null && idInicial > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        final c = widget.clienteRepository.obterPorId(idInicial);
-        if (c != null && mounted) _editarCliente(c);
+        unawaited(_abrirClienteIdInicial(idInicial));
+      });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _focarCampoNome();
       });
     }
+  }
+
+  void _focarCampoNome() {
+    if (!mounted) return;
+    if (_nomeRazaoFocus.canRequestFocus) {
+      _nomeRazaoFocus.requestFocus();
+    }
+  }
+
+  Future<void> _hidratarClientesTerminal() async {
+    final repo = widget.clienteRepository;
+    if (repo is! ClienteApiRepository) return;
+    try {
+      await repo.hidratar();
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackAviso(context, e, prefixo: 'Clientes');
+    }
+  }
+
+  Future<void> _abrirClienteIdInicial(int id) async {
+    final repo = widget.clienteRepository;
+    Cliente? c;
+    if (repo is ClienteApiRepository) {
+      c = await repo.obterPorIdRemoto(id) ?? repo.obterPorId(id);
+    } else {
+      c = repo.obterPorId(id) as Cliente?;
+    }
+    if (c != null && mounted) _editarCliente(c);
   }
 
   @override
@@ -180,7 +227,12 @@ class _ClientesPageState extends State<ClientesPage>
     _tabController.dispose();
     _debounceConsultaCnpj?.cancel();
     _debounceConsultaCep?.cancel();
+    final repo = widget.clienteRepository;
+    if (repo is ClienteApiRepository) {
+      repo.removeListener(_onClienteApiChanged);
+    }
     _documentoController.removeListener(_onDocumentoChanged);
+    _nomeRazaoFocus.dispose();
     _nomeRazaoController.dispose();
     _nomeFantasiaController.dispose();
     _documentoController.dispose();
@@ -199,6 +251,7 @@ class _ClientesPageState extends State<ClientesPage>
     _limiteController.dispose();
     _observacoesController.dispose();
     _rgController.dispose();
+    _nascimentoController.dispose();
     _ocupacaoController.dispose();
     _codigoInternoController.dispose();
     _inscricaoMunicipalController.dispose();
@@ -209,21 +262,51 @@ class _ClientesPageState extends State<ClientesPage>
     for (final endereco in _enderecosExtras) {
       endereco.dispose();
     }
-    _scrollAbaIdentificacao.dispose();
-    _scrollAbaContato.dispose();
-    _scrollAbaComercial.dispose();
-    _scrollAbaEndereco.dispose();
-    _scrollAbaRelacionamento.dispose();
+    _scrollFormulario.dispose();
+    _scrollRelacionamento.dispose();
     super.dispose();
   }
 
   Future<void> _abrirPesquisaCliente() async {
-    final clientesBase = widget.clienteRepository.listarTodos();
     final pesquisaController = TextEditingController();
     final resultadosScrollController = ScrollController();
     final pesquisaFocusNode = FocusNode();
-    List<Cliente> resultados = clientesBase;
+    List<Cliente> resultados = List<Cliente>.from(
+      widget.clienteRepository.listarTodos() as List,
+    );
     int indiceSelecionado = resultados.isEmpty ? -1 : 0;
+    Timer? debounceApi;
+
+    List<Cliente> filtrarLocal(String value) {
+      final termo = value.trim().toLowerCase();
+      final termoNumerico = _somenteDigitos(value);
+      final base = List<Cliente>.from(
+        widget.clienteRepository.listarTodos() as List,
+      );
+      if (termo.isEmpty && termoNumerico.isEmpty) return base;
+      return base.where((cliente) {
+        final campos = [
+          cliente.nomeRazao,
+          cliente.nomeFantasia,
+          cliente.documento,
+          cliente.telefone,
+          cliente.whatsapp,
+          cliente.email,
+          cliente.cidade,
+        ].map((e) => e.toLowerCase());
+        if (campos.any((campo) => campo.contains(termo))) return true;
+        if (termoNumerico.isEmpty) return false;
+        final camposNumericos = [
+          cliente.documento,
+          cliente.telefone,
+          cliente.whatsapp,
+          cliente.cep,
+        ].map((s) => _somenteDigitos('$s'));
+        return camposNumericos.any(
+          (campoNumerico) => campoNumerico.contains(termoNumerico),
+        );
+      }).toList();
+    }
 
     final clienteSelecionado = await showDialog<Cliente>(
       context: context,
@@ -340,37 +423,31 @@ class _ClientesPageState extends State<ClientesPage>
                           prefixIcon: Icon(Icons.search),
                         ),
                         onChanged: (value) {
-                          final termo = value.trim().toLowerCase();
-                          final termoNumerico = _somenteDigitos(value);
                           setDialogState(() {
-                            resultados = clientesBase.where((cliente) {
-                              final campos = [
-                                cliente.nomeRazao,
-                                cliente.nomeFantasia,
-                                cliente.documento,
-                                cliente.telefone,
-                                cliente.whatsapp,
-                                cliente.email,
-                                cliente.cidade,
-                              ].map((e) => e.toLowerCase());
-                              final matchTexto = campos.any(
-                                (campo) => campo.contains(termo),
-                              );
-                              if (matchTexto) return true;
-                              if (termoNumerico.isEmpty) return false;
-                              final camposNumericos = [
-                                cliente.documento,
-                                cliente.telefone,
-                                cliente.whatsapp,
-                                cliente.cep,
-                              ].map(_somenteDigitos);
-                              return camposNumericos.any(
-                                (campoNumerico) =>
-                                    campoNumerico.contains(termoNumerico),
-                              );
-                            }).toList();
+                            resultados = filtrarLocal(value);
                             indiceSelecionado = resultados.isEmpty ? -1 : 0;
                           });
+                          final repo = widget.clienteRepository;
+                          if (repo is ClienteApiRepository) {
+                            debounceApi?.cancel();
+                            debounceApi = Timer(
+                              const Duration(milliseconds: 320),
+                              () async {
+                                final termo = value.trim();
+                                if (termo.isEmpty) return;
+                                try {
+                                  final remotos =
+                                      await repo.pesquisarRemoto(termo);
+                                  if (!context.mounted) return;
+                                  setDialogState(() {
+                                    resultados = remotos;
+                                    indiceSelecionado =
+                                        resultados.isEmpty ? -1 : 0;
+                                  });
+                                } catch (_) {}
+                              },
+                            );
+                          }
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (resultadosScrollController.hasClients) {
                               resultadosScrollController.jumpTo(0);
@@ -481,13 +558,26 @@ class _ClientesPageState extends State<ClientesPage>
       },
     );
 
+    debounceApi?.cancel();
     pesquisaController.dispose();
     resultadosScrollController.dispose();
     pesquisaFocusNode.dispose();
 
     if (clienteSelecionado != null) {
-      _editarCliente(clienteSelecionado);
+      await _editarClienteComRefresh(clienteSelecionado);
     }
+  }
+
+  Future<void> _editarClienteComRefresh(Cliente c) async {
+    final repo = widget.clienteRepository;
+    if (repo is ClienteApiRepository && c.id > 0) {
+      final fresco = await repo.obterPorIdRemoto(c.id);
+      if (fresco != null && mounted) {
+        _editarCliente(fresco);
+        return;
+      }
+    }
+    _editarCliente(c);
   }
 
   void _limparFormulario() {
@@ -516,6 +606,7 @@ class _ClientesPageState extends State<ClientesPage>
       _limiteController.clear();
       _observacoesController.clear();
       _rgController.clear();
+      _nascimentoController.clear();
       _ocupacaoController.clear();
       _codigoInternoController.clear();
       _inscricaoMunicipalController.clear();
@@ -524,7 +615,6 @@ class _ClientesPageState extends State<ClientesPage>
       _motivoBloqueioController.clear();
       _prazoPagamentoController.clear();
       _sexoCliente = '';
-      _dataNascimentoCliente = null;
       _tipoPessoa = 'fisica';
       _segmento = '';
       _categoriaComercial = '';
@@ -536,11 +626,17 @@ class _ClientesPageState extends State<ClientesPage>
       _principalPadraoCarreto = true;
       _ativo = true;
       _clienteEmEdicaoId = null;
+      _saldoFiadoCache = 0;
+      _comprasClienteCache = [];
+      _carregandoCompras = false;
       _status = '';
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focarCampoNome();
     });
   }
 
-  void _salvarCliente() {
+  Future<void> _salvarCliente() async {
     final nomeRazao = _nomeRazaoController.text.trim();
     if (nomeRazao.isEmpty) {
       setState(() {
@@ -559,6 +655,19 @@ class _ClientesPageState extends State<ClientesPage>
       return;
     }
     setState(() => _erroDocumento = null);
+    DateTime? dataNascimento;
+    if (_tipoPessoa == 'fisica') {
+      final nascDigitos = _somenteDigitos(_nascimentoController.text);
+      if (nascDigitos.isNotEmpty) {
+        dataNascimento = parseDataDdMmYyyy(_nascimentoController.text);
+        if (dataNascimento == null) {
+          setState(() {
+            _status = 'Nascimento invalido. Use 00/00/0000.';
+          });
+          return;
+        }
+      }
+    }
     final limiteCredito =
         double.tryParse(
           _limiteController.text
@@ -590,13 +699,13 @@ class _ClientesPageState extends State<ClientesPage>
       nomeFantasia: _nomeFantasiaController.text.trim(),
       documento: _somenteDigitos(_documentoController.text),
       rg: _tipoPessoa == 'fisica' ? _rgController.text.trim() : '',
-      dataNascimento: _tipoPessoa == 'fisica' && _dataNascimentoCliente != null
-          ? DateTime.utc(
-              _dataNascimentoCliente!.year,
-              _dataNascimentoCliente!.month,
-              _dataNascimentoCliente!.day,
-            )
-          : null,
+      dataNascimento: dataNascimento == null
+          ? null
+          : DateTime.utc(
+              dataNascimento.year,
+              dataNascimento.month,
+              dataNascimento.day,
+            ),
       sexo: _tipoPessoa == 'fisica' ? _sexoCliente : '',
       inscricaoEstadual: _tipoPessoa == 'juridica'
           ? _inscricaoController.text.trim().toUpperCase()
@@ -627,134 +736,33 @@ class _ClientesPageState extends State<ClientesPage>
       atualizadoEm: agora,
     );
     cliente.definirEnderecos(enderecos);
-    final clienteId = widget.clienteRepository.salvar(cliente);
-    final clienteSalvo = widget.clienteRepository.obterPorId(clienteId);
-    if (widget.retornarClienteAoSalvar && clienteSalvo != null) {
-      Navigator.pop(context, clienteSalvo);
-      return;
+    final repo = widget.clienteRepository;
+    try {
+      final int clienteId;
+      if (repo is ClienteApiRepository) {
+        clienteId = await repo.salvarRemoto(cliente);
+      } else {
+        clienteId = repo.salvar(cliente) as int;
+      }
+      final clienteSalvo = widget.clienteRepository.obterPorId(clienteId);
+      if (!mounted) return;
+      if (widget.retornarClienteAoSalvar && clienteSalvo != null) {
+        Navigator.pop(context, clienteSalvo);
+        return;
+      }
+      _limparFormulario();
+      setState(() {
+        _status = 'Cliente salvo com sucesso.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(context, e, prefixo: 'Nao foi possivel salvar');
+      setState(() => _status = LanApiFeedback.mensagem(e));
     }
-    _limparFormulario();
-    setState(() {
-      _status = 'Cliente salvo com sucesso.';
-    });
   }
 
   String _somenteDigitos(String valor) {
     return valor.replaceAll(RegExp(r'\D'), '');
-  }
-
-  Future<void> _selecionarDataNascimentoCliente() async {
-    final hoje = DateTime.now();
-    final inicial = _dataNascimentoCliente ??
-        DateTime(hoje.year - 25, hoje.month, hoje.day);
-    final d = await showDatePicker(
-      context: context,
-      initialDate: inicial.isAfter(hoje) ? hoje : inicial,
-      firstDate: DateTime(1900),
-      lastDate: hoje,
-    );
-    if (d != null && mounted) {
-      setState(() => _dataNascimentoCliente = d);
-    }
-  }
-
-  List<Widget> _camposPessoaFisicaIdentificacao() {
-    if (_tipoPessoa != 'fisica') return const [];
-    final theme = Theme.of(context);
-    final compact = context.isCompactLayout;
-    final textoNasc = _dataNascimentoCliente == null
-        ? 'Nao informado'
-        : _dataNascimentoFmt.format(_dataNascimentoCliente!);
-    return [
-      const SizedBox(height: 8),
-      LayoutBuilder(
-        builder: (context, box) {
-          final wRg = compact ? box.maxWidth : 168.0;
-          final wNasc = compact ? box.maxWidth : 212.0;
-          final wSexo = compact ? box.maxWidth : 200.0;
-          return Wrap(
-        spacing: 10,
-        runSpacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          SizedBox(
-            width: wRg,
-            child: TextField(
-              controller: _rgController,
-              decoration: const InputDecoration(
-                labelText: 'RG',
-                isDense: true,
-              ),
-              textCapitalization: TextCapitalization.characters,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Za-z.\-\s]')),
-                LengthLimitingTextInputFormatter(18),
-              ],
-            ),
-          ),
-          SizedBox(
-            width: wNasc,
-            child: InputDecorator(
-              decoration: InputDecoration(
-                labelText: 'Nascimento',
-                isDense: true,
-                suffixIcon: IconButton(
-                  tooltip: 'Limpar data',
-                  icon: const Icon(Icons.clear, size: 20),
-                  onPressed: _dataNascimentoCliente == null
-                      ? null
-                      : () => setState(() => _dataNascimentoCliente = null),
-                ),
-              ),
-              child: InkWell(
-                onTap: _selecionarDataNascimentoCliente,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          textoNasc,
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                      ),
-                      Icon(
-                        Icons.calendar_today_outlined,
-                        size: 18,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          SizedBox(
-            width: wSexo,
-            child: DropdownButtonFormField<String>(
-              key: ValueKey<String>(_sexoCliente),
-              initialValue: _sexoCliente,
-              decoration: const InputDecoration(
-                labelText: 'Sexo',
-                isDense: true,
-              ),
-              items: const [
-                DropdownMenuItem(value: '', child: Text('Nao informado')),
-                DropdownMenuItem(value: 'M', child: Text('Masculino')),
-                DropdownMenuItem(value: 'F', child: Text('Feminino')),
-                DropdownMenuItem(value: 'O', child: Text('Outro')),
-              ],
-              onChanged: (v) {
-                if (v == null) return;
-                setState(() => _sexoCliente = v);
-              },
-            ),
-          ),
-        ],
-      );
-        },
-      ),
-    ];
   }
 
   void _onDocumentoChanged() {
@@ -950,12 +958,14 @@ class _ClientesPageState extends State<ClientesPage>
       _nomeFantasiaController.text = c.nomeFantasia;
       _documentoController.text = c.documento;
       _rgController.text = c.rg;
-      _dataNascimentoCliente = c.dataNascimento == null
-          ? null
-          : DateTime(
-              c.dataNascimento!.toUtc().year,
-              c.dataNascimento!.toUtc().month,
-              c.dataNascimento!.toUtc().day,
+      _nascimentoController.text = c.dataNascimento == null
+          ? ''
+          : _dataNascimentoFmt.format(
+              DateTime(
+                c.dataNascimento!.toUtc().year,
+                c.dataNascimento!.toUtc().month,
+                c.dataNascimento!.toUtc().day,
+              ),
             );
       _sexoCliente = c.sexo;
       _inscricaoController.text = c.inscricaoEstadual;
@@ -998,15 +1008,72 @@ class _ClientesPageState extends State<ClientesPage>
       _ocupacaoController.text = c.ocupacao;
       _ativo = c.ativo;
       _status = 'Editando cliente: ${c.nomeRazao}';
+      _saldoFiadoCache = widget.vendaRepository is VendaApiRepository
+          ? (widget.vendaRepository as VendaApiRepository)
+              .saldoFiadoEmAbertoCliente(c.id)
+          : (widget.vendaRepository.saldoFiadoEmAbertoCliente(c.id) as num)
+              .toDouble();
     });
     _padronizarMascarasCamposCliente();
     _carregandoClienteNoFormulario = false;
     _debounceConsultaCnpj?.cancel();
     _debounceConsultaCep?.cancel();
+    unawaited(_atualizarSaldoFiadoRemoto(c.id));
+    unawaited(_carregarComprasCliente(c.id));
+  }
+
+  Future<void> _atualizarSaldoFiadoRemoto(int clienteId) async {
+    if (clienteId <= 0) return;
+    try {
+      final double saldo;
+      if (widget.vendaRepository is VendaApiRepository) {
+        saldo = await (widget.vendaRepository as VendaApiRepository)
+            .saldoFiadoEmAbertoClienteRemoto(
+          clienteId,
+          onResumoCredito: ({
+            double? limiteCredito,
+            bool? bloqueadoFiado,
+            String? motivoBloqueio,
+          }) {
+            final cliRepo = widget.clienteRepository;
+            if (cliRepo is ClienteApiRepository) {
+              cliRepo.aplicarResumoCredito(
+                clienteId: clienteId,
+                limiteCredito: limiteCredito,
+                bloqueadoFiado: bloqueadoFiado,
+                motivoBloqueio: motivoBloqueio,
+              );
+            }
+            if (!mounted || _clienteEmEdicaoId != clienteId) return;
+            setState(() {
+              if (bloqueadoFiado != null) _bloqueadoFiado = bloqueadoFiado;
+              if (motivoBloqueio != null && motivoBloqueio.isNotEmpty) {
+                _motivoBloqueioController.text = motivoBloqueio;
+              }
+              if (limiteCredito != null && limiteCredito > 0) {
+                _limiteController.text = limiteCredito
+                    .toStringAsFixed(2)
+                    .replaceAll('.', ',');
+              }
+            });
+          },
+        );
+      } else {
+        saldo = (widget.vendaRepository.saldoFiadoEmAbertoCliente(clienteId)
+                as num)
+            .toDouble();
+      }
+      if (!mounted || _clienteEmEdicaoId != clienteId) return;
+      setState(() => _saldoFiadoCache = saldo);
+    } catch (_) {
+      // Mantem cache anterior; extrato/limite usam o valor disponivel.
+    }
   }
 
   List<Cliente> _clientesOrdenadosPorCadastro() {
-    final clientes = widget.clienteRepository.listarTodos();
+    final clientes = List<Cliente>.from(
+      widget.clienteRepository.listarTodos() as List,
+    );
     clientes.sort((a, b) => a.id.compareTo(b.id));
     return clientes;
   }
@@ -1151,7 +1218,7 @@ class _ClientesPageState extends State<ClientesPage>
   double _fiadoAbertoClienteAtual() {
     final id = _clienteEmEdicaoId;
     if (id == null) return 0;
-    return widget.vendaRepository.saldoFiadoEmAbertoCliente(id);
+    return _saldoFiadoCache;
   }
 
   Future<void> _confirmarExcluirCliente() async {
@@ -1177,9 +1244,31 @@ class _ClientesPageState extends State<ClientesPage>
       ),
     );
     if (ok != true || !mounted) return;
-    if (widget.clienteRepository.remover(id)) {
+    final repo = widget.clienteRepository;
+    try {
+      final bool removido;
+      if (repo is ClienteApiRepository) {
+        removido = await repo.removerRemoto(id);
+      } else {
+        removido = repo.remover(id) as bool;
+      }
+      if (!mounted) return;
+      if (!removido) {
+        LanApiFeedback.snackAviso(
+          context,
+          'Nao foi possivel excluir o cliente.',
+        );
+        return;
+      }
       _limparFormulario();
       setState(() => _status = 'Cliente excluido.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cliente excluido com sucesso.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(context, e, prefixo: 'Nao foi possivel excluir');
+      setState(() => _status = LanApiFeedback.mensagem(e));
     }
   }
 
@@ -1216,176 +1305,116 @@ class _ClientesPageState extends State<ClientesPage>
   List<Venda> _comprasDoClienteAtual() {
     final clienteId = _clienteEmEdicaoId;
     if (clienteId == null) return const [];
+    if (_comprasClienteCache.isNotEmpty) {
+      final limites = _limitesPeriodoHistorico();
+      final inicioUtc = limites.$1?.toUtc();
+      final fimUtc = limites.$2?.toUtc();
+      return _comprasClienteCache.where((venda) {
+        final d = venda.data.toUtc();
+        if (inicioUtc != null && d.isBefore(inicioUtc)) return false;
+        if (fimUtc != null && d.isAfter(fimUtc)) return false;
+        return true;
+      }).toList();
+    }
     final limites = _limitesPeriodoHistorico();
-    return widget.vendaRepository.listarComprasFinalizadasPorCliente(
-      clienteId,
-      inicio: limites.$1,
-      fim: limites.$2,
-    );
+    try {
+      return List<Venda>.from(
+        widget.vendaRepository.listarComprasFinalizadasPorCliente(
+          clienteId,
+          inicio: limites.$1,
+          fim: limites.$2,
+        ) as List,
+      );
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  List<ItemVenda> _itensDaCompraSafe(Venda compra) {
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      return repo.itensDaVendaSafe(compra);
+    }
+    try {
+      final via = repo.listarItensPorVenda(compra.id);
+      if (via is List && via.isNotEmpty) {
+        return List<ItemVenda>.from(via);
+      }
+    } catch (_) {}
+    try {
+      return List<ItemVenda>.from(compra.itens);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _carregarComprasCliente(int clienteId) async {
+    if (clienteId <= 0) {
+      _comprasClienteCache = [];
+      return;
+    }
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      setState(() => _carregandoCompras = true);
+      try {
+        final limites = _limitesPeriodoHistorico();
+        final lista = await repo.listarComprasFinalizadasPorClienteRemoto(
+          clienteId,
+          inicio: limites.$1,
+          fim: limites.$2,
+          limit: 300,
+        );
+        if (!mounted || _clienteEmEdicaoId != clienteId) return;
+        setState(() {
+          _comprasClienteCache = lista;
+          _carregandoCompras = false;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _carregandoCompras = false);
+        LanApiFeedback.snackAviso(context, e, prefixo: 'Historico');
+      }
+      return;
+    }
+    try {
+      final limites = _limitesPeriodoHistorico();
+      final lista = List<Venda>.from(
+        repo.listarComprasFinalizadasPorCliente(
+          clienteId,
+          inicio: limites.$1,
+          fim: limites.$2,
+        ) as List,
+      );
+      if (!mounted || _clienteEmEdicaoId != clienteId) return;
+      setState(() => _comprasClienteCache = lista);
+    } catch (_) {}
   }
 
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
 
-  String _rotuloStatusMensagem(String status) {
-    switch (status) {
-      case 'aceito_api':
-        return 'Aceito pela API';
-      case 'enviado':
-        return 'Enviado';
-      case 'entregue':
-        return 'Entregue';
-      case 'lido':
-        return 'Lido';
-      case 'falhou':
-        return 'Falhou';
-      default:
-        return status;
-    }
-  }
-
-  Cliente? _clienteEmEdicaoAtual() {
-    final id = _clienteEmEdicaoId;
-    if (id == null) return null;
-    return widget.clienteRepository.obterPorId(id);
-  }
-
-  Future<void> _enviarMensagemManualCliente(Cliente cliente) async {
-    final templates = await _mensageriaRepository.listarTemplates();
-    final templatesManuais = templates
-        .where((t) => t.ativo && t.evento == 'manual')
-        .toList();
-    if (templatesManuais.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Cadastre um template manual em Configuracoes > Mensageria.',
-          ),
-        ),
-      );
-      return;
-    }
-    MensagemTemplate selecionado = templatesManuais.first;
-    final destinoController = TextEditingController(
-      text: cliente.whatsapp.trim().isNotEmpty
-          ? cliente.whatsapp
-          : cliente.telefone,
-    );
-    if (!mounted) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Enviar mensagem ao cliente'),
-              content: AdaptiveDialogPane(
-                desktopWidth: 520,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      initialValue: selecionado.id,
-                      decoration: const InputDecoration(labelText: 'Template'),
-                      items: templatesManuais
-                          .map(
-                            (t) => DropdownMenuItem(
-                              value: t.id,
-                              child: Text(t.nome),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) {
-                        if (v == null) return;
-                        final t = templatesManuais.firstWhere((e) => e.id == v);
-                        setDialogState(() => selecionado = t);
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: destinoController,
-                      decoration: const InputDecoration(
-                        labelText: 'Destino (telefone/whatsapp)',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancelar'),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Enviar'),
-                ),
-              ],
-            );
-          },
+  List<Widget> _dadosPrincipaisChildren(bool emEdicao) {
+    final dropdownStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
         );
-      },
-    );
-    if (ok != true) return;
-    final destino = destinoController.text.replaceAll(RegExp(r'\D'), '');
-    if (destino.isEmpty) return;
-    await _mensageriaRepository.enfileirarMensagem(
-      clienteId: cliente.id,
-      templateId: selecionado.id,
-      destino: destino,
-      variaveis: {
-        'cliente_nome': cliente.nomeRazao.trim(),
-        'valor_total': '0,00',
-        'numero_orcamento': '-',
-      },
-    );
-    await _mensageriaRepository.processarFilaPendente(limite: 5);
-    if (!mounted) return;
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Mensagem enviada para fila e processada.')),
-    );
-  }
-
-  Future<void> _verErroDetalhadoLogCliente(MensagemLog log) async {
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Erro detalhado do envio'),
-          content: AdaptiveDialogPane(
-            desktopWidth: 700,
-            child: SingleChildScrollView(
-              child: SelectableText(
-                log.responseJson.trim().isEmpty
-                    ? 'Sem detalhe retornado pela API.'
-                    : log.responseJson,
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Fechar'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  List<Widget> _dadosPrincipaisChildren(bool formLargoTipoENome) {
     final dropdownTipo = DropdownButtonFormField<String>(
       isDense: true,
       isExpanded: true,
       initialValue: _tipoPessoa,
+      style: dropdownStyle,
       decoration: const InputDecoration(
         labelText: 'Tipo de pessoa',
         isDense: true,
       ),
-      items: const [
-        DropdownMenuItem(value: 'fisica', child: Text('Fisica')),
-        DropdownMenuItem(value: 'juridica', child: Text('Juridica')),
+      items: [
+        DropdownMenuItem(
+          value: 'fisica',
+          child: Text('Física', style: dropdownStyle),
+        ),
+        DropdownMenuItem(
+          value: 'juridica',
+          child: Text('Jurídica', style: dropdownStyle),
+        ),
       ],
       onChanged: (v) {
         if (v != null) {
@@ -1401,130 +1430,211 @@ class _ClientesPageState extends State<ClientesPage>
       },
     );
 
+    final campoCodigoInterno = TextField(
+      controller: _codigoInternoController,
+      decoration: InputDecoration(
+        labelText: 'Código interno',
+        isDense: true,
+        hintText: emEdicao && _clienteEmEdicaoId != null
+            ? '#$_clienteEmEdicaoId'
+            : null,
+      ),
+    );
+
     final campoNomeRazao = TextField(
       controller: _nomeRazaoController,
+      focusNode: _nomeRazaoFocus,
+      autofocus: _clienteEmEdicaoId == null,
       textCapitalization: TextCapitalization.words,
       decoration: const InputDecoration(
-        labelText: 'Nome / Razao social',
+        labelText: 'Nome / Razão social',
         isDense: true,
       ),
     );
 
-    final blocoDocumento = Align(
-      alignment: Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Wrap(
-            spacing: 10,
-            runSpacing: 8,
-            children: [
-              SizedBox(
-                width: _wDoc,
-                child: TextField(
-                  controller: _documentoController,
-                  decoration: InputDecoration(
-                    labelText: _tipoPessoa == 'fisica' ? 'CPF' : 'CNPJ',
-                    isDense: true,
-                    errorText: _erroDocumento,
-                    suffixIcon:
-                        _tipoPessoa == 'juridica' && _consultaCnpjEmAndamento
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
-                        : null,
-                  ),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [_cpfCnpjFormatter],
-                  onChanged: (_) {
-                    if (_erroDocumento != null) {
-                      setState(() => _erroDocumento = null);
-                    }
-                  },
-                ),
-              ),
-              if (_tipoPessoa == 'juridica')
-                SizedBox(
-                  width: _wIe,
-                  child: TextField(
-                    controller: _inscricaoController,
-                    decoration: const InputDecoration(
-                      labelText: 'Inscricao Estadual',
-                      isDense: true,
-                    ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Za-z]')),
-                      LengthLimitingTextInputFormatter(20),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          if (_tipoPessoa == 'juridica') ...[
-            const SizedBox(height: 6),
-            OutlinedButton.icon(
-              style: _estiloBotaoContornoCompacto,
-              onPressed:
-                  _consultaCnpjEmAndamento ? null : _buscarCnpjManualmente,
-              icon: const Icon(Icons.search, size: 18),
-              label: const Text('Buscar CNPJ'),
-            ),
-          ],
-        ],
+    final campoRg = TextField(
+      controller: _rgController,
+      decoration: const InputDecoration(
+        labelText: 'RG',
+        isDense: true,
+      ),
+      textCapitalization: TextCapitalization.characters,
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Za-z.\-\s]')),
+        LengthLimitingTextInputFormatter(18),
+      ],
+    );
+    final campoNascimento = TextField(
+      controller: _nascimentoController,
+      keyboardType: TextInputType.number,
+      inputFormatters: [DataDdMmYyyyInputFormatter()],
+      decoration: const InputDecoration(
+        labelText: 'Nascimento',
+        hintText: '00/00/0000',
+        isDense: true,
+      ),
+    );
+    final campoSexo = DropdownButtonFormField<String>(
+      key: ValueKey<String>(_sexoCliente),
+      initialValue: _sexoCliente,
+      isDense: true,
+      isExpanded: true,
+      style: dropdownStyle,
+      decoration: const InputDecoration(
+        labelText: 'Sexo',
+        isDense: true,
+      ),
+      items: [
+        DropdownMenuItem(
+          value: '',
+          child: Text('Não informado', overflow: TextOverflow.ellipsis, style: dropdownStyle),
+        ),
+        DropdownMenuItem(
+          value: 'M',
+          child: Text('Masculino', overflow: TextOverflow.ellipsis, style: dropdownStyle),
+        ),
+        DropdownMenuItem(
+          value: 'F',
+          child: Text('Feminino', overflow: TextOverflow.ellipsis, style: dropdownStyle),
+        ),
+        DropdownMenuItem(
+          value: 'O',
+          child: Text('Outro', overflow: TextOverflow.ellipsis, style: dropdownStyle),
+        ),
+      ],
+      onChanged: (v) {
+        if (v == null) return;
+        setState(() => _sexoCliente = v);
+      },
+    );
+
+    final campoFantasia = TextField(
+      controller: _nomeFantasiaController,
+      textCapitalization: TextCapitalization.words,
+      decoration: InputDecoration(
+        labelText: _tipoPessoa == 'fisica' ? 'Apelido' : 'Nome fantasia',
+        isDense: true,
       ),
     );
 
-    if (formLargoTipoENome) {
+    final campoCpf = TextField(
+      controller: _documentoController,
+      decoration: InputDecoration(
+        labelText: 'CPF',
+        isDense: true,
+        errorText: _erroDocumento,
+      ),
+      keyboardType: TextInputType.number,
+      inputFormatters: [_cpfCnpjFormatter],
+      onChanged: (_) {
+        if (_erroDocumento != null) {
+          setState(() => _erroDocumento = null);
+        }
+      },
+    );
+
+    if (_tipoPessoa == 'fisica') {
+      // Duas linhas para evitar overflow (Sexo/Nascimento) em monitores comuns.
       return [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(width: _wTipoPessoa, child: dropdownTipo),
-            const SizedBox(width: 10),
-            Expanded(child: campoNomeRazao),
+        _linhaCamposAdaptativa(
+          larguraMinimaLinha: 720,
+          espacamento: 6,
+          flexes: const [1, 1, 3, 2],
+          campos: [
+            campoCodigoInterno,
+            dropdownTipo,
+            campoNomeRazao,
+            campoFantasia,
           ],
         ),
         const SizedBox(height: 6),
-        TextField(
-          controller: _nomeFantasiaController,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Nome fantasia (opcional)',
-            isDense: true,
-          ),
+        _linhaCamposAdaptativa(
+          larguraMinimaLinha: 560,
+          espacamento: 6,
+          flexes: const [2, 1, 2, 2],
+          campos: [
+            campoCpf,
+            campoRg,
+            campoNascimento,
+            campoSexo,
+          ],
         ),
-        const SizedBox(height: 6),
-        blocoDocumento,
-        ..._camposPessoaFisicaIdentificacao(),
       ];
     }
 
+    // Pessoa juridica: identidade + documento/IE/CNPJ.
     return [
-      Align(
-        alignment: Alignment.centerLeft,
-        child: SizedBox(width: _wTipoPessoa, child: dropdownTipo),
+      _linhaCamposAdaptativa(
+        larguraMinimaLinha: 720,
+        espacamento: 4,
+        flexes: const [1, 1, 3, 2],
+        campos: [
+          campoCodigoInterno,
+          dropdownTipo,
+          campoNomeRazao,
+          campoFantasia,
+        ],
       ),
-      const SizedBox(height: 6),
-      campoNomeRazao,
-      const SizedBox(height: 6),
-      TextField(
-        controller: _nomeFantasiaController,
-        textCapitalization: TextCapitalization.words,
-        decoration: const InputDecoration(
-          labelText: 'Nome fantasia (opcional)',
-          isDense: true,
-        ),
+      const SizedBox(height: 4),
+      Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: _wDoc,
+            child: TextField(
+              controller: _documentoController,
+              decoration: InputDecoration(
+                labelText: 'CNPJ',
+                isDense: true,
+                contentPadding: _padCampoCadastro,
+                errorText: _erroDocumento,
+                suffixIconConstraints: _iconCampoCadastro,
+                suffixIcon: _consultaCnpjEmAndamento
+                    ? const Padding(
+                        padding: EdgeInsets.all(6),
+                        child: SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : null,
+              ),
+              keyboardType: TextInputType.number,
+              inputFormatters: [_cpfCnpjFormatter],
+              onChanged: (_) {
+                if (_erroDocumento != null) {
+                  setState(() => _erroDocumento = null);
+                }
+              },
+            ),
+          ),
+          SizedBox(
+            width: _wIe,
+            child: TextField(
+              controller: _inscricaoController,
+              decoration: const InputDecoration(
+                labelText: 'Inscrição Estadual',
+                isDense: true,
+              ),
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Za-z]')),
+                LengthLimitingTextInputFormatter(20),
+              ],
+            ),
+          ),
+          OutlinedButton.icon(
+            style: _estiloBotaoContornoCompacto,
+            onPressed:
+                _consultaCnpjEmAndamento ? null : _buscarCnpjManualmente,
+            icon: const Icon(Icons.search, size: 18),
+            label: const Text('Buscar CNPJ'),
+          ),
+        ],
       ),
-      const SizedBox(height: 6),
-      blocoDocumento,
-      ..._camposPessoaFisicaIdentificacao(),
     ];
   }
 
@@ -1545,7 +1655,7 @@ class _ClientesPageState extends State<ClientesPage>
     if (id == null) return const SizedBox.shrink();
 
     final limite = _limiteCreditoDigitado();
-    final saldo = widget.vendaRepository.saldoFiadoEmAbertoCliente(id);
+    final saldo = _saldoFiadoCache;
     final theme = Theme.of(context);
     final disponivel = limite > 0
         ? (limite - saldo).clamp(0.0, double.infinity).toDouble()
@@ -1589,245 +1699,272 @@ class _ClientesPageState extends State<ClientesPage>
 
   Widget _buildCardComercialComLimiteDestaque() {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final semantic = context.semanticColors;
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.outlineVariant),
+    final campoStyle = theme.textTheme.bodyMedium?.copyWith(
+      fontSize: 12,
+      fontWeight: FontWeight.w400,
+      color: scheme.onSurface,
+    );
+
+    return _buildSectionCard(
+      context: context,
+      title: 'Comercial',
+      icon: Icons.payments_outlined,
+      children: [
+        if (_clienteEmEdicaoId != null) ...[
+          _buildResumoLimiteCredito(context),
+          const SizedBox(height: 8),
+        ],
+        // Linha 1: Limite (4) | Tabela (4) | Vendedor (4)
+        _linhaCamposAdaptativa(
+          larguraMinimaLinha: 640,
+          espacamento: 8,
+          flexes: const [4, 4, 4],
+          campos: [
+            TextField(
+              controller: _limiteController,
+              style: campoStyle,
+              decoration: InputDecoration(
+                labelText: 'Limite de crédito (R\$)',
+                isDense: true,
+                filled: true,
+                fillColor: semantic.successBg,
+                contentPadding: _padCampoCadastro,
+              ),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: [_limiteCreditoFormatter],
+            ),
+            DropdownButtonFormField<String>(
+              key: ValueKey<String>(_tabelaPrecoPadrao),
+              isExpanded: true,
+              isDense: true,
+              initialValue: _tabelaPrecoPadrao,
+              style: campoStyle,
+              decoration: const InputDecoration(
+                labelText: 'Tabela de preço',
+                isDense: true,
+              ),
+              items: ClienteCadastro.tabelasPreco
+                  .map(
+                    (e) => DropdownMenuItem(
+                      value: e.$1,
+                      child: Text(
+                        e.$2,
+                        overflow: TextOverflow.ellipsis,
+                        style: campoStyle,
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => _tabelaPrecoPadrao = v);
+              },
+            ),
+            DropdownButtonFormField<int?>(
+              key: ValueKey<int?>(_vendedorResponsavelId),
+              isExpanded: true,
+              isDense: true,
+              initialValue: _vendedorResponsavelId,
+              style: campoStyle,
+              decoration: const InputDecoration(
+                labelText: 'Vendedor',
+                isDense: true,
+              ),
+              items: [
+                DropdownMenuItem<int?>(
+                  value: null,
+                  child: Text('Nenhum', style: campoStyle),
+                ),
+                ..._vendedoresAtivos.map(
+                  (v) => DropdownMenuItem<int?>(
+                    value: v.id,
+                    child: Text(
+                      v.apelido.trim().isNotEmpty
+                          ? v.apelido
+                          : v.nomeCompleto,
+                      overflow: TextOverflow.ellipsis,
+                      style: campoStyle,
+                    ),
+                  ),
+                ),
+              ],
+              onChanged: (v) => setState(() => _vendedorResponsavelId = v),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Linha 2: Prazo (3) | Categoria (3) | Ocupação (6)
+        _linhaCamposAdaptativa(
+          larguraMinimaLinha: 560,
+          espacamento: 8,
+          flexes: const [3, 3, 6],
+          campos: [
+            TextField(
+              controller: _prazoPagamentoController,
+              style: campoStyle,
+              decoration: const InputDecoration(
+                labelText: 'Prazo (dias)',
+                isDense: true,
+              ),
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(4),
+              ],
+            ),
+            DropdownButtonFormField<String>(
+              key: ValueKey<String>(_categoriaComercial),
+              isExpanded: true,
+              isDense: true,
+              initialValue:
+                  _categoriaComercial.isEmpty ? '' : _categoriaComercial,
+              style: campoStyle,
+              decoration: const InputDecoration(
+                labelText: 'Categoria',
+                isDense: true,
+              ),
+              items: [
+                DropdownMenuItem(
+                  value: '',
+                  child: Text('-', style: campoStyle),
+                ),
+                ...ClienteCadastro.categoriasComerciais.map(
+                  (c) => DropdownMenuItem(
+                    value: c,
+                    child: Text(c, style: campoStyle),
+                  ),
+                ),
+              ],
+              onChanged: (v) =>
+                  setState(() => _categoriaComercial = v ?? ''),
+            ),
+            TextField(
+              controller: _ocupacaoController,
+              style: campoStyle,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Ocupação / profissão',
+                isDense: true,
+                contentPadding: _padCampoCadastro,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _observacoesController,
+          style: campoStyle,
+          maxLines: 2,
+          minLines: 1,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Observações',
+            isDense: true,
+            contentPadding: _padCampoCadastro,
+            alignLabelWithHint: true,
+          ),
+        ),
+        const SizedBox(height: 10),
+        _buildMiniCardStatusCliente(theme),
+        if (_bloqueadoFiado) ...[
+          const SizedBox(height: 8),
+          TextField(
+            controller: _motivoBloqueioController,
+            style: campoStyle,
+            decoration: const InputDecoration(
+              labelText: 'Motivo do bloqueio',
+              isDense: true,
+              contentPadding: _padCampoCadastro,
+            ),
+            maxLines: 1,
+          ),
+        ],
+        if (_clienteEmEdicaoId != null &&
+            _clienteParaExtratoFiado() != null) ...[
+          const SizedBox(height: 8),
+          ExtratoFiadoClienteCard(
+            vendaRepository: widget.vendaRepository,
+            cliente: _clienteParaExtratoFiado()!,
+            limiteCredito: _limiteCreditoDigitado(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildMiniCardStatusCliente(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.payments_outlined,
-                  size: 17,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'Comercial',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13.5,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-              decoration: BoxDecoration(
-                color: semantic.successBg,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: semantic.successBorder),
+            Text(
+              'Status',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                fontSize: 11.5,
+                color: scheme.onSurfaceVariant,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.attach_money,
-                        size: 26,
-                        color: semantic.successFg,
+            ),
+            const SizedBox(height: 2),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final ladoALado = constraints.maxWidth >= 420;
+                final tiles = [
+                  SwitchListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    contentPadding: EdgeInsets.zero,
+                    value: _bloqueadoFiado,
+                    onChanged: (v) => setState(() => _bloqueadoFiado = v),
+                    title: const Text(
+                      'Bloquear fiado',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Limite de credito',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: semantic.successFg,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Valor maximo que o cliente pode manter em aberto na loja.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: semantic.successFg.withValues(alpha: 0.85),
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  if (_clienteEmEdicaoId != null) ...[
-                    _buildResumoLimiteCredito(context),
-                    if (_clienteParaExtratoFiado() != null)
-                      ExtratoFiadoClienteCard(
-                        vendaRepository: widget.vendaRepository,
-                        cliente: _clienteParaExtratoFiado()!,
-                        limiteCredito: _limiteCreditoDigitado(),
+                  SwitchListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    contentPadding: EdgeInsets.zero,
+                    value: _ativo,
+                    onChanged: (v) => setState(() => _ativo = v),
+                    title: const Text(
+                      'Cliente ativo',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
                       ),
-                    const SizedBox(height: 8),
+                    ),
+                  ),
+                ];
+                if (!ladoALado) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: tiles,
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: tiles[0]),
+                    const SizedBox(width: 12),
+                    Expanded(child: tiles[1]),
                   ],
-                  TextField(
-                    controller: _limiteController,
-                    decoration: InputDecoration(
-                      labelText: 'Valor (R\$)',
-                      isDense: true,
-                      filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.92),
-                      prefixIcon: Icon(
-                        Icons.paid_outlined,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    inputFormatters: [_limiteCreditoFormatter],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            _linhaCamposAdaptativa(
-              larguraMinimaLinha: 720,
-              flexes: const [2, 2, 1, 1],
-              campos: [
-                DropdownButtonFormField<String>(
-                  key: ValueKey<String>(_tabelaPrecoPadrao),
-                  isExpanded: true,
-                  initialValue: _tabelaPrecoPadrao,
-                  decoration: const InputDecoration(
-                    labelText: 'Tabela de preco padrao',
-                    isDense: true,
-                  ),
-                  items: ClienteCadastro.tabelasPreco
-                      .map(
-                        (e) => DropdownMenuItem(
-                          value: e.$1,
-                          child: Text(
-                            e.$2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) {
-                    if (v == null) return;
-                    setState(() => _tabelaPrecoPadrao = v);
-                  },
-                ),
-                DropdownButtonFormField<int?>(
-                  key: ValueKey<int?>(_vendedorResponsavelId),
-                  isExpanded: true,
-                  initialValue: _vendedorResponsavelId,
-                  decoration: const InputDecoration(
-                    labelText: 'Vendedor responsavel',
-                    isDense: true,
-                  ),
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('Nenhum'),
-                    ),
-                    ..._vendedoresAtivos.map(
-                      (v) => DropdownMenuItem<int?>(
-                        value: v.id,
-                        child: Text(
-                          v.apelido.trim().isNotEmpty
-                              ? v.apelido
-                              : v.nomeCompleto,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  ],
-                  onChanged: (v) =>
-                      setState(() => _vendedorResponsavelId = v),
-                ),
-                TextField(
-                  controller: _prazoPagamentoController,
-                  decoration: const InputDecoration(
-                    labelText: 'Prazo (dias)',
-                    isDense: true,
-                  ),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(4),
-                  ],
-                ),
-                DropdownButtonFormField<String>(
-                  key: ValueKey<String>(_categoriaComercial),
-                  isExpanded: true,
-                  initialValue: _categoriaComercial.isEmpty
-                      ? ''
-                      : _categoriaComercial,
-                  decoration: const InputDecoration(
-                    labelText: 'Categoria',
-                    isDense: true,
-                  ),
-                  items: [
-                    const DropdownMenuItem(
-                      value: '',
-                      child: Text('-'),
-                    ),
-                    ...ClienteCadastro.categoriasComerciais.map(
-                      (c) => DropdownMenuItem(value: c, child: Text(c)),
-                    ),
-                  ],
-                  onChanged: (v) =>
-                      setState(() => _categoriaComercial = v ?? ''),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            SwitchListTile(
-              dense: true,
-              value: _bloqueadoFiado,
-              onChanged: (v) => setState(() => _bloqueadoFiado = v),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Bloquear fiado'),
-              subtitle: const Text(
-                'Impede vendas a prazo (fiado) no PDV e caixa.',
-              ),
-            ),
-            if (_bloqueadoFiado) ...[
-              const SizedBox(height: 4),
-              TextField(
-                controller: _motivoBloqueioController,
-                decoration: const InputDecoration(
-                  labelText: 'Motivo do bloqueio',
-                  isDense: true,
-                ),
-                maxLines: 2,
-              ),
-            ],
-            const SizedBox(height: 10),
-            TextField(
-              controller: _ocupacaoController,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Ocupacao / profissao',
-                isDense: true,
-                prefixIcon: Icon(Icons.work_outline, size: 20),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _observacoesController,
-              maxLines: 2,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Observacoes',
-                isDense: true,
-              ),
-            ),
-            SwitchListTile(
-              dense: true,
-              value: _ativo,
-              onChanged: (v) => setState(() => _ativo = v),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Cliente ativo'),
+                );
+              },
             ),
           ],
         ),
@@ -1836,255 +1973,212 @@ class _ClientesPageState extends State<ClientesPage>
   }
 
   Widget _buildBarraFerramentasCadastro() {
-    final theme = Theme.of(context);
-    final iconStyle = IconButton.styleFrom(
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.all(6),
-      minimumSize: const Size(36, 36),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    );
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        child: Row(
-          children: [
-            IconButton(
-              tooltip: 'Primeiro cliente',
-              style: iconStyle,
-              onPressed: _irParaPrimeiroCliente,
-              icon: const Icon(Icons.first_page),
-            ),
-            IconButton(
-              tooltip: 'Cliente anterior',
-              style: iconStyle,
-              onPressed: _irParaClienteAnterior,
-              icon: const Icon(Icons.chevron_left),
-            ),
-            IconButton(
-              tooltip: 'Proximo cliente',
-              style: iconStyle,
-              onPressed: _irParaProximoCliente,
-              icon: const Icon(Icons.chevron_right),
-            ),
-            IconButton(
-              tooltip: 'Ultimo cliente',
-              style: iconStyle,
-              onPressed: _irParaUltimoCliente,
-              icon: const Icon(Icons.last_page),
-            ),
-            const VerticalDivider(width: 16),
-            IconButton(
-              tooltip: 'Pesquisar cliente',
-              style: iconStyle,
-              onPressed: _abrirPesquisaCliente,
-              icon: const Icon(Icons.search),
-            ),
-          ],
-        ),
+    final pesquisaBtn = OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
+      onPressed: _abrirPesquisaCliente,
+      icon: const Icon(Icons.search, size: 20),
+      label: const Text('Pesquisar cliente'),
     );
-  }
-
-  Widget _buildPainelComAbas({
-    required ThemeData theme,
-    required bool emEdicao,
-    required bool formWide,
-    required List<Venda> compras,
-    required double totalGasto,
-    required double ticketMedio,
-    required Venda? ultimaCompra,
-    required int quantidadeItens,
-    required List<MapEntry<String, int>> topProdutos,
-  }) {
-    final scheme = theme.colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final nav = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          labelPadding: const EdgeInsets.symmetric(horizontal: 14),
-          tabs: const [
-            Tab(text: 'Identificacao'),
-            Tab(text: 'Contato'),
-            Tab(text: 'Comercial'),
-            Tab(text: 'Enderecos'),
-            Tab(text: 'Relacionamento'),
-          ],
+        IconButton(
+          tooltip: 'Primeiro',
+          onPressed: _irParaPrimeiroCliente,
+          icon: const Icon(Icons.first_page_outlined),
         ),
-        Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerLow,
-              border: Border.all(color: scheme.outlineVariant),
-            ),
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildScrollAba(
-                  _buildAbaIdentificacao(theme, emEdicao, formWide),
-                  _scrollAbaIdentificacao,
-                ),
-                _buildScrollAba(
-                  _buildAbaContato(theme),
-                  _scrollAbaContato,
-                ),
-                _buildScrollAba(
-                  _buildCardComercialComLimiteDestaque(),
-                  _scrollAbaComercial,
-                ),
-                _buildScrollAbaEndereco(theme),
-                _buildScrollAbaRelacionamento(
-                  theme: theme,
-                  emEdicao: emEdicao,
-                  compras: compras,
-                  totalGasto: totalGasto,
-                  ticketMedio: ticketMedio,
-                  ultimaCompra: ultimaCompra,
-                  quantidadeItens: quantidadeItens,
-                  topProdutos: topProdutos,
-                ),
-              ],
-            ),
+        IconButton(
+          tooltip: 'Anterior',
+          onPressed: _irParaClienteAnterior,
+          icon: const Icon(Icons.navigate_before_outlined),
+        ),
+        IconButton(
+          tooltip: 'Próximo',
+          onPressed: _irParaProximoCliente,
+          icon: const Icon(Icons.navigate_next_outlined),
+        ),
+        IconButton(
+          tooltip: 'Último',
+          onPressed: _irParaUltimoCliente,
+          icon: const Icon(Icons.last_page_outlined),
+        ),
+      ],
+    );
+    if (context.isCompactLayout) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          pesquisaBtn,
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [nav],
           ),
-        ),
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(child: pesquisaBtn),
+        nav,
       ],
     );
   }
 
-  Widget _buildScrollAba(Widget child, ScrollController controller) {
-    return Scrollbar(
-      controller: controller,
-      thumbVisibility: true,
-      trackVisibility: true,
-      child: SingleChildScrollView(
-        controller: controller,
-        primary: false,
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 96),
-        child: child,
+  Widget _buildFormularioUnico({
+    required ThemeData theme,
+    required bool emEdicao,
+    required bool formWide,
+  }) {
+    const pageBg = Color(0xFFF8FAFC);
+    const fieldTextStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w400,
+      height: 1.25,
+    );
+    final scheme = theme.colorScheme;
+    final denseTheme = theme.copyWith(
+      visualDensity: VisualDensity.compact,
+      scaffoldBackgroundColor: pageBg,
+      inputDecorationTheme: InputDecorationTheme(
+        isDense: true,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: _padCampoCadastro,
+        prefixIconConstraints: _iconCampoCadastro,
+        suffixIconConstraints: _iconCampoCadastro,
+        floatingLabelBehavior: FloatingLabelBehavior.auto,
+        labelStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: scheme.onSurfaceVariant,
+        ),
+        floatingLabelStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: scheme.primary,
+        ),
+        hintStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
+          color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: scheme.primary, width: 1.4),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: scheme.error),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: scheme.error, width: 1.4),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.6),
+          ),
+        ),
+      ),
+      textTheme: theme.textTheme.copyWith(
+        bodyLarge: theme.textTheme.bodyLarge?.copyWith(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
+        ),
+        bodyMedium: theme.textTheme.bodyMedium?.copyWith(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
+        ),
+        bodySmall: theme.textTheme.bodySmall?.copyWith(fontSize: 10.5),
+        titleMedium: theme.textTheme.titleMedium?.copyWith(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
+        ),
+        titleSmall: theme.textTheme.titleSmall?.copyWith(fontSize: 12.5),
+        labelLarge: theme.textTheme.labelLarge?.copyWith(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+        labelMedium: theme.textTheme.labelMedium?.copyWith(fontSize: 11),
+        labelSmall: theme.textTheme.labelSmall?.copyWith(fontSize: 10),
+      ),
+      dropdownMenuTheme: const DropdownMenuThemeData(
+        textStyle: fieldTextStyle,
       ),
     );
-  }
 
-  Widget _buildScrollAbaEndereco(ThemeData theme) {
-    return Scrollbar(
-      controller: _scrollAbaEndereco,
-      thumbVisibility: true,
-      trackVisibility: true,
-      child: ListView(
-        controller: _scrollAbaEndereco,
-        primary: false,
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 96),
+    Widget cadastroScroll({required Widget child}) {
+      return Scrollbar(
+        controller: _scrollFormulario,
+        thumbVisibility: true,
+        trackVisibility: true,
+        child: SingleChildScrollView(
+          controller: _scrollFormulario,
+          primary: false,
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
+          child: child,
+        ),
+      );
+    }
+
+    return Theme(
+      data: denseTheme,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Card(
-            color: theme.colorScheme.surface,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: theme.colorScheme.outlineVariant),
+          Material(
+            color: Colors.white,
+            child: TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 14),
+              tabs: const [
+                Tab(height: 36, text: 'Cadastro'),
+                Tab(height: 36, text: 'Relacionamento'),
+              ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          ),
+          Expanded(
+            child: ColoredBox(
+              color: pageBg,
+              child: TabBarView(
+                controller: _tabController,
                 children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.location_on_outlined,
-                        size: 17,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Endereco',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13.5,
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      return cadastroScroll(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildAbaIdentificacao(denseTheme, emEdicao),
+                            const SizedBox(height: 10),
+                            _buildAbaContato(denseTheme),
+                            const SizedBox(height: 10),
+                            _buildCardComercialComLimiteDestaque(),
+                            const SizedBox(height: 10),
+                            _buildSecaoEnderecos(denseTheme),
+                          ],
                         ),
-                      ),
-                    ],
+                      );
+                    },
                   ),
-                  const SizedBox(height: 8),
-                  _buildEnderecoForm(
-                    titulo: 'Endereco principal / sede',
-                    tipo: 'principal',
-                    nomeObraController: null,
-                    padraoCarreto: _principalPadraoCarreto,
-                    onPadraoCarreto: () => _definirUnicoPadraoCarreto(
-                      principal: true,
-                    ),
-                    cepController: _cepController,
-                    enderecoController: _enderecoController,
-                    numeroController: _numeroController,
-                    bairroController: _bairroController,
-                    cidadeController: _cidadeController,
-                    ufController: _ufController,
-                    codigoIbgeController: _codigoIbgeController,
-                    referenciaController: _referenciaController,
-                  ),
-                  for (var i = 0; i < _enderecosExtras.length; i++) ...[
-                    const SizedBox(height: 8),
-                    _buildEnderecoForm(
-                      titulo: _enderecosExtras[i].tituloExibicao(),
-                      tipo: _enderecosExtras[i].tipo,
-                      onTipoChanged: (v) =>
-                          setState(() => _enderecosExtras[i].tipo = v),
-                      nomeObraController:
-                          _enderecosExtras[i].nomeObraController,
-                      padraoCarreto: _enderecosExtras[i].padraoCarreto,
-                      onPadraoCarreto: () => _definirUnicoPadraoCarreto(
-                        principal: false,
-                        indiceExtra: i,
-                      ),
-                      cepController: _enderecosExtras[i].cepController,
-                      enderecoController:
-                          _enderecosExtras[i].enderecoController,
-                      numeroController: _enderecosExtras[i].numeroController,
-                      bairroController: _enderecosExtras[i].bairroController,
-                      cidadeController: _enderecosExtras[i].cidadeController,
-                      ufController: _enderecosExtras[i].ufController,
-                      codigoIbgeController:
-                          _enderecosExtras[i].codigoIbgeController,
-                      referenciaController:
-                          _enderecosExtras[i].referenciaController,
-                      onRemover: () {
-                        final removido = _enderecosExtras.removeAt(i);
-                        removido.dispose();
-                        setState(() {});
-                      },
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
-                      style: _estiloBotaoContornoCompacto,
-                      onPressed: () {
-                        setState(() {
-                          _enderecosExtras.add(
-                            _EnderecoFormControllers.vazio(tipo: 'entrega'),
-                          );
-                        });
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          if (!_scrollAbaEndereco.hasClients) return;
-                          final pos = _scrollAbaEndereco.position;
-                          pos.animateTo(
-                            pos.maxScrollExtent,
-                            duration: const Duration(milliseconds: 280),
-                            curve: Curves.easeOut,
-                          );
-                        });
-                      },
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Adicionar endereco'),
-                    ),
+                  _buildAbaRelacionamento(
+                    theme: denseTheme,
+                    emEdicao: emEdicao,
                   ),
                 ],
               ),
@@ -2095,84 +2189,108 @@ class _ClientesPageState extends State<ClientesPage>
     );
   }
 
-  Widget _buildAbaIdentificacao(ThemeData theme, bool emEdicao, bool formWide) {
+  Widget _buildSecaoEnderecos(ThemeData theme) {
+    return _buildSectionCard(
+      context: context,
+      title: 'Endereço',
+      icon: Icons.location_on_outlined,
+      children: [
+        _buildEnderecoForm(
+          titulo: 'Endereço principal / sede',
+          tipo: 'principal',
+          nomeObraController: null,
+          padraoCarreto: _principalPadraoCarreto,
+          onPadraoCarreto: () => _definirUnicoPadraoCarreto(
+            principal: true,
+          ),
+          cepController: _cepController,
+          enderecoController: _enderecoController,
+          numeroController: _numeroController,
+          bairroController: _bairroController,
+          cidadeController: _cidadeController,
+          ufController: _ufController,
+          codigoIbgeController: _codigoIbgeController,
+          referenciaController: _referenciaController,
+        ),
+        for (var i = 0; i < _enderecosExtras.length; i++) ...[
+          const SizedBox(height: 10),
+          const Divider(height: 1),
+          const SizedBox(height: 10),
+          _buildEnderecoForm(
+            titulo: _enderecosExtras[i].tituloExibicao(),
+            tipo: _enderecosExtras[i].tipo,
+            onTipoChanged: (v) =>
+                setState(() => _enderecosExtras[i].tipo = v),
+            nomeObraController: _enderecosExtras[i].nomeObraController,
+            padraoCarreto: _enderecosExtras[i].padraoCarreto,
+            onPadraoCarreto: () => _definirUnicoPadraoCarreto(
+              principal: false,
+              indiceExtra: i,
+            ),
+            cepController: _enderecosExtras[i].cepController,
+            enderecoController: _enderecosExtras[i].enderecoController,
+            numeroController: _enderecosExtras[i].numeroController,
+            bairroController: _enderecosExtras[i].bairroController,
+            cidadeController: _enderecosExtras[i].cidadeController,
+            ufController: _enderecosExtras[i].ufController,
+            codigoIbgeController: _enderecosExtras[i].codigoIbgeController,
+            referenciaController: _enderecosExtras[i].referenciaController,
+            onRemover: () {
+              final removido = _enderecosExtras.removeAt(i);
+              removido.dispose();
+              setState(() {});
+            },
+          ),
+        ],
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              foregroundColor: Theme.of(context).colorScheme.primary,
+              side: BorderSide(
+                color: Theme.of(context)
+                    .colorScheme
+                    .primary
+                    .withValues(alpha: 0.4),
+              ),
+            ),
+            onPressed: () {
+              setState(() {
+                _enderecosExtras.add(
+                  _EnderecoFormControllers.vazio(tipo: 'entrega'),
+                );
+              });
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                if (!_scrollFormulario.hasClients) return;
+                final pos = _scrollFormulario.position;
+                pos.animateTo(
+                  pos.maxScrollExtent,
+                  duration: const Duration(milliseconds: 280),
+                  curve: Curves.easeOut,
+                );
+              });
+            },
+            icon: const Icon(Icons.add_location_alt_outlined, size: 16),
+            label: const Text('Adicionar endereço'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAbaIdentificacao(ThemeData theme, bool emEdicao) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildSectionCard(
           context: context,
-          title: 'Identificacao',
+          title: 'Identificação',
           icon: Icons.person_outline,
           children: [
-            _linhaCamposAdaptativa(
-              flexes: const [1, 2, 2],
-              campos: [
-                TextField(
-                  controller: _codigoInternoController,
-                  decoration: InputDecoration(
-                    labelText: 'Codigo interno',
-                    isDense: true,
-                    hintText: emEdicao && _clienteEmEdicaoId != null
-                        ? '#$_clienteEmEdicaoId'
-                        : null,
-                  ),
-                ),
-                DropdownButtonFormField<String>(
-                  key: ValueKey<String>(_segmento),
-                  isExpanded: true,
-                  initialValue: _segmento.isEmpty ? '' : _segmento,
-                  decoration: const InputDecoration(
-                    labelText: 'Segmento',
-                    isDense: true,
-                  ),
-                  items: [
-                    const DropdownMenuItem(
-                      value: '',
-                      child: Text('Nao informado'),
-                    ),
-                    ...ClienteCadastro.segmentos.map(
-                      (e) => DropdownMenuItem(
-                        value: e.$1,
-                        child: Text(
-                          e.$2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  ],
-                  onChanged: (v) => setState(() => _segmento = v ?? ''),
-                ),
-                DropdownButtonFormField<String>(
-                  key: ValueKey<String>(_origemCadastro),
-                  isExpanded: true,
-                  initialValue:
-                      _origemCadastro.isEmpty ? '' : _origemCadastro,
-                  decoration: const InputDecoration(
-                    labelText: 'Origem do cadastro',
-                    isDense: true,
-                  ),
-                  items: [
-                    const DropdownMenuItem(
-                      value: '',
-                      child: Text('Nao informado'),
-                    ),
-                    ...ClienteCadastro.origensCadastro.map(
-                      (e) => DropdownMenuItem(
-                        value: e.$1,
-                        child: Text(
-                          e.$2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  ],
-                  onChanged: (v) =>
-                      setState(() => _origemCadastro = v ?? ''),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            ..._dadosPrincipaisChildren(formWide),
+            ..._dadosPrincipaisChildren(emEdicao),
             if (_tipoPessoa == 'juridica') ...[
               const SizedBox(height: 8),
               _linhaCamposAdaptativa(
@@ -2182,14 +2300,19 @@ class _ClientesPageState extends State<ClientesPage>
                   TextField(
                     controller: _inscricaoMunicipalController,
                     decoration: const InputDecoration(
-                      labelText: 'Inscricao municipal',
+                      labelText: 'Inscrição municipal',
                       isDense: true,
                     ),
                   ),
                   DropdownButtonFormField<String>(
                     key: ValueKey<String>(_indicadorIe),
                     isExpanded: true,
+                    isDense: true,
                     initialValue: _indicadorIe.isEmpty ? '' : _indicadorIe,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                    ),
                     decoration: const InputDecoration(
                       labelText: 'Indicador IE',
                       isDense: true,
@@ -2197,7 +2320,7 @@ class _ClientesPageState extends State<ClientesPage>
                     items: [
                       const DropdownMenuItem(
                         value: '',
-                        child: Text('Nao informado'),
+                        child: Text('Não informado'),
                       ),
                       ...ClienteCadastro.indicadoresIe.map(
                         (e) => DropdownMenuItem(
@@ -2232,60 +2355,116 @@ class _ClientesPageState extends State<ClientesPage>
             decoration: const InputDecoration(
               labelText: 'Contato principal (nome)',
               isDense: true,
-              prefixIcon: Icon(Icons.person_outline, size: 20),
+              contentPadding: _padCampoCadastro,
             ),
             textCapitalization: TextCapitalization.words,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           TextField(
             controller: _contatoPrincipalCargoController,
             decoration: const InputDecoration(
               labelText: 'Cargo / funcao na obra',
               isDense: true,
-              prefixIcon: Icon(Icons.engineering_outlined, size: 20),
+              contentPadding: _padCampoCadastro,
             ),
             textCapitalization: TextCapitalization.words,
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 4),
         ],
-        TextField(
-          controller: _telefoneController,
-          decoration: const InputDecoration(
-            labelText: 'Telefone',
-            isDense: true,
-          ),
-          keyboardType: TextInputType.phone,
-          inputFormatters: [_telefoneFormatter],
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _whatsappController,
-          decoration: const InputDecoration(
-            labelText: 'WhatsApp',
-            isDense: true,
-          ),
-          keyboardType: TextInputType.phone,
-          inputFormatters: [_telefoneFormatter],
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _emailController,
-          decoration: const InputDecoration(
-            labelText: 'E-mail',
-            isDense: true,
-          ),
-          keyboardType: TextInputType.emailAddress,
-          textCapitalization: TextCapitalization.none,
-          inputFormatters: [_emailFormatter],
+        _linhaCamposAdaptativa(
+          larguraMinimaLinha: 560,
+          espacamento: 6,
+          flexes: const [1, 1, 1],
+          campos: [
+            TextField(
+              controller: _telefoneController,
+              decoration: const InputDecoration(
+                labelText: 'Telefone',
+                isDense: true,
+              ),
+              keyboardType: TextInputType.phone,
+              inputFormatters: [_telefoneFormatter],
+            ),
+            TextField(
+              controller: _whatsappController,
+              decoration: const InputDecoration(
+                labelText: 'WhatsApp',
+                isDense: true,
+              ),
+              keyboardType: TextInputType.phone,
+              inputFormatters: [_telefoneFormatter],
+            ),
+            TextField(
+              controller: _emailController,
+              decoration: const InputDecoration(
+                labelText: 'E-mail',
+                isDense: true,
+              ),
+              keyboardType: TextInputType.emailAddress,
+              textCapitalization: TextCapitalization.none,
+              inputFormatters: [_emailFormatter],
+            ),
+          ],
         ),
       ],
     );
   }
 
-  /// Historico sem [ExpansionTile]: o corpo do tile usa [Expansible] com
-  /// [ClipRect]/[Align.heightFactor], o que pode truncar listas longas dentro
-  /// de scroll. Aqui um [ListView] com [ScrollController] ligado ao [Scrollbar].
-  Widget _buildScrollAbaRelacionamento({
+  Widget _buildAbaRelacionamento({
+    required ThemeData theme,
+    required bool emEdicao,
+  }) {
+    final compras = _comprasDoClienteAtual();
+    final totalGasto = compras.fold<double>(0, (acc, v) => acc + v.total);
+    final ticketMedio = compras.isEmpty ? 0.0 : totalGasto / compras.length;
+    final ultimaCompra = compras.isEmpty ? null : compras.first;
+    final quantidadeItens = compras.fold<int>(
+      0,
+      (acc, compra) =>
+          acc +
+          _itensDaCompraSafe(compra).fold<int>(
+            0,
+            (soma, item) => soma + item.quantidade,
+          ),
+    );
+    final topMap = <String, int>{};
+    for (final compra in compras) {
+      for (final item in _itensDaCompraSafe(compra)) {
+        final nome = item.nomeProduto.trim();
+        if (nome.isEmpty) continue;
+        topMap[nome] = (topMap[nome] ?? 0) + item.quantidade;
+      }
+    }
+    final topProdutos = topMap.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return Scrollbar(
+      controller: _scrollRelacionamento,
+      thumbVisibility: true,
+      trackVisibility: true,
+      child: ListView(
+        controller: _scrollRelacionamento,
+        primary: false,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+        children: [
+          _buildConteudoHistoricoCompras(
+            theme: theme,
+            emEdicao: emEdicao,
+            compras: compras,
+            totalGasto: totalGasto,
+            ticketMedio: ticketMedio,
+            ultimaCompra: ultimaCompra,
+            quantidadeItens: quantidadeItens,
+            topProdutos: topProdutos,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Historico de compras (Column no scroll do formulario).
+  Widget _buildConteudoHistoricoCompras({
     required ThemeData theme,
     required bool emEdicao,
     required List<Venda> compras,
@@ -2294,20 +2473,14 @@ class _ClientesPageState extends State<ClientesPage>
     required Venda? ultimaCompra,
     required int quantidadeItens,
     required List<MapEntry<String, int>> topProdutos,
+    VoidCallback? onAtualizarUi,
   }) {
     final tituloSecao = theme.textTheme.titleSmall?.copyWith(
       fontWeight: FontWeight.w600,
     );
-    return Scrollbar(
-      controller: _scrollAbaRelacionamento,
-      thumbVisibility: true,
-      trackVisibility: true,
-      child: ListView(
-        controller: _scrollAbaRelacionamento,
-        primary: false,
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 48),
-        children: [
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
           Card(
             elevation: 0,
             color: theme.colorScheme.surface,
@@ -2350,6 +2523,11 @@ class _ClientesPageState extends State<ClientesPage>
                           ),
                         )
                       else ...[
+                        if (_carregandoCompras)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 8),
+                            child: LinearProgressIndicator(minHeight: 2),
+                          ),
                         DropdownButtonFormField<String>(
                           initialValue: _periodoHistorico,
                           decoration: const InputDecoration(
@@ -2377,6 +2555,13 @@ class _ClientesPageState extends State<ClientesPage>
                           onChanged: (value) {
                             if (value == null) return;
                             setState(() => _periodoHistorico = value);
+                            onAtualizarUi?.call();
+                            final id = _clienteEmEdicaoId;
+                            if (id != null) {
+                              unawaited(_carregarComprasCliente(id).then((_) {
+                                onAtualizarUi?.call();
+                              }));
+                            }
                           },
                         ),
                         const SizedBox(height: 8),
@@ -2443,145 +2628,7 @@ class _ClientesPageState extends State<ClientesPage>
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          Card(
-            elevation: 0,
-            color: theme.colorScheme.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-              side: BorderSide(color: theme.colorScheme.outlineVariant),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 12, 10, 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.chat_bubble_outline,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Mensagens enviadas',
-                          style: tituloSecao,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: !emEdicao
-                      ? const Text(
-                          'Salve o cliente para habilitar logs de mensagens.',
-                        )
-                      : FutureBuilder<List<MensagemLog>>(
-                          key: ValueKey<int?>(_clienteEmEdicaoId),
-                          future: _mensageriaRepository.listarLogsPorCliente(
-                            _clienteEmEdicaoId!,
-                          ),
-                          builder: (context, snapshot) {
-                            final logs = snapshot.data ?? const <MensagemLog>[];
-                            final clienteAtual = _clienteEmEdicaoAtual();
-                            if (snapshot.connectionState ==
-                                ConnectionState.waiting) {
-                              return const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 8),
-                                child: LinearProgressIndicator(),
-                              );
-                            }
-                            if (clienteAtual == null) {
-                              return const Text('Cliente nao encontrado.');
-                            }
-                            if (logs.isEmpty) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  OutlinedButton.icon(
-                                    onPressed: () =>
-                                        _enviarMensagemManualCliente(
-                                          clienteAtual,
-                                        ),
-                                    icon: const Icon(
-                                      Icons.send_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Enviar mensagem agora'),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  const Text(
-                                    'Nenhum log de mensagem para este cliente.',
-                                  ),
-                                ],
-                              );
-                            }
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                OutlinedButton.icon(
-                                  onPressed: () =>
-                                      _enviarMensagemManualCliente(clienteAtual),
-                                  icon: const Icon(
-                                    Icons.send_outlined,
-                                    size: 18,
-                                  ),
-                                  label: const Text('Enviar mensagem agora'),
-                                ),
-                                const SizedBox(height: 8),
-                                ...logs.map((log) {
-                                  final enviado = log.resultado == 'enviado';
-                                  return ListTile(
-                                    dense: true,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 2,
-                                    ),
-                                    leading: Icon(
-                                      enviado
-                                          ? Icons.check_circle_outline
-                                          : Icons.error_outline,
-                                      size: 20,
-                                      color: enviado
-                                          ? theme.colorScheme.primary
-                                          : theme.colorScheme.error,
-                                    ),
-                                    title: Text(
-                                      '${log.canal.toUpperCase()} - ${_rotuloStatusMensagem(log.statusEntrega)}',
-                                      style: theme.textTheme.bodySmall,
-                                    ),
-                                    subtitle: Text(
-                                      '${_dataHora.format(log.criadoEm.toLocal())}\n${log.destino}',
-                                      style: theme.textTheme.bodySmall,
-                                    ),
-                                    isThreeLine: true,
-                                    trailing: log.resultado == 'falhou'
-                                        ? IconButton(
-                                            tooltip: 'Ver erro',
-                                            onPressed: () =>
-                                                _verErroDetalhadoLogCliente(
-                                                  log,
-                                                ),
-                                            icon: const Icon(
-                                              Icons.error_outline,
-                                              size: 20,
-                                            ),
-                                          )
-                                        : null,
-                                  );
-                                }),
-                              ],
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -2591,24 +2638,7 @@ class _ClientesPageState extends State<ClientesPage>
     final emEdicao = _clienteEmEdicaoId != null;
     final compras = _comprasDoClienteAtual();
     final totalGasto = compras.fold<double>(0, (acc, v) => acc + v.total);
-    final ticketMedio = compras.isEmpty ? 0.0 : totalGasto / compras.length;
     final ultimaCompra = compras.isEmpty ? null : compras.first;
-    final quantidadeItens = compras.fold<int>(
-      0,
-      (acc, compra) =>
-          acc +
-          compra.itens.fold<int>(0, (soma, item) => soma + item.quantidade),
-    );
-    final topProdutosMap = <String, int>{};
-    for (final compra in compras) {
-      for (final item in compra.itens) {
-        final nome = item.nomeProduto.trim();
-        if (nome.isEmpty) continue;
-        topProdutosMap[nome] = (topProdutosMap[nome] ?? 0) + item.quantidade;
-      }
-    }
-    final topProdutos = topProdutosMap.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
     final limiteDigitado = _limiteCreditoDigitado();
     final fiadoAberto = emEdicao ? _fiadoAbertoClienteAtual() : 0.0;
     final creditoDisp = limiteDigitado > 0
@@ -2637,7 +2667,6 @@ class _ClientesPageState extends State<ClientesPage>
           ),
         },
         child: Focus(
-          autofocus: true,
           child: Scaffold(
             appBar: AppBar(title: const Text('Cadastro de Clientes')),
             body: Column(
@@ -2645,85 +2674,63 @@ class _ClientesPageState extends State<ClientesPage>
               children: [
                 Expanded(
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      context.isCompactLayout ? 8 : 12,
-                      8,
-                      context.isCompactLayout ? 8 : 12,
-                      0,
-                    ),
-                    child: Align(
-                      alignment: Alignment.topCenter,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxWidth: _maxLarguraFormulario,
-                        ),
-                        child: LayoutBuilder(
-                          builder: (context, box) {
-                            final formWide = box.maxWidth >= 680;
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                ClienteCadastroHeader(
-                                  emEdicao: emEdicao,
-                                  clienteId: _clienteEmEdicaoId,
-                                  nomeRazao: _nomeRazaoController.text,
-                                  tipoPessoa: _tipoPessoa,
-                                  documento: _documentoController.text,
-                                  ativo: _ativo,
-                                  segmento: _segmento,
-                                  codigoInterno: _codigoInternoController
-                                          .text
-                                          .trim()
-                                          .isNotEmpty
-                                      ? _codigoInternoController.text.trim()
-                                      : (emEdicao &&
-                                              _clienteEmEdicaoId != null
-                                          ? '#${_clienteEmEdicaoId}'
-                                          : 'Novo'),
-                                  totalGasto: emEdicao
-                                      ? _formatarMoeda(totalGasto)
+                    padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
+                    child: LayoutBuilder(
+                      builder: (context, box) {
+                        final formWide = box.maxWidth >= 720;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildBarraFerramentasCadastro(),
+                            const SizedBox(height: 4),
+                            ClienteCadastroHeader(
+                              emEdicao: emEdicao,
+                              clienteId: _clienteEmEdicaoId,
+                              nomeRazao: _nomeRazaoController.text,
+                              tipoPessoa: _tipoPessoa,
+                              documento: _documentoController.text,
+                              ativo: _ativo,
+                              codigoInterno: _codigoInternoController.text
+                                      .trim()
+                                      .isNotEmpty
+                                  ? _codigoInternoController.text.trim()
+                                  : (emEdicao && _clienteEmEdicaoId != null
+                                      ? '#${_clienteEmEdicaoId}'
+                                      : 'Novo'),
+                              totalGasto: emEdicao
+                                  ? _formatarMoeda(totalGasto)
+                                  : null,
+                              ultimaCompraTexto: emEdicao
+                                  ? (ultimaCompra == null
+                                      ? 'Sem compras'
+                                      : _dataHora.format(
+                                          ultimaCompra.data.toLocal(),
+                                        ))
+                                  : null,
+                              fiadoAberto: emEdicao && limiteDigitado > 0
+                                  ? _formatarMoeda(fiadoAberto)
+                                  : null,
+                              creditoDisponivel:
+                                  emEdicao && limiteDigitado > 0
+                                      ? _formatarMoeda(creditoDisp)
                                       : null,
-                                  ultimaCompraTexto: emEdicao
-                                      ? (ultimaCompra == null
-                                          ? 'Sem compras'
-                                          : _dataHora.format(
-                                              ultimaCompra.data.toLocal(),
-                                            ))
-                                      : null,
-                                  fiadoAberto: emEdicao && limiteDigitado > 0
-                                      ? _formatarMoeda(fiadoAberto)
-                                      : null,
-                                  creditoDisponivel:
-                                      emEdicao && limiteDigitado > 0
-                                          ? _formatarMoeda(creditoDisp)
-                                          : null,
-                                  limiteCredito: limiteDigitado,
-                                ),
-                                const SizedBox(height: 6),
-                                _buildBarraFerramentasCadastro(),
-                                if (_status.isNotEmpty) ...[
-                                  const SizedBox(height: 6),
-                                  _buildStatusBanner(context, _status),
-                                ],
-                                const SizedBox(height: 6),
-                                Expanded(
-                                  child: _buildPainelComAbas(
-                                    theme: theme,
-                                    emEdicao: emEdicao,
-                                    formWide: formWide,
-                                    compras: compras,
-                                    totalGasto: totalGasto,
-                                    ticketMedio: ticketMedio,
-                                    ultimaCompra: ultimaCompra,
-                                    quantidadeItens: quantidadeItens,
-                                    topProdutos: topProdutos,
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
+                              limiteCredito: limiteDigitado,
+                            ),
+                            if (_status.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              _buildStatusBanner(context, _status),
+                            ],
+                            const SizedBox(height: 2),
+                            Expanded(
+                              child: _buildFormularioUnico(
+                                theme: theme,
+                                emEdicao: emEdicao,
+                                formWide: formWide,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -2731,7 +2738,6 @@ class _ClientesPageState extends State<ClientesPage>
                   emEdicao: emEdicao,
                   onSalvar: _salvarCliente,
                   onNovo: _limparFormulario,
-                  onLimpar: _limparFormulario,
                   podeExcluir: emEdicao && _clienteEmEdicaoId != null,
                   onExcluir: _confirmarExcluirCliente,
                 ),
@@ -2747,13 +2753,13 @@ class _ClientesPageState extends State<ClientesPage>
   Widget _linhaCamposAdaptativa({
     required List<Widget> campos,
     double larguraMinimaLinha = 620,
-    double espacamento = 10,
+    double espacamento = 4,
     List<double>? flexes,
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxW = constraints.maxWidth;
-        if (maxW < larguraMinimaLinha) {
+        if (!maxW.isFinite || maxW < larguraMinimaLinha) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -2770,7 +2776,10 @@ class _ClientesPageState extends State<ClientesPage>
           children: [
             for (var i = 0; i < campos.length; i++) ...[
               if (i > 0) SizedBox(width: espacamento),
-              Expanded(flex: flexList[i].round(), child: campos[i]),
+              Expanded(
+                flex: flexList[i].round().clamp(1, 100),
+                child: campos[i],
+              ),
             ],
           ],
         );
@@ -2785,31 +2794,39 @@ class _ClientesPageState extends State<ClientesPage>
     required List<Widget> children,
   }) {
     final theme = Theme.of(context);
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.outlineVariant),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icon, size: 17, color: theme.colorScheme.primary),
+                Icon(icon, size: 16, color: theme.colorScheme.primary),
                 const SizedBox(width: 6),
                 Text(
                   title,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
-                    fontSize: 13.5,
+                    fontSize: 13,
+                    letterSpacing: 0.1,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             ...children,
           ],
         ),
@@ -2848,7 +2865,6 @@ class _ClientesPageState extends State<ClientesPage>
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cepCidadeUfUmaLinha = constraints.maxWidth >= 520;
         final campoCep = SizedBox(
           width: _wCep,
           child: TextField(
@@ -2856,12 +2872,14 @@ class _ClientesPageState extends State<ClientesPage>
             decoration: InputDecoration(
               labelText: 'CEP',
               isDense: true,
+              contentPadding: _padCampoCadastro,
+              suffixIconConstraints: _iconCampoCadastro,
               suffixIcon: cepConsultando
                   ? const Padding(
-                      padding: EdgeInsets.all(12),
+                      padding: EdgeInsets.all(6),
                       child: SizedBox(
-                        width: 18,
-                        height: 18,
+                        width: 14,
+                        height: 14,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       ),
                     )
@@ -2926,7 +2944,7 @@ class _ClientesPageState extends State<ClientesPage>
                 controller: enderecoController,
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(
-                  labelText: 'Endereco',
+                  labelText: 'Endereço',
                   isDense: true,
                 ),
               ),
@@ -2970,14 +2988,14 @@ class _ClientesPageState extends State<ClientesPage>
                 ),
                 if (onRemover != null)
                   IconButton(
-                    tooltip: 'Remover endereco',
+                    tooltip: 'Remover endereço',
                     onPressed: onRemover,
                     icon: const Icon(Icons.remove_circle_outline),
                   ),
               ],
             ),
             if (onTipoChanged != null || onPadraoCarreto != null) ...[
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               _linhaCamposAdaptativa(
                 larguraMinimaLinha: 520,
                 campos: [
@@ -2985,7 +3003,12 @@ class _ClientesPageState extends State<ClientesPage>
                     DropdownButtonFormField<String>(
                       key: ValueKey<String>(tipo),
                       isExpanded: true,
+                      isDense: true,
                       initialValue: tipo,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                          ),
                       decoration: const InputDecoration(
                         labelText: 'Tipo',
                         isDense: true,
@@ -3007,7 +3030,7 @@ class _ClientesPageState extends State<ClientesPage>
                     TextField(
                       controller: nomeObraController,
                       decoration: const InputDecoration(
-                        labelText: 'Nome da obra / referencia',
+                        labelText: 'Nome da obra / referência',
                         isDense: true,
                       ),
                       textCapitalization: TextCapitalization.words,
@@ -3016,7 +3039,7 @@ class _ClientesPageState extends State<ClientesPage>
                     Align(
                       alignment: Alignment.centerLeft,
                       child: FilterChip(
-                        label: const Text('Padrao para carreto (PDV)'),
+                        label: const Text('Padrão para carreto (PDV)'),
                         selected: padraoCarreto,
                         onSelected: (_) => onPadraoCarreto(),
                       ),
@@ -3026,46 +3049,36 @@ class _ClientesPageState extends State<ClientesPage>
             ] else if (onPadraoCarreto != null) ...[
               const SizedBox(height: 4),
               FilterChip(
-                label: const Text('Padrao para carreto (PDV)'),
+                label: const Text('Padrão para carreto (PDV)'),
                 selected: padraoCarreto,
                 onSelected: (_) => onPadraoCarreto(),
               ),
             ],
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             linhaCepBuscar,
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             linhaEnderecoNumero,
-            const SizedBox(height: 6),
-            campoBairro,
-            const SizedBox(height: 6),
-            if (cepCidadeUfUmaLinha)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: campoCidade),
-                  const SizedBox(width: 8),
-                  campoUf,
-                ],
-              )
-            else ...[
-              campoCidade,
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: campoUf,
-              ),
-            ],
-            const SizedBox(height: 6),
-            ClienteEnderecoIbgeSelector(
-              codigoIbgeController: codigoIbgeController,
-              cidadeController: cidadeController,
+            const SizedBox(height: 4),
+            _linhaCamposAdaptativa(
+              larguraMinimaLinha: 640,
+              espacamento: 4,
+              flexes: const [2, 2, 1, 3],
+              campos: [
+                campoBairro,
+                campoCidade,
+                campoUf,
+                ClienteEnderecoIbgeSelector(
+                  codigoIbgeController: codigoIbgeController,
+                  cidadeController: cidadeController,
+                ),
+              ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             TextField(
               controller: referenciaController,
               textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
-                labelText: 'Referencia',
+                labelText: 'Referência',
                 isDense: true,
               ),
             ),

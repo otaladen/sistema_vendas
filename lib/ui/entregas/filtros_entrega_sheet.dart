@@ -77,6 +77,13 @@ InputDecoration _dec(String label) => InputDecoration(
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
     );
 
+String _valorDropdownPresente(String atual, Iterable<String> opcoes) {
+  for (final o in opcoes) {
+    if (o == atual) return atual;
+  }
+  return opcoes.isEmpty ? atual : opcoes.first;
+}
+
 /// Painel inferior com todos os filtros da aba Entregas.
 Future<void> showFiltrosEntregaSheet({
   required BuildContext context,
@@ -157,7 +164,10 @@ Future<void> showFiltrosEntregaSheet({
                 children: [
                   DropdownButtonFormField<String>(
                     key: ValueKey('sheet_status_$filtrosDropdownNonce'),
-                    initialValue: statusSelecionado,
+                    initialValue: _valorDropdownPresente(
+                      statusSelecionado,
+                      statuses,
+                    ),
                     isExpanded: true,
                     decoration: _dec('Status'),
                     items: statuses
@@ -176,7 +186,16 @@ Future<void> showFiltrosEntregaSheet({
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     key: ValueKey('sheet_mot_$filtrosDropdownNonce'),
-                    initialValue: filtroMotorista,
+                    initialValue: _valorDropdownPresente(
+                      filtroMotorista,
+                      [
+                        'todos',
+                        ...{
+                          for (final m in motoristasAtivos)
+                            m.nome.trim().toLowerCase(),
+                        }.where((n) => n.isNotEmpty),
+                      ],
+                    ),
                     isExpanded: true,
                     decoration: _dec('Motorista'),
                     items: [
@@ -184,12 +203,17 @@ Future<void> showFiltrosEntregaSheet({
                         value: 'todos',
                         child: Text('Todos'),
                       ),
-                      ...motoristasAtivos.map(
-                        (m) => DropdownMenuItem(
-                          value: m.nome.trim().toLowerCase(),
-                          child: Text(m.nome),
-                        ),
-                      ),
+                      ...{
+                        for (final m in motoristasAtivos)
+                          m.nome.trim().toLowerCase(): m.nome.trim(),
+                      }.entries
+                          .where((e) => e.key.isNotEmpty)
+                          .map(
+                            (e) => DropdownMenuItem(
+                              value: e.key,
+                              child: Text(e.value),
+                            ),
+                          ),
                     ],
                     onChanged: (v) {
                       if (v == null) return;
@@ -199,7 +223,13 @@ Future<void> showFiltrosEntregaSheet({
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     key: ValueKey('sheet_vend_$filtrosDropdownNonce'),
-                    initialValue: filtroVendedor,
+                    initialValue: _valorDropdownPresente(
+                      filtroVendedor,
+                      [
+                        'todos',
+                        ...vendedoresDisponiveis.map((n) => n.toLowerCase()),
+                      ],
+                    ),
                     isExpanded: true,
                     decoration: _dec('Vendedor'),
                     items: [
@@ -222,7 +252,10 @@ Future<void> showFiltrosEntregaSheet({
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     key: ValueKey('sheet_agr_$filtrosDropdownNonce'),
-                    initialValue: agrupamento,
+                    initialValue: _valorDropdownPresente(
+                      agrupamento,
+                      const ['bairro', 'motorista'],
+                    ),
                     decoration: _dec('Agrupar lista por'),
                     items: const [
                       DropdownMenuItem(value: 'bairro', child: Text('Bairro')),
@@ -239,7 +272,10 @@ Future<void> showFiltrosEntregaSheet({
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     key: ValueKey('sheet_dm_$filtrosDropdownNonce'),
-                    initialValue: filtroDataMarcada,
+                    initialValue: _valorDropdownPresente(
+                      filtroDataMarcada,
+                      const ['todos', 'hoje', 'amanha', 'sem_data'],
+                    ),
                     decoration: _dec('Data marcada na entrega'),
                     items: const [
                       DropdownMenuItem(value: 'todos', child: Text('Todas')),

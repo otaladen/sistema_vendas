@@ -3,13 +3,13 @@ import 'package:intl/intl.dart';
 
 import '../../data/app_config_repository.dart';
 import '../../data/auditoria_repository.dart';
-import '../../data/mensageria_repository.dart';
-import '../../data/venda_repository.dart';
+import '../../data/api/auditoria_api_repository.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/auditoria_retencao.dart';
 import '../../model/auditoria_evento.dart';
 import '../../model/historico_entrega.dart';
-import '../../model/mensagem_log.dart';
+import '../../model/venda.dart';
 import '../../services/auditoria_registrar.dart';
 import 'relatorio_export_util.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
@@ -24,9 +24,9 @@ class RelatorioLogSistemaPage extends StatefulWidget {
     this.vendaRepository,
   });
 
-  final AuditoriaRepository auditoriaRepository;
+  final dynamic auditoriaRepository;
   final AppConfigRepository appConfigRepository;
-  final VendaRepository? vendaRepository;
+  final dynamic vendaRepository;
   final bool usuarioAdmin;
   final String usuarioLogin;
 
@@ -39,14 +39,12 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
     with SingleTickerProviderStateMixin {
   final _buscaController = TextEditingController();
   final _fmtData = DateFormat('dd/MM/yyyy HH:mm');
-  final _mensageriaRepo = MensageriaRepository();
   late TabController _tabController;
   late DateTime _inicio;
   late DateTime _fim;
   String? _moduloFiltro;
   String? _usuarioFiltro;
   List<AuditoriaEvento> _eventos = [];
-  List<MensagemLog> _mensagens = [];
   List<HistoricoEntrega> _entregas = [];
   List<String> _usuariosDistintos = [];
   bool _carregando = true;
@@ -57,7 +55,7 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (mounted) setState(() {});
     });
@@ -81,19 +79,26 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
     _carregar();
   }
 
-  bool _dataNoPeriodo(DateTime data) {
-    final local = data.toLocal();
-    final ini = DateTime(_inicio.year, _inicio.month, _inicio.day);
-    final fim = DateTime(_fim.year, _fim.month, _fim.day, 23, 59, 59, 999);
-    return !local.isBefore(ini) && !local.isAfter(fim);
-  }
-
   Future<void> _carregar({bool incluirConfig = false}) async {
     setState(() => _carregando = true);
     if (incluirConfig && widget.usuarioAdmin) {
       final config = await widget.appConfigRepository.carregarEmpresaConfig();
       _retencaoDias =
           AuditoriaRetencaoOpcoes.normalizar(config.auditoriaRetencaoDias);
+    }
+    if (widget.auditoriaRepository is AuditoriaApiRepository) {
+      try {
+        await (widget.auditoriaRepository as AuditoriaApiRepository).hidratar(
+          desde: _inicio,
+          ate: _fim,
+        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Auditoria: $e')),
+          );
+        }
+      }
     }
     _usuariosDistintos = widget.auditoriaRepository.listarUsuariosDistintos();
     _totalEventosBanco = widget.auditoriaRepository.contarTotal();
@@ -107,23 +112,23 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
       ),
     );
 
-    final logs = await _mensageriaRepo.listarLogs();
-    final termo = _buscaController.text.trim().toLowerCase();
-    _mensagens = logs.where((m) {
-      if (!_dataNoPeriodo(m.criadoEm)) return false;
-      if (termo.isEmpty) return true;
-      return m.destino.toLowerCase().contains(termo) ||
-          m.templateId.toLowerCase().contains(termo) ||
-          m.resultado.toLowerCase().contains(termo) ||
-          m.statusEntrega.toLowerCase().contains(termo);
-    }).toList();
+    final vendaRepo = widget.vendaRepository;
+    if (vendaRepo is VendaApiRepository) {
+      try {
+        await vendaRepo.garantirPeriodoRelatorioCarregado(_inicio, _fim);
+      } catch (e) {
+        debugPrint('Log sistema: historico entregas via API: $e');
+      }
+    }
 
-    _entregas = widget.vendaRepository?.listarHistoricoEntregaGlobal(
-          inicio: _inicio,
-          fim: _fim,
-          termoBusca: _buscaController.text,
-        ) ??
-        [];
+    final hist = widget.vendaRepository?.listarHistoricoEntregaGlobal(
+      inicio: _inicio,
+      fim: _fim,
+      termoBusca: _buscaController.text,
+    );
+    _entregas = hist == null
+        ? <HistoricoEntrega>[]
+        : (hist as List).cast<HistoricoEntrega>();
 
     if (!mounted) return;
     setState(() => _carregando = false);
@@ -514,7 +519,6 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
           controller: _tabController,
           tabs: const [
             Tab(text: 'Sistema'),
-            Tab(text: 'Mensagens'),
             Tab(text: 'Entregas'),
           ],
         ),
@@ -557,7 +561,6 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
                     controller: _tabController,
                     children: [
                       _buildTabSistema(),
-                      _buildTabMensagens(),
                       _buildTabEntregas(),
                     ],
                   ),
@@ -704,55 +707,6 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
     );
   }
 
-  Widget _buildTabMensagens() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      children: [
-        Text(
-          '${_mensagens.length} envio(s) no periodo',
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-        const SizedBox(height: 8),
-        if (_mensagens.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(top: 24),
-            child: Center(
-              child: Text('Nenhuma mensagem encontrada com os filtros atuais.'),
-            ),
-          )
-        else
-          ..._mensagens.map((m) {
-            final ok = m.resultado == 'enviado';
-            return Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: ok
-                      ? Theme.of(context).colorScheme.tertiaryContainer
-                      : Theme.of(context).colorScheme.errorContainer,
-                  child: Icon(
-                    ok ? Icons.check_circle_outline : Icons.error_outline,
-                    size: 20,
-                  ),
-                ),
-                title: Text(
-                  '${m.canal.toUpperCase()} · ${m.destino}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  '${_fmtData.format(m.criadoEm.toLocal())}'
-                  '\n${m.resultado} · entrega: ${m.statusEntrega}'
-                  '${m.templateId.isNotEmpty ? ' · ${m.templateId}' : ''}',
-                ),
-                isThreeLine: true,
-              ),
-            );
-          }),
-      ],
-    );
-  }
-
   Widget _buildTabEntregas() {
     if (widget.vendaRepository == null) {
       return const Center(
@@ -776,7 +730,20 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
           )
         else
           ..._entregas.map((h) {
-            final venda = h.venda.target;
+            Venda? venda;
+            try {
+              venda = h.venda.target;
+            } catch (_) {
+              venda = null;
+            }
+            if (venda == null) {
+              final vid = h.venda.targetId;
+              if (vid > 0) {
+                try {
+                  venda = widget.vendaRepository?.obterPorId(vid) as Venda?;
+                } catch (_) {}
+              }
+            }
             final numOrc = venda?.numeroOrcamento ?? 0;
             final rotuloNovo = HistoricoEntregaEventos.rotulo(h.statusNovo);
             final rotuloAnterior = h.statusAnterior.isEmpty

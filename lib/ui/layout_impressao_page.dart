@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
+import '../data/api/lan_api_client.dart';
+import '../data/sync/sync_entity_codec_extras.dart';
 import '../model/config_layout_impressao.dart';
 import '../services/cupom_layout_preview_pdf.dart';
 import '../services/cupom_pdf_layout.dart';
@@ -12,10 +14,14 @@ class LayoutImpressaoPage extends StatefulWidget {
     super.key,
     required this.appConfigRepository,
     this.printService,
+    this.terminalLeve = false,
+    this.lanApiClient,
   });
 
   final AppConfigRepository appConfigRepository;
   final PrintService? printService;
+  final bool terminalLeve;
+  final dynamic lanApiClient;
 
   @override
   State<LayoutImpressaoPage> createState() => _LayoutImpressaoPageState();
@@ -42,8 +48,31 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
     super.dispose();
   }
 
+  Future<EmpresaConfig> _carregarEmpresa() async {
+    final local = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!widget.terminalLeve) return local;
+    final client = widget.lanApiClient;
+    if (client is! LanApiClient || !client.configurado) return local;
+    try {
+      final m = await client.obterEmpresaConfig();
+      final raw = m['config'];
+      if (raw is! Map) return local;
+      final mesclado = SyncEntityCodecExtras.empresaConfigDeMap(
+        local,
+        Map<String, dynamic>.from(raw),
+      );
+      await widget.appConfigRepository.salvarEmpresaConfig(
+        mesclado,
+        propagarRede: false,
+      );
+      return mesclado;
+    } catch (_) {
+      return local;
+    }
+  }
+
   Future<void> _carregar() async {
-    final empresa = await widget.appConfigRepository.carregarEmpresaConfig();
+    final empresa = await _carregarEmpresa();
     if (!mounted) return;
     setState(() {
       _empresa = empresa;
@@ -76,12 +105,47 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
     if (empresa == null) return;
     setState(() => _salvando = true);
     try {
-      await widget.appConfigRepository.salvarEmpresaConfig(
-        empresa.copyWith(layoutImpressao: _layout),
-      );
+      final atualizado = empresa.copyWith(layoutImpressao: _layout);
+      final client = widget.lanApiClient;
+      final terminalComApi = widget.terminalLeve &&
+          client is LanApiClient &&
+          client.configurado;
+      if (terminalComApi) {
+        final resp = await client.salvarEmpresaConfigRemoto(
+          SyncEntityCodecExtras.empresaConfigParaMap(atualizado),
+        );
+        final raw = resp['config'];
+        final paraCache = raw is Map
+            ? SyncEntityCodecExtras.empresaConfigDeMap(
+                atualizado,
+                Map<String, dynamic>.from(raw),
+              )
+            : atualizado;
+        await widget.appConfigRepository.salvarEmpresaConfig(
+          paraCache,
+          propagarRede: false,
+        );
+        _empresa = paraCache;
+      } else {
+        await widget.appConfigRepository.salvarEmpresaConfig(atualizado);
+        _empresa = atualizado;
+        if (client is LanApiClient && client.configurado) {
+          try {
+            await client.salvarEmpresaConfigRemoto(
+              SyncEntityCodecExtras.empresaConfigParaMap(atualizado),
+            );
+          } catch (_) {}
+        }
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Layout de impressao salvo.')),
+        SnackBar(
+          content: Text(
+            terminalComApi
+                ? 'Layout salvo no servidor.'
+                : 'Layout de impressao salvo.',
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;

@@ -23,7 +23,9 @@ class SyncLog {
       mensagem: msg,
       em: DateTime.now(),
     );
-    debugPrint('[sync] falha: $msg');
+    if (kDebugMode) {
+      debugPrint('[sync] falha: $msg');
+    }
   }
 }
 

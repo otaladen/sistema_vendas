@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/app_config_repository.dart';
 import 'package:sistema_vendas/model/config_layout_impressao.dart';

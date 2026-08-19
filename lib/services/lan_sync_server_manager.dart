@@ -23,43 +23,48 @@ class LanSyncServerManager {
   static Future<String?> localizarExecutavel() async {
     final candidatos = <String>[];
 
-    try {
-      final exeDir = File(Platform.resolvedExecutable).parent.path;
+    void adicionarEm(String base) {
       candidatos.add(
-        p.join(exeDir, 'sync_server', 'sistema_vendas_sync_server.exe'),
+        p.join(base, 'sync_server', 'sistema_vendas_sync_server.exe'),
       );
       candidatos.add(
-        p.join(exeDir, 'sync_server', 'sistema_vendas_sync_server_presenca.exe'),
+        p.join(base, 'sync_server', 'sistema_vendas_sync_server_presenca.exe'),
       );
       candidatos.add(
-        p.join(exeDir, 'sync_server', 'sistema_vendas_sync_server_novo.exe'),
+        p.join(base, 'sync_server', 'sistema_vendas_sync_server_novo.exe'),
       );
-      candidatos.add(p.join(exeDir, 'sistema_vendas_sync_server.exe'));
-      candidatos.add(p.join(exeDir, 'sistema_vendas_sync_server_presenca.exe'));
-    } catch (_) {}
-
-    var dir = Directory.current;
-    for (var i = 0; i < 8; i++) {
-      candidatos.add(
-        p.join(dir.path, 'sync_server', 'sistema_vendas_sync_server.exe'),
-      );
-      candidatos.add(
-        p.join(
-          dir.path,
-          'sync_server',
-          'sistema_vendas_sync_server_presenca.exe',
-        ),
-      );
-      candidatos.add(
-        p.join(dir.path, 'sync_server', 'sistema_vendas_sync_server_novo.exe'),
-      );
-      final parent = dir.parent;
-      if (parent.path == dir.path) break;
-      dir = parent;
+      candidatos.add(p.join(base, 'sistema_vendas_sync_server.exe'));
+      candidatos.add(p.join(base, 'sistema_vendas_sync_server_presenca.exe'));
+      candidatos.add(p.join(base, 'sistema_vendas_sync_server_novo.exe'));
     }
 
+    void subirPastas(Directory start, {int maxNiveis = 10}) {
+      var dir = start;
+      for (var i = 0; i < maxNiveis; i++) {
+        adicionarEm(dir.path);
+        final parent = dir.parent;
+        if (parent.path == dir.path) break;
+        dir = parent;
+      }
+    }
+
+    try {
+      final exeDir = Directory(File(Platform.resolvedExecutable).parent.path);
+      // Prioridade: pasta ao lado do .exe (instalacao / Release).
+      adicionarEm(exeDir.path);
+      // Depois sobe a arvore (ex.: Release → … → raiz do projeto no dev).
+      subirPastas(exeDir.parent);
+    } catch (_) {}
+
+    try {
+      subirPastas(Directory.current);
+    } catch (_) {}
+
+    final vistos = <String>{};
     for (final c in candidatos) {
-      if (File(c).existsSync()) return c;
+      final norm = p.normalize(c);
+      if (!vistos.add(norm.toLowerCase())) continue;
+      if (File(norm).existsSync()) return norm;
     }
     return null;
   }
@@ -152,18 +157,23 @@ class LanSyncServerManager {
     }
 
     final fotos = (productImagesPath ?? await caminhoPadraoProductImages()).trim();
+    final exe = await localizarExecutavel();
+    final jaOnline = await servidorRespondendoNaPorta(porta);
 
-    // Sempre reinicia: garante a pasta correta de fotos do app.
-    if (await servidorRespondendoNaPorta(porta)) {
-      await pararServidor();
-      await Future<void>.delayed(const Duration(milliseconds: 800));
+    // Sem exe: nao derruba hub que ja esteja rodando (ex.: iniciado a mao).
+    if (exe == null) {
+      if (jaOnline) return null;
+      return 'Hub mobile (:$porta): executavel nao encontrado.\n'
+          'Copie a pasta sync_server para ao lado do sistema_vendas.exe '
+          '(com sistema_vendas_sync_server.exe), ou rode '
+          'sync_server\\build_windows_exe.bat no projeto.\n'
+          'Obs.: terminais Windows usam a API :8788 — o hub mobile e opcional.';
     }
 
-    final exe = await localizarExecutavel();
-    if (exe == null) {
-      return 'Executavel do servidor nao encontrado.\n'
-          'Na pasta sync_server do programa, rode build_windows_exe.bat uma vez '
-          'para gerar sistema_vendas_sync_server.exe.';
+    // Sempre reinicia: garante a pasta correta de fotos do app.
+    if (jaOnline) {
+      await pararServidor();
+      await Future<void>.delayed(const Duration(milliseconds: 800));
     }
 
     try {
@@ -193,10 +203,10 @@ class LanSyncServerManager {
           return null;
         }
       }
-      return 'Servidor iniciado, mas ainda nao respondeu na porta $porta. '
+      return 'Hub mobile iniciado, mas ainda nao respondeu na porta $porta. '
           'Verifique o firewall do Windows.';
     } catch (e) {
-      return 'Nao foi possivel iniciar o servidor: $e';
+      return 'Nao foi possivel iniciar o hub mobile: $e';
     }
   }
 

@@ -18,6 +18,7 @@ import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_nome_titulo_normalizer.dart';
 import '../services/gerenciador_estoque_service.dart';
 import '../services/produto_imagem_service.dart';
+import 'lote_produto_repository.dart';
 import 'movimento_estoque_repository.dart';
 import 'produto_busca_sinonimos.dart';
 import 'produto_busca_util.dart';
@@ -168,12 +169,15 @@ class ProdutoRepository extends ChangeNotifier {
     int offset = 0,
     int limit = 50,
     bool somenteAtivos = true,
+    bool somenteInativos = false,
   }) {
     _migrarCampoAtivoLegadoUmaVez();
     if (limit <= 0) return const [];
-    final qb = somenteAtivos
-        ? _db.produtoBox.query(Produto_.ativo.equals(true))
-        : _db.produtoBox.query();
+    final qb = somenteInativos
+        ? _db.produtoBox.query(Produto_.ativo.equals(false))
+        : somenteAtivos
+            ? _db.produtoBox.query(Produto_.ativo.equals(true))
+            : _db.produtoBox.query();
     final query = qb.order(Produto_.nome).build();
     try {
       query.offset = offset < 0 ? 0 : offset;
@@ -1221,7 +1225,11 @@ class ProdutoRepository extends ChangeNotifier {
           throw StateError('Produto id ${produto.id} nao encontrado.');
         }
         final novoEstoque = produto.estoqueReal;
+        final precosMudaram = _precosComerciaisDiferentes(existente, produto);
         _copiarCamposCadastro(existente, produto);
+        if (precosMudaram) {
+          existente.precoAlteradoEm = DateTime.now().toUtc();
+        }
         final estoqueMudou = novoEstoque != existente.estoqueReal;
         if (!estoqueMudou) {
           existente.estoqueAtual = existente.estoqueReal;
@@ -1242,6 +1250,7 @@ class ProdutoRepository extends ChangeNotifier {
       final estoqueInicial = produto.estoqueReal;
       produto.estoqueReal = 0;
       produto.estoqueAtual = 0;
+      produto.precoAlteradoEm ??= DateTime.now().toUtc();
       final novoId = _db.produtoBox.put(produto);
       produto.id = novoId;
       if (estoqueInicial > 0) {
@@ -1257,6 +1266,12 @@ class ProdutoRepository extends ChangeNotifier {
     if (_importacaoEmLoteDepth <= 0) {
       invalidarCacheBusca();
       notificarAlteracaoParaRede(entidade: 'produto', entidadeId: id);
+    }
+    if (produto.controlaLoteValidade && id > 0) {
+      final p = _db.produtoBox.get(id);
+      if (p != null) {
+        LoteProdutoRepository(_db).garantirMigracaoSemLote(p);
+      }
     }
     return id;
   }
@@ -1285,7 +1300,8 @@ class ProdutoRepository extends ChangeNotifier {
     destino.icmsOrigem = origem.icmsOrigem;
     destino.icmsSituacaoTributaria = origem.icmsSituacaoTributaria;
     destino.pisCofinsSituacaoTributaria = origem.pisCofinsSituacaoTributaria;
-    destino.estoqueReservado = origem.estoqueReservado;
+    // estoqueReservado / estoqueReal / estoqueVersao: nao copiar do formulario —
+    // reserva e fisico so mudam pelo GerenciadorEstoqueService.
     destino.leadTimeDias = origem.leadTimeDias;
     destino.vendaMediaDiaria = origem.vendaMediaDiaria;
     destino.estoqueSeguranca = origem.estoqueSeguranca;
@@ -1304,8 +1320,20 @@ class ProdutoRepository extends ChangeNotifier {
     destino.embalagemMultiplica = origem.embalagemMultiplica;
     destino.permiteQuantidadeFracionada = origem.permiteQuantidadeFracionada;
     destino.ultimaVendaEm = origem.ultimaVendaEm;
+    // precoAlteradoEm: controlado em [salvar] quando precos mudam.
     destino.criadoEm = origem.criadoEm;
     destino.ativo = origem.ativo;
+    destino.controlaLoteValidade = origem.controlaLoteValidade;
+    destino.percentualBotaFora = origem.percentualBotaFora;
+  }
+
+  static bool _precosComerciaisDiferentes(Produto a, Produto b) {
+    bool dif(double x, double y) => (x - y).abs() > 0.0001;
+    return dif(a.preco1, b.preco1) ||
+        dif(a.preco2, b.preco2) ||
+        dif(a.preco3, b.preco3) ||
+        dif(a.precoVenda, b.precoVenda) ||
+        dif(a.precoCusto, b.precoCusto);
   }
 
   /// Remove zeros a esquerda de SKUs numericos legados (ex.: 008858 -> 8858).
@@ -1849,6 +1877,8 @@ class ProdutoRepository extends ChangeNotifier {
     required int novaQuantidadeFisica,
     required String motivo,
     String usuarioLogin = '',
+    String numeroLote = '',
+    DateTime? dataValidade,
   }) {
     _db.store.runInTransaction(TxMode.write, () {
       final produto = _db.produtoBox.get(produtoId);
@@ -1860,10 +1890,16 @@ class ProdutoRepository extends ChangeNotifier {
         novaQuantidadeFisica,
         motivo,
         usuarioLogin: usuarioLogin,
+        numeroLote: numeroLote,
+        dataValidade: dataValidade,
       );
+      if (produto.controlaLoteValidade) {
+        LoteProdutoRepository(_db).garantirMigracaoSemLote(produto);
+      }
     });
     invalidarCacheBusca();
     notificarAlteracaoParaRede(entidade: 'produto', entidadeId: produtoId);
+    notificarAlteracaoParaRede(entidade: 'lote_produto', entidadeId: 0);
   }
 
   /// Media ponderada das entradas de NF-e; null se nao houver historico valido.
@@ -1958,12 +1994,18 @@ class ProdutoRepository extends ChangeNotifier {
       doc.produto.estoqueReal = fresh.estoqueReal;
       doc.produto.estoqueReservado = fresh.estoqueReservado;
       doc.produto.estoqueAtual = fresh.estoqueAtual;
+      doc.produto.preco1 = fresh.preco1;
+      doc.produto.preco2 = fresh.preco2;
+      doc.produto.preco3 = fresh.preco3;
+      doc.produto.precoVenda = fresh.precoVenda;
+      doc.produto.precoCusto = fresh.precoCusto;
+      doc.produto.nome = fresh.nome;
+      doc.produto.ativo = fresh.ativo;
     }
   }
 
   /// Apos venda/entrega: estoque e historico mudaram, mas o catalogo de busca
-  /// (nomes, barras, etc.) continua valido. Evita wipe + [notifyListeners]
-  /// a cada escrita — o gargalo do PDV com catalogo grande.
+  /// (nomes, barras, etc.) continua valido. Atualiza docs em memoria e avisa a UI.
   void atualizarCacheAposMovimentoEstoque() {
     _sincronizarEstoqueNosDocsCache();
     // Força recálculo lazy dos scores de historico na proxima busca.
@@ -1971,6 +2013,7 @@ class ProdutoRepository extends ChangeNotifier {
     _cacheVendaCount = -1;
     _cacheScoreHistorico = const {};
     _cacheScoreCliente.clear();
+    notifyListeners();
   }
 
   /// Chamado apos operacoes que alteram cadastro/estrutura do catalogo

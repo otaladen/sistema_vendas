@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../data/usuario_repository.dart';
 import '../domain/auditoria_catalogo.dart';
 import '../model/usuario_sistema.dart';
 import '../services/auditoria_registrar.dart';
@@ -12,10 +11,15 @@ class LoginPage extends StatefulWidget {
     super.key,
     required this.usuarioRepository,
     required this.onLoginSuccess,
+    this.terminalRemoto = false,
   });
 
-  final UsuarioRepository usuarioRepository;
+  /// [UsuarioRepository] (servidor) ou [UsuarioApiRepository] (terminal).
+  final dynamic usuarioRepository;
   final ValueChanged<UsuarioSistema> onLoginSuccess;
+
+  /// Terminal leve: autentica no PC servidor; nao cria admin local.
+  final bool terminalRemoto;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -60,15 +64,39 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _inicializar() async {
-    final usuarios = await widget.usuarioRepository.listarTodos();
-    if (!mounted) return;
-    setState(() {
-      _primeiroAcesso = usuarios.isEmpty;
-      _carregando = false;
-    });
+    try {
+      final usuarios = await widget.usuarioRepository.listarTodos() as List;
+      if (!mounted) return;
+      setState(() {
+        // Terminal: nunca cria admin local — so o PC servidor cadastra usuarios.
+        _primeiroAcesso = !widget.terminalRemoto && usuarios.isEmpty;
+        if (widget.terminalRemoto && usuarios.isEmpty) {
+          _erro =
+              'Nenhum usuario no PC servidor. Cadastre o administrador no PC 1 '
+              'e tente de novo.';
+        }
+        _carregando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _primeiroAcesso = false;
+        _carregando = false;
+        _erro = widget.terminalRemoto
+            ? 'Nao foi possivel consultar usuarios no servidor: $e'
+            : '$e';
+      });
+    }
   }
 
   Future<void> _criarAdministrador() async {
+    if (widget.terminalRemoto) {
+      setState(() {
+        _erro =
+            'No terminal, use o usuario/senha cadastrados no PC servidor.';
+      });
+      return;
+    }
     if (_autenticando) return;
     final nome = _nomeController.text.trim();
     final login = _loginController.text.trim();
@@ -104,6 +132,7 @@ class _LoginPageState extends State<LoginPage> {
         perfil: 'dono',
         podeCadastros: true,
         podeEstoque: true,
+        podeFiscal: true,
         podeVendas: true,
         podeCaixa: true,
         podeAcessarPdv: true,
@@ -185,6 +214,9 @@ class _LoginPageState extends State<LoginPage> {
       }
       if (!mounted) return;
       widget.onLoginSuccess(usuario);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _erro = '$e');
     } finally {
       if (mounted) {
         setState(() {
@@ -328,7 +360,9 @@ class _LoginPageState extends State<LoginPage> {
                                       Text(
                                         _primeiroAcesso
                                             ? 'Cadastre o administrador inicial com acesso total.'
-                                            : 'Informe usuario e senha para entrar no sistema.',
+                                            : widget.terminalRemoto
+                                                ? 'Use usuario e senha cadastrados no PC servidor.'
+                                                : 'Informe usuario e senha para entrar no sistema.',
                                         style: Theme.of(context).textTheme.bodyMedium,
                                       ),
                                       const SizedBox(height: 18),

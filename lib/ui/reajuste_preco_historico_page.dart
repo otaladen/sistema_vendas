@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../data/reajuste_preco_repository.dart';
-import '../data/usuario_repository.dart';
+import '../data/api/reajuste_preco_api_repository.dart';
 import '../model/reajuste_preco.dart';
 import '../model/usuario_sistema.dart';
 import 'reajuste_preco_autorizacao.dart';
+import 'widgets/lan_api_feedback.dart';
 
 final _dataFmt = DateFormat('dd/MM/yyyy HH:mm', 'pt_BR');
 final _moeda = NumberFormat('#,##0.00', 'pt_BR');
@@ -18,8 +18,9 @@ class ReajustePrecoHistoricoPage extends StatefulWidget {
     required this.usuarioLogado,
   });
 
-  final ReajustePrecoRepository reajusteRepository;
-  final UsuarioRepository usuarioRepository;
+  final dynamic reajusteRepository;
+  /// [UsuarioRepository] no PC1 ou [UsuarioApiRepository] no Terminal Leve.
+  final dynamic usuarioRepository;
   final UsuarioSistema usuarioLogado;
 
   @override
@@ -29,6 +30,8 @@ class ReajustePrecoHistoricoPage extends StatefulWidget {
 
 class _ReajustePrecoHistoricoPageState extends State<ReajustePrecoHistoricoPage> {
   List<ReajustePreco> _lista = [];
+  bool _carregando = true;
+  String? _erro;
 
   @override
   void initState() {
@@ -36,10 +39,31 @@ class _ReajustePrecoHistoricoPageState extends State<ReajustePrecoHistoricoPage>
     _carregar();
   }
 
-  void _carregar() {
+  Future<void> _carregar() async {
     setState(() {
-      _lista = widget.reajusteRepository.listarHistorico();
+      _carregando = true;
+      _erro = null;
     });
+    try {
+      final repo = widget.reajusteRepository;
+      if (repo is ReajustePrecoApiRepository) {
+        await repo.hidratarHistorico();
+      }
+      if (!mounted) return;
+      setState(() {
+        _lista = List<ReajustePreco>.from(
+          repo.listarHistorico() as List,
+        );
+        _carregando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _carregando = false;
+        _erro = LanApiFeedback.mensagem(e, fallback: '$e');
+        _lista = const [];
+      });
+    }
   }
 
   String _rotuloRegra(ReajustePreco r) {
@@ -74,23 +98,45 @@ class _ReajustePrecoHistoricoPageState extends State<ReajustePrecoHistoricoPage>
     );
     if (ok != true || !mounted) return;
 
-    final resultado = widget.reajusteRepository.estornar(
-      reajusteId: r.id,
-      usuario: widget.usuarioLogado,
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '${resultado.produtosGravados} produto(s) com precos restaurados.',
+    try {
+      final repo = widget.reajusteRepository;
+      if (repo is ReajustePrecoApiRepository) {
+        await repo.hidratarItensDoReajuste(r.id);
+      }
+      final resultadoRaw = repo.estornar(
+        reajusteId: r.id,
+        usuario: widget.usuarioLogado,
+      );
+      final resultado =
+          resultadoRaw is Future ? await resultadoRaw : resultadoRaw;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${resultado.produtosGravados} produto(s) com precos restaurados.',
+          ),
         ),
-      ),
-    );
-    _carregar();
+      );
+      await _carregar();
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(context, e, prefixo: 'Estorno');
+    }
   }
 
-  void _verDetalhe(ReajustePreco r) {
-    final itens = widget.reajusteRepository.listarItensDoReajuste(r.id);
+  Future<void> _verDetalhe(ReajustePreco r) async {
+    final repo = widget.reajusteRepository;
+    if (repo is ReajustePrecoApiRepository) {
+      try {
+        await repo.hidratarItensDoReajuste(r.id);
+      } catch (e) {
+        if (!mounted) return;
+        LanApiFeedback.snackErro(context, e, prefixo: 'Detalhe');
+        return;
+      }
+    }
+    final itens = repo.listarItensDoReajuste(r.id) as List;
+    if (!mounted) return;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -115,25 +161,38 @@ class _ReajustePrecoHistoricoPageState extends State<ReajustePrecoHistoricoPage>
                     style: Theme.of(ctx).textTheme.bodySmall,
                   ),
                   if (r.motivo.isNotEmpty)
-                    Text('Motivo: ${r.motivo}', style: Theme.of(ctx).textTheme.bodySmall),
-                  Text(_rotuloRegra(r), style: Theme.of(ctx).textTheme.bodySmall),
+                    Text(
+                      'Motivo: ${r.motivo}',
+                      style: Theme.of(ctx).textTheme.bodySmall,
+                    ),
+                  Text(
+                    _rotuloRegra(r),
+                    style: Theme.of(ctx).textTheme.bodySmall,
+                  ),
                   const SizedBox(height: 8),
                   Expanded(
-                    child: ListView.builder(
-                      controller: scroll,
-                      itemCount: itens.length,
-                      itemBuilder: (_, i) {
-                        final item = itens[i];
-                        return ListTile(
-                          dense: true,
-                          title: Text(item.nome, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: Text(
-                            'SKU ${item.codigoInterno} · '
-                            'P1 ${_moeda.format(item.preco1Antes)} → ${_moeda.format(item.preco1Depois)}',
+                    child: itens.isEmpty
+                        ? const Center(child: Text('Sem itens neste reajuste.'))
+                        : ListView.builder(
+                            controller: scroll,
+                            itemCount: itens.length,
+                            itemBuilder: (_, i) {
+                              final item = itens[i];
+                              return ListTile(
+                                dense: true,
+                                title: Text(
+                                  item.nome as String,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  'SKU ${item.codigoInterno} · '
+                                  'P1 ${_moeda.format(item.preco1Antes)} → '
+                                  '${_moeda.format(item.preco1Depois)}',
+                                ),
+                              );
+                            },
                           ),
-                        );
-                      },
-                    ),
                   ),
                 ],
               ),
@@ -150,55 +209,89 @@ class _ReajustePrecoHistoricoPageState extends State<ReajustePrecoHistoricoPage>
         usuarioPodeReajustePrecoLote(widget.usuarioLogado);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Historico de reajustes')),
-      body: _lista.isEmpty
-          ? const Center(child: Text('Nenhum reajuste registrado ainda.'))
-          : ListView.separated(
-              padding: const EdgeInsets.all(12),
-              itemCount: _lista.length,
-              separatorBuilder: (_, index) => const SizedBox(height: 6),
-              itemBuilder: (context, index) {
-                final r = _lista[index];
-                final estornado = r.estornado;
-                return Card(
-                  child: ListTile(
-                    title: Text(
-                      '#${r.id} · ${r.totalAlterados} produto(s)',
-                      style: TextStyle(
-                        decoration: estornado ? TextDecoration.lineThrough : null,
-                      ),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+      appBar: AppBar(
+        title: const Text('Historico de reajustes'),
+        actions: [
+          IconButton(
+            tooltip: 'Atualizar',
+            onPressed: _carregando ? null : _carregar,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: _carregando
+          ? const Center(child: CircularProgressIndicator())
+          : _erro != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(_dataFmt.format(r.criadoEm.toLocal())),
-                        Text('${_rotuloRegra(r)} · ${r.usuarioLogin}'),
-                        if (r.motivo.isNotEmpty) Text(r.motivo),
-                        if (estornado)
-                          Text(
-                            'Estornado em ${_dataFmt.format(r.estornadoEm!.toLocal())} '
-                            'por ${r.estornadoPorLogin}',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
+                        Text(_erro!, textAlign: TextAlign.center),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: _carregar,
+                          child: const Text('Tentar de novo'),
+                        ),
                       ],
                     ),
-                    isThreeLine: true,
-                    trailing: estornado
-                        ? const Chip(label: Text('Estornado'))
-                        : podeEstornar
-                            ? IconButton(
-                                tooltip: 'Estornar',
-                                icon: const Icon(Icons.undo),
-                                onPressed: () => _estornar(r),
-                              )
-                            : null,
-                    onTap: () => _verDetalhe(r),
                   ),
-                );
-              },
-            ),
+                )
+              : _lista.isEmpty
+                  ? const Center(
+                      child: Text('Nenhum reajuste registrado ainda.'),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(12),
+                      itemCount: _lista.length,
+                      separatorBuilder: (_, index) => const SizedBox(height: 6),
+                      itemBuilder: (context, index) {
+                        final r = _lista[index];
+                        final estornado = r.estornado;
+                        return Card(
+                          child: ListTile(
+                            title: Text(
+                              '#${r.id} · ${r.totalAlterados} produto(s)',
+                              style: TextStyle(
+                                decoration: estornado
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                              ),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(_dataFmt.format(r.criadoEm.toLocal())),
+                                Text('${_rotuloRegra(r)} · ${r.usuarioLogin}'),
+                                if (r.motivo.isNotEmpty) Text(r.motivo),
+                                if (estornado && r.estornadoEm != null)
+                                  Text(
+                                    'Estornado em '
+                                    '${_dataFmt.format(r.estornadoEm!.toLocal())} '
+                                    'por ${r.estornadoPorLogin}',
+                                    style: TextStyle(
+                                      color:
+                                          Theme.of(context).colorScheme.error,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            isThreeLine: true,
+                            trailing: estornado
+                                ? const Chip(label: Text('Estornado'))
+                                : podeEstornar
+                                    ? IconButton(
+                                        tooltip: 'Estornar',
+                                        icon: const Icon(Icons.undo),
+                                        onPressed: () => _estornar(r),
+                                      )
+                                    : null,
+                            onTap: () => _verDetalhe(r),
+                          ),
+                        );
+                      },
+                    ),
     );
   }
 }

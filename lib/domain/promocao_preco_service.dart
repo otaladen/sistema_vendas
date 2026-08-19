@@ -1,16 +1,18 @@
-import '../data/promocao_repository.dart';
 import '../model/produto.dart';
 import '../model/promocao.dart';
+import '../model/promocao_combo_item.dart';
 import '../model/promocao_item.dart';
 import 'promocao_cadastro.dart';
 import 'promocao_info_vigente.dart';
 import 'promocao_preco_result.dart';
 
 /// Resolve preco promocional (base % sempre em [Produto.preco1]).
+///
+/// Aceita [PromocaoRepository] ou [PromocaoApiRepository] (duck typing).
 class PromocaoPrecoService {
   PromocaoPrecoService(this._repo);
 
-  final PromocaoRepository _repo;
+  final dynamic _repo;
 
   static double preco1Base(Produto produto) {
     return produto.preco1 > 0 ? produto.preco1 : produto.precoVenda;
@@ -41,10 +43,10 @@ class PromocaoPrecoService {
       }
       final tipo = PromocaoCadastro.normalizarTipoCampanha(promo.tipoCampanha);
       if (tipo == PromocaoCadastro.tipoComboAb) {
-        promo.comboItens.length;
-        if (promo.comboItens.isEmpty) continue;
+        final combo = _comboDe(promo);
+        if (combo.isEmpty) continue;
         final nomes = <String>[];
-        for (final c in promo.comboItens) {
+        for (final c in combo) {
           nomes.add('SKU#${c.produtoAlvoId} x${c.quantidade}');
         }
         out.add(
@@ -191,9 +193,8 @@ class PromocaoPrecoService {
   }
 
   PromocaoItem? _itemQueCasa(Promocao promo, Produto produto, int quantidade) {
-    promo.itens.length;
     PromocaoItem? fallback;
-    for (final item in promo.itens) {
+    for (final item in _itensDe(promo)) {
       if (quantidade < item.quantidadeMinima) continue;
       if (item.produtoAlvoId > 0) {
         if (item.produtoAlvoId == produto.id) return item;
@@ -212,6 +213,37 @@ class PromocaoPrecoService {
       return item;
     }
     return fallback;
+  }
+
+  /// Itens sem depender de Backlink ObjectBox (terminal leve).
+  List<PromocaoItem> _itensDe(Promocao promo) {
+    try {
+      final r = _repo.itensDaPromocao(promo);
+      if (r is List<PromocaoItem>) return r;
+      if (r is Iterable) {
+        return r.whereType<PromocaoItem>().toList(growable: false);
+      }
+    } catch (_) {}
+    try {
+      return List<PromocaoItem>.from(promo.itens);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  List<PromocaoComboItem> _comboDe(Promocao promo) {
+    try {
+      final r = _repo.comboItensDaPromocao(promo);
+      if (r is List<PromocaoComboItem>) return r;
+      if (r is Iterable) {
+        return r.whereType<PromocaoComboItem>().toList(growable: false);
+      }
+    } catch (_) {}
+    try {
+      return List<PromocaoComboItem>.from(promo.comboItens);
+    } catch (_) {
+      return const [];
+    }
   }
 
   static double calcularPrecoRegra({

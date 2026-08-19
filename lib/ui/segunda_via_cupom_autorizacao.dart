@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../data/usuario_repository.dart';
 import '../domain/usuario_permissao_helper.dart';
 
 /// Credenciais informadas no dialogo de autorizacao.
@@ -15,7 +14,7 @@ class CredenciaisSegundaVia {
 /// ativo (admin tambem pode, pois tem controle total no cadastro).
 Future<bool> solicitarSenhaAutorizacaoSegundaViaCupom(
   BuildContext context,
-  UsuarioRepository usuarioRepository,
+  dynamic usuarioRepository,
 ) async {
   final credenciais = await showDialog<CredenciaisSegundaVia>(
     context: context,
@@ -62,7 +61,7 @@ Future<bool> solicitarSenhaAutorizacaoSegundaViaCupom(
 /// Respeita [exigirAutorizacao] das configuracoes do Caixa.
 Future<bool> autorizarSegundaViaCupomSeConfigurado({
   required BuildContext context,
-  required UsuarioRepository usuarioRepository,
+  required dynamic usuarioRepository,
   required bool exigirAutorizacao,
 }) {
   if (!exigirAutorizacao) return Future.value(true);

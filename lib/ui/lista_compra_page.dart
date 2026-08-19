@@ -2,14 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../data/lista_compra_repository.dart';
-import '../data/produto_repository.dart';
+import '../data/api/lista_compra_api_repository.dart';
+import '../data/api/lan_api_client.dart';
 import '../data/sugestao_compra_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../domain/lista_compra_item_constantes.dart';
+import '../domain/produto_embalagem.dart';
 import '../model/item_lista_compra.dart';
 import '../model/usuario_sistema.dart';
 import '../services/lista_compra_export_service.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
+import 'widgets/lan_api_feedback.dart';
+import 'shell/main_menu_deps.dart';
 
 /// Lista de compras: anotacoes manuais, sugestoes do sistema e exportacao.
 class ListaCompraPage extends StatefulWidget {
@@ -17,10 +21,12 @@ class ListaCompraPage extends StatefulWidget {
     super.key,
     required this.produtoRepository,
     this.usuarioLogado,
+    this.listaCompraRepository,
   });
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
   final UsuarioSistema? usuarioLogado;
+  final dynamic listaCompraRepository;
 
   @override
   State<ListaCompraPage> createState() => _ListaCompraPageState();
@@ -28,7 +34,7 @@ class ListaCompraPage extends StatefulWidget {
 
 class _ListaCompraPageState extends State<ListaCompraPage>
     with SafeSyncRefreshMixin, SingleTickerProviderStateMixin {
-  late final ListaCompraRepository _repo;
+  late final dynamic _repo;
   late final ListaCompraExportService _export;
   late final TabController _tabController;
 
@@ -43,10 +49,38 @@ class _ListaCompraPageState extends State<ListaCompraPage>
   @override
   void initState() {
     super.initState();
-    _repo = ListaCompraRepository(widget.produtoRepository.objectBox);
+    _repo = widget.listaCompraRepository ?? _criarRepositorio();
     _export = ListaCompraExportService(_repo);
     _tabController = TabController(length: 2, vsync: this);
     initSafeSyncRefresh(onReload: _recarregar);
+    _carregarInicial();
+  }
+
+  dynamic _criarRepositorio() {
+    try {
+      return ListaCompraRepository(widget.produtoRepository.objectBox);
+    } catch (_) {
+      final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+      if (client == null) {
+        throw StateError('Lista de compras requer conexao com o PC servidor.');
+      }
+      return ListaCompraApiRepository(
+        client,
+        produtoRepository: widget.produtoRepository,
+      );
+    }
+  }
+
+  Future<void> _carregarInicial() async {
+    if (_repo is ListaCompraApiRepository) {
+      try {
+        await _repo.hidratar();
+      } on LanApiException catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackAviso(context, e, prefixo: 'Lista de compras');
+        }
+      }
+    }
     _recarregar();
   }
 
@@ -78,11 +112,12 @@ class _ListaCompraPageState extends State<ListaCompraPage>
   List<ItemListaCompra> get _itensFiltrados {
     switch (_filtroStatus) {
       case 'urgente':
-        return _itens.where(
-          (i) =>
-              i.ativo &&
-              i.prioridade == ListaCompraItemPrioridade.urgente,
-        ).toList();
+        return _itens
+            .where(
+              (i) =>
+                  i.ativo && i.prioridade == ListaCompraItemPrioridade.urgente,
+            )
+            .toList();
       case 'recebidos':
         return _itens
             .where((i) => i.status == ListaCompraItemStatus.recebido)
@@ -100,10 +135,7 @@ class _ListaCompraPageState extends State<ListaCompraPage>
   }
 
   Future<void> _aceitarSugestao(LinhaSugestaoCompra linha) async {
-    _repo.aceitarSugestaoSistema(
-      linha: linha,
-      criadoPor: _criadoPor,
-    );
+    _repo.aceitarSugestaoSistema(linha: linha, criadoPor: _criadoPor);
     _recarregar();
   }
 
@@ -176,9 +208,9 @@ class _ListaCompraPageState extends State<ListaCompraPage>
       _repo.remover(item.id);
       _recarregar();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('"$nome" removido do historico.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('"$nome" removido do historico.')));
     }
   }
 
@@ -216,8 +248,9 @@ class _ListaCompraPageState extends State<ListaCompraPage>
 
   Future<void> _abrirManutencaoHistorico() async {
     final qtdRecebidos = _repo.contarPorStatus(ListaCompraItemStatus.recebido);
-    final qtdCancelados =
-        _repo.contarPorStatus(ListaCompraItemStatus.cancelado);
+    final qtdCancelados = _repo.contarPorStatus(
+      ListaCompraItemStatus.cancelado,
+    );
     final qtdAntigos = _repo.contarParaLimpeza(maisAntigosQueDias: 30);
 
     final acao = await showDialog<String>(
@@ -294,8 +327,7 @@ class _ListaCompraPageState extends State<ListaCompraPage>
         dias = null;
       case 'cancelados':
         titulo = 'Apagar cancelados';
-        corpo =
-            'Excluir permanentemente $qtdCancelados item(ns) cancelado(s)?';
+        corpo = 'Excluir permanentemente $qtdCancelados item(ns) cancelado(s)?';
         statuses = {ListaCompraItemStatus.cancelado};
         dias = null;
       case 'antigos30':
@@ -377,8 +409,8 @@ class _ListaCompraPageState extends State<ListaCompraPage>
                   child: Text(
                     'Pedidos por fornecedor',
                     style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 Expanded(
@@ -400,8 +432,9 @@ class _ListaCompraPageState extends State<ListaCompraPage>
                           ),
                           trailing: PopupMenuButton<String>(
                             onSelected: (v) async {
-                              final texto =
-                                  _export.montarTextoPedidoFornecedor(g);
+                              final texto = _export.montarTextoPedidoFornecedor(
+                                g,
+                              );
                               if (v == 'whatsapp') {
                                 await _export.compartilharWhatsApp(texto);
                               } else if (v == 'pdf') {
@@ -423,8 +456,9 @@ class _ListaCompraPageState extends State<ListaCompraPage>
                             ],
                           ),
                           onTap: () async {
-                            final texto =
-                                _export.montarTextoPedidoFornecedor(g);
+                            final texto = _export.montarTextoPedidoFornecedor(
+                              g,
+                            );
                             await showDialog<void>(
                               context: ctx,
                               builder: (dCtx) => AlertDialog(
@@ -465,18 +499,18 @@ class _ListaCompraPageState extends State<ListaCompraPage>
   Future<void> _exportarCsv() async {
     final path = await _export.exportarCsv(itens: _itensFiltrados);
     if (!mounted || path == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('CSV salvo em: $path')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('CSV salvo em: $path')));
   }
 
   Future<void> _exportarPdf() async {
     final path = await _export.salvarPdfEmArquivo(itens: _itensFiltrados);
     if (!mounted) return;
     if (path != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('PDF salvo em: $path')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('PDF salvo em: $path')));
     }
   }
 
@@ -512,9 +546,14 @@ class _ListaCompraPageState extends State<ListaCompraPage>
         final item = itens[i];
         final prod = _repo.produtoDe(item);
         final nome = item.nomeExibicao(prod);
-        final urgente =
-            item.prioridade == ListaCompraItemPrioridade.urgente;
-        final estoque = prod?.estoqueAtual;
+        final urgente = item.prioridade == ListaCompraItemPrioridade.urgente;
+        final estoqueTxt = prod == null
+            ? null
+            : ProdutoEmbalagem.formatarEstoque(
+                prod,
+                prod.estoqueReal,
+                comUnidade: true,
+              );
         return Card(
           child: ListTile(
             isThreeLine: true,
@@ -540,7 +579,7 @@ class _ListaCompraPageState extends State<ListaCompraPage>
                   '${item.quantidadePendenteRecebimento} ${item.unidade}'
                   '${item.quantidadeRecebida > 0 ? ' (rec. ${item.quantidadeRecebida})' : ''}'
                   ' · ${ListaCompraItemStatus.rotulo(item.status)}'
-                  '${estoque != null ? ' · est. $estoque' : ''}',
+                  '${estoqueTxt != null ? ' · est. $estoqueTxt' : ''}',
                 ),
                 if (item.fornecedorTexto.trim().isNotEmpty)
                   Text('Fornecedor: ${item.fornecedorTexto.trim()}'),
@@ -657,16 +696,17 @@ class _ListaCompraPageState extends State<ListaCompraPage>
               final p = l.produto;
               return Card(
                 color: l.estoqueCritico
-                    ? Theme.of(context)
-                        .colorScheme
-                        .errorContainer
-                        .withValues(alpha: 0.35)
+                    ? Theme.of(
+                        context,
+                      ).colorScheme.errorContainer.withValues(alpha: 0.35)
                     : null,
                 child: ListTile(
                   title: Text(p.nome),
                   subtitle: Text(
-                    'Sugerido: ${l.quantidadeSugerida} ${p.unidade} · '
-                    'Estoque: ${p.estoqueAtual} · PP: ${l.pontoPedido.toStringAsFixed(0)}'
+                    'Sugerido: ${l.quantidadeSugerida} ${ProdutoEmbalagem.normalizarUnidade(p.unidade)} · '
+                    'Estoque: ${ProdutoEmbalagem.formatarEstoque(p, p.estoqueReal, comUnidade: true)} · '
+                    'PP: ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(p, l.pontoPedido)} '
+                    '${ProdutoEmbalagem.normalizarUnidade(p.unidade)}'
                     '${l.estoqueCritico ? ' · CRITICO' : ''}',
                   ),
                   trailing: Row(
@@ -770,8 +810,7 @@ class _ListaCompraPageState extends State<ListaCompraPage>
               leading: const Icon(Icons.warning_amber_outlined),
               actions: [
                 TextButton(
-                  onPressed: () =>
-                      setState(() => _filtroStatus = 'urgente'),
+                  onPressed: () => setState(() => _filtroStatus = 'urgente'),
                   child: const Text('Ver'),
                 ),
               ],
@@ -793,10 +832,7 @@ class _ListaCompraPageState extends State<ListaCompraPage>
           Expanded(
             child: TabBarView(
               controller: _tabController,
-              children: [
-                _buildListaItens(),
-                _buildSugestoes(),
-              ],
+              children: [_buildListaItens(), _buildSugestoes()],
             ),
           ),
         ],

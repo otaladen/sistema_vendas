@@ -13,7 +13,7 @@ class ListagemVendasCabecalho extends StatelessWidget {
   final int totalRegistros;
   final int exibidos;
   final double valorTotalExibido;
-  final VoidCallback onAtualizar;
+  final VoidCallback? onAtualizar;
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +56,7 @@ class ListagemVendasCabecalho extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         _KpiTile(
-          rotulo: 'Total exibido',
+          rotulo: 'Total do filtro',
           valor: moeda.format(valorTotalExibido),
           icone: Icons.payments_outlined,
           destaque: true,

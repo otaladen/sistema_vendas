@@ -1,17 +1,21 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
 
+import 'package:flutter/material.dart';
+
+import '../../data/api/auditoria_api_repository.dart';
+import '../../data/api/sugestao_venda_metrica_api_repository.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../data/app_config_repository.dart';
+import '../../data/conta_pagar_repository.dart';
+import '../../data/objectbox.dart';
 import '../../data/auditoria_repository.dart';
-import '../../data/cliente_repository.dart';
-import '../../data/produto_repository.dart';
-import '../../data/venda_repository.dart';
-import '../../data/vendedor_repository.dart';
 import '../../data/sugestao_venda_metrica_repository.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../model/usuario_sistema.dart';
 import '../financeiro/relatorio_contas_pagar_page.dart';
 import '../relatorio_fiados_page.dart';
+import '../shell/main_menu_deps.dart';
 import '../widgets/hub_nav_button.dart';
 import '../widgets/relatorios/relatorio_hub_secao.dart';
 import 'relatorio_comissao_vendedores_page.dart';
@@ -37,6 +41,10 @@ import '../../data/promocao_repository.dart';
 import 'relatorio_top_clientes_page.dart';
 import 'relatorio_vendas_periodo_page.dart';
 import 'relatorio_vendas_por_vendedor_page.dart';
+import 'relatorio_margem_markup_page.dart';
+import 'relatorio_performance_entregas_page.dart';
+import '../fiscal/relatorio_fiscal_mensal_page.dart';
+import '../sugestao_compra_page.dart';
 
 /// Item do hub de relatorios (categoria + metadados para busca).
 class _RelatorioHubItem {
@@ -79,10 +87,10 @@ class RelatoriosPage extends StatefulWidget {
     this.onAbrirModuloCaixa,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
-  final VendedorRepository vendedorRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
+  final dynamic vendedorRepository;
+  final dynamic produtoRepository;
   final AppConfigRepository appConfigRepository;
   final UsuarioSistema usuarioLogado;
   final bool usuarioAdmin;
@@ -106,6 +114,63 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
     'produtos',
     'operacional',
   ];
+
+  /// No terminal leve os relatorios trabalham sobre uma janela baixada da API.
+  static const _mesesJanelaTerminal = 13;
+  bool _carregandoJanela = false;
+  String _erroJanela = '';
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.vendaRepository is VendaApiRepository) {
+      unawaited(_carregarJanelaTerminal());
+    }
+  }
+
+  Future<void> _carregarJanelaTerminal() async {
+    final repo = widget.vendaRepository as VendaApiRepository;
+    final hoje = DateTime.now();
+    final inicio = DateTime(
+      hoje.year,
+      hoje.month - _mesesJanelaTerminal + 1,
+      1,
+    );
+    setState(() {
+      _carregandoJanela = true;
+      _erroJanela = '';
+    });
+    try {
+      await repo.garantirPeriodoRelatorioCarregado(inicio, hoje);
+      if (!mounted) return;
+      setState(() => _carregandoJanela = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _carregandoJanela = false;
+        _erroJanela = '$e';
+      });
+    }
+  }
+
+  /// Nulo no terminal leve (sem banco local).
+  ObjectBox? get _objectBoxLocal {
+    try {
+      final ob = widget.produtoRepository.objectBox;
+      return ob is ObjectBox ? ob : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _abrirEmMigracao(String titulo) {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => _RelatorioEmMigracaoPage(titulo: titulo),
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -221,14 +286,20 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           'nf-e',
           'financeiro',
         ],
-        onTap: () => Navigator.push<void>(
-          context,
-          MaterialPageRoute<void>(
-            builder: (_) => RelatorioContasPagarPage(
-              objectBox: v.objectBox,
+        onTap: () {
+          final ob = _objectBoxLocal;
+          final repoApi = MainMenuDeps.maybeOf(context)?.contaPagarRepository;
+          Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => RelatorioContasPagarPage(
+                objectBox: ob,
+                contaPagarRepository:
+                    repoApi ?? (ob != null ? ContaPagarRepository(ob) : null),
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
       _RelatorioHubItem(
         categoriaId: 'vendas',
@@ -298,18 +369,27 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           'objetivo',
           'acompanhamento',
         ],
-        onTap: () => Navigator.push<void>(
-          context,
-          MaterialPageRoute<void>(
-            builder: (_) => RelatorioMetasVendedoresPage(
-              vendaRepository: v,
-              vendedorRepository: vd,
-              produtoRepository: p,
-              objectBox: p.objectBox,
-              usuarioLogado: widget.usuarioLogado,
+        onTap: () {
+          final ob = _objectBoxLocal;
+          final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+          if (ob == null && client == null) {
+            _abrirEmMigracao('Metas de vendedores');
+            return;
+          }
+          Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => RelatorioMetasVendedoresPage(
+                vendaRepository: v,
+                vendedorRepository: vd,
+                produtoRepository: p,
+                objectBox: ob,
+                lanApiClient: client,
+                usuarioLogado: widget.usuarioLogado,
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
       _RelatorioHubItem(
         categoriaId: 'vendas',
@@ -442,6 +522,60 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         categoriaId: 'produtos',
         categoriaTitulo: 'Produtos e estoque',
         categoriaIcone: Icons.inventory_2_outlined,
+        icon: Icons.shopping_cart_outlined,
+        relatorioCor: AppRelatorioId.sugestaoCompra,
+        titulo: 'Sugestao de compras',
+        subtitulo:
+            'Ponto de pedido, giro recente e falta ate o minimo / cobertura.',
+        palavrasChave: const [
+          'compra',
+          'reposicao',
+          'ponto de pedido',
+          'giro',
+          'estoque',
+          'minimo',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => SugestaoCompraPage(
+              produtoRepository: p,
+              lanApiClient: MainMenuDeps.maybeOf(context)?.lanApiClient,
+            ),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'produtos',
+        categoriaTitulo: 'Produtos e estoque',
+        categoriaIcone: Icons.inventory_2_outlined,
+        icon: Icons.percent_outlined,
+        relatorioCor: AppRelatorioId.margemMarkup,
+        titulo: 'Margem bruta e markup',
+        subtitulo:
+            'Receita liquida, CMV, margem % e markup por produto e categoria.',
+        palavrasChave: const [
+          'margem',
+          'markup',
+          'lucro',
+          'cmv',
+          'categoria',
+          'preco',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioMargemMarkupPage(
+              vendaRepository: v,
+              produtoRepository: p,
+            ),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'produtos',
+        categoriaTitulo: 'Produtos e estoque',
+        categoriaIcone: Icons.inventory_2_outlined,
         icon: Icons.swap_vert_outlined,
         relatorioCor: AppRelatorioId.movimentacaoEstoque,
         titulo: 'Movimentacao de estoque',
@@ -456,15 +590,24 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           'ajuste',
           'inventario',
         ],
-        onTap: () => Navigator.push<void>(
-          context,
-          MaterialPageRoute<void>(
-            builder: (_) => RelatorioMovimentacaoEstoquePage(
-              produtoRepository: p,
-              objectBox: p.objectBox,
+        onTap: () {
+          final ob = _objectBoxLocal;
+          final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+          if (ob == null && client == null) {
+            _abrirEmMigracao('Movimentacao de estoque');
+            return;
+          }
+          Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => RelatorioMovimentacaoEstoquePage(
+                produtoRepository: p,
+                objectBox: ob,
+                lanApiClient: client,
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
       _RelatorioHubItem(
         categoriaId: 'produtos',
@@ -485,7 +628,10 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         onTap: () => Navigator.push<void>(
           context,
           MaterialPageRoute<void>(
-            builder: (_) => RelatorioDevolucoesPage(vendaRepository: v),
+            builder: (_) => RelatorioDevolucoesPage(
+              vendaRepository: v,
+              clienteRepository: c,
+            ),
           ),
         ),
       ),
@@ -531,7 +677,14 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           'promo',
         ],
         onTap: () {
-          final promoRepo = PromocaoRepository(p.objectBox);
+          final ob = _objectBoxLocal;
+          final promoRepo =
+              MainMenuDeps.maybeOf(context)?.promocaoRepository ??
+              (ob != null ? PromocaoRepository(ob) : null);
+          if (promoRepo == null) {
+            _abrirEmMigracao('Vendas em promocao');
+            return;
+          }
           Navigator.push<void>(
             context,
             MaterialPageRoute<void>(
@@ -561,15 +714,28 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           'ranking',
           'aceite',
         ],
-        onTap: () => Navigator.push<void>(
-          context,
-          MaterialPageRoute<void>(
-            builder: (_) => RelatorioSugestoesVendaPage(
-              metricaRepository: SugestaoVendaMetricaRepository(p.objectBox),
-              produtoRepository: p,
+        onTap: () {
+          final ob = _objectBoxLocal;
+          final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+          dynamic metricaRepo;
+          if (ob != null) {
+            metricaRepo = SugestaoVendaMetricaRepository(ob);
+          } else if (client != null) {
+            metricaRepo = SugestaoVendaMetricaApiRepository(client);
+          } else {
+            _abrirEmMigracao('Sugestoes de venda');
+            return;
+          }
+          Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => RelatorioSugestoesVendaPage(
+                metricaRepository: metricaRepo,
+                produtoRepository: p,
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
       _RelatorioHubItem(
         categoriaId: 'produtos',
@@ -614,12 +780,22 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           'evento',
         ],
         onTap: () {
-          final auditoriaRepo = AuditoriaRepository(p.objectBox);
+          final ob = _objectBoxLocal;
+          final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+          dynamic auditRepo;
+          if (ob != null) {
+            auditRepo = AuditoriaRepository(ob);
+          } else if (client != null) {
+            auditRepo = AuditoriaApiRepository(client);
+          } else {
+            _abrirEmMigracao('Log do sistema');
+            return;
+          }
           Navigator.push<void>(
             context,
             MaterialPageRoute<void>(
               builder: (_) => RelatorioLogSistemaPage(
-                auditoriaRepository: auditoriaRepo,
+                auditoriaRepository: auditRepo,
                 appConfigRepository: widget.appConfigRepository,
                 vendaRepository: widget.vendaRepository,
                 usuarioAdmin: widget.usuarioAdmin,
@@ -637,7 +813,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         relatorioCor: AppRelatorioId.fechamentoHist,
         titulo: 'Historico de fechamento',
         subtitulo:
-            'Fechamentos de caixa gravados na auditoria local; detalhe e exportacao.',
+            'Fechamentos de caixa do PC servidor (API) ou auditoria local neste PC.',
         palavrasChave: const [
           'fechamento',
           'caixa',
@@ -645,12 +821,17 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           'historico',
           'auditoria',
         ],
-        onTap: () => Navigator.push<void>(
-          context,
-          MaterialPageRoute<void>(
-            builder: (_) => const RelatorioHistoricoFechamentoPage(),
-          ),
-        ),
+        onTap: () {
+          final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+          Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => RelatorioHistoricoFechamentoPage(
+                lanApiClient: client,
+              ),
+            ),
+          );
+        },
       ),
       _RelatorioHubItem(
         categoriaId: 'operacional',
@@ -672,7 +853,11 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         onTap: () => Navigator.push<void>(
           context,
           MaterialPageRoute<void>(
-            builder: (_) => RelatorioPendenciasEntregaPage(vendaRepository: v),
+            builder: (_) => RelatorioPendenciasEntregaPage(
+              vendaRepository: v,
+              clienteRepository: c,
+              vendedorRepository: vd,
+            ),
           ),
         ),
       ),
@@ -696,7 +881,10 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
         onTap: () => Navigator.push<void>(
           context,
           MaterialPageRoute<void>(
-            builder: (_) => RelatorioHistoricoEntregasPage(vendaRepository: v),
+            builder: (_) => RelatorioHistoricoEntregasPage(
+              vendaRepository: v,
+              clienteRepository: widget.clienteRepository,
+            ),
           ),
         ),
       ),
@@ -722,8 +910,59 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           MaterialPageRoute<void>(
             builder: (_) => RelatorioEntregasResumoPage(
               vendaRepository: v,
+              clienteRepository: widget.clienteRepository,
               onAbrirModuloEntregas: widget.onAbrirModuloEntregas,
             ),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'operacional',
+        categoriaTitulo: 'Operacional',
+        categoriaIcone: Icons.settings_suggest_outlined,
+        icon: Icons.local_shipping,
+        relatorioCor: AppRelatorioId.performanceEntregas,
+        titulo: 'Performance de entregas',
+        subtitulo:
+            'Taxa de sucesso, insucessos e carga que voltou, por motorista ou veiculo.',
+        palavrasChave: const [
+          'performance',
+          'insucesso',
+          'motorista',
+          'veiculo',
+          'ausente',
+          'carreto',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioPerformanceEntregasPage(
+              vendaRepository: v,
+            ),
+          ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'operacional',
+        categoriaTitulo: 'Operacional',
+        categoriaIcone: Icons.settings_suggest_outlined,
+        icon: Icons.account_balance_outlined,
+        relatorioCor: AppRelatorioId.fiscalMensal,
+        titulo: 'Relatorio fiscal do mes',
+        subtitulo:
+            'Totais de NF-e e NFC-e autorizadas e canceladas para a contabilidade.',
+        palavrasChave: const [
+          'fiscal',
+          'nfe',
+          'nfce',
+          'contabilidade',
+          'fechamento',
+          'mes',
+        ],
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => RelatorioFiscalMensalPage(vendaRepository: v),
           ),
         ),
       ),
@@ -745,6 +984,8 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           u,
           PermissaoUsuario.relatoriosLogSistema,
         );
+      case 'Relatorio fiscal do mes':
+        return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.fiscal);
       default:
         return true;
     }
@@ -875,6 +1116,15 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
           ),
+          if (_carregandoJanela || _erroJanela.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _JanelaTerminalAviso(
+              carregando: _carregandoJanela,
+              erro: _erroJanela,
+              meses: _mesesJanelaTerminal,
+              onTentarNovamente: () => unawaited(_carregarJanelaTerminal()),
+            ),
+          ],
           const SizedBox(height: 12),
           TextField(
             controller: _buscaController,
@@ -910,6 +1160,102 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           else
             ..._buildSecoesHub(agrupados),
         ],
+      ),
+    );
+  }
+}
+
+/// Fallback quando nao ha ObjectBox local nem LanApiClient configurado.
+class _RelatorioEmMigracaoPage extends StatelessWidget {
+  const _RelatorioEmMigracaoPage({required this.titulo});
+
+  final String titulo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(titulo)),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_outlined, size: 48),
+              const SizedBox(height: 12),
+              Text(
+                'Sem conexao com o PC servidor',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$titulo precisa da API do PC 1. Verifique a rede do terminal '
+                'ou abra este relatorio no PC servidor.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Estado da janela de vendas baixada da API (somente terminal leve).
+class _JanelaTerminalAviso extends StatelessWidget {
+  const _JanelaTerminalAviso({
+    required this.carregando,
+    required this.erro,
+    required this.meses,
+    required this.onTentarNovamente,
+  });
+
+  final bool carregando;
+  final String erro;
+  final int meses;
+  final VoidCallback onTentarNovamente;
+
+  @override
+  Widget build(BuildContext context) {
+    final cores = Theme.of(context).colorScheme;
+    final falhou = erro.isNotEmpty;
+    return Card(
+      margin: EdgeInsets.zero,
+      color: falhou ? cores.errorContainer : cores.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            if (carregando)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              Icon(
+                falhou ? Icons.cloud_off : Icons.cloud_done_outlined,
+                color: falhou ? cores.onErrorContainer : null,
+              ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                carregando
+                    ? 'Baixando vendas dos ultimos $meses meses do servidor...'
+                    : 'Nao foi possivel baixar as vendas do servidor: $erro',
+                style: TextStyle(
+                  color: falhou ? cores.onErrorContainer : null,
+                ),
+              ),
+            ),
+            if (falhou)
+              TextButton(
+                onPressed: onTentarNovamente,
+                child: const Text('Tentar novamente'),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -1,34 +1,24 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import '../data/app_config_repository.dart';
-import '../data/sync/sync_api_client.dart';
+import '../data/api/lan_api_client.dart';
+import '../data/api/lan_api_event_hub.dart';
 import '../domain/entrega_pod_nome_arquivo.dart';
-import '../services/entrega_pod_paths.dart';
+import 'entrega_pod_paths.dart';
 
-/// Upload/download de fotos POD via servidor LAN (fase 2).
+/// Upload/download de fotos POD pela API LAN do PC1 (`:8788`), via Tailscale.
 class EntregaPodLanService {
   EntregaPodLanService({
-    required AppConfigRepository configRepository,
-    SyncApiClient? apiClient,
-  })  : _configRepository = configRepository,
-        _apiClientOverride = apiClient;
+    LanApiClient? lanClient,
+  }) : _lanClient = lanClient;
 
-  final AppConfigRepository _configRepository;
-  final SyncApiClient? _apiClientOverride;
+  final LanApiClient? _lanClient;
 
-  Future<SyncApiClient?> _cliente() async {
-    if (_apiClientOverride != null) return _apiClientOverride;
-    final config = await _configRepository.carregarEmpresaConfig();
-    if (!config.redeSincronizacaoAtiva) return null;
-    final url = config.redeServidorUrl.trim();
-    if (url.isEmpty) return null;
-    return SyncApiClient(baseUrl: url, syncToken: config.redeSyncToken);
-  }
+  LanApiClient? get _lan =>
+      _lanClient ?? LanApiEventHub.instance.client;
 
-  /// Envia JPEG para o PC servidor se a rede sync estiver ativa.
+  /// Envia JPEG para o PC servidor pela LAN. Null se rede/arquivo indisponivel.
   Future<String?> enviarFotoSeRedeAtiva({
     required String arquivoLocal,
     String? nomeArquivo,
@@ -41,18 +31,15 @@ class EntregaPodLanService {
         p.basename(arquivoLocal);
     if (!EntregaPodNomeArquivo.valido(nome)) return null;
 
-    final client = await _cliente();
-    if (client == null) return null;
+    final client = _lan;
+    if (client == null || !client.configurado) return null;
 
     final bytes = await arquivo.readAsBytes();
-    final path = await client.uploadPodFoto(
-      fileName: nome,
-      jpegBytes: bytes,
-    );
-    return path ?? '${EntregaPodPaths.subpastaServidor}/$nome';
+    if (bytes.isEmpty) return null;
+    return client.uploadPodFoto(fileName: nome, jpegBytes: bytes);
   }
 
-  /// Baixa foto do servidor para cache local e retorna o caminho.
+  /// Resolve foto local, pasta do PC1 ou download LAN para cache.
   Future<String?> baixarParaCache({
     required String podFotoPathServidor,
     String? podFotoPathLocal,
@@ -66,12 +53,17 @@ class EntregaPodLanService {
     final nome = EntregaPodNomeArquivo.extrairNomeArquivo(podFotoPathServidor);
     if (nome == null) return null;
 
+    final noServidor = EntregaPodPaths.arquivoServidorDe(nome);
+    if (noServidor != null && noServidor.existsSync()) {
+      return noServidor.path;
+    }
+
     final cacheDir = await EntregaPodPaths.diretorioCache();
     final destino = p.join(cacheDir.path, nome);
     if (File(destino).existsSync()) return destino;
 
-    final client = await _cliente();
-    if (client == null) return null;
+    final client = _lan;
+    if (client == null || !client.configurado) return null;
 
     final bytes = await client.downloadPodFoto(fileName: nome);
     if (bytes == null || bytes.isEmpty) return null;

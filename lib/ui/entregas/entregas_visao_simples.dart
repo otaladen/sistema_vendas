@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/venda_relacao_safe.dart';
 import '../../model/venda.dart';
+import 'entrega_insucesso_faixa.dart';
 import 'logistica_entregas.dart';
 
 /// Visao operacional enxuta para loja pequena (ex.: 2 motoristas / 2 caminhoes).
@@ -340,11 +342,20 @@ class _FaixaSemMotorista extends StatelessWidget {
                     side: BorderSide(color: scheme.outlineVariant),
                   ),
                   title: Text(
-                    '#${v.numeroOrcamento} · ${v.cliente.target?.nomeRazao ?? 'Sem cliente'}',
+                    '#${v.numeroOrcamento} · ${VendaRelacaoSafe.nomeCliente(v)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  subtitle: Text(rotuloStatus(v.statusEntrega)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(rotuloStatus(v.statusEntrega)),
+                      EntregaInsucessoFaixa(
+                        venda: v,
+                        padding: const EdgeInsets.only(top: 2),
+                      ),
+                    ],
+                  ),
                   trailing: podeGerenciar
                       ? FilledButton.tonal(
                           onPressed: () => onAtribuir(v),
@@ -496,7 +507,7 @@ class _ColunaMotorista extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  v.cliente.target?.nomeRazao ?? 'Sem cliente',
+                                  VendaRelacaoSafe.nomeCliente(v),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.bodyMedium,
@@ -512,6 +523,7 @@ class _ColunaMotorista extends StatelessWidget {
                                     ),
                                   ),
                                 ],
+                                EntregaInsucessoFaixa(venda: v),
                                 const SizedBox(height: 8),
                                 Row(
                                   children: [

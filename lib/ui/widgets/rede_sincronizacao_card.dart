@@ -15,7 +15,12 @@ import '../../data/sync/sync_priority.dart';
 import '../../data/sync/sync_teste_conexao.dart';
 import '../../domain/sync_rede_ajuda.dart';
 import '../../domain/sync_token_util.dart';
+import '../../services/lan_api_server.dart';
 import '../../services/lan_sync_server_manager.dart';
+import '../../services/lan_servidor_bootstrap.dart';
+import '../../services/windows_app_startup_helper.dart';
+import '../../data/api/lan_api_url.dart';
+import '../../ui/shell/main_menu_deps.dart';
 
 /// Assistente de rede local: servidor neste PC ou cliente apontando para outro.
 class RedeSincronizacaoCard extends StatefulWidget {
@@ -23,10 +28,14 @@ class RedeSincronizacaoCard extends StatefulWidget {
     super.key,
     required this.configRepository,
     this.lanSyncScheduler,
+    this.forcarModoCliente = false,
   });
 
   final AppConfigRepository configRepository;
   final LanSyncScheduler? lanSyncScheduler;
+
+  /// Terminal leve: trava papel cliente (sem banco local neste PC).
+  final bool forcarModoCliente;
 
   @override
   State<RedeSincronizacaoCard> createState() => _RedeSincronizacaoCardState();
@@ -52,11 +61,15 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   bool _tokenVisivel = false;
   bool? _tokenAceitoPeloServidor;
   bool _erroAjudaExpandido = false;
+  bool _iniciarComWindows = false;
 
   int? _estacoesAtivas;
   List<Map<String, dynamic>> _estacoesLista = [];
   String _presencaErro = '';
   bool _carregandoPresenca = false;
+
+  /// API de terminais (:8788) ativa neste PC (Windows servidor).
+  bool _apiAtiva = false;
 
   @override
   void initState() {
@@ -99,10 +112,13 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     final online = url.isNotEmpty
         ? await LanSyncServerManager.servidorRespondendo(url)
         : await LanSyncServerManager.servidorRespondendoNaPorta(porta);
+    final iniciarWin = Platform.isWindows
+        ? await WindowsAppStartupHelper.estaAtivo()
+        : false;
 
     if (!mounted) return;
     setState(() {
-      _modoServidor = config.redeModoServidor;
+      _modoServidor = widget.forcarModoCliente ? false : config.redeModoServidor;
       _syncAtiva = config.redeSincronizacaoAtiva;
       _modoImplantacao = modoImplantacao;
       _ipLocal = ip;
@@ -110,6 +126,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       _urlController.text = url;
       _tokenController.text = config.redeSyncToken;
       _servidorOnline = online;
+      _iniciarComWindows = iniciarWin;
       _carregando = false;
     });
   }
@@ -178,6 +195,16 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   }
 
   void _aoMudarModo(bool servidor) {
+    if (widget.forcarModoCliente && servidor) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Este PC e terminal leve: o banco fica so no PC servidor.',
+          ),
+        ),
+      );
+      return;
+    }
     setState(() {
       _modoServidor = servidor;
       _tokenAceitoPeloServidor = null;
@@ -195,12 +222,43 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     _urlController.text = LanSyncServerManager.montarUrlServidor(ip, _porta);
   }
 
+  String get _enderecoApiTerminais {
+    final ip = _ipLocal?.trim();
+    if (ip == null || ip.isEmpty) {
+      return '—:${LanApiUrl.portaPadrao}';
+    }
+    return '$ip:${LanApiUrl.portaPadrao}';
+  }
+
   Future<void> _atualizarStatusServidor() async {
     final url = _urlController.text.trim();
-    final online = url.isNotEmpty
+    final hubOnline = url.isNotEmpty
         ? await LanSyncServerManager.servidorRespondendo(url)
         : await LanSyncServerManager.servidorRespondendoNaPorta(_porta);
-    if (mounted) setState(() => _servidorOnline = online);
+    final apiOnline = _ehWindows && LanApiServerHub.instance.ativo;
+    if (mounted) {
+      setState(() {
+        _servidorOnline = hubOnline;
+        _apiAtiva = apiOnline;
+      });
+    }
+  }
+
+  void _copiarEnderecoApiTerminais() {
+    final ip = _ipLocal;
+    if (ip == null || ip.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('IP local nao detectado. Atualize o IP.')),
+      );
+      return;
+    }
+    final txt = '$ip:${LanApiUrl.portaPadrao}';
+    Clipboard.setData(ClipboardData(text: txt));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Copiado para Terminais Windows (API): $txt'),
+      ),
+    );
   }
 
   Future<void> _alternarModoImplantacao(bool ativo) async {
@@ -222,7 +280,9 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   Future<void> _salvar({bool iniciarServidorSeModoServidor = false}) async {
     setState(() => _salvando = true);
     try {
-      if (_modoServidor) {
+      final modoServidor =
+          widget.forcarModoCliente ? false : _modoServidor;
+      if (modoServidor) {
         _preencherUrlServidorLocal();
       }
       final atual = await widget.configRepository.carregarEmpresaConfig();
@@ -236,14 +296,29 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       }
       final config = atual.copyWith(
         redeSincronizacaoAtiva: _syncAtiva,
-        redeModoServidor: _modoServidor,
+        redeModoServidor: modoServidor,
         redePortaServidor: _porta,
         redeServidorUrl: _urlController.text.trim(),
         redeSyncToken: token,
       );
       await widget.configRepository.salvarEmpresaConfig(config);
 
-      if (_modoServidor && iniciarServidorSeModoServidor && Platform.isWindows) {
+      if (modoServidor && Platform.isWindows) {
+        // Terminais devem funcionar so de ligar este PC (sem abrir a UI).
+        final errStartup = await WindowsAppStartupHelper.definir(true);
+        if (errStartup != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(errStartup)),
+          );
+        } else if (mounted) {
+          setState(() => _iniciarComWindows = true);
+        }
+      } else if (!modoServidor && Platform.isWindows) {
+        await WindowsAppStartupHelper.definir(false);
+        if (mounted) setState(() => _iniciarComWindows = false);
+      }
+
+      if (modoServidor && iniciarServidorSeModoServidor && Platform.isWindows) {
         final err = await LanSyncServerManager.iniciarServidor(
           porta: _porta,
           syncToken: token,
@@ -255,9 +330,23 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
             SnackBar(content: Text(err)),
           );
         }
+        if (!mounted) return;
+        final ob = MainMenuDeps.maybeOf(context)?.objectBox;
+        if (ob != null) {
+          // garantirAtivo sobe a API :8788; evita reiniciar o hub 2x (travava).
+          await LanServidorBootstrap.garantirAtivo(
+            objectBox: ob,
+            configRepository: widget.configRepository,
+          );
+        }
+        await widget.lanSyncScheduler?.iniciar();
+      } else if (!_modoServidor && Platform.isWindows) {
+        // Windows cliente = Terminal Leve no proximo boot (API direta).
+        // Nao inicia pull/push ObjectBox aqui — isso travava o PC.
+        await widget.lanSyncScheduler?.parar();
+      } else {
+        await widget.lanSyncScheduler?.iniciar();
       }
-
-      await widget.lanSyncScheduler?.iniciar();
       await _atualizarStatusServidor();
       if (!mounted) return;
       if (tokenGeradoAgora) {
@@ -316,9 +405,28 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     final testeOk = _servidorOnline && (_tokenAceitoPeloServidor ?? true);
     if (!testeOk) return;
 
-    // Nao espera o pull completo aqui: no celular (banco vazio) isso pode
-    // travar a tela por minutos. Conexao ja esta ok; sync sobe em background.
     if (!mounted) return;
+    if (_modoServidor) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Servidor ativo. Este PC guarda o banco e atende os terminais. '
+            'O inicio automatico com o Windows foi ativado: apos reiniciar, '
+            'os terminais funcionam so de ligar este PC (sem abrir o programa).',
+          ),
+          duration: Duration(seconds: 7),
+        ),
+      );
+      return;
+    }
+
+    // Cliente Windows/Android/iOS: Terminal Leve no proximo boot (API :8788).
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isAndroid || Platform.isIOS)) {
+      await _avisarReinicioTerminalLeve();
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
@@ -329,6 +437,46 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       ),
     );
     unawaited(_sincronizarAgora(avisarConclusao: true));
+  }
+
+  Future<void> _avisarReinicioTerminalLeve() async {
+    if (!mounted) return;
+    final ehMobile = Platform.isAndroid || Platform.isIOS;
+    final fechar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cliente configurado'),
+        content: Text(
+          ehMobile
+              ? 'Neste celular o Terminal Leve le e grava direto na API do '
+                  'PC servidor (porta ${LanApiUrl.portaPadrao}), sem banco local.\n\n'
+                  'Se o servidor cair, o app para.\n\n'
+                  'Feche e abra o app de novo para ativar esse modo.'
+              : 'Neste PC Windows o Terminal Leve le e grava direto na API do '
+                  'servidor.\n\n'
+                  'Feche e abra o sistema de novo para ativar esse modo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Depois'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              ehMobile ? 'Fechar o app agora' : 'Fechar o sistema agora',
+            ),
+          ),
+        ],
+      ),
+    );
+    if (fechar == true && !kIsWeb) {
+      if (Platform.isWindows) {
+        exit(0);
+      } else if (Platform.isAndroid || Platform.isIOS) {
+        await SystemNavigator.pop();
+      }
+    }
   }
 
   Future<void> _testarConexao({bool silencioso = false}) async {
@@ -387,7 +535,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         _preencherUrlServidorLocal();
         setState(() => _servidorOnline = true);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Servidor de sincronizacao iniciado.')),
+          const SnackBar(content: Text('Hub mobile iniciado na porta configurada.')),
         );
       }
     } finally {
@@ -410,19 +558,64 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   }
 
   Future<void> _liberarFirewall() async {
-    final err = await LanSyncServerManager.tentarLiberarFirewall(_porta);
+    final errSync =
+        await LanSyncServerManager.tentarLiberarFirewall(_porta);
+    final errApi = await LanSyncServerManager.tentarLiberarFirewall(
+      LanApiUrl.portaPadrao,
+    );
     if (!mounted) return;
+    final ok = errSync == null && errApi == null;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          err ??
-              'Regra de firewall criada para a porta $_porta (se permitido pelo Windows).',
+          ok
+              ? 'Regras de firewall criadas para as portas $_porta (sync) e '
+                  '${LanApiUrl.portaPadrao} (terminais), se permitido pelo Windows.'
+              : (errSync ?? errApi)!,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _alternarIniciarComWindows(bool value) async {
+    final err = await WindowsAppStartupHelper.definir(value);
+    if (!mounted) return;
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+      return;
+    }
+    setState(() => _iniciarComWindows = value);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          value
+              ? 'Servidor em segundo plano ativado. Apos reiniciar o Windows, '
+                  'os terminais funcionam so de ligar este PC.'
+              : 'Inicio automatico com o Windows desativado.',
         ),
       ),
     );
   }
 
   Future<void> _sincronizarAgora({bool avisarConclusao = true}) async {
+    if (_modoServidor) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No PC servidor nao ha sync de cliente. '
+            'Os outros PCs e terminais e que baixam/enviam dados.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isAndroid || Platform.isIOS)) {
+      if (!mounted) return;
+      await _avisarReinicioTerminalLeve();
+      return;
+    }
     final agendador = widget.lanSyncScheduler;
     if (agendador == null) {
       if (!mounted) return;
@@ -499,6 +692,41 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   }
 
   Future<void> _atualizarPresenca() async {
+    if (_modoServidor && LanApiServerHub.instance.ativo) {
+      setState(() {
+        _carregandoPresenca = true;
+        _presencaErro = '';
+      });
+      LanApiServerHub.instance.publicarPresencaNoHub();
+      final snap = LanApiServerHub.instance.presencaSnapshot;
+      if (!mounted) return;
+      if (snap == null) {
+        setState(() {
+          _carregandoPresenca = false;
+          _presencaErro = 'API de terminais nao respondeu.';
+        });
+        return;
+      }
+      final n = (snap['activeCount'] as num?)?.toInt();
+      final raw = snap['stations'];
+      final lista = <Map<String, dynamic>>[];
+      if (raw is List) {
+        for (final e in raw) {
+          if (e is Map<String, dynamic>) {
+            lista.add(e);
+          } else if (e is Map) {
+            lista.add(Map<String, dynamic>.from(e));
+          }
+        }
+      }
+      setState(() {
+        _carregandoPresenca = false;
+        _estacoesAtivas = n;
+        _estacoesLista = lista;
+      });
+      return;
+    }
+
     final uri = _urlController.text.trim();
     if (uri.isEmpty) {
       setState(() {
@@ -552,156 +780,249 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     }
   }
 
-  String _formatarHora(DateTime dt) {
-    final l = dt.toLocal();
-    return '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
+  bool get _ehWindows => !kIsWeb && Platform.isWindows;
+
+  /// Cliente Windows = Terminal Leve (API). Sem sync ObjectBox legado.
+  bool get _clienteWindows => _ehWindows && !_modoServidor;
+
+  /// Celular / outros: ainda usam pull/push do hub.
+  bool get _usaSyncCatalogo => !_ehWindows && !_modoServidor;
+
+  bool get _servidorRedePronto {
+    if (!_syncAtiva) return false;
+    if (_modoServidor) {
+      return _ehWindows ? (_apiAtiva || _servidorOnline) : _servidorOnline;
+    }
+    return _servidorOnline || _apiAtiva;
   }
 
-  void _copiarEnderecoClientes() {
-    final ip = _ipLocal;
-    if (ip == null) return;
-    final txt = '$ip:$_porta';
-    Clipboard.setData(ClipboardData(text: txt));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Copiado para os outros PCs: $txt')),
+  Widget _cardOperador({required ThemeData tema, required Widget child}) {
+    return Card(
+      elevation: 0,
+      color: tema.colorScheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: tema.colorScheme.outlineVariant.withValues(alpha: 0.55),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: child,
+      ),
     );
   }
 
-  String _rotuloBotaoPrincipal() {
-    if (_salvando || _testandoRede) {
-      return _modoServidor ? 'Ativando servidor...' : 'Conectando...';
-    }
-    if (_sincronizando) {
-      return 'Sincronizando em segundo plano...';
-    }
-    return _modoServidor
-        ? 'Ativar como servidor e sincronizar'
-        : 'Conectar a este servidor e sincronizar';
-  }
-
-  Widget _buildPainelStatus(ThemeData tema, SyncLogEntry? ultimoLog) {
-    final erro = tema.colorScheme.error;
-    final onVar = tema.colorScheme.onSurfaceVariant;
-
-    final syncLigada = _syncAtiva;
-    final papel = _modoServidor ? 'Servidor' : 'Cliente';
-
-    late final Color corSemaforo;
-    late final String rotuloSemaforo;
-
-    if (!syncLigada) {
-      corSemaforo = tema.colorScheme.outline;
-      rotuloSemaforo = 'Sync desligada';
-    } else if (!_servidorOnline) {
-      corSemaforo = erro;
-      rotuloSemaforo = 'Servidor local nao encontrado';
-    } else if (ultimoLog != null && !ultimoLog.sucesso) {
-      corSemaforo = Colors.orange.shade800;
-      rotuloSemaforo = 'Sync com falha';
-    } else if (ultimoLog?.sucesso == true) {
-      corSemaforo = Colors.green.shade700;
-      rotuloSemaforo = 'Sincronizado';
-    } else {
-      corSemaforo = Colors.orange.shade800;
-      rotuloSemaforo = 'Aguardando sync';
-    }
-
-    String syncTxt = 'Nenhuma sincronizacao ainda';
-    if (ultimoLog != null) {
-      syncTxt = ultimoLog.sucesso
-          ? 'Ultima sync OK as ${_formatarHora(ultimoLog.em)}'
-          : 'Ultima sync falhou as ${_formatarHora(ultimoLog.em)}';
-    }
-
-    final endereco = _modoServidor
-        ? (_urlController.text.trim().isEmpty
-            ? (_ipLocal ?? 'IP nao detectado')
-            : _urlController.text.trim())
-        : (_urlController.text.trim().isEmpty
-            ? 'Informe o endereco do servidor'
-            : _urlController.text.trim());
-
-    return Card(
-      color: corSemaforo.withValues(alpha: 0.08),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 14,
-                  height: 14,
-                  margin: const EdgeInsets.only(top: 4),
-                  decoration: BoxDecoration(
-                    color: corSemaforo,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: corSemaforo.withValues(alpha: 0.45),
-                        blurRadius: 6,
-                        spreadRadius: 1,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        rotuloSemaforo,
-                        style: tema.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: corSemaforo,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$papel · $syncTxt',
-                        style: tema.textTheme.bodySmall?.copyWith(color: onVar),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Endereco: $endereco',
-              style: tema.textTheme.bodySmall,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
+  Widget _badgeStatus({
+    required String rotulo,
+    required Color cor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: cor.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        rotulo,
+        style: TextStyle(
+          color: cor,
+          fontWeight: FontWeight.w700,
+          fontSize: 12.5,
         ),
       ),
     );
   }
 
-  Widget _buildAssistenteSimplificado(ThemeData tema) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_modoServidor) _buildModoServidor(tema) else _buildModoCliente(),
-        const SizedBox(height: 8),
-        _buildCampoToken(),
-        const SizedBox(height: 4),
-        Text(
-          'Mesmo token no servidor e em todos os clientes.',
-          style: tema.textTheme.bodySmall?.copyWith(
-            color: tema.colorScheme.onSurfaceVariant,
+  Widget _buildStatusCard(ThemeData tema) {
+    final onVar = tema.colorScheme.onSurfaceVariant;
+    final erro = tema.colorScheme.error;
+
+    late final IconData icone;
+    late final String titulo;
+    late final String badge;
+    late final Color corBadge;
+    late final String subtitulo;
+
+    if (!_syncAtiva) {
+      icone = Icons.wifi_tethering_error_rounded;
+      titulo = 'Rede da loja';
+      badge = 'Rede desligada';
+      corBadge = erro;
+      subtitulo = 'Ative a rede para conectar terminais e celulares.';
+    } else if (_modoServidor) {
+      icone = Icons.dns_rounded;
+      titulo = 'Servidor da loja';
+      if (_servidorRedePronto) {
+        badge = 'Servidor Ativo';
+        corBadge = Colors.green.shade700;
+        subtitulo = _estacoesAtivas != null
+            ? '$_estacoesAtivas terminais online'
+            : 'Pronto para receber terminais.';
+      } else {
+        badge = 'Aguardando conexão';
+        corBadge = Colors.orange.shade800;
+        subtitulo = 'Ative a rede abaixo para liberar o servidor.';
+      }
+    } else if (_servidorRedePronto) {
+      icone = Icons.cloud_done_rounded;
+      titulo = _clienteWindows ? 'Terminal da loja' : 'Cliente da rede';
+      badge = 'Conectado à Rede';
+      corBadge = Colors.green.shade700;
+      subtitulo = _clienteWindows
+          ? 'Conectado ao servidor da loja.'
+          : 'Sincronizando com o servidor da loja.';
+    } else {
+      icone = Icons.wifi_tethering;
+      titulo = _clienteWindows ? 'Terminal da loja' : 'Cliente da rede';
+      badge = 'Aguardando conexão';
+      corBadge = Colors.orange.shade800;
+      subtitulo = 'Informe o endereço do servidor e conecte.';
+    }
+
+    return _cardOperador(
+      tema: tema,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icone, size: 36, color: tema.colorScheme.primary),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: tema.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _badgeStatus(rotulo: badge, cor: corBadge),
+                const SizedBox(height: 8),
+                Text(
+                  subtitulo,
+                  style: tema.textTheme.bodySmall?.copyWith(color: onVar),
+                ),
+              ],
+            ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConnectionCard(ThemeData tema) {
+    final onVar = tema.colorScheme.onSurfaceVariant;
+    final ocupado = _salvando || _testandoRede || _sincronizando;
+
+    if (_modoServidor) {
+      final precisaAtivar = !_syncAtiva || !_servidorRedePronto;
+      return _cardOperador(
+        tema: tema,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Endereço do servidor',
+              style: tema.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _ipLocal == null ? 'IP não detectado' : _enderecoApiTerminais,
+                    style: tema.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Atualizar IP',
+                  onPressed: () async {
+                    final ip = await LanSyncServerManager.obterIpv4Local();
+                    setState(() => _ipLocal = ip);
+                    if (ip != null) _preencherUrlServidorLocal();
+                    await _atualizarStatusServidor();
+                  },
+                  icon: const Icon(Icons.refresh_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Use este endereço nos terminais da loja.',
+              style: tema.textTheme.bodySmall?.copyWith(color: onVar),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: _ipLocal == null ? null : _copiarEnderecoApiTerminais,
+              icon: const Icon(Icons.copy_rounded),
+              label: const Text('Copiar Endereço para os Terminais'),
+            ),
+            if (precisaAtivar) ...[
+              const SizedBox(height: 10),
+              FilledButton.tonalIcon(
+                onPressed: ocupado ? null : _configurarRedeCompleta,
+                icon: ocupado
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.power_settings_new_rounded),
+                label: Text(
+                  ocupado ? 'Ativando...' : 'Ativar Rede da Loja',
+                ),
+              ),
+            ],
+          ],
         ),
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: (_salvando || _testandoRede) ? null : _configurarRedeCompleta,
-            icon: (_salvando || _testandoRede || _sincronizando)
+      );
+    }
+
+    return _cardOperador(
+      tema: tema,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Conectar ao servidor',
+            style: tema.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _urlController,
+            decoration: InputDecoration(
+              labelText: 'Endereço do servidor',
+              hintText: 'Ex.: 192.168.0.15:${LanApiUrl.portaPadrao}',
+              border: const OutlineInputBorder(),
+              isDense: true,
+              suffixIcon: IconButton(
+                tooltip: 'Colar',
+                icon: const Icon(Icons.content_paste_outlined),
+                onPressed: _colarEnderecoServidor,
+              ),
+            ),
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            onChanged: (_) => setState(() {
+              _servidorOnline = false;
+              _tokenAceitoPeloServidor = null;
+            }),
+          ),
+          const SizedBox(height: 12),
+          _buildCampoToken(),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: ocupado ? null : _configurarRedeCompleta,
+            icon: ocupado
                 ? const SizedBox(
                     width: 18,
                     height: 18,
@@ -710,240 +1031,352 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
                       color: Colors.white,
                     ),
                   )
-                : const Icon(Icons.link_outlined),
-            label: Text(_rotuloBotaoPrincipal()),
+                : const Icon(Icons.link_rounded),
+            label: Text(
+              ocupado ? 'Conectando...' : 'Salvar e Conectar',
+            ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTerminaisConectados(ThemeData tema) {
+    final onVar = tema.colorScheme.onSurfaceVariant;
+    final erro = tema.colorScheme.error;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Terminais conectados a API',
+          style: tema.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Quem esta no WebSocket :${LanApiUrl.portaPadrao} '
+          '(terminais Windows e celular no chat). '
+          'O “online” do hub mobile :8787 e outra contagem.',
+          style: tema.textTheme.bodySmall?.copyWith(color: onVar),
         ),
         const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: (_salvando || _testandoRede)
-                ? null
-                : () => _testarConexao(),
-            icon: _testandoRede
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.wifi_tethering_outlined),
-            label: Text(_testandoRede ? 'Testando...' : 'Testar conexao'),
+        OutlinedButton.icon(
+          onPressed: _carregandoPresenca ? null : _atualizarPresenca,
+          icon: _carregandoPresenca
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.devices_outlined),
+          label: Text(
+            _carregandoPresenca ? 'Consultando...' : 'Atualizar terminais',
           ),
         ),
-        ValueListenableBuilder<SyncLogEntry?>(
-          valueListenable: SyncLog.ultimo,
-          builder: (context, ultimoLog, _) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildPainelConflitos(tema),
-                if (ultimoLog != null && !ultimoLog.sucesso)
-                  _buildErroComAjuda(tema, ultimoLog),
-              ],
+        if (_presencaErro.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _presencaErro,
+              style: TextStyle(color: erro, fontSize: 13),
+            ),
+          ),
+        if (_estacoesAtivas != null && _presencaErro.isEmpty) ...[
+          const SizedBox(height: 8),
+          Text('Total ativo: $_estacoesAtivas'),
+          ..._estacoesLista.map((s) {
+            final lab = (s['label'] ?? '').toString();
+            return Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('• ${lab.isEmpty ? "Terminal" : lab}'),
             );
-          },
-        ),
+          }),
+        ],
       ],
     );
   }
 
   Widget _buildOpcoesAvancadasRede(ThemeData tema) {
+    final onVar = tema.colorScheme.onSurfaceVariant;
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: const EdgeInsets.only(bottom: 8),
+      leading: Icon(
+        Icons.settings_suggest_outlined,
+        color: tema.colorScheme.onSurfaceVariant,
+      ),
       title: Text(
-        'Opcoes avancadas',
+        'Opções Avançadas / Suporte',
         style: tema.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
       ),
       subtitle: Text(
-        'Implantacao, salvar manual, sync e servidor',
-        style: tema.textTheme.bodySmall?.copyWith(
-          color: tema.colorScheme.onSurfaceVariant,
-        ),
+        'Papel, token, firewall, hub mobile e diagnóstico',
+        style: tema.textTheme.bodySmall?.copyWith(color: onVar),
       ),
       children: [
+        if (!widget.forcarModoCliente) ...[
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(
+                value: true,
+                label: Text('Servidor neste PC'),
+                icon: Icon(Icons.dns_outlined),
+              ),
+              ButtonSegment(
+                value: false,
+                label: Text('Cliente (outro PC)'),
+                icon: Icon(Icons.devices_outlined),
+              ),
+            ],
+            selected: {_modoServidor},
+            onSelectionChanged: (s) => _aoMudarModo(s.first),
+          ),
+          const SizedBox(height: 8),
+        ],
         SwitchListTile.adaptive(
           contentPadding: EdgeInsets.zero,
-          value: _modoImplantacao,
-          onChanged: _alternarModoImplantacao,
-          title: const Text('Modo implantacao (este PC)'),
-          subtitle: const Text(
-            'Intervalo 60s e espera 3s antes de sync apos varias gravacoes.',
+          value: _syncAtiva,
+          onChanged: (v) => setState(() => _syncAtiva = v),
+          title: const Text('Usar rede local'),
+          subtitle: Text(
+            _modoServidor
+                ? 'Liga o servidor neste PC para terminais.'
+                : 'Conecta este aparelho ao servidor da loja.',
+            style: TextStyle(color: onVar),
           ),
         ),
         const SizedBox(height: 8),
-        ValueListenableBuilder<SyncLogEntry?>(
-          valueListenable: SyncLog.ultimo,
-          builder: (context, ultimoLog, _) {
-            return _buildChecklist(tema, ultimoLog);
-          },
+        if (_modoServidor) ...[
+          _buildCampoToken(),
+          const SizedBox(height: 4),
+          Text(
+            'Gere o token neste PC e use o mesmo em todos os clientes.',
+            style: tema.textTheme.bodySmall?.copyWith(color: onVar),
+          ),
+          const SizedBox(height: 12),
+        ],
+        OutlinedButton.icon(
+          onPressed: (_salvando || _testandoRede) ? null : () => _testarConexao(),
+          icon: _testandoRede
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.wifi_tethering_outlined),
+          label: Text(_testandoRede ? 'Testando...' : 'Testar conexão'),
+        ),
+        if (Platform.isWindows) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _liberarFirewall,
+            icon: const Icon(Icons.security_outlined, size: 18),
+            label: const Text('Liberar portas no firewall'),
+          ),
+        ],
+        if (_modoServidor) ...[
+          const SizedBox(height: 16),
+          _buildHubMobileAvancado(tema),
+          const SizedBox(height: 8),
+          _buildControlesServidorAvancado(tema),
+          const SizedBox(height: 12),
+          _buildTerminaisConectados(tema),
+        ],
+        if (_usaSyncCatalogo) ...[
+          const SizedBox(height: 12),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: _modoImplantacao,
+            onChanged: _alternarModoImplantacao,
+            title: const Text('Modo implantação (este aparelho)'),
+            subtitle: const Text(
+              'Intervalo maior entre sincronizações (celular/loja nova).',
+            ),
+          ),
+          const SizedBox(height: 8),
+          ValueListenableBuilder<SyncLogEntry?>(
+            valueListenable: SyncLog.ultimo,
+            builder: (context, ultimoLog, _) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildChecklist(tema, ultimoLog),
+                  if (ultimoLog != null && !ultimoLog.sucesso)
+                    _buildErroComAjuda(tema, ultimoLog),
+                ],
+              );
+            },
+          ),
+          _buildPainelConflitos(tema),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _salvando ? null : () => _salvar(),
+                  icon: const Icon(Icons.save_outlined, size: 18),
+                  label: Text(_salvando ? 'Salvando...' : 'Salvar'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: (_sincronizando || _salvando)
+                      ? null
+                      : _sincronizarAgora,
+                  icon: _sincronizando
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_sync_outlined, size: 18),
+                  label: Text(
+                    _sincronizando ? 'Sync...' : 'Sincronizar',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (!kIsWeb &&
+              (Platform.isAndroid || Platform.isIOS) &&
+              !_modoServidor) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed:
+                  (_enviandoFotos || _salvando) ? null : _enviarFotosAoServidor,
+              icon: _enviandoFotos
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.photo_library_outlined, size: 18),
+              label: Text(
+                _enviandoFotos
+                    ? 'Enviando fotos...'
+                    : 'Reenviar fotos (opcional)',
+              ),
+            ),
+          ],
+        ] else if (!_modoServidor) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _salvando ? null : () => _salvar(),
+            icon: const Icon(Icons.save_outlined, size: 18),
+            label: Text(_salvando ? 'Salvando...' : 'Salvar configuração'),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => SyncRedeAjuda.mostrarDialogPrimeiraSync(context),
+            icon: const Icon(Icons.help_outline, size: 18),
+            label: const Text('Como configurar a rede?'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHubMobileAvancado(ThemeData tema) {
+    final erro = tema.colorScheme.error;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Hub mobile (:$_porta)',
+          style: tema.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _portaController,
+          decoration: InputDecoration(
+            labelText: 'Porta do hub mobile',
+            helperText: 'Padrao ${LanSyncServerManager.portaPadrao} — so para celular',
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          onChanged: (_) => _preencherUrlServidorLocal(),
+        ),
+        const SizedBox(height: 8),
+        _InfoLinha(
+          rotulo: 'Endereco do hub',
+          valor: _urlController.text.isEmpty ? '—' : _urlController.text,
         ),
         const SizedBox(height: 8),
         Row(
           children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _salvando ? null : () => _salvar(),
-                icon: const Icon(Icons.save_outlined, size: 18),
-                label: Text(_salvando ? 'Salvando...' : 'Salvar'),
-              ),
+            Icon(
+              _servidorOnline ? Icons.check_circle : Icons.error_outline,
+              size: 18,
+              color: _servidorOnline ? Colors.green.shade700 : erro,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             Expanded(
-              child: OutlinedButton.icon(
-                onPressed: (_sincronizando || _salvando)
-                    ? null
-                    : _sincronizarAgora,
-                icon: _sincronizando
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.cloud_sync_outlined, size: 18),
-                label: Text(_sincronizando ? 'Sync...' : 'Sync agora'),
+              child: Text(
+                _servidorOnline
+                    ? 'Hub mobile respondendo neste PC'
+                    : 'Hub mobile parado ou inacessivel',
+                style: tema.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
         ),
-        if (!kIsWeb && Platform.isWindows) ...[
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed:
-                (_enviandoFotos || _salvando) ? null : _enviarFotosAoServidor,
-            icon: _enviandoFotos
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.photo_library_outlined, size: 18),
-            label: Text(
-              _enviandoFotos
-                  ? 'Enviando fotos...'
-                  : 'Reenviar fotos (opcional)',
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              'No PC servidor as fotos ja ficam no disco. So use isto se o '
-              'celular ainda mostrar "foto indisponivel" (servidor antigo '
-              'aberto fora do app).',
-              style: tema.textTheme.bodySmall?.copyWith(
-                color: tema.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ],
-        const SizedBox(height: 8),
-        _buildControlesServidorAvancado(tema),
       ],
     );
   }
 
   Widget _buildControlesServidorAvancado(ThemeData tema) {
-    final onVar = tema.colorScheme.onSurfaceVariant;
-    final erro = tema.colorScheme.error;
-
-    if (_modoServidor) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton.icon(
-                onPressed: (_iniciandoServidor || _servidorOnline)
-                    ? null
-                    : _iniciarServidor,
-                icon: _iniciandoServidor
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.play_arrow_outlined, size: 20),
-                label: const Text('Iniciar servidor'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _parandoServidor || !_servidorOnline
-                    ? null
-                    : _pararServidor,
-                icon: const Icon(Icons.stop_outlined, size: 20),
-                label: const Text('Parar'),
-              ),
-              if (Platform.isWindows)
-                OutlinedButton(
-                  onPressed: _liberarFirewall,
-                  child: const Text('Liberar porta no firewall'),
-                ),
-            ],
-          ),
-          if (_ipLocal != null) ...[
-            const SizedBox(height: 8),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              onPressed:
+                  (_iniciandoServidor || _servidorOnline) ? null : _iniciarServidor,
+              icon: _iniciandoServidor
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.play_arrow_outlined, size: 20),
+              label: const Text('Iniciar hub mobile'),
+            ),
             OutlinedButton.icon(
-              onPressed: _copiarEnderecoClientes,
-              icon: const Icon(Icons.copy_outlined, size: 18),
-              label: Text(
-                'Copiar endereco para outros PCs (${_ipLocal!}:$_porta)',
-              ),
+              onPressed: _parandoServidor || !_servidorOnline
+                  ? null
+                  : _pararServidor,
+              icon: const Icon(Icons.stop_outlined, size: 20),
+              label: const Text('Parar hub'),
             ),
           ],
-          const Divider(height: 24),
-          Text(
-            'Estacoes conectadas',
-            style: tema.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'PCs com o app aberto e sincronizacao ativa.',
-            style: tema.textTheme.bodySmall?.copyWith(color: onVar),
-          ),
+        ),
+        if (Platform.isWindows) ...[
           const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _carregandoPresenca ? null : _atualizarPresenca,
-            icon: _carregandoPresenca
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.devices_outlined),
-            label: Text(
-              _carregandoPresenca ? 'Consultando...' : 'Ver estacoes online',
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: _iniciarComWindows,
+            onChanged: _alternarIniciarComWindows,
+            title: const Text('Servidor ao ligar o PC'),
+            subtitle: const Text(
+              'Recomendado: sobe a API em segundo plano ao ligar o Windows '
+              '(sem abrir o programa). Terminais passam a funcionar so de '
+              'ligar este PC. Ativado automaticamente ao salvar como servidor.',
             ),
           ),
-          if (_presencaErro.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _presencaErro,
-                style: TextStyle(color: erro, fontSize: 13),
-              ),
-            ),
-          if (_estacoesAtivas != null && _presencaErro.isEmpty) ...[
-            const SizedBox(height: 8),
-            Text('Total ativo: $_estacoesAtivas'),
-            ..._estacoesLista.map((s) {
-              final lab = (s['label'] ?? '').toString();
-              return Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('• ${lab.isEmpty ? "PC" : lab}'),
-              );
-            }),
-          ],
         ],
-      );
-    }
-
-    return Text(
-      'No modo cliente, o servidor principal controla as estacoes.',
-      style: tema.textTheme.bodySmall?.copyWith(color: onVar),
+      ],
     );
   }
 
@@ -1061,14 +1494,14 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
           ok: tokenOk && _servidorOnline,
           titulo: 'Autenticacao no servidor',
           subtitulo: tokenOk
-              ? 'Pronto para sincronizar'
+              ? 'Pronto para conectar'
               : 'Corrija endereco e token',
         ),
         _CheckItem(
           ok: ultimaSyncOk,
-          titulo: 'Ultima sincronizacao de dados',
+          titulo: 'Ultima sincronizacao',
           subtitulo: ultimaSyncOk
-              ? 'Dados replicados com sucesso'
+              ? 'Dados atualizados'
               : (ultimoLog == null
                   ? 'Ainda nao sincronizou'
                   : 'Falhou — veja como resolver abaixo'),
@@ -1081,7 +1514,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     return TextField(
       controller: _tokenController,
       decoration: InputDecoration(
-        labelText: 'Token de sincronizacao (LAN)',
+        labelText: 'Token da rede',
         hintText: 'Gerado ao salvar se vazio',
         border: const OutlineInputBorder(),
         isDense: true,
@@ -1167,99 +1600,6 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     );
   }
 
-  Widget _buildModoServidor(ThemeData tema) {
-    final erro = tema.colorScheme.error;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _InfoLinha(
-          rotulo: 'IP deste PC na rede',
-          valor: _ipLocal ?? 'Nao detectado',
-          trailing: IconButton(
-            tooltip: 'Atualizar IP',
-            onPressed: () async {
-              final ip = await LanSyncServerManager.obterIpv4Local();
-              setState(() => _ipLocal = ip);
-              if (ip != null) _preencherUrlServidorLocal();
-            },
-            icon: const Icon(Icons.refresh, size: 20),
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _portaController,
-          decoration: const InputDecoration(
-            labelText: 'Porta do servidor',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          onChanged: (_) => _preencherUrlServidorLocal(),
-        ),
-        const SizedBox(height: 8),
-        _InfoLinha(
-          rotulo: 'Endereco local do servico',
-          valor: _urlController.text.isEmpty ? '—' : _urlController.text,
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Icon(
-              _servidorOnline ? Icons.check_circle : Icons.error_outline,
-              size: 18,
-              color: _servidorOnline ? Colors.green.shade700 : erro,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _servidorOnline
-                    ? 'Servidor de sync respondendo neste PC'
-                    : 'Servidor parado ou inacessivel',
-                style: tema.textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildModoCliente() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Cole o endereco que o servidor copiou (ex.: 192.168.0.3:8787).',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _urlController,
-          decoration: InputDecoration(
-            labelText: 'Endereco do servidor na rede',
-            hintText: 'Ex.: 192.168.0.15:8787',
-            border: const OutlineInputBorder(),
-            isDense: true,
-            suffixIcon: IconButton(
-              tooltip: 'Colar da area de transferencia',
-              icon: const Icon(Icons.content_paste_outlined),
-              onPressed: _colarEnderecoServidor,
-            ),
-          ),
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-          onChanged: (_) => setState(() {
-            _servidorOnline = false;
-            _tokenAceitoPeloServidor = null;
-          }),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final tema = Theme.of(context);
@@ -1274,76 +1614,11 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Escolha o papel deste computador. O servidor concentra os dados; '
-          'os outros PCs conectam ao IP dele na mesma rede Wi-Fi/cabo.',
-          style: tema.textTheme.bodySmall?.copyWith(
-            color: tema.colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 12),
-        ValueListenableBuilder<SyncLogEntry?>(
-          valueListenable: SyncLog.ultimo,
-          builder: (context, ultimoLog, _) {
-            return _buildPainelStatus(tema, ultimoLog);
-          },
-        ),
-        const SizedBox(height: 12),
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(
-              value: true,
-              label: Text('Servidor neste PC'),
-              icon: Icon(Icons.dns_outlined),
-            ),
-            ButtonSegment(
-              value: false,
-              label: Text('Outro PC e o servidor'),
-              icon: Icon(Icons.lan_outlined),
-            ),
-          ],
-          selected: {_modoServidor},
-          onSelectionChanged: (s) => _aoMudarModo(s.first),
-        ),
-        const SizedBox(height: 8),
-        SwitchListTile.adaptive(
-          contentPadding: EdgeInsets.zero,
-          value: _syncAtiva,
-          onChanged: (v) => setState(() => _syncAtiva = v),
-          title: const Text('Usar sincronizacao na rede local'),
-          subtitle: const Text(
-            'Cadastros, estoque, vendas, NF-e e configuracoes entre PCs.',
-          ),
-        ),
-        if (!_syncAtiva) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: tema.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              'Com a sincronizacao desligada, este PC trabalha apenas com '
-              'dados locais. Ative o switch acima para conectar outros '
-              'computadores da loja.',
-              style: tema.textTheme.bodySmall,
-            ),
-          ),
-        ] else ...[
-          const SizedBox(height: 8),
-          _buildAssistenteSimplificado(tema),
-          const SizedBox(height: 4),
-          _buildOpcoesAvancadasRede(tema),
-        ],
-        const SizedBox(height: 12),
-        Center(
-          child: TextButton.icon(
-            onPressed: () => SyncRedeAjuda.mostrarDialogPrimeiraSync(context),
-            icon: const Icon(Icons.help_outline, size: 18),
-            label: const Text('Problemas na primeira sincronizacao?'),
-          ),
-        ),
+        _buildStatusCard(tema),
+        const SizedBox(height: 16),
+        _buildConnectionCard(tema),
+        const SizedBox(height: 16),
+        _buildOpcoesAvancadasRede(tema),
       ],
     );
   }
@@ -1396,12 +1671,10 @@ class _InfoLinha extends StatelessWidget {
   const _InfoLinha({
     required this.rotulo,
     required this.valor,
-    this.trailing,
   });
 
   final String rotulo;
   final String valor;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -1423,7 +1696,6 @@ class _InfoLinha extends StatelessWidget {
             ],
           ),
         ),
-        ?trailing,
       ],
     );
   }

@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../data/produto_repository.dart';
-import '../data/reajuste_preco_repository.dart';
-import '../data/usuario_repository.dart';
 import '../domain/reajuste_preco_lote.dart';
 import '../model/produto.dart';
 import '../model/usuario_sistema.dart';
 import 'layout/app_layout.dart';
 import 'reajuste_preco_autorizacao.dart';
 import 'reajuste_preco_historico_page.dart';
+import 'widgets/lan_api_feedback.dart';
 
 final NumberFormat _moeda = NumberFormat('#,##0.00', 'pt_BR');
 final NumberFormat _pct = NumberFormat('#,##0.0', 'pt_BR');
@@ -26,9 +24,10 @@ class ReajustePrecoLotePage extends StatefulWidget {
     this.tituloEscopo,
   });
 
-  final ProdutoRepository produtoRepository;
-  final ReajustePrecoRepository reajusteRepository;
-  final UsuarioRepository usuarioRepository;
+  final dynamic produtoRepository;
+  final dynamic reajusteRepository;
+  /// [UsuarioRepository] no PC1 ou [UsuarioApiRepository] no Terminal Leve.
+  final dynamic usuarioRepository;
   final UsuarioSistema usuarioLogado;
   final List<Produto> escopoInicial;
   final String? tituloEscopo;
@@ -291,29 +290,45 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
     }
 
     setState(() => _aplicando = true);
-    final resultado = widget.reajusteRepository.aplicarLote(
-      parametros: params,
-      linhas: resumo.linhas,
-      usuario: widget.usuarioLogado,
-      motivo: _motivoController.text.trim(),
-    );
-    if (!mounted) return;
-    setState(() => _aplicando = false);
+    try {
+      final resultadoRaw = widget.reajusteRepository.aplicarLote(
+        parametros: params,
+        linhas: resumo.linhas,
+        usuario: widget.usuarioLogado,
+        motivo: _motivoController.text.trim(),
+      );
+      final resultado = resultadoRaw is Future
+          ? await resultadoRaw
+          : resultadoRaw;
+      if (!mounted) return;
+      setState(() => _aplicando = false);
 
-    final motivo = _motivoController.text.trim();
-    final extra = motivo.isEmpty ? '' : ' Motivo: $motivo.';
-    final hist = resultado.reajustePrecoId > 0
-        ? ' Registro #${resultado.reajustePrecoId} no historico.'
-        : '';
-    _snack(
-      '${resultado.produtosGravados} produto(s) atualizado(s).'
-      '${resultado.ignorados > 0 ? ' ${resultado.ignorados} ignorado(s).' : ''}'
-      '$extra$hist',
-    );
-    Navigator.pop(context, true);
+      final motivo = _motivoController.text.trim();
+      final extra = motivo.isEmpty ? '' : ' Motivo: $motivo.';
+      final hist = resultado.reajustePrecoId > 0
+          ? ' Registro #${resultado.reajustePrecoId} no historico.'
+          : '';
+      _snack(
+        '${resultado.produtosGravados} produto(s) atualizado(s).'
+        '${resultado.ignorados > 0 ? ' ${resultado.ignorados} ignorado(s).' : ''}'
+        '$extra$hist',
+      );
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _aplicando = false);
+      LanApiFeedback.snackErro(context, e, prefixo: 'Reajuste');
+    }
   }
 
-  void _abrirHistorico() {
+  Future<void> _abrirHistorico() async {
+    final repo = widget.reajusteRepository;
+    try {
+      await repo.hidratarHistorico();
+    } catch (_) {
+      // Repositorio local nao tem hidratarHistorico.
+    }
+    if (!mounted) return;
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => ReajustePrecoHistoricoPage(
@@ -730,7 +745,7 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
         ),
         CheckboxListTile(
           dense: true,
-          title: const Text('Preco 3 — atacado'),
+          title: const Text('Preco 3 — especial'),
           value: _tabelas.contains(ReajusteTabelaPreco.preco3),
           onChanged: (v) => _toggleTabela(ReajusteTabelaPreco.preco3, v),
         ),
@@ -999,7 +1014,7 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
     final partes = <String>[];
     if (_tabelas.contains(ReajusteTabelaPreco.preco1)) partes.add('P1 a prazo');
     if (_tabelas.contains(ReajusteTabelaPreco.preco2)) partes.add('P2 a vista');
-    if (_tabelas.contains(ReajusteTabelaPreco.preco3)) partes.add('P3 atacado');
+    if (_tabelas.contains(ReajusteTabelaPreco.preco3)) partes.add('P3 especial');
     return partes.join(' · ');
   }
 }

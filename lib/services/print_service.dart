@@ -18,16 +18,11 @@ enum PrintTestOutcome {
   noSavedPrinter,
 }
 
-/// Servico de impressao com foco em **PDF / fluxo nativo do SO** via pacote `printing`.
+/// Servico de impressao PDF / fluxo nativo do SO via pacote `printing`.
 ///
-/// **Por que `printing` + `pdf` (e nao ESC/POS na primeira versao)?**
-/// - Funciona em **Windows/macOS/Linux** (lista de impressoras + impressao direta).
-/// - Em **Web** e **mobile**, a lista de impressoras costuma ser vazia ou limitada;
-///   o mesmo fluxo cai no **dialogo do sistema** (`layoutPdf`), mantendo um codigo unico.
-/// - Para **termica pura (USB/BT rede ESC/POS)** no futuro, recomenda-se um pacote
-///   dedicado (ex.: ecossistemas `esc_pos_*` / `flutter_pos_printer_platform`), em
-///   servico separado (ex.: esc_pos / flutter_pos_printer_platform), sem misturar
-///   bytes ESC/POS com este fluxo PDF.
+/// Cupom termico de balcao: use [EscPosPrinterService] (modo ESC/POS nas
+/// Configuracoes > Impressora). Este servico permanece para orcamentos A4,
+/// etiquetas e dialogo do Windows Print Manager.
 class PrintService {
   PrintService(this._configRepository);
 

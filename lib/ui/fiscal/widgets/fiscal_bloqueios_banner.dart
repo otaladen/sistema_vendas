@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../domain/fiscal/fiscal_bloqueios_fechamento.dart';
-import '../../../domain/venda_documento_rotulo_helper.dart';
-import '../../../model/venda.dart';
+
 /// Alerta de pendencias fiscais antes do fechamento contabil.
 class FiscalBloqueiosBanner extends StatelessWidget {
   const FiscalBloqueiosBanner({
@@ -26,6 +25,7 @@ class FiscalBloqueiosBanner extends StatelessWidget {
     final critico = bloqueios.temBloqueioCritico;
     final corFundo = critico ? Colors.red.shade50 : Colors.orange.shade50;
     final corTexto = critico ? Colors.red.shade900 : Colors.orange.shade900;
+    final preview = bloqueios.nfcePreviewEfetivo;
 
     final linhas = <String>[];
     if (bloqueios.bloqueiaExportacao) {
@@ -89,12 +89,12 @@ class FiscalBloqueiosBanner extends StatelessWidget {
                   style: theme.textTheme.bodyMedium?.copyWith(color: corTexto),
                 ),
               ),
-            if (bloqueios.vendasNfceProcessando.isNotEmpty) ...[
+            if (preview.isNotEmpty) ...[
               const SizedBox(height: 8),
-              ...bloqueios.vendasNfceProcessando.take(5).map(_linhaNfce),
-              if (bloqueios.vendasNfceProcessando.length > 5)
+              ...preview.take(5).map((p) => _linhaPreview(p, corTexto)),
+              if (preview.length > 5)
                 Text(
-                  '... e mais ${bloqueios.vendasNfceProcessando.length - 5}.',
+                  '... e mais ${preview.length - 5}.',
                   style: theme.textTheme.bodySmall?.copyWith(color: corTexto),
                 ),
             ],
@@ -114,14 +114,16 @@ class FiscalBloqueiosBanner extends StatelessWidget {
     );
   }
 
-  Widget _linhaNfce(Venda v) {
+  Widget _linhaPreview(FiscalBloqueioNfcePreview p, Color corTexto) {
+    final dt = DateTime.tryParse(p.dataIso)?.toLocal();
+    final dataTxt = dt != null ? _data.format(dt) : '';
     return Text(
-      '${VendaDocumentoRotuloHelper.rotuloIdentificacaoLista(v)} · '
-      '${_data.format(v.data.toLocal())} · '
-      'R\$ ${_moeda.format(v.total)}',
+      '${p.rotulo}'
+      '${dataTxt.isNotEmpty ? " · $dataTxt" : ""}'
+      ' · R\$ ${_moeda.format(p.total)}',
       style: TextStyle(
         fontSize: 12,
-        color: Colors.red.shade800,
+        color: corTexto,
       ),
     );
   }

@@ -186,6 +186,16 @@ class PromocaoRepository {
     );
   }
 
+  /// Alterna ou define [Promocao.ativa]. [ativa] null = toggle.
+  Promocao? alterarStatus(int id, {bool? ativa}) {
+    final p = obterPorId(id);
+    if (p == null) return null;
+    p.ativa = ativa ?? !p.ativa;
+    _db.promocaoBox.put(p);
+    notificarAlteracaoParaRede(entidade: 'promocao', entidadeId: id);
+    return p;
+  }
+
   void _removerItensPromocaoTx(int promocaoId) {
     final q = _db.promocaoItemBox
         .query(PromocaoItem_.promocao.equals(promocaoId))

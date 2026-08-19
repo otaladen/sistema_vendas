@@ -21,6 +21,12 @@ class SyncLocalConfig {
       'sync_local_backup_segundo_destino_pasta';
   static const _kAbrirGavetaAutomatica = 'sync_local_abrir_gaveta_automatica';
   static const _kGavetaPino = 'sync_local_gaveta_pino';
+  static const _kModoImpressaoBalcao = 'sync_local_modo_impressao_balcao';
+  static const _kEscPosLargura = 'sync_local_escpos_largura';
+  static const _kEscPosDestino = 'sync_local_escpos_destino';
+  static const _kEscPosHost = 'sync_local_escpos_host';
+  static const _kEscPosPortaTcp = 'sync_local_escpos_porta_tcp';
+  static const _kEscPosPortaCom = 'sync_local_escpos_porta_com';
 
   static Future<void> migrarLegadoSeNecessario(EmpresaConfig legado) async {
     final prefs = await SharedPreferences.getInstance();
@@ -81,6 +87,36 @@ class SyncLocalConfig {
         if (p == null) return base.gavetaPino;
         return p.clamp(0, 1);
       }(),
+      modoImpressaoBalcao: () {
+        final m = (prefs.getString(_kModoImpressaoBalcao) ??
+                base.modoImpressaoBalcao)
+            .trim()
+            .toLowerCase();
+        return m == 'escpos' ? 'escpos' : 'pdf';
+      }(),
+      escPosLargura: () {
+        final l =
+            (prefs.getString(_kEscPosLargura) ?? base.escPosLargura)
+                .trim()
+                .toLowerCase();
+        return (l == '58' || l == '58mm') ? '58' : '80';
+      }(),
+      escPosDestino: () {
+        final d =
+            (prefs.getString(_kEscPosDestino) ?? base.escPosDestino)
+                .trim()
+                .toLowerCase();
+        if (d == 'rede' || d == 'tcp' || d == 'ip') return 'rede';
+        if (d == 'com' || d == 'serial') return 'com';
+        return 'windows';
+      }(),
+      escPosHost: prefs.getString(_kEscPosHost) ?? base.escPosHost,
+      escPosPortaTcp: () {
+        final p = prefs.getInt(_kEscPosPortaTcp);
+        if (p == null || p < 1 || p > 65535) return base.escPosPortaTcp;
+        return p;
+      }(),
+      escPosPortaCom: prefs.getString(_kEscPosPortaCom) ?? base.escPosPortaCom,
     );
   }
 
@@ -110,6 +146,21 @@ class SyncLocalConfig {
     );
     await prefs.setBool(_kAbrirGavetaAutomatica, config.abrirGavetaAutomatica);
     await prefs.setInt(_kGavetaPino, config.gavetaPino.clamp(0, 1));
+    await prefs.setString(
+      _kModoImpressaoBalcao,
+      config.modoImpressaoBalcao == 'escpos' ? 'escpos' : 'pdf',
+    );
+    await prefs.setString(
+      _kEscPosLargura,
+      config.escPosLargura == '58' ? '58' : '80',
+    );
+    await prefs.setString(_kEscPosDestino, config.escPosDestino);
+    await prefs.setString(_kEscPosHost, config.escPosHost.trim());
+    await prefs.setInt(
+      _kEscPosPortaTcp,
+      config.escPosPortaTcp.clamp(1, 65535),
+    );
+    await prefs.setString(_kEscPosPortaCom, config.escPosPortaCom.trim());
     await prefs.setBool(_kMigrado, true);
   }
 }

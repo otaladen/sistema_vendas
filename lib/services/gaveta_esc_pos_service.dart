@@ -2,7 +2,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../data/app_config_repository.dart';
-import 'gaveta_raw_io.dart';
+import 'esc_pos_commands.dart';
+import 'esc_pos_transport.dart';
 
 enum GavetaResultadoCodigo {
   sucesso,
@@ -24,9 +25,7 @@ class GavetaAbrirResultado {
   final GavetaResultadoCodigo codigo;
 }
 
-/// Pulso ESC/POS na gaveta (Epson, Bematech, Elgin) via impressora termica USB no Windows.
-///
-/// Usa [EmpresaConfig.impressoraPadrao] — a mesma impressora do cupom PDF, quando for termica.
+/// Pulso ESC/POS na gaveta via destino configurado (Windows RAW / TCP / COM).
 class GavetaEscPosService {
   GavetaEscPosService(this._configRepository);
 
@@ -37,23 +36,15 @@ class GavetaEscPosService {
     int pino = 0,
     int tempoOnMs = 50,
     int tempoOffMs = 250,
-  }) {
-    final m = pino.clamp(0, 1);
-    final t1 = (tempoOnMs ~/ 2).clamp(1, 255);
-    final t2 = (tempoOffMs ~/ 2).clamp(1, 255);
-    return Uint8List.fromList([0x1B, 0x70, m, t1, t2]);
-  }
+  }) =>
+      EscPosCommands.drawerPulse(
+        pino: pino,
+        tempoOnMs: tempoOnMs,
+        tempoOffMs: tempoOffMs,
+      );
 
   /// Abre apos pagamento no caixa ([forcar] ignora o interruptor automatico).
   Future<GavetaAbrirResultado> abrirAposPagamento({bool forcar = false}) async {
-    if (!Platform.isWindows) {
-      return const GavetaAbrirResultado(
-        sucesso: false,
-        mensagem: 'Gaveta automatica: use o app no Windows com impressora USB.',
-        codigo: GavetaResultadoCodigo.plataforma,
-      );
-    }
-
     final config = await _configRepository.carregarEmpresaConfig();
     if (!forcar && !config.abrirGavetaAutomatica) {
       return const GavetaAbrirResultado(
@@ -63,19 +54,37 @@ class GavetaEscPosService {
       );
     }
 
-    final impressora = config.impressoraPadrao.trim();
-    if (impressora.isEmpty) {
+    final destino = EscPosDestino.fromConfig(
+      tipo: config.escPosDestino,
+      impressoraWindows: config.impressoraPadrao,
+      host: config.escPosHost,
+      portaTcp: config.escPosPortaTcp,
+      portaCom: config.escPosPortaCom,
+    );
+
+    if ((destino.tipo == EscPosDestinoTipo.windows ||
+            destino.tipo == EscPosDestinoTipo.com) &&
+        !Platform.isWindows) {
+      return const GavetaAbrirResultado(
+        sucesso: false,
+        mensagem: 'Gaveta USB/COM: use o app no Windows.',
+        codigo: GavetaResultadoCodigo.plataforma,
+      );
+    }
+
+    if (destino.tipo == EscPosDestinoTipo.windows &&
+        config.impressoraPadrao.trim().isEmpty) {
       return const GavetaAbrirResultado(
         sucesso: false,
         mensagem:
-            'Configure a impressora termica (USB) em Configuracoes > Impressora.',
+            'Configure a impressora termica em Configuracoes > Impressora.',
         codigo: GavetaResultadoCodigo.semImpressora,
       );
     }
 
     try {
       final bytes = comandoPulseGaveta(pino: config.gavetaPino);
-      await enviarRawParaImpressora(impressora, bytes);
+      await EscPosTransport.enviar(destino, bytes);
       return const GavetaAbrirResultado(
         sucesso: true,
         mensagem: 'Comando de gaveta enviado para a impressora.',
@@ -84,9 +93,7 @@ class GavetaEscPosService {
     } catch (e) {
       return GavetaAbrirResultado(
         sucesso: false,
-        mensagem:
-            'Nao foi possivel abrir a gaveta ($impressora). '
-            'Verifique USB, driver e nome exato na lista do Windows. Detalhe: $e',
+        mensagem: 'Nao foi possivel abrir a gaveta. Detalhe: $e',
         codigo: GavetaResultadoCodigo.erro,
       );
     }

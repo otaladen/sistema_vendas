@@ -11,24 +11,24 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_config_repository.dart';
-import '../data/produto_repository.dart';
+import '../data/api/lan_api_client.dart';
+import '../data/sync/sync_entity_codec_extras.dart';
 import 'configuracoes/obra_calculadora_config_section.dart';
 import 'configuracoes/backup_configuracao_section.dart';
+import 'configuracoes/backup_terminal_leve_section.dart';
 import 'configuracoes/config_page_shell.dart';
 import 'configuracoes/config_secao.dart';
 import 'configuracoes/config_section_card.dart';
-import '../data/mensageria_repository.dart';
 import '../data/objectbox.dart';
 import '../data/sync/lan_sync_scheduler.dart';
-import '../data/venda_repository.dart';
 import '../config/fiscal_config.dart';
+import '../domain/pod_foto_retencao.dart';
+import '../services/entrega_pod_retencao_service.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../services/fiscal_config_store.dart';
 import '../services/gemini_config.dart';
 import '../services/print_service.dart';
 import 'widgets/rede_sincronizacao_card.dart';
-import '../model/mensagem_log.dart';
-import '../model/mensagem_template.dart';
 import '../services/cupom_layout_preview_pdf.dart';
 import '../services/cupom_pdf_layout.dart';
 import 'config_impressora_page.dart';
@@ -38,21 +38,27 @@ class ConfiguracoesPage extends StatefulWidget {
   const ConfiguracoesPage({
     super.key,
     required this.vendaRepository,
-    required this.objectBox,
     required this.appConfigRepository,
     required this.printService,
     required this.produtoRepository,
+    this.objectBox,
     this.lanSyncScheduler,
     this.secaoInicialId,
+    this.terminalLeve = false,
+    this.lanApiClient,
   });
 
-  final VendaRepository vendaRepository;
-  final ObjectBox objectBox;
+  final dynamic vendaRepository;
+  final ObjectBox? objectBox;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
   final LanSyncScheduler? lanSyncScheduler;
   final String? secaoInicialId;
+
+  /// Terminal Windows: sem banco local — backup/servidor ficam no PC 1.
+  final bool terminalLeve;
+  final dynamic lanApiClient;
 
   @override
   State<ConfiguracoesPage> createState() => _ConfiguracoesPageState();
@@ -68,19 +74,20 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _limiteDivergenciaCaixaController = TextEditingController();
   final _maxDescontoPercentualPdvController = TextEditingController();
   final _margemMinimaPadraoController = TextEditingController();
-  final _whatsappDonoController = TextEditingController();
-  final _alertasIntervaloController = TextEditingController(text: '120');
-  final _whatsApiVersionController = TextEditingController();
-  final _whatsPhoneIdController = TextEditingController();
-  final _whatsTokenController = TextEditingController();
-  final _mensageriaBackendUrlController = TextEditingController();
   final _geminiApiKeyController = TextEditingController();
   final _fiscalTokenController = TextEditingController();
   final _fiscalCnpjController = TextEditingController();
   final _fiscalIeController = TextEditingController();
-  final _mensageriaRepository = MensageriaRepository();
+  final _emailContadorController = TextEditingController();
+  final _smtpHostController = TextEditingController();
+  final _smtpPortController = TextEditingController(text: '587');
+  final _smtpUserController = TextEditingController();
+  final _smtpPasswordController = TextEditingController();
+  final _smtpFromController = TextEditingController();
   bool _geminiChaveOculta = true;
   bool _fiscalTokenOculto = true;
+  bool _smtpPasswordOculta = true;
+  bool _smtpSsl = false;
   String _fiscalAmbiente = 'homologacao';
   int _fiscalRegime = FiscalRegimePadrao.regimeNormal;
   String _modeloPdf = 'cupom';
@@ -93,6 +100,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _horarioInconsistente = false;
   String _diagnosticoHorario = '';
   bool _permitirVendaSemEstoque = true;
+  int _podFotoRetencaoDias = 180;
   bool _pdvExigirVendedor = false;
   bool _pdvBloqueioVendedor = false;
   bool _pdvBloqueioVendedorAposOrcamento = false;
@@ -130,37 +138,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _mostrarCampoDescontoCaixa = true;
   bool _exigirAutorizacaoSegundaViaCupom = true;
   bool _umCaixaAbertoPorLoja = true;
-  bool _alertasProativosWhatsappAtivos = false;
-  List<MensagemTemplate> _templatesMensagem = [];
-  int _filaPendente = 0;
-  int _logsTotais = 0;
-  int _logsEnviados = 0;
-  int _logsEntregues = 0;
-  int _logsLidos = 0;
-  int _logsFalhas = 0;
-  String _filtroStatusLog = 'todos';
-  String _filtroCanalLog = 'todos';
-  final _filtroTextoLogController = TextEditingController();
-  final _webhookPayloadController = TextEditingController();
-  List<MensagemLog> _logsFiltrados = [];
   int _indiceSecaoConfig = 0;
-
-  String _rotuloStatusMensagem(String status) {
-    switch (status) {
-      case 'aceito_api':
-        return 'Aceito pela API';
-      case 'enviado':
-        return 'Enviado';
-      case 'entregue':
-        return 'Entregue';
-      case 'lido':
-        return 'Lido';
-      case 'falhou':
-        return 'Falhou';
-      default:
-        return status;
-    }
-  }
 
   @override
   void initState() {
@@ -173,7 +151,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _carregarChaveGemini();
     _carregarConfigFiscal();
     _carregarDiagnosticoHorario();
-    _carregarMensageria();
   }
 
   @override
@@ -187,24 +164,52 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _limiteDivergenciaCaixaController.dispose();
     _maxDescontoPercentualPdvController.dispose();
     _margemMinimaPadraoController.dispose();
-    _whatsappDonoController.dispose();
-    _alertasIntervaloController.dispose();
-    _whatsApiVersionController.dispose();
-    _whatsPhoneIdController.dispose();
-    _whatsTokenController.dispose();
-    _mensageriaBackendUrlController.dispose();
-    _filtroTextoLogController.dispose();
-    _webhookPayloadController.dispose();
     _geminiApiKeyController.dispose();
     _fiscalTokenController.dispose();
     _fiscalCnpjController.dispose();
     _fiscalIeController.dispose();
+    _emailContadorController.dispose();
+    _smtpHostController.dispose();
+    _smtpPortController.dispose();
+    _smtpUserController.dispose();
+    _smtpPasswordController.dispose();
+    _smtpFromController.dispose();
     _caixaLimiteOrcamentosController.dispose();
     _pdvBloqueioInatividadeMinutosController.dispose();
     super.dispose();
   }
 
   Future<void> _carregarConfigFiscal() async {
+    if (widget.terminalLeve) {
+      final client = widget.lanApiClient;
+      if (client is LanApiClient && client.configurado) {
+        try {
+          final m = await client.obterEmpresaFiscal();
+          final raw = m['fiscal'];
+          if (raw is Map && mounted) {
+            final f = Map<String, dynamic>.from(raw);
+            setState(() {
+              final tokenOk = f['tokenConfigurado'] == true;
+              _fiscalTokenController.text = tokenOk ? '********' : '';
+              _fiscalCnpjController.text =
+                  (f['cnpjEmitente'] ?? '').toString();
+              _fiscalIeController.text =
+                  (f['inscricaoEstadualEmitente'] ?? '').toString();
+              final amb = (f['ambiente'] ?? 'homologacao').toString();
+              _fiscalAmbiente =
+                  amb == 'producao' ? 'producao' : 'homologacao';
+              final regime = (f['regimeTributarioEmitente'] as num?)?.toInt();
+              if (regime != null && regime >= 1 && regime <= 3) {
+                _fiscalRegime = regime;
+              }
+            });
+            return;
+          }
+        } catch (e) {
+          debugPrint('Config fiscal remoto: $e');
+        }
+      }
+    }
     final cfg = await FiscalConfigStore.carregar();
     if (!mounted) return;
     setState(() {
@@ -213,10 +218,28 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _fiscalIeController.text = cfg.inscricaoEstadualEmitente;
       _fiscalAmbiente = cfg.homologacao ? 'homologacao' : 'producao';
       _fiscalRegime = FiscalRegimePadrao.regimeEfetivo(cfg);
+      _emailContadorController.text = cfg.emailContador;
+      _smtpHostController.text = cfg.smtpHost;
+      _smtpPortController.text = '${cfg.smtpPort}';
+      _smtpUserController.text = cfg.smtpUser;
+      _smtpPasswordController.text = cfg.smtpPassword;
+      _smtpFromController.text = cfg.smtpFromEmail;
+      _smtpSsl = cfg.smtpSsl;
     });
   }
 
   Future<void> _salvarConfigFiscal() async {
+    if (widget.terminalLeve) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Token Focus e dados fiscais sensiveis so podem ser alterados no PC servidor.',
+          ),
+        ),
+      );
+      return;
+    }
     final token = _fiscalTokenController.text.trim();
     if (token.isNotEmpty && token.length < 8) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -224,12 +247,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       );
       return;
     }
+    final smtpPort =
+        int.tryParse(_smtpPortController.text.trim()) ?? 587;
     await FiscalConfigStore.salvar(
       apiToken: token,
       ambiente: _fiscalAmbiente,
       cnpjEmitente: _fiscalCnpjController.text,
       inscricaoEstadualEmitente: _fiscalIeController.text,
       regimeTributarioEmitente: _fiscalRegime,
+      emailContador: _emailContadorController.text,
+      smtpHost: _smtpHostController.text,
+      smtpPort: smtpPort,
+      smtpUser: _smtpUserController.text,
+      smtpPassword: _smtpPasswordController.text,
+      smtpFromEmail: _smtpFromController.text,
+      smtpSsl: _smtpSsl,
     );
     final empresa = await widget.appConfigRepository.carregarEmpresaConfig();
     await widget.appConfigRepository.salvarEmpresaConfig(
@@ -308,8 +340,44 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     );
   }
 
+  Future<EmpresaConfig> _carregarConfigDoDiscoOuServidor() async {
+    final local = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!widget.terminalLeve) return local;
+    final client = widget.lanApiClient;
+    if (client is! LanApiClient || !client.configurado) {
+      return local;
+    }
+    try {
+      final m = await client.obterEmpresaConfig();
+      final raw = m['config'];
+      if (raw is! Map) return local;
+      final mesclado = SyncEntityCodecExtras.empresaConfigDeMap(
+        local,
+        Map<String, dynamic>.from(raw),
+      );
+      // Cache local para PDV/caixa; nao propaga de volta ao servidor.
+      await widget.appConfigRepository.salvarEmpresaConfig(
+        mesclado,
+        propagarRede: false,
+      );
+      return mesclado;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Nao foi possivel ler configuracoes do servidor: $e. '
+              'Exibindo cache local.',
+            ),
+          ),
+        );
+      }
+      return local;
+    }
+  }
+
   Future<void> _carregarConfig() async {
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await _carregarConfigDoDiscoOuServidor();
     if (!mounted) return;
     setState(() {
       _nomeLojaController.text = config.nomeLoja;
@@ -325,6 +393,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _impressoraPadrao = config.impressoraPadrao;
       _logoPath = config.logoPath;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
+      _podFotoRetencaoDias =
+          PodFotoRetencaoOpcoes.normalizar(config.podFotoRetencaoDias);
       _pdvExigirVendedor = config.pdvExigirVendedor;
       _pdvBloqueioVendedor = config.pdvBloqueioVendedor;
       _pdvBloqueioVendedorAposOrcamento =
@@ -375,45 +445,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           .toStringAsFixed(1)
           .replaceAll('.', ',');
       _umCaixaAbertoPorLoja = config.umCaixaAbertoPorLoja;
-      _alertasProativosWhatsappAtivos = config.alertasProativosWhatsappAtivos;
-      _whatsappDonoController.text = config.whatsappDonoNumero;
-      _alertasIntervaloController.text =
-          config.alertasProativosIntervaloMinutos.toString();
-      _whatsApiVersionController.text = config.whatsappApiVersion;
-      _whatsPhoneIdController.text = config.whatsappPhoneNumberId;
-      _whatsTokenController.text = config.whatsappAccessToken;
-      _mensageriaBackendUrlController.text = config.mensageriaBackendUrl;
       _prefsEmpresaAplicadas = true;
-    });
-  }
-
-  Future<void> _carregarMensageria() async {
-    final templates = await _mensageriaRepository.listarTemplates();
-    final fila = await _mensageriaRepository.listarFila();
-    final logs = await _mensageriaRepository.listarLogs();
-    final resumo = await _mensageriaRepository.resumoDashboard();
-    if (!mounted) return;
-    setState(() {
-      _templatesMensagem = templates;
-      _filaPendente = fila.where((e) => e.status == 'pendente').length;
-      _logsTotais = logs.length;
-      _logsEnviados = resumo.enviados;
-      _logsEntregues = resumo.entregues;
-      _logsLidos = resumo.lidos;
-      _logsFalhas = resumo.falhas;
-    });
-    await _aplicarFiltroLogs();
-  }
-
-  Future<void> _aplicarFiltroLogs() async {
-    final logs = await _mensageriaRepository.filtrarLogs(
-      statusEntrega: _filtroStatusLog,
-      canal: _filtroCanalLog,
-      texto: _filtroTextoLogController.text,
-    );
-    if (!mounted) return;
-    setState(() {
-      _logsFiltrados = logs;
     });
   }
 
@@ -569,384 +601,136 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     setState(() => _salvando = true);
     try {
       final disco = await widget.appConfigRepository.carregarEmpresaConfig();
-      await widget.appConfigRepository.salvarEmpresaConfig(
-        disco.copyWith(
-          nomeLoja: _nomeLojaController.text,
-          telefone: _telefoneController.text,
-          endereco: _enderecoController.text,
-          pastaPadraoPdf: _pastaPadraoPdfController.text,
-          impressoraPadrao: _impressoraPadrao,
-          modeloPdf: _modeloPdf,
-          rodapeNota: _rodapeNotaController.text,
-          rodapeOrcamento: _rodapeOrcamentoController.text,
-          logoPath: _logoPath,
-          limiteDivergenciaCaixa:
-              _parseMoeda(_limiteDivergenciaCaixaController.text) ?? 20,
-          mostrarCampoDescontoCaixa: _mostrarCampoDescontoCaixa,
-          exigirAutorizacaoSegundaViaCupom: _exigirAutorizacaoSegundaViaCupom,
-          maxDescontoPercentualPdv:
-              (_parseMoeda(_maxDescontoPercentualPdvController.text) ?? 15)
-                  .clamp(0, 100),
-          margemMinimaPercentualPadrao:
-              (_parseMoeda(_margemMinimaPadraoController.text) ?? 20)
-                  .clamp(0, 99),
-          umCaixaAbertoPorLoja: _umCaixaAbertoPorLoja,
-          alertasProativosWhatsappAtivos: _alertasProativosWhatsappAtivos,
-          whatsappDonoNumero: _whatsappDonoController.text.trim(),
-          alertasProativosIntervaloMinutos: int.tryParse(
-                _alertasIntervaloController.text.trim(),
-              ) ??
-              120,
-          permitirVendaSemEstoque: _permitirVendaSemEstoque,
-          pdvExigirVendedor: _pdvExigirVendedor,
-          pdvBloqueioVendedor: _pdvBloqueioVendedor,
-          pdvBloqueioVendedorAposOrcamento: _pdvBloqueioVendedor &&
-              _pdvBloqueioVendedorAposOrcamento,
-          pdvBloqueioVendedorInatividadeMinutos: _pdvBloqueioVendedor &&
-                  _pdvBloqueioInatividadeAtivo
-              ? (int.tryParse(
-                      _pdvBloqueioInatividadeMinutosController.text.trim(),
-                    ) ??
-                    5)
-                  .clamp(1, 480)
-              : 0,
-          pdvBalcaoRapido: _pdvBalcaoRapido,
-          pdvCheckoutDireto: _pdvCheckoutDireto,
-          pdvPularDialogOrcamentoSalvo: _pdvPularDialogOrcamentoSalvo,
-          pdvExigirClienteRetiradaFutura: _pdvExigirClienteRetiradaFutura,
-          obraCalcTijoloProdutoId: _obraCalcTijoloProdutoId,
-          obraCalcCimentoProdutoId: _obraCalcCimentoProdutoId,
-          obraCalcAreiaProdutoId: _obraCalcAreiaProdutoId,
-          obraCalcPisoProdutoId: _obraCalcPisoProdutoId,
-          obraCalcPerdaPadraoPct: _obraCalcPerdaPadraoPct,
-          obraCalcPerdaRebocoPct: _obraCalcPerdaRebocoPct,
-          obraCalcPerdaPisoPct: _obraCalcPerdaPisoPct,
-          obraCalcEspessuraRebocoMm: _obraCalcEspessuraRebocoMm,
-          obraCalcEspessuraContrapisoMm: _obraCalcEspessuraContrapisoMm,
-          obraCalcM2PorCaixaPiso: _obraCalcM2PorCaixaPiso,
-          obraCalcGeminiParseAtivo: _obraCalcGeminiParseAtivo,
-          obraCalcTemplatesJson: _obraCalcTemplatesJson,
-          obraCalcBritaProdutoId: _obraCalcBritaProdutoId,
-          obraCalcTelhaProdutoId: _obraCalcTelhaProdutoId,
-          obraCalcFerroProdutoId: _obraCalcFerroProdutoId,
-          obraCalcEspessuraLajeMm: _obraCalcEspessuraLajeMm,
-          obraCalcPerdaLajePct: _obraCalcPerdaLajePct,
-          obraCalcPerdaFundacaoPct: _obraCalcPerdaFundacaoPct,
-          obraCalcPerdaTelhadoPct: _obraCalcPerdaTelhadoPct,
-          obraCalcTelhasPorM2: _obraCalcTelhasPorM2,
-          obraCalcInclinacaoTelhadoPct: _obraCalcInclinacaoTelhadoPct,
-          obraCalcUsarSubstitutoEstoqueZero: _obraCalcUsarSubstitutoEstoqueZero,
-          caixaFiscalNaoBloqueante: _caixaFiscalNaoBloqueante,
-          caixaLimiteOrcamentosPendentes: int.tryParse(
-                _caixaLimiteOrcamentosController.text.trim(),
-              ) ??
-              120,
-          whatsappApiVersion: _whatsApiVersionController.text,
-          whatsappPhoneNumberId: _whatsPhoneIdController.text,
-          whatsappAccessToken: _whatsTokenController.text,
-          mensageriaBackendUrl: _mensageriaBackendUrlController.text,
-        ),
+      final atualizado = disco.copyWith(
+        nomeLoja: _nomeLojaController.text,
+        telefone: _telefoneController.text,
+        endereco: _enderecoController.text,
+        pastaPadraoPdf: _pastaPadraoPdfController.text,
+        impressoraPadrao: _impressoraPadrao,
+        modeloPdf: _modeloPdf,
+        rodapeNota: _rodapeNotaController.text,
+        rodapeOrcamento: _rodapeOrcamentoController.text,
+        logoPath: _logoPath,
+        limiteDivergenciaCaixa:
+            _parseMoeda(_limiteDivergenciaCaixaController.text) ?? 20,
+        mostrarCampoDescontoCaixa: _mostrarCampoDescontoCaixa,
+        exigirAutorizacaoSegundaViaCupom: _exigirAutorizacaoSegundaViaCupom,
+        maxDescontoPercentualPdv:
+            (_parseMoeda(_maxDescontoPercentualPdvController.text) ?? 15)
+                .clamp(0, 100),
+        margemMinimaPercentualPadrao:
+            (_parseMoeda(_margemMinimaPadraoController.text) ?? 20)
+                .clamp(0, 99),
+        umCaixaAbertoPorLoja: _umCaixaAbertoPorLoja,
+        permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        podFotoRetencaoDias: _podFotoRetencaoDias,
+        pdvExigirVendedor: _pdvExigirVendedor,
+        pdvBloqueioVendedor: _pdvBloqueioVendedor,
+        pdvBloqueioVendedorAposOrcamento:
+            _pdvBloqueioVendedor && _pdvBloqueioVendedorAposOrcamento,
+        pdvBloqueioVendedorInatividadeMinutos: _pdvBloqueioVendedor &&
+                _pdvBloqueioInatividadeAtivo
+            ? (int.tryParse(
+                    _pdvBloqueioInatividadeMinutosController.text.trim(),
+                  ) ??
+                  5)
+                .clamp(1, 480)
+            : 0,
+        pdvBalcaoRapido: _pdvBalcaoRapido,
+        pdvCheckoutDireto: _pdvCheckoutDireto,
+        pdvPularDialogOrcamentoSalvo: _pdvPularDialogOrcamentoSalvo,
+        pdvExigirClienteRetiradaFutura: _pdvExigirClienteRetiradaFutura,
+        obraCalcTijoloProdutoId: _obraCalcTijoloProdutoId,
+        obraCalcCimentoProdutoId: _obraCalcCimentoProdutoId,
+        obraCalcAreiaProdutoId: _obraCalcAreiaProdutoId,
+        obraCalcPisoProdutoId: _obraCalcPisoProdutoId,
+        obraCalcPerdaPadraoPct: _obraCalcPerdaPadraoPct,
+        obraCalcPerdaRebocoPct: _obraCalcPerdaRebocoPct,
+        obraCalcPerdaPisoPct: _obraCalcPerdaPisoPct,
+        obraCalcEspessuraRebocoMm: _obraCalcEspessuraRebocoMm,
+        obraCalcEspessuraContrapisoMm: _obraCalcEspessuraContrapisoMm,
+        obraCalcM2PorCaixaPiso: _obraCalcM2PorCaixaPiso,
+        obraCalcGeminiParseAtivo: _obraCalcGeminiParseAtivo,
+        obraCalcTemplatesJson: _obraCalcTemplatesJson,
+        obraCalcBritaProdutoId: _obraCalcBritaProdutoId,
+        obraCalcTelhaProdutoId: _obraCalcTelhaProdutoId,
+        obraCalcFerroProdutoId: _obraCalcFerroProdutoId,
+        obraCalcEspessuraLajeMm: _obraCalcEspessuraLajeMm,
+        obraCalcPerdaLajePct: _obraCalcPerdaLajePct,
+        obraCalcPerdaFundacaoPct: _obraCalcPerdaFundacaoPct,
+        obraCalcPerdaTelhadoPct: _obraCalcPerdaTelhadoPct,
+        obraCalcTelhasPorM2: _obraCalcTelhasPorM2,
+        obraCalcInclinacaoTelhadoPct: _obraCalcInclinacaoTelhadoPct,
+        obraCalcUsarSubstitutoEstoqueZero: _obraCalcUsarSubstitutoEstoqueZero,
+        caixaFiscalNaoBloqueante: _caixaFiscalNaoBloqueante,
+        caixaLimiteOrcamentosPendentes: int.tryParse(
+              _caixaLimiteOrcamentosController.text.trim(),
+            ) ??
+            120,
       );
+
+      final client = widget.lanApiClient;
+      final terminalComApi = widget.terminalLeve &&
+          client is LanApiClient &&
+          client.configurado;
+
+      if (terminalComApi) {
+        // Terminal: servidor e fonte da verdade — POST primeiro, depois cache local.
+        final resp = await client.salvarEmpresaConfigRemoto(
+          SyncEntityCodecExtras.empresaConfigParaMap(atualizado),
+        );
+        final raw = resp['config'];
+        final paraCache = raw is Map
+            ? SyncEntityCodecExtras.empresaConfigDeMap(
+                atualizado,
+                Map<String, dynamic>.from(raw),
+              )
+            : atualizado;
+        await widget.appConfigRepository.salvarEmpresaConfig(
+          paraCache,
+          propagarRede: false,
+        );
+      } else {
+        await widget.appConfigRepository.salvarEmpresaConfig(atualizado);
+        if (client is LanApiClient && client.configurado) {
+          try {
+            await client.salvarEmpresaConfigRemoto(
+              SyncEntityCodecExtras.empresaConfigParaMap(atualizado),
+            );
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Salvo localmente, mas falhou ao enviar ao PC1: $e',
+                  ),
+                ),
+              );
+            }
+          }
+        }
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Configuracoes da empresa salvas.')),
+        SnackBar(
+          content: Text(
+            terminalComApi
+                ? 'Configuracoes salvas no servidor.'
+                : 'Configuracoes da empresa salvas.',
+          ),
+        ),
       );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Falha ao salvar configuracoes: $e')),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _salvando = false);
       }
     }
-  }
-
-  Future<void> _abrirCadastroTemplate({MensagemTemplate? template}) async {
-    final nomeController = TextEditingController(text: template?.nome ?? '');
-    final metaTemplateController = TextEditingController(
-      text: template?.metaTemplateName ?? '',
-    );
-    final textoController = TextEditingController(
-      text: template?.textoBase ?? '',
-    );
-    String canal = template?.canal ?? 'whatsapp';
-    String evento = template?.evento ?? 'manual';
-    bool ativo = template?.ativo ?? true;
-    final salvar = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: Text(
-                template == null ? 'Novo template' : 'Editar template',
-              ),
-              content: SizedBox(
-                width: 560,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: nomeController,
-                      decoration: const InputDecoration(labelText: 'Nome'),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      initialValue: canal,
-                      decoration: const InputDecoration(labelText: 'Canal'),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'whatsapp',
-                          child: Text('WhatsApp'),
-                        ),
-                        DropdownMenuItem(value: 'sms', child: Text('SMS')),
-                      ],
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setDialogState(() => canal = v);
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      initialValue: evento,
-                      decoration: const InputDecoration(labelText: 'Evento'),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'manual',
-                          child: Text('Manual'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'venda_finalizada',
-                          child: Text('Venda finalizada'),
-                        ),
-                      ],
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setDialogState(() => evento = v);
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: metaTemplateController,
-                      decoration: const InputDecoration(
-                        labelText: 'Template Meta (opcional)',
-                        hintText: 'Ex.: venda_confirmada',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: textoController,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
-                        labelText: 'Texto base',
-                        hintText:
-                            'Use variaveis: {{cliente_nome}} {{numero_orcamento}} {{valor_total}}',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SwitchListTile.adaptive(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Template ativo'),
-                      value: ativo,
-                      onChanged: (v) => setDialogState(() => ativo = v),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancelar'),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Salvar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    if (salvar != true) return;
-    final nome = nomeController.text.trim();
-    if (nome.isEmpty) return;
-    await _mensageriaRepository.salvarTemplate(
-      MensagemTemplate(
-        id: template?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        nome: nome,
-        canal: canal,
-        evento: evento,
-        textoBase: textoController.text.trim(),
-        metaTemplateName: metaTemplateController.text.trim(),
-        ativo: ativo,
-        criadoEm: template?.criadoEm ?? DateTime.now(),
-      ),
-    );
-    await _carregarMensageria();
-  }
-
-  Future<void> _removerTemplate(MensagemTemplate template) async {
-    await _mensageriaRepository.removerTemplate(template.id);
-    await _carregarMensageria();
-  }
-
-  Future<void> _processarFilaMensagens() async {
-    final processadas = await _mensageriaRepository.processarFilaPendente();
-    await _carregarMensageria();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Fila processada: $processadas mensagem(ns).')),
-    );
-  }
-
-  Future<void> _processarWebhookWhatsapp() async {
-    final payload = _webhookPayloadController.text.trim();
-    if (payload.isEmpty) return;
-    final atualizados = await _mensageriaRepository
-        .processarWebhookWhatsappPayload(payload);
-    await _carregarMensageria();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Webhook processado: $atualizados log(s) atualizados.'),
-      ),
-    );
-  }
-
-  Future<void> _reenfileirarFalhaDeLog(MensagemLog log) async {
-    await _mensageriaRepository.reenfileirarFalha(log.filaId);
-    await _carregarMensageria();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Mensagem falha reenfileirada.')),
-    );
-  }
-
-  Future<void> _verErroDetalhadoLog(MensagemLog log) async {
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Erro detalhado do envio'),
-          content: SizedBox(
-            width: 720,
-            child: SingleChildScrollView(
-              child: SelectableText(
-                log.responseJson.trim().isEmpty
-                    ? 'Sem detalhe retornado pela API.'
-                    : log.responseJson,
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Fechar'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _mostrarContratoBackendMensageria() async {
-    const exemploRequest = '''
-{
-  "canal": "whatsapp",
-  "destino": "5599999999999",
-  "templateId": "id_template",
-  "templateName": "nome_template_meta_ou_vazio",
-  "idioma": "pt_BR",
-  "payload": {
-    "messaging_product": "whatsapp",
-    "to": "5599999999999",
-    "type": "text",
-    "text": {
-      "body": "Mensagem renderizada pelo sistema"
-    }
-  },
-  "meta": {
-    "origin": "sistema_vendas_desktop",
-    "test": false
-  }
-}
-''';
-    const exemploResponseOk = '''
-{
-  "ok": true,
-  "provider": "whatsapp_cloud_api",
-  "providerMessageId": "wamid.HBg...",
-  "status": "accepted"
-}
-''';
-    const exemploResponseErro = '''
-{
-  "ok": false,
-  "error": "invalid_token_or_destination"
-}
-''';
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Contrato do Backend de Mensageria'),
-          content: SizedBox(
-            width: 760,
-            child: SingleChildScrollView(
-              child: SelectableText(
-                'REQUEST (POST JSON)\\n$exemploRequest\\n\\n'
-                'RESPONSE 2xx (sucesso)\\n$exemploResponseOk\\n\\n'
-                'RESPONSE erro (4xx/5xx)\\n$exemploResponseErro',
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Fechar'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _testarBackendMensageria() async {
-    final url = _mensageriaBackendUrlController.text.trim();
-    final resultado = await _mensageriaRepository.testarBackend(
-      backendUrl: url,
-    );
-    if (!mounted) return;
-    final status = resultado.statusHttp == 0
-        ? '-'
-        : resultado.statusHttp.toString();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          resultado.sucesso
-              ? 'Backend respondeu com sucesso (HTTP $status).'
-              : 'Falha no teste do backend (HTTP $status).',
-        ),
-      ),
-    );
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Resultado do teste de backend'),
-          content: SizedBox(
-            width: 700,
-            child: SingleChildScrollView(
-              child: SelectableText(resultado.resposta),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Fechar'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   Future<Uint8List> _gerarPdfTeste() async {
@@ -1694,6 +1478,99 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 ),
                 keyboardType: TextInputType.number,
               ),
+              const SizedBox(height: 16),
+              Text(
+                'Envio do fechamento ao contador',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _emailContadorController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'E-mail do contador',
+                  hintText: 'contador@escritorio.com.br',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _smtpHostController,
+                decoration: const InputDecoration(
+                  labelText: 'Servidor SMTP',
+                  hintText: 'smtp.seudominio.com.br',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _smtpPortController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Porta',
+                        hintText: '587',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('SSL direto'),
+                      subtitle: const Text('Porta 465'),
+                      value: _smtpSsl,
+                      onChanged: (v) => setState(() => _smtpSsl = v),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _smtpUserController,
+                decoration: const InputDecoration(
+                  labelText: 'Usuario SMTP',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _smtpPasswordController,
+                obscureText: _smtpPasswordOculta,
+                decoration: InputDecoration(
+                  labelText: 'Senha SMTP',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    tooltip: _smtpPasswordOculta
+                        ? 'Mostrar senha'
+                        : 'Ocultar senha',
+                    onPressed: () => setState(
+                      () => _smtpPasswordOculta = !_smtpPasswordOculta,
+                    ),
+                    icon: Icon(
+                      _smtpPasswordOculta
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _smtpFromController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Remetente (From) — opcional',
+                  hintText: 'Deixe vazio para usar o usuario SMTP',
+                  border: OutlineInputBorder(),
+                ),
+              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -1793,6 +1670,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                       builder: (_) => LayoutImpressaoPage(
                         appConfigRepository: widget.appConfigRepository,
                         printService: widget.printService,
+                        terminalLeve: widget.terminalLeve,
+                        lanApiClient: widget.lanApiClient,
                       ),
                     ),
                   );
@@ -1900,9 +1779,32 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   Widget _painelRede() {
     return _configTab(
       [
+        if (widget.terminalLeve)
+          ConfigSectionCard(
+            icon: Icons.devices_outlined,
+            title: 'Terminal',
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context)
+                    .colorScheme
+                    .secondaryContainer
+                    .withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                'Este PC é um Terminal — conecte ao servidor da loja.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+          ),
+        if (widget.terminalLeve) const SizedBox(height: 12),
         RedeSincronizacaoCard(
           configRepository: widget.appConfigRepository,
           lanSyncScheduler: widget.lanSyncScheduler,
+          forcarModoCliente: widget.terminalLeve,
         ),
       ],
       secao: ConfigSecoes.todas[5],
@@ -1910,11 +1812,19 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   }
 
   Widget _painelBackup() {
+    if (widget.terminalLeve || widget.objectBox == null) {
+      return _configTab(
+        [
+          BackupTerminalLeveSection(lanApiClient: widget.lanApiClient),
+        ],
+        secao: ConfigSecoes.todas[6],
+      );
+    }
     return _configTab(
       [
         BackupConfiguracaoSection(
           appConfigRepository: widget.appConfigRepository,
-          objectBox: widget.objectBox,
+          objectBox: widget.objectBox!,
           produtoRepository: widget.produtoRepository,
           lanSyncScheduler: widget.lanSyncScheduler,
           nomeLoja: _nomeLojaController.text.trim().isEmpty
@@ -1926,327 +1836,27 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     );
   }
 
-  Widget _painelMensagens() {
-    return _configTab(
-      [
-        ConfigSectionCard(
-          icon: Icons.notifications_active_outlined,
-          title: 'Alertas proativos WhatsApp',
-          subtitle: 'Fiado vencido, estoque zerado e caixa aberto apos 18h.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                value: _alertasProativosWhatsappAtivos,
-                onChanged: (value) {
-                  setState(() => _alertasProativosWhatsappAtivos = value);
-                },
-                title: const Text('Ativar alertas proativos'),
-                subtitle: const Text(
-                  'Envia alertas para o numero do dono (requer mensageria configurada).',
-                ),
-              ),
-              TextField(
-                controller: _whatsappDonoController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'WhatsApp do dono',
-                  hintText: 'Ex.: 5511999999999',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _alertasIntervaloController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Intervalo entre alertas (minutos)',
-                  hintText: '120',
-                ),
-              ),
-              const SizedBox(height: 12),
-              ConfigSaveButton(
-                salvando: _salvando,
-                onPressed: _salvarConfig,
-                label: 'Salvar alertas proativos',
-              ),
-            ],
-          ),
+  Future<void> _aplicarRetencaoPodAgora() async {
+    final dias = PodFotoRetencaoOpcoes.normalizar(_podFotoRetencaoDias);
+    if (dias <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Retencao desligada. Nada foi apagado.'),
         ),
-        ConfigSectionCard(
-          icon: Icons.chat_outlined,
-          title: 'Mensageria (WhatsApp/SMS)',
-          subtitle: 'Credenciais, templates, fila e monitoramento de envios.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                controller: _mensageriaBackendUrlController,
-                decoration: const InputDecoration(
-                  labelText: 'Backend URL de envio (opcional)',
-                  hintText: 'https://seu-backend/send-whatsapp',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _whatsApiVersionController,
-                decoration: const InputDecoration(
-                  labelText: 'WhatsApp API Version',
-                  hintText: 'v20.0',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _whatsPhoneIdController,
-                decoration: const InputDecoration(
-                  labelText: 'WhatsApp Phone Number ID',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _whatsTokenController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'WhatsApp Access Token',
-                ),
-              ),
-              const SizedBox(height: 8),
-              ConfigSaveButton(
-                salvando: _salvando,
-                onPressed: _salvarConfig,
-                label: 'Salvar credenciais de mensageria',
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _mostrarContratoBackendMensageria,
-                      icon: const Icon(Icons.description_outlined),
-                      label: const Text('Ver contrato do backend'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _testarBackendMensageria,
-                      icon: const Icon(Icons.wifi_tethering_outlined),
-                      label: const Text('Testar backend'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(child: Text('Templates: ${_templatesMensagem.length}')),
-                  Expanded(child: Text('Fila pendente: $_filaPendente')),
-                  Expanded(child: Text('Logs: $_logsTotais')),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 10,
-                runSpacing: 6,
-                children: [
-                  Text('Enviadas: $_logsEnviados'),
-                  Text('Entregues: $_logsEntregues'),
-                  Text('Lidas: $_logsLidos'),
-                  Text('Falhas: $_logsFalhas'),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _abrirCadastroTemplate,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Novo template'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _processarFilaMensagens,
-                      icon: const Icon(Icons.send_outlined),
-                      label: const Text('Processar fila'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (_templatesMensagem.isEmpty)
-                const Text('Nenhum template cadastrado.')
-              else
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 230),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _templatesMensagem.length,
-                    itemBuilder: (context, index) {
-                      final t = _templatesMensagem[index];
-                      return ListTile(
-                        dense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                        title: Text(t.nome),
-                        subtitle: Text(
-                          '${t.canal} | evento: ${t.evento} | ${t.ativo ? 'ativo' : 'inativo'}',
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: 'Editar',
-                              onPressed: () => _abrirCadastroTemplate(template: t),
-                              icon: const Icon(Icons.edit_outlined),
-                            ),
-                            IconButton(
-                              tooltip: 'Excluir',
-                              onPressed: () => _removerTemplate(t),
-                              icon: const Icon(Icons.delete_outline),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              const SizedBox(height: 10),
-              const Divider(),
-              const SizedBox(height: 6),
-              Text(
-                'Monitor de fila e logs',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  SizedBox(
-                    width: 190,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _filtroStatusLog,
-                      decoration: const InputDecoration(labelText: 'Status'),
-                      items: const [
-                        DropdownMenuItem(value: 'todos', child: Text('Todos')),
-                        DropdownMenuItem(
-                          value: 'aceito_api',
-                          child: Text('Aceito pela API'),
-                        ),
-                        DropdownMenuItem(value: 'enviado', child: Text('Enviado')),
-                        DropdownMenuItem(value: 'entregue', child: Text('Entregue')),
-                        DropdownMenuItem(value: 'lido', child: Text('Lido')),
-                        DropdownMenuItem(value: 'falhou', child: Text('Falhou')),
-                      ],
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() => _filtroStatusLog = v);
-                        _aplicarFiltroLogs();
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: 170,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _filtroCanalLog,
-                      decoration: const InputDecoration(labelText: 'Canal'),
-                      items: const [
-                        DropdownMenuItem(value: 'todos', child: Text('Todos')),
-                        DropdownMenuItem(
-                          value: 'whatsapp',
-                          child: Text('WhatsApp'),
-                        ),
-                        DropdownMenuItem(value: 'sms', child: Text('SMS')),
-                      ],
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() => _filtroCanalLog = v);
-                        _aplicarFiltroLogs();
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: 280,
-                    child: TextField(
-                      controller: _filtroTextoLogController,
-                      decoration: const InputDecoration(
-                        labelText: 'Buscar destino/template/erro',
-                      ),
-                      onSubmitted: (_) => _aplicarFiltroLogs(),
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _aplicarFiltroLogs,
-                    icon: const Icon(Icons.search),
-                    label: const Text('Filtrar'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (_logsFiltrados.isEmpty)
-                const Text('Nenhum log para os filtros atuais.')
-              else
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 230),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _logsFiltrados.length,
-                    itemBuilder: (context, index) {
-                      final log = _logsFiltrados[index];
-                      return ListTile(
-                        dense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                        title: Text(
-                          '${log.canal.toUpperCase()} | ${_rotuloStatusMensagem(log.statusEntrega)} | cliente ${log.clienteId}',
-                        ),
-                        subtitle: Text(log.destino),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(log.resultado),
-                            if (log.resultado == 'falhou')
-                              IconButton(
-                                tooltip: 'Reenfileirar',
-                                onPressed: () => _reenfileirarFalhaDeLog(log),
-                                icon: const Icon(Icons.refresh),
-                              ),
-                            if (log.resultado == 'falhou')
-                              IconButton(
-                                tooltip: 'Ver erro detalhado',
-                                onPressed: () => _verErroDetalhadoLog(log),
-                                icon: const Icon(Icons.error_outline),
-                              ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _webhookPayloadController,
-                minLines: 3,
-                maxLines: 5,
-                decoration: const InputDecoration(
-                  labelText: 'Payload webhook WhatsApp (JSON)',
-                  hintText: 'Cole aqui o payload de status do WhatsApp.',
-                ),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: _processarWebhookWhatsapp,
-                icon: const Icon(Icons.hub_outlined),
-                label: const Text('Processar webhook de status'),
-              ),
-            ],
-          ),
+      );
+      return;
+    }
+    final n = await EntregaPodRetencaoService.aplicar(dias: dias);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          n == 0
+              ? 'Nenhuma foto antiga para remover (politica: ${PodFotoRetencaoOpcoes.rotulo(dias)}).'
+              : '$n foto(s) antiga(s) removida(s).',
         ),
-      ],
-      secao: ConfigSecoes.todas[7],
+      ),
     );
   }
 
@@ -2318,8 +1928,57 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             ],
           ),
         ),
+        ConfigSectionCard(
+          icon: Icons.photo_outlined,
+          title: 'Fotos de prova de entrega',
+          subtitle:
+              'O celular ja envia JPEG reduzido. Aqui o PC apaga fotos antigas.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DropdownButtonFormField<int>(
+                key: ValueKey('pod_retencao_$_podFotoRetencaoDias'),
+                initialValue: _podFotoRetencaoDias,
+                decoration: const InputDecoration(
+                  labelText: 'Retencao automatica das fotos',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: [
+                  for (final d in PodFotoRetencaoOpcoes.valoresPermitidos)
+                    DropdownMenuItem(
+                      value: d,
+                      child: Text(PodFotoRetencaoOpcoes.rotulo(d)),
+                    ),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _podFotoRetencaoDias = v);
+                },
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Padrao: 6 meses. Quem recebeu continua no pedido; so o arquivo '
+                'JPEG e apagado. Fotos novas saem com no maximo 960 px.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              ConfigSaveButton(
+                salvando: _salvando,
+                onPressed: _salvarConfig,
+                label: 'Salvar retencao de fotos',
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _aplicarRetencaoPodAgora,
+                icon: const Icon(Icons.delete_sweep_outlined),
+                label: const Text('Limpar fotos antigas agora'),
+              ),
+            ],
+          ),
+        ),
       ],
-      secao: ConfigSecoes.todas[8],
+      secao: ConfigSecoes.todas[7],
     );
   }
 
@@ -2349,8 +2008,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         return _painelRede();
       case 'backup':
         return _painelBackup();
-      case 'mensagens':
-        return _painelMensagens();
       case 'sistema':
         return _painelSistema(agoraFmt, ultimaVendaFmt, sinal, h, m);
       default:

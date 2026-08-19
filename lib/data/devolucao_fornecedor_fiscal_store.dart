@@ -18,6 +18,7 @@ class DevolucaoFornecedorFiscalRegistro {
     this.nomeFornecedor = '',
     this.cnpjFornecedor = '',
     this.itensBaixaJson = '[]',
+    this.estoqueBaixado = false,
     DateTime? emitidaEm,
   }) : emitidaEm = emitidaEm ?? DateTime.now();
 
@@ -35,7 +36,67 @@ class DevolucaoFornecedorFiscalRegistro {
 
   /// JSON com [{historicoEntradaId, produtoId, quantidade}].
   final String itensBaixaJson;
+
+  /// true depois que o fisico foi debitado (emissao imediata ou reconsulta).
+  final bool estoqueBaixado;
   final DateTime emitidaEm;
+
+  String get _status => statusFocus.toLowerCase();
+
+  bool get rejeitada =>
+      _status.contains('erro') ||
+      _status.contains('rejeit') ||
+      _status.contains('denegad');
+
+  bool get cancelada => _status.contains('cancel');
+
+  bool get processando => _status.contains('processando');
+
+  bool get autorizada =>
+      !rejeitada &&
+      !cancelada &&
+      !processando &&
+      _status.contains('autoriz');
+
+  /// Processando, ou autorizada ainda sem baixa (crash entre SEFAZ e estoque).
+  bool get pendenteReconsulta =>
+      processando || (autorizada && !estoqueBaixado);
+
+  String get rotuloStatus {
+    if (cancelada) return 'Cancelada';
+    if (autorizada) return 'Autorizada';
+    if (processando) return 'Processando';
+    if (rejeitada) return 'Rejeitada';
+    if (statusFocus.isNotEmpty) return statusFocus;
+    return 'Desconhecido';
+  }
+
+  DevolucaoFornecedorFiscalRegistro copyWith({
+    String? chaveNfe,
+    String? numero,
+    String? serie,
+    String? urlDanfe,
+    String? urlXml,
+    String? statusFocus,
+    bool? estoqueBaixado,
+  }) {
+    return DevolucaoFornecedorFiscalRegistro(
+      chaveNotaCompra: chaveNotaCompra,
+      referenciaFocus: referenciaFocus,
+      chaveNfe: chaveNfe ?? this.chaveNfe,
+      numero: numero ?? this.numero,
+      serie: serie ?? this.serie,
+      urlDanfe: urlDanfe ?? this.urlDanfe,
+      urlXml: urlXml ?? this.urlXml,
+      statusFocus: statusFocus ?? this.statusFocus,
+      motivo: motivo,
+      nomeFornecedor: nomeFornecedor,
+      cnpjFornecedor: cnpjFornecedor,
+      itensBaixaJson: itensBaixaJson,
+      estoqueBaixado: estoqueBaixado ?? this.estoqueBaixado,
+      emitidaEm: emitidaEm,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'chaveNotaCompra': chaveNotaCompra,
@@ -50,10 +111,21 @@ class DevolucaoFornecedorFiscalRegistro {
         'nomeFornecedor': nomeFornecedor,
         'cnpjFornecedor': cnpjFornecedor,
         'itensBaixaJson': itensBaixaJson,
+        'estoqueBaixado': estoqueBaixado,
         'emitidaEm': emitidaEm.toUtc().toIso8601String(),
       };
 
   factory DevolucaoFornecedorFiscalRegistro.fromJson(Map<String, dynamic> json) {
+    final status = (json['statusFocus'] ?? '').toString();
+    final rawBaixa = json['estoqueBaixado'];
+    // Legado: nota ja autorizada no JSON teve baixa na emissao imediata.
+    // Processando sem o campo = ainda nao baixou (bug antigo da reconsulta).
+    final estoqueBaixado = rawBaixa is bool
+        ? rawBaixa
+        : status.toLowerCase().contains('autoriz') &&
+            !status.toLowerCase().contains('processando') &&
+            !status.toLowerCase().contains('erro') &&
+            !status.toLowerCase().contains('rejeit');
     return DevolucaoFornecedorFiscalRegistro(
       chaveNotaCompra: (json['chaveNotaCompra'] ?? '').toString(),
       referenciaFocus: (json['referenciaFocus'] ?? '').toString(),
@@ -62,11 +134,12 @@ class DevolucaoFornecedorFiscalRegistro {
       serie: (json['serie'] ?? '').toString(),
       urlDanfe: (json['urlDanfe'] ?? '').toString(),
       urlXml: (json['urlXml'] ?? '').toString(),
-      statusFocus: (json['statusFocus'] ?? '').toString(),
+      statusFocus: status,
       motivo: (json['motivo'] ?? '').toString(),
       nomeFornecedor: (json['nomeFornecedor'] ?? '').toString(),
       cnpjFornecedor: (json['cnpjFornecedor'] ?? '').toString(),
       itensBaixaJson: (json['itensBaixaJson'] ?? '[]').toString(),
+      estoqueBaixado: estoqueBaixado,
       emitidaEm: DateTime.tryParse((json['emitidaEm'] ?? '').toString()) ??
           DateTime.now(),
     );
@@ -110,17 +183,32 @@ class DevolucaoFornecedorFiscalStore {
       ..sort((a, b) => b.emitidaEm.compareTo(a.emitidaEm));
   }
 
+  DevolucaoFornecedorFiscalRegistro? obterPorReferencia(String referencia) {
+    final ref = referencia.trim();
+    if (ref.isEmpty) return null;
+    for (final r in listar()) {
+      if (r.referenciaFocus == ref) return r;
+    }
+    return null;
+  }
+
   int proximaSequencia(String chaveNotaCompra) =>
       listarPorChaveCompra(chaveNotaCompra).length + 1;
+
+  List<DevolucaoFornecedorFiscalRegistro> listarPendentesReconsulta() {
+    final out = listar().where((r) => r.pendenteReconsulta).toList();
+    out.sort((a, b) => b.emitidaEm.compareTo(a.emitidaEm));
+    return out;
+  }
 
   /// Soma das quantidades ja baixadas por historico de entrada nesta NF.
   Map<int, int> quantidadesJaDevolvidasPorHistorico(String chaveNotaCompra) {
     final out = <int, int>{};
     for (final reg in listarPorChaveCompra(chaveNotaCompra)) {
-      if (reg.statusFocus.toLowerCase().contains('erro') ||
-          reg.statusFocus.toLowerCase().contains('rejeit')) {
-        continue;
-      }
+      // Rejeitada/erro libera a qtd. Cancelada sem baixa tambem.
+      // Processando continua reservada para nao emitir em duplicata.
+      if (reg.rejeitada) continue;
+      if (reg.cancelada && !reg.estoqueBaixado) continue;
       try {
         final raw = jsonDecode(reg.itensBaixaJson);
         if (raw is! List) continue;

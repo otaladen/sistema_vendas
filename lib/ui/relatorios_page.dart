@@ -25,3 +25,5 @@ export 'relatorios/relatorio_movimentacao_estoque_page.dart';
 export 'relatorios/relatorio_devolucoes_page.dart';
 export 'relatorios/relatorio_pendencias_entrega_page.dart';
 export 'relatorios/relatorio_historico_entregas_page.dart';
+export 'relatorios/relatorio_margem_markup_page.dart';
+export 'relatorios/relatorio_performance_entregas_page.dart';

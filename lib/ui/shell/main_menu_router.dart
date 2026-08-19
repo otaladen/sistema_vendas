@@ -35,21 +35,10 @@ class MainMenuRouter {
     Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => MainMenuDeps(
-          objectBox: deps.objectBox,
-          produtoRepository: deps.produtoRepository,
-          clienteRepository: deps.clienteRepository,
-          vendaRepository: deps.vendaRepository,
-          vendedorRepository: deps.vendedorRepository,
-          funcionarioRepository: deps.funcionarioRepository,
-          motoristaRepository: deps.motoristaRepository,
-          usuarioLogado: deps.usuarioLogado,
-          onLogout: deps.onLogout,
-          lanSyncScheduler: deps.lanSyncScheduler,
-          appConfigRepository: deps.appConfigRepository,
-          printService: deps.printService,
-          child: ContasPagarPage(
+        builder: (_) => deps.wrap(
+          ContasPagarPage(
             objectBox: deps.objectBox,
+            contaPagarRepository: deps.contaPagarRepository,
             filtroInicial: filtro,
           ),
         ),
@@ -57,10 +46,10 @@ class MainMenuRouter {
     );
   }
 
-  static void abrirContasReceber(
+  static Future<void> abrirContasReceber(
     BuildContext context, {
     FiltroContasReceber filtro = FiltroContasReceber.todos,
-  }) {
+  }) async {
     final deps = MainMenuDeps.maybeOf(context);
     if (deps == null) return;
     if (!MainMenuDestino.financeiro.podeAcessar(deps.usuarioLogado)) return;
@@ -70,23 +59,11 @@ class MainMenuRouter {
       PermissaoUsuario.acessarCaixa,
     );
 
-    Navigator.push<void>(
+    await Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => MainMenuDeps(
-          objectBox: deps.objectBox,
-          produtoRepository: deps.produtoRepository,
-          clienteRepository: deps.clienteRepository,
-          vendaRepository: deps.vendaRepository,
-          vendedorRepository: deps.vendedorRepository,
-          funcionarioRepository: deps.funcionarioRepository,
-          motoristaRepository: deps.motoristaRepository,
-          usuarioLogado: deps.usuarioLogado,
-          onLogout: deps.onLogout,
-          lanSyncScheduler: deps.lanSyncScheduler,
-          appConfigRepository: deps.appConfigRepository,
-          printService: deps.printService,
-          child: ContasReceberPage(
+        builder: (_) => deps.wrap(
+          ContasReceberPage(
             vendaRepository: deps.vendaRepository,
             clienteRepository: deps.clienteRepository,
             usuarioLogado: deps.usuarioLogado,
@@ -108,34 +85,15 @@ class MainMenuRouter {
 
     final shell = AppShellScope.maybeOf(context);
     if (shell != null) {
-      shell.irPara(
-        destino,
-        configSecaoInicialId: configSecaoInicialId,
-      );
+      shell.irPara(destino, configSecaoInicialId: configSecaoInicialId);
       return;
     }
 
     Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
-        builder: (ctx) => MainMenuDeps(
-          objectBox: deps.objectBox,
-          produtoRepository: deps.produtoRepository,
-          clienteRepository: deps.clienteRepository,
-          vendaRepository: deps.vendaRepository,
-          vendedorRepository: deps.vendedorRepository,
-          funcionarioRepository: deps.funcionarioRepository,
-          motoristaRepository: deps.motoristaRepository,
-          usuarioLogado: deps.usuarioLogado,
-          onLogout: deps.onLogout,
-          lanSyncScheduler: deps.lanSyncScheduler,
-          appConfigRepository: deps.appConfigRepository,
-          printService: deps.printService,
-          child: pagina(
-            destino,
-            deps,
-            configSecaoInicialId: configSecaoInicialId,
-          ),
+        builder: (ctx) => deps.wrap(
+          pagina(destino, deps, configSecaoInicialId: configSecaoInicialId),
         ),
       ),
     );
@@ -201,6 +159,8 @@ class MainMenuRouter {
         return EstoquePage(
           produtoRepository: deps.produtoRepository,
           usuarioLogado: u,
+          lanApiClient: deps.lanApiClient,
+          listaCompraRepository: deps.listaCompraRepository,
         );
       case MainMenuDestino.notasFiscais:
         return NotasFiscaisPage(
@@ -209,6 +169,8 @@ class MainMenuRouter {
           clienteRepository: deps.clienteRepository,
           appConfigRepository: deps.appConfigRepository,
           usuarioLogado: u,
+          terminalLeve: deps.terminalLeve,
+          lanApiClient: deps.lanApiClient,
         );
       case MainMenuDestino.entregas:
         return EntregasPage(
@@ -220,6 +182,8 @@ class MainMenuRouter {
           usuarioAtual: u.login,
           podeGerenciarStatusEntrega:
               UsuarioPermissaoHelper.podeGerenciarEntregas(u),
+          ocultarValoresMonetarios:
+              UsuarioPermissaoHelper.ehMotoristaCampoSomente(u),
           podeRegistrarPodEntrega:
               UsuarioPermissaoHelper.podeRegistrarPodEntrega(u),
           podeRegistrarDevolucaoTrocaSemSenha:
@@ -232,6 +196,8 @@ class MainMenuRouter {
           clienteRepository: deps.clienteRepository,
           usuarioLogado: u,
           onLogout: deps.onLogout,
+          lanApiClient: deps.lanApiClient,
+          contaPagarRepository: deps.contaPagarRepository,
         );
       case MainMenuDestino.cadastros:
         return CadastrosPage(
@@ -244,16 +210,19 @@ class MainMenuRouter {
           usuarioLogado: u,
           printService: deps.printService,
           onLogout: deps.onLogout,
+          terminalLeve: deps.terminalLeve,
         );
       case MainMenuDestino.configuracoes:
         return ConfiguracoesPage(
           vendaRepository: deps.vendaRepository,
-          objectBox: deps.produtoRepository.objectBox,
+          objectBox: deps.objectBox,
           lanSyncScheduler: deps.lanSyncScheduler,
           appConfigRepository: deps.appConfigRepository,
           printService: deps.printService,
           produtoRepository: deps.produtoRepository,
           secaoInicialId: configSecaoInicialId,
+          terminalLeve: deps.terminalLeve,
+          lanApiClient: deps.lanApiClient,
         );
       case MainMenuDestino.motorista:
         return MotoristaEntregasPage(

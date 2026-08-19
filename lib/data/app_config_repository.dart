@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/fiscal_config.dart';
 import '../domain/auditoria_retencao.dart';
 import '../domain/backup_retencao.dart';
+import '../domain/pod_foto_retencao.dart';
 import '../domain/local_backup_escopo.dart';
 import '../services/fiscal_config_store.dart';
 import '../model/config_layout_impressao.dart';
@@ -55,10 +56,6 @@ class EmpresaConfig {
     /// Limite de desconto (%) sobre o subtotal de produtos no PDV ao enviar ao caixa (0 = desabilitado).
     this.maxDescontoPercentualPdv = 15,
     this.permitirVendaSemEstoque = true,
-    this.whatsappApiVersion = 'v20.0',
-    this.whatsappPhoneNumberId = '',
-    this.whatsappAccessToken = '',
-    this.mensageriaBackendUrl = '',
     this.redeSincronizacaoAtiva = false,
     this.redeModoServidor = false,
     this.redePortaServidor = 8787,
@@ -73,17 +70,33 @@ class EmpresaConfig {
     this.backupSegundoDestinoPasta = '',
     this.layoutImpressaoJson = '',
     this.auditoriaRetencaoDias = 90,
+    this.podFotoRetencaoDias = 180,
     this.margemMinimaPercentualPadrao = 20,
     this.umCaixaAbertoPorLoja = true,
-    this.alertasProativosWhatsappAtivos = false,
-    this.whatsappDonoNumero = '',
-    this.alertasProativosIntervaloMinutos = 120,
 
     /// Abre gaveta (ESC/POS) apos finalizar pagamento no caixa (config local do PC).
     this.abrirGavetaAutomatica = true,
 
     /// Pino da gaveta no comando ESC p: 0 ou 1 (Epson/Bematech/Elgin).
     this.gavetaPino = 0,
+
+    /// Modo de impressao do cupom de balcao: `pdf` | `escpos`.
+    this.modoImpressaoBalcao = 'pdf',
+
+    /// Largura da bobina ESC/POS: `80` | `58`.
+    this.escPosLargura = '80',
+
+    /// Destino ESC/POS: `windows` | `rede` | `com`.
+    this.escPosDestino = 'windows',
+
+    /// IP da impressora termica (destino rede).
+    this.escPosHost = '',
+
+    /// Porta TCP (padrao 9100).
+    this.escPosPortaTcp = 9100,
+
+    /// Porta serial (ex.: COM3).
+    this.escPosPortaCom = '',
 
     /// Regime Focus: 1 = Simples Nacional, 3 = Regime Normal (sincroniza na LAN).
     this.regimeTributarioEmitente = FiscalConfig.regimeTributarioEmitente,
@@ -163,10 +176,6 @@ class EmpresaConfig {
   /// 0 = vendedor nao pode informar desconto no dialog "Enviar ao caixa"; ate 100 (% sobre subtotal dos produtos).
   final double maxDescontoPercentualPdv;
   final bool permitirVendaSemEstoque;
-  final String whatsappApiVersion;
-  final String whatsappPhoneNumberId;
-  final String whatsappAccessToken;
-  final String mensageriaBackendUrl;
 
   /// Quando verdadeiro, o app sincroniza com [redeServidorUrl] na LAN.
   final bool redeSincronizacaoAtiva;
@@ -210,22 +219,32 @@ class EmpresaConfig {
   /// Retencao do log do sistema: 0 = sem auto-limpeza; 90 ou 180 dias.
   final int auditoriaRetencaoDias;
 
+  /// Retencao das fotos POD: 0 = sem limpeza; 90, 180, 365 ou 730 dias.
+  final int podFotoRetencaoDias;
+
   /// Margem minima padrao (%) para alerta ao importar NF-e de entrada.
   final double margemMinimaPercentualPadrao;
 
   /// Quando ativo, so um terminal pode ter caixa aberto na rede.
   final bool umCaixaAbertoPorLoja;
 
-  /// Alertas WhatsApp proativos para o dono (fiado, estoque, caixa).
-  final bool alertasProativosWhatsappAtivos;
-  final String whatsappDonoNumero;
-  final int alertasProativosIntervaloMinutos;
-
   /// Pulso automatico na gaveta ao confirmar pagamento no caixa (somente Windows).
   final bool abrirGavetaAutomatica;
 
   /// Conector da gaveta na impressora termica (0 = pin 2, 1 = pin 5 — padrao Epson).
   final int gavetaPino;
+
+  /// `pdf` = Windows Print Manager / PDF; `escpos` = termica direta.
+  final String modoImpressaoBalcao;
+
+  /// `80` ou `58`.
+  final String escPosLargura;
+
+  /// `windows` | `rede` | `com`.
+  final String escPosDestino;
+  final String escPosHost;
+  final int escPosPortaTcp;
+  final String escPosPortaCom;
 
   final int regimeTributarioEmitente;
 
@@ -286,10 +305,6 @@ class EmpresaConfig {
     bool? exigirAutorizacaoSegundaViaCupom,
     double? maxDescontoPercentualPdv,
     bool? permitirVendaSemEstoque,
-    String? whatsappApiVersion,
-    String? whatsappPhoneNumberId,
-    String? whatsappAccessToken,
-    String? mensageriaBackendUrl,
     bool? redeSincronizacaoAtiva,
     bool? redeModoServidor,
     int? redePortaServidor,
@@ -305,13 +320,17 @@ class EmpresaConfig {
     String? layoutImpressaoJson,
     LayoutImpressaoEmpresa? layoutImpressao,
     int? auditoriaRetencaoDias,
+    int? podFotoRetencaoDias,
     double? margemMinimaPercentualPadrao,
     bool? umCaixaAbertoPorLoja,
-    bool? alertasProativosWhatsappAtivos,
-    String? whatsappDonoNumero,
-    int? alertasProativosIntervaloMinutos,
     bool? abrirGavetaAutomatica,
     int? gavetaPino,
+    String? modoImpressaoBalcao,
+    String? escPosLargura,
+    String? escPosDestino,
+    String? escPosHost,
+    int? escPosPortaTcp,
+    String? escPosPortaCom,
     int? regimeTributarioEmitente,
     bool? pdvBalcaoRapido,
     bool? pdvCheckoutDireto,
@@ -366,11 +385,6 @@ class EmpresaConfig {
           maxDescontoPercentualPdv ?? this.maxDescontoPercentualPdv,
       permitirVendaSemEstoque:
           permitirVendaSemEstoque ?? this.permitirVendaSemEstoque,
-      whatsappApiVersion: whatsappApiVersion ?? this.whatsappApiVersion,
-      whatsappPhoneNumberId:
-          whatsappPhoneNumberId ?? this.whatsappPhoneNumberId,
-      whatsappAccessToken: whatsappAccessToken ?? this.whatsappAccessToken,
-      mensageriaBackendUrl: mensageriaBackendUrl ?? this.mensageriaBackendUrl,
       redeSincronizacaoAtiva:
           redeSincronizacaoAtiva ?? this.redeSincronizacaoAtiva,
       redeModoServidor: redeModoServidor ?? this.redeModoServidor,
@@ -398,18 +412,37 @@ class EmpresaConfig {
           : (layoutImpressaoJson ?? this.layoutImpressaoJson),
       auditoriaRetencaoDias:
           auditoriaRetencaoDias ?? this.auditoriaRetencaoDias,
+      podFotoRetencaoDias: podFotoRetencaoDias != null
+          ? PodFotoRetencaoOpcoes.normalizar(podFotoRetencaoDias)
+          : this.podFotoRetencaoDias,
       margemMinimaPercentualPadrao: margemMinimaPercentualPadrao ??
           this.margemMinimaPercentualPadrao,
       umCaixaAbertoPorLoja:
           umCaixaAbertoPorLoja ?? this.umCaixaAbertoPorLoja,
-      alertasProativosWhatsappAtivos: alertasProativosWhatsappAtivos ??
-          this.alertasProativosWhatsappAtivos,
-      whatsappDonoNumero: whatsappDonoNumero ?? this.whatsappDonoNumero,
-      alertasProativosIntervaloMinutos: alertasProativosIntervaloMinutos ??
-          this.alertasProativosIntervaloMinutos,
       abrirGavetaAutomatica:
           abrirGavetaAutomatica ?? this.abrirGavetaAutomatica,
       gavetaPino: gavetaPino ?? this.gavetaPino,
+      modoImpressaoBalcao: () {
+        final m = (modoImpressaoBalcao ?? this.modoImpressaoBalcao)
+            .trim()
+            .toLowerCase();
+        return m == 'escpos' ? 'escpos' : 'pdf';
+      }(),
+      escPosLargura: () {
+        final l =
+            (escPosLargura ?? this.escPosLargura).trim().toLowerCase();
+        return (l == '58' || l == '58mm') ? '58' : '80';
+      }(),
+      escPosDestino: () {
+        final d =
+            (escPosDestino ?? this.escPosDestino).trim().toLowerCase();
+        if (d == 'rede' || d == 'tcp' || d == 'ip') return 'rede';
+        if (d == 'com' || d == 'serial') return 'com';
+        return 'windows';
+      }(),
+      escPosHost: escPosHost ?? this.escPosHost,
+      escPosPortaTcp: escPosPortaTcp ?? this.escPosPortaTcp,
+      escPosPortaCom: escPosPortaCom ?? this.escPosPortaCom,
       regimeTributarioEmitente: regimeTributarioEmitente != null
           ? regimeTributarioEmitente.clamp(1, 3)
           : this.regimeTributarioEmitente,
@@ -511,10 +544,6 @@ class AppConfigRepository {
   static const _kMaxDescontoPercentualPdv =
       'config_max_desconto_percentual_pdv';
   static const _kPermitirVendaSemEstoque = 'config_permitir_venda_sem_estoque';
-  static const _kWhatsappApiVersion = 'config_whatsapp_api_version';
-  static const _kWhatsappPhoneNumberId = 'config_whatsapp_phone_number_id';
-  static const _kWhatsappAccessToken = 'config_whatsapp_access_token';
-  static const _kMensageriaBackendUrl = 'config_mensageria_backend_url';
   static const _kRedeSincronizacaoAtiva = 'config_rede_sincronizacao_ativa';
   static const _kRedeModoServidor = 'config_rede_modo_servidor';
   static const _kRedePortaServidor = 'config_rede_porta_servidor';
@@ -547,14 +576,10 @@ class AppConfigRepository {
       'config_migracao_cadastro_duplicados_v2';
   static const _kLayoutImpressaoJson = 'config_layout_impressao_json';
   static const _kAuditoriaRetencaoDias = 'config_auditoria_retencao_dias';
+  static const _kPodFotoRetencaoDias = 'config_pod_foto_retencao_dias_v1';
   static const _kMargemMinimaPercentualPadrao =
       'config_margem_minima_percentual_padrao';
   static const _kUmCaixaAbertoPorLoja = 'config_um_caixa_aberto_por_loja';
-  static const _kAlertasProativosWhatsapp =
-      'config_alertas_proativos_whatsapp';
-  static const _kWhatsappDonoNumero = 'config_whatsapp_dono_numero';
-  static const _kAlertasProativosIntervaloMin =
-      'config_alertas_proativos_intervalo_min';
   static const _kModoImplantacaoLocal = 'sync_modo_implantacao_local_v1';
   static const _kRegimeTributarioEmitente = 'config_regime_tributario_emitente_v1';
   static const _kPdvBalcaoRapido = 'config_pdv_balcao_rapido_v1';
@@ -626,10 +651,6 @@ class AppConfigRepository {
         return v.clamp(0.0, 100.0).toDouble();
       }(),
       permitirVendaSemEstoque: prefs.getBool(_kPermitirVendaSemEstoque) ?? true,
-      whatsappApiVersion: prefs.getString(_kWhatsappApiVersion) ?? 'v20.0',
-      whatsappPhoneNumberId: prefs.getString(_kWhatsappPhoneNumberId) ?? '',
-      whatsappAccessToken: prefs.getString(_kWhatsappAccessToken) ?? '',
-      mensageriaBackendUrl: prefs.getString(_kMensageriaBackendUrl) ?? '',
       redeSincronizacaoAtiva: prefs.getBool(_kRedeSincronizacaoAtiva) ?? false,
       redeModoServidor: prefs.getBool(_kRedeModoServidor) ?? false,
       redePortaServidor: () {
@@ -662,20 +683,15 @@ class AppConfigRepository {
         if (d <= 120) return 90;
         return 180;
       }(),
+      podFotoRetencaoDias: PodFotoRetencaoOpcoes.normalizar(
+        prefs.getInt(_kPodFotoRetencaoDias),
+      ),
       margemMinimaPercentualPadrao: () {
         final v = prefs.getDouble(_kMargemMinimaPercentualPadrao);
         if (v == null) return 20.0;
         return v.clamp(0, 99).toDouble();
       }(),
       umCaixaAbertoPorLoja: prefs.getBool(_kUmCaixaAbertoPorLoja) ?? true,
-      alertasProativosWhatsappAtivos:
-          prefs.getBool(_kAlertasProativosWhatsapp) ?? false,
-      whatsappDonoNumero: prefs.getString(_kWhatsappDonoNumero) ?? '',
-      alertasProativosIntervaloMinutos: () {
-        final m = prefs.getInt(_kAlertasProativosIntervaloMin);
-        if (m == null || m < 15) return 120;
-        return m.clamp(15, 1440);
-      }(),
       regimeTributarioEmitente: () {
         final r = prefs.getInt(_kRegimeTributarioEmitente);
         if (r == null || r < 1 || r > 3) {
@@ -828,24 +844,6 @@ class AppConfigRepository {
       _kPermitirVendaSemEstoque,
       config.permitirVendaSemEstoque,
     );
-    await prefs.setString(
-      _kWhatsappApiVersion,
-      config.whatsappApiVersion.trim().isEmpty
-          ? 'v20.0'
-          : config.whatsappApiVersion.trim(),
-    );
-    await prefs.setString(
-      _kWhatsappPhoneNumberId,
-      config.whatsappPhoneNumberId.trim(),
-    );
-    await prefs.setString(
-      _kWhatsappAccessToken,
-      config.whatsappAccessToken.trim(),
-    );
-    await prefs.setString(
-      _kMensageriaBackendUrl,
-      config.mensageriaBackendUrl.trim(),
-    );
     await prefs.setBool(
       _kRedeSincronizacaoAtiva,
       config.redeSincronizacaoAtiva,
@@ -890,23 +888,15 @@ class AppConfigRepository {
       _kAuditoriaRetencaoDias,
       AuditoriaRetencaoOpcoes.normalizar(config.auditoriaRetencaoDias),
     );
+    await prefs.setInt(
+      _kPodFotoRetencaoDias,
+      PodFotoRetencaoOpcoes.normalizar(config.podFotoRetencaoDias),
+    );
     await prefs.setDouble(
       _kMargemMinimaPercentualPadrao,
       config.margemMinimaPercentualPadrao.clamp(0, 99),
     );
     await prefs.setBool(_kUmCaixaAbertoPorLoja, config.umCaixaAbertoPorLoja);
-    await prefs.setBool(
-      _kAlertasProativosWhatsapp,
-      config.alertasProativosWhatsappAtivos,
-    );
-    await prefs.setString(
-      _kWhatsappDonoNumero,
-      config.whatsappDonoNumero.trim(),
-    );
-    await prefs.setInt(
-      _kAlertasProativosIntervaloMin,
-      config.alertasProativosIntervaloMinutos.clamp(15, 1440),
-    );
     await prefs.setInt(
       _kRegimeTributarioEmitente,
       config.regimeTributarioEmitente.clamp(1, 3),

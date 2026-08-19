@@ -7,10 +7,8 @@ import '../../model/conferencia_carga_romaneio.dart';
 import '../../model/historico_entrega.dart';
 import '../../model/kit_orcamento.dart';
 import '../../model/promocao.dart';
-import '../../model/promocao_item.dart';
 import '../../model/linha_devolucao_entrada.dart';
 import '../../model/linha_troca_saida.dart';
-import '../../model/mensagem_template.dart';
 import '../../model/motorista.dart';
 import '../../model/recebimento_fiado.dart';
 import '../../model/titulo_receber.dart';
@@ -20,6 +18,7 @@ import '../../model/usuario_sistema.dart';
 import '../../model/vinculo_fornecedor_produto.dart';
 import '../../domain/auditoria_retencao.dart';
 import '../../domain/backup_retencao.dart';
+import '../../domain/pod_foto_retencao.dart';
 import '../app_config_repository.dart';
 
 /// Codecs adicionais para sync LAN (entidades alem de produto/cliente/venda/vendedor).
@@ -208,18 +207,28 @@ class SyncEntityCodecExtras {
   // --- Motorista ---
   static Map<String, dynamic> motoristaParaMap(Motorista m) => {
         'id': m.id,
+        'codigoInterno': m.codigoInterno,
         'nome': m.nome,
         'telefone': m.telefone,
+        'cpf': m.cpf,
+        'cnhNumero': m.cnhNumero,
+        'cnhCategoria': m.cnhCategoria,
+        'cnhValidade': _dt(m.cnhValidade),
         'ativo': m.ativo,
         'criadoEm': _dt(m.criadoEm),
       };
 
   static Motorista motoristaDeMap(Map<String, dynamic> m) => Motorista(
         id: (m['id'] as num?)?.toInt() ?? 0,
+        codigoInterno: (m['codigoInterno'] ?? '').toString(),
         nome: (m['nome'] ?? '').toString(),
         telefone: (m['telefone'] ?? '').toString(),
+        cpf: (m['cpf'] ?? '').toString(),
+        cnhNumero: (m['cnhNumero'] ?? '').toString(),
+        cnhCategoria: (m['cnhCategoria'] ?? '').toString(),
+        cnhValidade: _parseDt((m['cnhValidade'] ?? '').toString()),
         ativo: m['ativo'] != false,
-        criadoEm: _parseDt((m['criadoEm'] ?? '').toString()),
+        criadoEm: _parseDt((m['criadoEm'] ?? '').toString()) ?? DateTime.now(),
       );
 
   // --- Fornecedor NF-e ---
@@ -228,6 +237,19 @@ class SyncEntityCodecExtras {
         'cnpj': f.cnpj,
         'razaoSocial': f.razaoSocial,
         'nomeFantasia': f.nomeFantasia,
+        'inscricaoEstadual': f.inscricaoEstadual,
+        'telefone': f.telefone,
+        'whatsapp': f.whatsapp,
+        'email': f.email,
+        'cep': f.cep,
+        'endereco': f.endereco,
+        'numero': f.numero,
+        'bairro': f.bairro,
+        'cidade': f.cidade,
+        'uf': f.uf,
+        'observacoes': f.observacoes,
+        'ativo': f.ativo,
+        'atualizadoEm': f.atualizadoEm.toUtc().toIso8601String(),
       };
 
   static FornecedorNfe fornecedorNfeDeMap(Map<String, dynamic> m) =>
@@ -236,6 +258,19 @@ class SyncEntityCodecExtras {
         cnpj: (m['cnpj'] ?? '').toString(),
         razaoSocial: (m['razaoSocial'] ?? '').toString(),
         nomeFantasia: (m['nomeFantasia'] ?? '').toString(),
+        inscricaoEstadual: (m['inscricaoEstadual'] ?? '').toString(),
+        telefone: (m['telefone'] ?? '').toString(),
+        whatsapp: (m['whatsapp'] ?? '').toString(),
+        email: (m['email'] ?? '').toString(),
+        cep: (m['cep'] ?? '').toString(),
+        endereco: (m['endereco'] ?? '').toString(),
+        numero: (m['numero'] ?? '').toString(),
+        bairro: (m['bairro'] ?? '').toString(),
+        cidade: (m['cidade'] ?? '').toString(),
+        uf: (m['uf'] ?? '').toString(),
+        observacoes: (m['observacoes'] ?? '').toString(),
+        ativo: m['ativo'] != false,
+        atualizadoEm: _parseDt((m['atualizadoEm'] ?? '').toString()),
       );
 
   // --- Vinculo ---
@@ -270,25 +305,33 @@ class SyncEntityCodecExtras {
         'produtoId': h.produto.targetId,
       };
 
-  static HistoricoEntrada historicoEntradaDeMap(Map<String, dynamic> m) =>
-      HistoricoEntrada(
-        id: (m['id'] as num?)?.toInt() ?? 0,
-        numeroNota: (m['numeroNota'] as num?)?.toInt() ?? 0,
-        chaveAcesso: (m['chaveAcesso'] ?? '').toString(),
-        dataEmissao: _parseDt((m['dataEmissao'] ?? '').toString()) ??
-            DateTime.now().toUtc(),
-        nomeFornecedor: (m['nomeFornecedor'] ?? '').toString(),
-        cnpjFornecedor: (m['cnpjFornecedor'] ?? '').toString(),
-        unidadeFornecedor: (m['unidadeFornecedor'] ?? '').toString(),
-        quantidadeFornecedor:
-            (m['quantidadeFornecedor'] as num?)?.toDouble() ?? 0,
-        fatorConversaoUtilizado:
-            (m['fatorConversaoUtilizado'] as num?)?.toDouble() ?? 1,
-        quantidadeEntradaEstoque:
-            (m['quantidadeEntradaEstoque'] as num?)?.toInt() ?? 0,
-        precoCustoUnitarioNota:
-            (m['precoCustoUnitarioNota'] as num?)?.toDouble() ?? 0,
-      );
+  static HistoricoEntrada historicoEntradaDeMap(Map<String, dynamic> m) {
+    final h = HistoricoEntrada(
+      id: (m['id'] as num?)?.toInt() ?? 0,
+      numeroNota: (m['numeroNota'] as num?)?.toInt() ?? 0,
+      chaveAcesso: (m['chaveAcesso'] ?? '').toString(),
+      dataEmissao: _parseDt((m['dataEmissao'] ?? '').toString()) ??
+          DateTime.now().toUtc(),
+      nomeFornecedor: (m['nomeFornecedor'] ?? '').toString(),
+      cnpjFornecedor: (m['cnpjFornecedor'] ?? '').toString(),
+      unidadeFornecedor: (m['unidadeFornecedor'] ?? '').toString(),
+      quantidadeFornecedor:
+          (m['quantidadeFornecedor'] as num?)?.toDouble() ?? 0,
+      fatorConversaoUtilizado:
+          (m['fatorConversaoUtilizado'] as num?)?.toDouble() ?? 1,
+      quantidadeEntradaEstoque:
+          (m['quantidadeEntradaEstoque'] as num?)?.toInt() ?? 0,
+      precoCustoUnitarioNota:
+          (m['precoCustoUnitarioNota'] as num?)?.toDouble() ?? 0,
+    );
+    final pid = (m['produtoId'] as num?)?.toInt() ?? 0;
+    if (pid > 0) {
+      try {
+        h.produto.targetId = pid;
+      } catch (_) {}
+    }
+    return h;
+  }
 
   // --- NF-e importada ---
   static Map<String, dynamic> nfeImportadaParaMap(NfeImportadaRegistro r) => {
@@ -527,21 +570,26 @@ class SyncEntityCodecExtras {
         'exigirAutorizacaoSegundaViaCupom': c.exigirAutorizacaoSegundaViaCupom,
         'maxDescontoPercentualPdv': c.maxDescontoPercentualPdv,
         'permitirVendaSemEstoque': c.permitirVendaSemEstoque,
-        'whatsappApiVersion': c.whatsappApiVersion,
-        'whatsappPhoneNumberId': c.whatsappPhoneNumberId,
-        'whatsappAccessToken': c.whatsappAccessToken,
-        'mensageriaBackendUrl': c.mensageriaBackendUrl,
+        'pdvBalcaoRapido': c.pdvBalcaoRapido,
+        'pdvCheckoutDireto': c.pdvCheckoutDireto,
+        'pdvPularDialogOrcamentoSalvo': c.pdvPularDialogOrcamentoSalvo,
+        'pdvExigirVendedor': c.pdvExigirVendedor,
+        'pdvBloqueioVendedor': c.pdvBloqueioVendedor,
+        'pdvBloqueioVendedorInatividadeMinutos':
+            c.pdvBloqueioVendedorInatividadeMinutos,
+        'pdvBloqueioVendedorAposOrcamento': c.pdvBloqueioVendedorAposOrcamento,
+        'pdvExigirClienteRetiradaFutura': c.pdvExigirClienteRetiradaFutura,
+        'caixaFiscalNaoBloqueante': c.caixaFiscalNaoBloqueante,
+        'caixaLimiteOrcamentosPendentes': c.caixaLimiteOrcamentosPendentes,
         'backupAutomaticoAtivo': c.backupAutomaticoAtivo,
         'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
         'backupRetencaoMaxCopias': c.backupRetencaoMaxCopias,
         'backupSegundoDestinoAtivo': c.backupSegundoDestinoAtivo,
         'layoutImpressaoJson': c.layoutImpressaoJson,
         'auditoriaRetencaoDias': c.auditoriaRetencaoDias,
+        'podFotoRetencaoDias': c.podFotoRetencaoDias,
         'margemMinimaPercentualPadrao': c.margemMinimaPercentualPadrao,
         'umCaixaAbertoPorLoja': c.umCaixaAbertoPorLoja,
-        'alertasProativosWhatsappAtivos': c.alertasProativosWhatsappAtivos,
-        'whatsappDonoNumero': c.whatsappDonoNumero,
-        'alertasProativosIntervaloMinutos': c.alertasProativosIntervaloMinutos,
         'regimeTributarioEmitente': c.regimeTributarioEmitente,
         'obraCalcTijoloProdutoId': c.obraCalcTijoloProdutoId,
         'obraCalcCimentoProdutoId': c.obraCalcCimentoProdutoId,
@@ -591,14 +639,37 @@ class SyncEntityCodecExtras {
               base.maxDescontoPercentualPdv,
       permitirVendaSemEstoque:
           m['permitirVendaSemEstoque'] as bool? ?? base.permitirVendaSemEstoque,
-      whatsappApiVersion:
-          (m['whatsappApiVersion'] ?? base.whatsappApiVersion).toString(),
-      whatsappPhoneNumberId:
-          (m['whatsappPhoneNumberId'] ?? base.whatsappPhoneNumberId).toString(),
-      whatsappAccessToken:
-          (m['whatsappAccessToken'] ?? base.whatsappAccessToken).toString(),
-      mensageriaBackendUrl:
-          (m['mensageriaBackendUrl'] ?? base.mensageriaBackendUrl).toString(),
+      pdvBalcaoRapido:
+          m['pdvBalcaoRapido'] as bool? ?? base.pdvBalcaoRapido,
+      pdvCheckoutDireto:
+          m['pdvCheckoutDireto'] as bool? ?? base.pdvCheckoutDireto,
+      pdvPularDialogOrcamentoSalvo:
+          m['pdvPularDialogOrcamentoSalvo'] as bool? ??
+              base.pdvPularDialogOrcamentoSalvo,
+      pdvExigirVendedor:
+          m['pdvExigirVendedor'] as bool? ?? base.pdvExigirVendedor,
+      pdvBloqueioVendedor:
+          m['pdvBloqueioVendedor'] as bool? ?? base.pdvBloqueioVendedor,
+      pdvBloqueioVendedorInatividadeMinutos: () {
+        final v =
+            (m['pdvBloqueioVendedorInatividadeMinutos'] as num?)?.toInt();
+        if (v == null) return base.pdvBloqueioVendedorInatividadeMinutos;
+        return v.clamp(0, 480);
+      }(),
+      pdvBloqueioVendedorAposOrcamento:
+          m['pdvBloqueioVendedorAposOrcamento'] as bool? ??
+              base.pdvBloqueioVendedorAposOrcamento,
+      pdvExigirClienteRetiradaFutura:
+          m['pdvExigirClienteRetiradaFutura'] as bool? ??
+              base.pdvExigirClienteRetiradaFutura,
+      caixaFiscalNaoBloqueante:
+          m['caixaFiscalNaoBloqueante'] as bool? ??
+              base.caixaFiscalNaoBloqueante,
+      caixaLimiteOrcamentosPendentes: () {
+        final v = (m['caixaLimiteOrcamentosPendentes'] as num?)?.toInt();
+        if (v == null) return base.caixaLimiteOrcamentosPendentes;
+        return v.clamp(20, 500);
+      }(),
       backupAutomaticoAtivo:
           m['backupAutomaticoAtivo'] as bool? ?? base.backupAutomaticoAtivo,
       backupAutomaticoIntervaloMinutos:
@@ -618,6 +689,10 @@ class SyncEntityCodecExtras {
         (m['auditoriaRetencaoDias'] as num?)?.toInt() ??
             base.auditoriaRetencaoDias,
       ),
+      podFotoRetencaoDias: PodFotoRetencaoOpcoes.normalizar(
+        (m['podFotoRetencaoDias'] as num?)?.toInt() ??
+            base.podFotoRetencaoDias,
+      ),
       margemMinimaPercentualPadrao: () {
         final v = (m['margemMinimaPercentualPadrao'] as num?)?.toDouble();
         if (v == null) return base.margemMinimaPercentualPadrao;
@@ -625,16 +700,6 @@ class SyncEntityCodecExtras {
       }(),
       umCaixaAbertoPorLoja:
           m['umCaixaAbertoPorLoja'] as bool? ?? base.umCaixaAbertoPorLoja,
-      alertasProativosWhatsappAtivos:
-          m['alertasProativosWhatsappAtivos'] as bool? ??
-              base.alertasProativosWhatsappAtivos,
-      whatsappDonoNumero:
-          (m['whatsappDonoNumero'] ?? base.whatsappDonoNumero).toString(),
-      alertasProativosIntervaloMinutos: () {
-        final v = (m['alertasProativosIntervaloMinutos'] as num?)?.toInt();
-        if (v == null) return base.alertasProativosIntervaloMinutos;
-        return v.clamp(15, 1440);
-      }(),
       regimeTributarioEmitente: () {
         final v = (m['regimeTributarioEmitente'] as num?)?.toInt();
         if (v == null || v < 1 || v > 3) {
@@ -733,22 +798,6 @@ class SyncEntityCodecExtras {
     );
   }
 
-  static Map<String, dynamic> mensageriaTemplatesParaMap(
-    List<MensagemTemplate> lista,
-  ) =>
-      {'templates': lista.map((t) => t.toMap()).toList()};
-
-  static List<MensagemTemplate> mensageriaTemplatesDeMap(
-    Map<String, dynamic> m,
-  ) {
-    final raw = m['templates'];
-    if (raw is! List) return [];
-    return raw
-        .whereType<Map>()
-        .map((e) => MensagemTemplate.fromMap(e.cast<String, dynamic>()))
-        .toList();
-  }
-
   static Map<String, dynamic> usuariosParaMap(List<UsuarioSistema> lista) =>
       {'usuarios': lista.map((u) => u.toMapParaSync()).toList()};
 
@@ -781,12 +830,23 @@ class SyncEntityCodecExtras {
   }
 
   static List<UsuarioSistema> usuariosDeMap(Map<String, dynamic> m) {
-    final raw = m['usuarios'];
-    if (raw is! List) return [];
-    return raw
-        .whereType<Map>()
-        .map((e) => UsuarioSistema.fromMap(e.cast<String, dynamic>()))
-        .toList();
+    final raw = m['usuarios'] ?? m['items'] ?? m['data'];
+    final list = raw is List
+        ? raw
+        : (raw is Map && raw['usuarios'] is List)
+            ? raw['usuarios'] as List
+            : null;
+    if (list == null) return [];
+    final out = <UsuarioSistema>[];
+    for (final e in list) {
+      if (e is! Map) continue;
+      try {
+        final map = Map<String, dynamic>.from(e);
+        map.putIfAbsent('senha', () => '');
+        out.add(UsuarioSistema.fromMap(map));
+      } catch (_) {}
+    }
+    return out;
   }
 
   // --- TituloReceber ---

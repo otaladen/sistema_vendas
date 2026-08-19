@@ -2,11 +2,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../data/app_config_repository.dart';
-import '../data/venda_repository.dart';
 import '../domain/recebimento_fiado_codec.dart';
 import '../model/cliente.dart';
 import '../model/recebimento_fiado.dart';
@@ -41,9 +39,10 @@ class ReciboRecebimentoFiadoPdf {
   static Future<Uint8List> gerarBytes({
     required RecebimentoFiado recebimento,
     required Cliente cliente,
-    required VendaRepository vendaRepository,
+    required dynamic vendaRepository,
     required EmpresaConfig config,
     required String operadorCaixa,
+    double? saldoRestanteOverride,
   }) async {
     final logoBytes = config.logoPath.trim().isNotEmpty
         ? await File(config.logoPath)
@@ -53,16 +52,33 @@ class ReciboRecebimentoFiadoPdf {
     final alocacoesRaw = RecebimentoFiadoCodec.decode(recebimento.alocacoesJson);
     final alocacoes = <({TituloReceber titulo, double valor})>[];
     for (final a in alocacoesRaw) {
-      final t = vendaRepository.titulos.obterPorId(a.tituloId);
+      TituloReceber? t;
+      try {
+        t = vendaRepository.titulos.obterPorId(a.tituloId) as TituloReceber?;
+      } catch (_) {
+        t = null;
+      }
       if (t != null) {
         alocacoes.add((titulo: t, valor: a.valor));
       }
     }
 
-    vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
-    final saldoRestante = vendaRepository.titulos
-        .listarAbertosPorCliente(cliente.id)
-        .fold<double>(0, (s, t) => s + t.saldo);
+    try {
+      vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+    } catch (_) {}
+
+    double saldoRestante;
+    if (saldoRestanteOverride != null) {
+      saldoRestante = saldoRestanteOverride;
+    } else {
+      try {
+        saldoRestante = (vendaRepository.titulos
+                .listarAbertosPorCliente(cliente.id) as List)
+            .fold<double>(0, (s, t) => s + (t as TituloReceber).saldo);
+      } catch (_) {
+        saldoRestante = 0;
+      }
+    }
 
     final doc = pw.Document();
     final modelo = empresaModeloPdfDeString(config.modeloPdf);

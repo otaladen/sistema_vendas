@@ -1,23 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../data/api/venda_api_repository.dart';
 import '../data/app_config_repository.dart';
-import '../data/cliente_repository.dart';
-import '../data/produto_repository.dart';
-import '../data/usuario_repository.dart';
+import '../data/devolucao_fiscal_store.dart';
 import '../data/venda_repository.dart';
-import '../data/vendedor_repository.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/troca_com_nota_pdv_intent.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
+import '../model/registro_devolucao.dart';
 import '../model/usuario_sistema.dart';
 import '../model/venda.dart';
 import '../services/print_service.dart';
 import '../services/venda_fiscal_service.dart';
 import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
+import 'shell/main_menu_deps.dart';
 import 'troca_com_nota_pdv_navigation.dart';
+import 'widgets/lan_api_feedback.dart';
 import 'widgets/produto_busca_input.dart';
 
 /// Fluxo de devolucao (estoque de volta) ou troca (devolucao + saida de produtos).
@@ -36,14 +37,14 @@ class RegistrarDevolucaoTrocaPage extends StatefulWidget {
     this.printService,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
+  final dynamic produtoRepository;
   final int vendaId;
   final String usuarioAtual;
   final bool podeRegistrarSemSenha;
   final UsuarioSistema? usuarioLogado;
-  final VendedorRepository? vendedorRepository;
+  final dynamic vendedorRepository;
   final AppConfigRepository? appConfigRepository;
   final PrintService? printService;
 
@@ -71,10 +72,11 @@ class _LinhaTrocaEdit {
 class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPage> {
   final _motivoController = TextEditingController();
   final _obsFinanceiraController = TextEditingController();
-  final _usuarioRepository = UsuarioRepository();
+  late dynamic _usuarioRepository;
   final _currency = NumberFormat('#,##0.00', 'pt_BR');
 
   Venda? _venda;
+  List<ItemVenda> _itens = const [];
   final Map<int, TextEditingController> _qtdDevolucaoPorItem = {};
   bool _modoTroca = false;
   final List<_LinhaTrocaEdit> _linhasTroca = [];
@@ -85,6 +87,8 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
   @override
   void initState() {
     super.initState();
+    _usuarioRepository =
+        MainMenuDeps.resolverUsuarioRepository(context);
     _carregarTudo();
   }
 
@@ -94,32 +98,62 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     setState(() {
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
     });
-    _recarregarVenda();
+    await _recarregarVenda();
   }
 
-  void _recarregarVenda() {
+  Future<void> _recarregarVenda() async {
     for (final c in _qtdDevolucaoPorItem.values) {
       c.dispose();
     }
     _qtdDevolucaoPorItem.clear();
 
-    final v = widget.vendaRepository.obterPorId(widget.vendaId);
-    if (v == null) {
+    final repo = widget.vendaRepository;
+    Venda? v = repo.obterPorId(widget.vendaId) as Venda?;
+    List<ItemVenda> itens = const [];
+    try {
+      if (repo is VendaApiRepository) {
+        await repo.carregarItensRemoto(widget.vendaId);
+        v = repo.obterPorId(widget.vendaId) ?? v;
+        itens = repo.listarItensPorVenda(widget.vendaId);
+      } else {
+        try {
+          itens = v?.itens.toList() ?? const <ItemVenda>[];
+        } catch (_) {
+          itens = (repo.listarItensPorVenda(widget.vendaId) as List<ItemVenda>?) ??
+              const [];
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
         _venda = null;
+        _itens = const [];
+        _carregando = false;
+        _erroCarregamento = LanApiFeedback.mensagem(e);
+      });
+      return;
+    }
+
+    if (v == null) {
+      if (!mounted) return;
+      setState(() {
+        _venda = null;
+        _itens = const [];
         _carregando = false;
         _erroCarregamento = 'Venda nao encontrada.';
       });
       return;
     }
-    for (final item in v.itens) {
+    for (final item in itens) {
       final maxD = item.quantidade - item.quantidadeDevolvida;
       _qtdDevolucaoPorItem[item.id] = TextEditingController(
         text: maxD > 0 ? '' : '0',
       );
     }
+    if (!mounted) return;
     setState(() {
       _venda = v;
+      _itens = itens;
       _carregando = false;
       _erroCarregamento = null;
     });
@@ -167,10 +201,8 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
   }
 
   List<LinhaDevolucaoEntradaInput> _entradasPreenchidasFromUi() {
-    final v = _venda;
-    if (v == null) return [];
     final entradas = <LinhaDevolucaoEntradaInput>[];
-    for (final item in v.itens) {
+    for (final item in _itens) {
       final ctl = _qtdDevolucaoPorItem[item.id];
       if (ctl == null) continue;
       final q = _parseQtd(ctl.text);
@@ -186,15 +218,13 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
 
   /// Valor de referencia do que o cliente devolve (preco da venda original).
   double _valorTotalDevolvido() {
-    final v = _venda;
-    if (v == null) return 0;
     final entradas = _entradasPreenchidasFromUi();
     return creditoDevolucaoReaisDeEntradas(
       entradas: entradas
           .map((e) => (itemVendaId: e.itemVendaId, quantidade: e.quantidade))
           .toList(),
       precoUnitarioDoItem: (id) {
-        final item = v.itens.firstWhere((i) => i.id == id);
+        final item = _itens.firstWhere((i) => i.id == id);
         return item.precoUnitario;
       },
     );
@@ -463,7 +493,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     final senha = senhaController.text.trim();
     loginController.dispose();
     senhaController.dispose();
-    final u = await _usuarioRepository.autenticar(login, senha);
+    final u = await _usuarioRepository.autenticar(login, senha) as UsuarioSistema?;
     final autorizado =
         u != null && UsuarioPermissaoHelper.podeCancelarVendas(u);
     if (!autorizado) return (false, '');
@@ -492,7 +522,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     }
 
     final entradas = <LinhaDevolucaoEntradaInput>[];
-    for (final item in v.itens) {
+    for (final item in _itens) {
       final ctl = _qtdDevolucaoPorItem[item.id];
       if (ctl == null) continue;
       final q = _parseQtd(ctl.text);
@@ -557,13 +587,32 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       return;
     }
 
-    final fiscalSvc = VendaFiscalService(
-      vendaRepository: widget.vendaRepository,
-      clienteRepository: widget.clienteRepository,
-    );
+    final VendaFiscalService? fiscalSvc;
+    if (widget.vendaRepository is VendaRepository) {
+      fiscalSvc = VendaFiscalService(
+        vendaRepository: widget.vendaRepository as VendaRepository,
+        clienteRepository: widget.clienteRepository,
+      );
+    } else {
+      fiscalSvc = null;
+      final exigeFiscal =
+          v.nfceAutorizadaAtiva || v.nfe55Autorizada;
+      if (exigeFiscal) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Devolucao com NFC-e/NF-e autorizada ainda exige o PC servidor '
+              '(SEFAZ). Vendas sem documento fiscal podem ser devolvidas neste terminal.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
 
     VendaFiscalOperacaoResultado? fiscalRes;
-    if (fiscalSvc.vendaExigeNfeDevolucao(v)) {
+    if (fiscalSvc != null && fiscalSvc.vendaExigeNfeDevolucao(v)) {
       final confirmaFiscal = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -595,7 +644,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
 
       final itensFiscais = <({ItemVenda item, int quantidade})>[];
       for (final e in entradas) {
-        final item = v.itens.firstWhere((i) => i.id == e.itemVendaId);
+        final item = _itens.firstWhere((i) => i.id == e.itemVendaId);
         itensFiscais.add((item: item, quantidade: e.quantidade));
       }
 
@@ -640,27 +689,42 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
 
     int registroId;
     try {
-      registroId = widget.vendaRepository.registrarDevolucaoOuTroca(
-        vendaOrigemId: v.id,
-        tipo: _modoTroca ? 'troca' : 'devolucao',
-        motivo: motivo,
-        observacaoFinanceira: _obsFinanceiraController.text,
-        registradoPor: auth.$2,
-        entradas: entradas,
-        saidasTroca: saidas,
-        permitirVendaSemEstoque: _permitirVendaSemEstoque,
-      );
+      final repo = widget.vendaRepository;
+      if (repo is VendaApiRepository) {
+        registroId = await repo.registrarDevolucaoOuTrocaRemoto(
+          vendaOrigemId: v.id,
+          tipo: _modoTroca ? 'troca' : 'devolucao',
+          motivo: motivo,
+          observacaoFinanceira: _obsFinanceiraController.text,
+          registradoPor: auth.$2,
+          entradas: entradas,
+          saidasTroca: saidas,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      } else {
+        registroId = repo.registrarDevolucaoOuTroca(
+          vendaOrigemId: v.id,
+          tipo: _modoTroca ? 'troca' : 'devolucao',
+          motivo: motivo,
+          observacaoFinanceira: _obsFinanceiraController.text,
+          registradoPor: auth.$2,
+          entradas: entradas,
+          saidasTroca: saidas,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
+        SnackBar(content: Text(LanApiFeedback.mensagem(e))),
       );
       return;
     }
 
     if (fiscalRes != null &&
         fiscalRes.sucesso &&
-        fiscalRes.referenciaDevolucao.isNotEmpty) {
+        fiscalRes.referenciaDevolucao.isNotEmpty &&
+        fiscalSvc != null) {
       fiscalSvc.salvarDevolucaoFiscalLocal(
         registroDevolucaoId: registroId,
         vendaId: v.id,
@@ -695,7 +759,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
           .map((e) => (itemVendaId: e.itemVendaId, quantidade: e.quantidade))
           .toList(),
       precoUnitarioDoItem: (id) {
-        final item = v.itens.firstWhere((i) => i.id == id);
+        final item = _itens.firstWhere((i) => i.id == id);
         return item.precoUnitario;
       },
     );
@@ -801,13 +865,19 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     }
 
     final v = _venda!;
-    final registros =
-        widget.vendaRepository.listarRegistrosDevolucaoPorVenda(v.id);
-    final fiscalSvc = VendaFiscalService(
-      vendaRepository: widget.vendaRepository,
-      clienteRepository: widget.clienteRepository,
-    );
-    final fiscaisMap = mapaFiscalPorRegistro(fiscalSvc, registros);
+    final registros = widget.vendaRepository
+            .listarRegistrosDevolucaoPorVenda(v.id)
+        as List<RegistroDevolucao>;
+    final Map<int, DevolucaoFiscalRegistro> fiscaisMap;
+    if (widget.vendaRepository is VendaRepository) {
+      final fiscalSvc = VendaFiscalService(
+        vendaRepository: widget.vendaRepository as VendaRepository,
+        clienteRepository: widget.clienteRepository,
+      );
+      fiscaisMap = mapaFiscalPorRegistro(fiscalSvc, registros);
+    } else {
+      fiscaisMap = const {};
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -908,7 +978,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
-          ...v.itens.map((ItemVenda item) {
+          ..._itens.map((ItemVenda item) {
             final maxD = item.quantidade - item.quantidadeDevolvida;
             final ctl = _qtdDevolucaoPorItem[item.id]!;
             final qDev = _parseQtd(ctl.text);
@@ -1020,7 +1090,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                             ),
                             DropdownMenuItem(
                               value: 'preco3',
-                              child: Text('Atacado'),
+                              child: Text('Especial'),
                             ),
                           ],
                           onChanged: (nv) {

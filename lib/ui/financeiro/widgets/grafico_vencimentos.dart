@@ -38,6 +38,12 @@ class ContasPagarVencimentosBuckets {
 ContasPagarVencimentosBuckets computeContasPagarVencimentosBuckets(
   Box<ContaPagar> box,
 ) {
+  return computeContasPagarVencimentosBucketsDeLista(box.getAll());
+}
+
+ContasPagarVencimentosBuckets computeContasPagarVencimentosBucketsDeLista(
+  Iterable<ContaPagar> todas,
+) {
   final hojeLocal = DateTime.now();
   final hoje = DateTime.utc(
     hojeLocal.year,
@@ -52,39 +58,34 @@ ContasPagarVencimentosBuckets computeContasPagarVencimentosBuckets(
 
   DateTime normalizaDia(DateTime d) => DateTime.utc(d.year, d.month, d.day);
 
-  final cond = ContaPagar_.status.equals(ContaPagarStatus.pendente).or(
-    ContaPagar_.status.equals(ContaPagarStatus.atrasado),
-  );
-  final q = box.query(cond).build();
-  try {
-    var atras = 0.0;
-    var p7 = 0.0;
-    var p815 = 0.0;
-    var p1630 = 0.0;
-
-    for (final c in q.find()) {
-      final v = c.valorParcela;
-      if (!v.isFinite || v <= 0) continue;
-      final venc = normalizaDia(c.dataVencimento);
-      if (venc.isBefore(hoje)) {
-        atras += v;
-      } else if (!venc.isAfter(fim7)) {
-        p7 += v;
-      } else if (!venc.isBefore(ini8) && !venc.isAfter(fim15)) {
-        p815 += v;
-      } else if (!venc.isBefore(ini16) && !venc.isAfter(fim30)) {
-        p1630 += v;
-      }
+  var atras = 0.0;
+  var d7 = 0.0;
+  var d815 = 0.0;
+  var d1630 = 0.0;
+  for (final c in todas) {
+    if (c.status != ContaPagarStatus.pendente &&
+        c.status != ContaPagarStatus.atrasado) {
+      continue;
     }
-    return ContasPagarVencimentosBuckets(
-      atrasadas: atras,
-      proximos7Dias: p7,
-      de8a15Dias: p815,
-      de16a30Dias: p1630,
-    );
-  } finally {
-    q.close();
+    final venc = normalizaDia(c.dataVencimento.toLocal());
+    final v = c.valorParcela;
+    if (!v.isFinite || v <= 0) continue;
+    if (venc.isBefore(hoje) || c.status == ContaPagarStatus.atrasado) {
+      atras += v;
+    } else if (!venc.isAfter(fim7)) {
+      d7 += v;
+    } else if (!venc.isBefore(ini8) && !venc.isAfter(fim15)) {
+      d815 += v;
+    } else if (!venc.isBefore(ini16) && !venc.isAfter(fim30)) {
+      d1630 += v;
+    }
   }
+  return ContasPagarVencimentosBuckets(
+    atrasadas: atras,
+    proximos7Dias: d7,
+    de8a15Dias: d815,
+    de16a30Dias: d1630,
+  );
 }
 
 /// Agrupa titulos a receber (fiado) em aberto por vencimento.

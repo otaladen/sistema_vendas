@@ -35,6 +35,8 @@ class HistoricoEntregaEventos {
   static const retiradaLojaPreSaida = 'retirada_loja_pre_saida';
   static const complementoPendente = 'complemento_pendente';
   static const podEntrega = 'pod_entrega';
+  static const naoEntregue = 'entrega_evento_nao_entregue';
+  static const buscarNaLoja = 'entrega_evento_buscar_na_loja';
 
   static bool ehEventoOcorrencia(String statusNovo) {
     switch (statusNovo) {
@@ -44,6 +46,8 @@ class HistoricoEntregaEventos {
       case retiradaLojaPreSaida:
       case complementoPendente:
       case podEntrega:
+      case naoEntregue:
+      case buscarNaLoja:
         return true;
       default:
         return false;
@@ -64,10 +68,14 @@ class HistoricoEntregaEventos {
         return 'Complemento pendente';
       case podEntrega:
         return 'Comprovante de entrega (POD)';
+      case naoEntregue:
+        return 'Nao entregue';
+      case buscarNaLoja:
+        return 'Buscar nesta loja';
       case 'pendente':
         return 'Pendente';
       case 'roteirizada':
-        return 'Roteirizada';
+        return 'No patio';
       case 'saiu_entrega':
         return 'Saiu para entrega';
       case 'entregue_complemento_pendente':

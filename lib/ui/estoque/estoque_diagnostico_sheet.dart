@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/venda_repository.dart';
 import '../../domain/estoque/estoque_diagnostico_models.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
@@ -12,12 +11,14 @@ final DateFormat _dataHoraDiagnostico = DateFormat('dd/MM/yyyy HH:mm');
 
 Future<void> mostrarEstoqueDiagnosticoSheet({
   required BuildContext context,
-  required EstoqueDiagnosticoService diagnosticoService,
-  required VendaRepository vendaRepository,
+  EstoqueDiagnosticoService? diagnosticoService,
+  dynamic vendaRepository,
   required UsuarioSistema usuarioLogado,
   required bool permitirVendaSemEstoque,
   EstoqueDiagnosticoResultado? resultadoInicial,
   VoidCallback? aoAtualizarExterno,
+  Future<EstoqueDiagnosticoResultado?> Function()? buscarRemoto,
+  Future<void> Function(int vendaId)? reprocessarBaixaRemoto,
 }) async {
   await showModalBottomSheet<void>(
     context: context,
@@ -31,6 +32,8 @@ Future<void> mostrarEstoqueDiagnosticoSheet({
         permitirVendaSemEstoque: permitirVendaSemEstoque,
         resultadoInicial: resultadoInicial,
         aoAtualizarExterno: aoAtualizarExterno,
+        buscarRemoto: buscarRemoto,
+        reprocessarBaixaRemoto: reprocessarBaixaRemoto,
       );
     },
   );
@@ -38,20 +41,24 @@ Future<void> mostrarEstoqueDiagnosticoSheet({
 
 class _EstoqueDiagnosticoSheetBody extends StatefulWidget {
   const _EstoqueDiagnosticoSheetBody({
-    required this.diagnosticoService,
-    required this.vendaRepository,
+    this.diagnosticoService,
+    this.vendaRepository,
     required this.usuarioLogado,
     required this.permitirVendaSemEstoque,
     this.resultadoInicial,
     this.aoAtualizarExterno,
+    this.buscarRemoto,
+    this.reprocessarBaixaRemoto,
   });
 
-  final EstoqueDiagnosticoService diagnosticoService;
-  final VendaRepository vendaRepository;
+  final EstoqueDiagnosticoService? diagnosticoService;
+  final dynamic vendaRepository;
   final UsuarioSistema usuarioLogado;
   final bool permitirVendaSemEstoque;
   final EstoqueDiagnosticoResultado? resultadoInicial;
   final VoidCallback? aoAtualizarExterno;
+  final Future<EstoqueDiagnosticoResultado?> Function()? buscarRemoto;
+  final Future<void> Function(int vendaId)? reprocessarBaixaRemoto;
 
   @override
   State<_EstoqueDiagnosticoSheetBody> createState() =>
@@ -73,23 +80,47 @@ class _EstoqueDiagnosticoSheetBodyState
   @override
   void initState() {
     super.initState();
-    _resultado =
-        widget.resultadoInicial ?? widget.diagnosticoService.executar();
+    _resultado = widget.resultadoInicial ??
+        widget.diagnosticoService?.executar() ??
+        EstoqueDiagnosticoResultado(achados: const [], geradoEm: DateTime.now());
   }
 
   Future<void> _atualizar() async {
     setState(() => _atualizando = true);
     await Future<void>.delayed(Duration.zero);
-    final novo = widget.diagnosticoService.executar();
+    EstoqueDiagnosticoResultado? novo;
+    if (widget.buscarRemoto != null) {
+      try {
+        novo = await widget.buscarRemoto!();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Diagnostico: $e')),
+          );
+        }
+      }
+    } else {
+      novo = widget.diagnosticoService?.executar();
+    }
     if (!mounted) return;
     setState(() {
-      _resultado = novo;
+      if (novo != null) _resultado = novo;
       _atualizando = false;
     });
     widget.aoAtualizarExterno?.call();
   }
 
   Future<void> _reprocessarBaixa(int vendaId) async {
+    final temLocal = widget.vendaRepository != null;
+    final temRemoto = widget.reprocessarBaixaRemoto != null;
+    if (!temLocal && !temRemoto) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reprocessar baixa indisponivel sem conexao com o PC servidor.'),
+        ),
+      );
+      return;
+    }
     if (!_podeReprocessar) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -102,10 +133,14 @@ class _EstoqueDiagnosticoSheetBodyState
     }
     setState(() => _reprocessandoVendaId = vendaId);
     try {
-      widget.vendaRepository.reprocessarBaixaEstoqueDocumentoVenda(
-        vendaId,
-        permitirVendaSemEstoque: widget.permitirVendaSemEstoque,
-      );
+      if (temRemoto) {
+        await widget.reprocessarBaixaRemoto!(vendaId);
+      } else {
+        widget.vendaRepository.reprocessarBaixaEstoqueDocumentoVenda(
+          vendaId,
+          permitirVendaSemEstoque: widget.permitirVendaSemEstoque,
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Baixa reprocessada para venda #$vendaId.')),

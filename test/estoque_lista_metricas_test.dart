@@ -82,4 +82,56 @@ void main() {
     expect(p.estoqueExibicao, closeTo(3, 0.001));
     expect(EstoqueListaMetricas.abaixoDoMinimo(p), isTrue);
   });
+
+  test('cobertura usa media na unidade de venda (nao raw)', () {
+    final p = Produto(
+      codigoInterno: 'CX3',
+      nome: 'Piso media',
+      unidade: 'M2',
+      unidadeCompra: 'CX',
+      quantidadePorEmbalagem: 2.5,
+      permiteQuantidadeFracionada: true,
+      precoCusto: 10,
+      precoVenda: 20,
+      estoqueReal: 144620,
+      quantidadeMinima: 50,
+    )..vendaMediaDiaria = 2410.33;
+    expect(p.estoqueExibicao, closeTo(144.62, 0.01));
+    expect(p.vendaMediaDiariaExibicao, closeTo(2.41033, 0.0001));
+    expect(EstoqueListaMetricas.coberturaDias(p), closeTo(60, 0.2));
+    expect(EstoqueListaMetricas.formatarMediaDiaria(p), '2,41 M2');
+  });
+
+  test('anotar compra sugere falta na unidade de exibicao', () {
+    final p = Produto(
+      codigoInterno: 'CX4',
+      nome: 'Piso falta',
+      unidade: 'M2',
+      unidadeCompra: 'CX',
+      quantidadePorEmbalagem: 2.5,
+      permiteQuantidadeFracionada: true,
+      precoCusto: 10,
+      precoVenda: 20,
+      estoqueReal: 3000, // 3 m2
+      quantidadeMinima: 50,
+    );
+    expect(EstoqueListaMetricas.quantidadeSugeridaAnotarCompra(p), 47);
+  });
+
+  test('anotar compra nao usa estoque raw contra minimo', () {
+    final p = Produto(
+      codigoInterno: 'CX5',
+      nome: 'Piso cheio',
+      unidade: 'M2',
+      unidadeCompra: 'CX',
+      quantidadePorEmbalagem: 2.5,
+      permiteQuantidadeFracionada: true,
+      precoCusto: 10,
+      precoVenda: 20,
+      estoqueReal: 144620,
+      quantidadeMinima: 50,
+    );
+    expect(p.estoqueExibicao > p.quantidadeMinima, isTrue);
+    expect(EstoqueListaMetricas.quantidadeSugeridaAnotarCompra(p), 1);
+  });
 }

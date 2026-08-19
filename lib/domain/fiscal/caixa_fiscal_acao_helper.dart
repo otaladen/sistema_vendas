@@ -83,7 +83,10 @@ abstract final class CaixaFiscalAcaoHelper {
       case 'nfce':
         return venda.nfceEmitida || venda.nfceProcessandoPendenteFocus;
       case 'cupom':
-        return venda.cupomNaoFiscalEmitidoEm != null;
+        // cupomNaoFiscalEmitidoEm e setado na finalizacao (baixa de estoque).
+        // A pergunta/impressao do comprovante e um passo separado — nunca
+        // considerar "ja atendido" so pela baixa.
+        return false;
       case 'nfe55':
         return venda.nfe55Autorizada || venda.nfe55Processando;
       default:

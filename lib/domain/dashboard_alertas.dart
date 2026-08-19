@@ -170,7 +170,7 @@ class DashboardAlertasService {
       if (!modoLeve) {
         final critico = produtoRepository
             .listarTodos()
-            .where((p) => p.estoqueReal < p.quantidadeMinima)
+            .where((p) => p.estoqueExibicao < p.quantidadeMinima)
             .length;
         if (critico > 0) {
           alertas.add(

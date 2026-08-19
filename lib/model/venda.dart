@@ -43,6 +43,7 @@ class Venda {
     this.grupoEntregaFreteId = 0,
     this.ordemEntrega = 0,
     this.caminhaoEntrega = '',
+    this.lojaOrigemMercadoria = '',
     this.complementoEntregaJson = '',
     this.nfceChaveAcesso = '',
     this.nfceNumero = '',
@@ -70,6 +71,7 @@ class Venda {
     this.podFotoPath = '',
     this.podFotoPathServidor = '',
     this.podRegistradoEm,
+    this.uuidLocal = '',
   }) : data = data ?? DateTime.now();
 
   @Id(assignable: true)
@@ -143,6 +145,11 @@ class Venda {
   /// Legado (nao usado na UI). Expedicao identifica o veiculo pelo [motoristaEntrega].
   String caminhaoEntrega;
 
+  /// Resumo da origem da mercadoria. Vazio ou [LojaOrigemMercadoria.outraLoja] =
+  /// padrao carreto (sem baixa fisica aqui). [LojaOrigemMercadoria.local] = desta
+  /// loja. [LojaOrigemMercadoria.misto] quando os itens diferem.
+  String lojaOrigemMercadoria;
+
   /// JSON: lista de itens em falta na ida (`ComplementoEntregaCodec`).
   /// Usado com [statusEntrega] `entregue_complemento_pendente` ou pendencia em aberto.
   String complementoEntregaJson;
@@ -203,6 +210,11 @@ class Venda {
 
   @Property(type: PropertyType.dateUtc)
   DateTime? podRegistradoEm;
+
+  /// Chave de idempotencia do cliente (UUID) para evitar orcamento duplicado
+  /// em retry apos timeout de rede. Vazio em registros legados.
+  @Index()
+  String uuidLocal;
 
   final cliente = ToOne<Cliente>();
   final vendedor = ToOne<Vendedor>();

@@ -71,6 +71,20 @@ void main() {
     );
   });
 
+  test('filtro aplicacao aceita curingas %', () {
+    final p = _produto(
+      descricao: 'Indicada para impermeabilizacao de lajes e fundacoes.',
+    );
+    expect(
+      PdvConsultaInsightsService.produtoCombinaAplicacao(p, 'imper%laje'),
+      isTrue,
+    );
+    expect(
+      PdvConsultaInsightsService.produtoCombinaAplicacao(p, 'imper%tinta'),
+      isFalse,
+    );
+  });
+
   test('extrai trecho da descricao para o termo', () {
     final p = _produto(
       descricao:

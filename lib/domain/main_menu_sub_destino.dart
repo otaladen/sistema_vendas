@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../model/usuario_sistema.dart';
 import 'main_menu_destino.dart';
+import 'modo_terminal_leve.dart';
 import 'permissao_usuario.dart';
 import 'usuario_permissao_helper.dart';
 
@@ -17,6 +18,7 @@ enum MainMenuSubDestino {
   cadastrosFuncionarios,
   cadastrosClientes,
   cadastrosVendedores,
+  cadastrosFornecedores,
   cadastrosUsuarios,
   fiscalImportarNfe,
   fiscalNotasImportadas,
@@ -28,6 +30,7 @@ enum MainMenuSubDestino {
   financeiroTesouraria,
   financeiroContasReceber,
   financeiroContasPagar,
+  financeiroObrigacoesMensais,
   financeiroRelatorioContasPagar,
   financeiroRelatorioFiados,
 }
@@ -46,6 +49,7 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
       case MainMenuSubDestino.cadastrosFuncionarios:
       case MainMenuSubDestino.cadastrosClientes:
       case MainMenuSubDestino.cadastrosVendedores:
+      case MainMenuSubDestino.cadastrosFornecedores:
       case MainMenuSubDestino.cadastrosUsuarios:
         return MainMenuDestino.cadastros;
       case MainMenuSubDestino.fiscalImportarNfe:
@@ -59,6 +63,7 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
       case MainMenuSubDestino.financeiroTesouraria:
       case MainMenuSubDestino.financeiroContasReceber:
       case MainMenuSubDestino.financeiroContasPagar:
+      case MainMenuSubDestino.financeiroObrigacoesMensais:
       case MainMenuSubDestino.financeiroRelatorioContasPagar:
       case MainMenuSubDestino.financeiroRelatorioFiados:
         return MainMenuDestino.financeiro;
@@ -87,6 +92,8 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return 'Clientes';
       case MainMenuSubDestino.cadastrosVendedores:
         return 'Vendedores';
+      case MainMenuSubDestino.cadastrosFornecedores:
+        return 'Fornecedores';
       case MainMenuSubDestino.cadastrosUsuarios:
         return 'Usuarios';
       case MainMenuSubDestino.fiscalImportarNfe:
@@ -109,6 +116,8 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return 'Contas a receber';
       case MainMenuSubDestino.financeiroContasPagar:
         return 'Contas a pagar';
+      case MainMenuSubDestino.financeiroObrigacoesMensais:
+        return 'Obrigacoes fixas';
       case MainMenuSubDestino.financeiroRelatorioContasPagar:
         return 'Relatorio contas a pagar';
       case MainMenuSubDestino.financeiroRelatorioFiados:
@@ -138,6 +147,8 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return Icons.people_outline;
       case MainMenuSubDestino.cadastrosVendedores:
         return Icons.storefront_outlined;
+      case MainMenuSubDestino.cadastrosFornecedores:
+        return Icons.factory_outlined;
       case MainMenuSubDestino.cadastrosUsuarios:
         return Icons.manage_accounts_outlined;
       case MainMenuSubDestino.fiscalImportarNfe:
@@ -160,6 +171,8 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return Icons.call_received_outlined;
       case MainMenuSubDestino.financeiroContasPagar:
         return Icons.call_made_outlined;
+      case MainMenuSubDestino.financeiroObrigacoesMensais:
+        return Icons.event_repeat_outlined;
       case MainMenuSubDestino.financeiroRelatorioContasPagar:
         return Icons.receipt_long_outlined;
       case MainMenuSubDestino.financeiroRelatorioFiados:
@@ -192,6 +205,7 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
       case MainMenuSubDestino.cadastrosFuncionarios:
       case MainMenuSubDestino.cadastrosClientes:
       case MainMenuSubDestino.cadastrosVendedores:
+      case MainMenuSubDestino.cadastrosFornecedores:
         return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.cadastros);
       case MainMenuSubDestino.fiscalImportarNfe:
       case MainMenuSubDestino.fiscalNotasImportadas:
@@ -200,10 +214,11 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
       case MainMenuSubDestino.fiscalNfeSaida:
       case MainMenuSubDestino.fiscalRelatorioMensal:
       case MainMenuSubDestino.fiscalExportarFechamento:
-        return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque);
+        return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.fiscal);
       case MainMenuSubDestino.financeiroTesouraria:
       case MainMenuSubDestino.financeiroContasReceber:
       case MainMenuSubDestino.financeiroContasPagar:
+      case MainMenuSubDestino.financeiroObrigacoesMensais:
       case MainMenuSubDestino.financeiroRelatorioContasPagar:
         return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro);
       case MainMenuSubDestino.financeiroRelatorioFiados:
@@ -239,6 +254,7 @@ abstract final class MainMenuSubDestinoHelper {
     MainMenuSubDestino.cadastrosFuncionarios,
     MainMenuSubDestino.cadastrosClientes,
     MainMenuSubDestino.cadastrosVendedores,
+    MainMenuSubDestino.cadastrosFornecedores,
     MainMenuSubDestino.cadastrosUsuarios,
   ];
 
@@ -256,14 +272,16 @@ abstract final class MainMenuSubDestinoHelper {
     MainMenuSubDestino.financeiroTesouraria,
     MainMenuSubDestino.financeiroContasReceber,
     MainMenuSubDestino.financeiroContasPagar,
+    MainMenuSubDestino.financeiroObrigacoesMensais,
     MainMenuSubDestino.financeiroRelatorioContasPagar,
     MainMenuSubDestino.financeiroRelatorioFiados,
   ];
 
   static List<MainMenuSubDestino> subitensDe(
     MainMenuDestino pai,
-    UsuarioSistema usuario,
-  ) {
+    UsuarioSistema usuario, {
+    bool terminalLeve = false,
+  }) {
     final lista = switch (pai) {
       MainMenuDestino.vendas => _vendas,
       MainMenuDestino.cadastros => _cadastros,
@@ -273,15 +291,18 @@ abstract final class MainMenuSubDestinoHelper {
     };
     return [
       for (final s in lista)
-        if (s.podeAcessar(usuario)) s,
+        if (s.podeAcessar(usuario) &&
+            (!terminalLeve || subDestinoPermitidoNoTerminalLeve(s.name)))
+          s,
     ];
   }
 
   static MainMenuSubDestino? primeiroPermitido(
     MainMenuDestino pai,
-    UsuarioSistema usuario,
-  ) {
-    final subs = subitensDe(pai, usuario);
+    UsuarioSistema usuario, {
+    bool terminalLeve = false,
+  }) {
+    final subs = subitensDe(pai, usuario, terminalLeve: terminalLeve);
     return subs.isEmpty ? null : subs.first;
   }
 }

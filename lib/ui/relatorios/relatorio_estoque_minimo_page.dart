@@ -1,6 +1,5 @@
 ﻿import 'package:flutter/material.dart';
 
-import '../../data/produto_repository.dart';
 import '../../domain/produto_embalagem.dart';
 import '../../model/produto.dart';
 import 'relatorio_drill_down.dart';
@@ -10,7 +9,7 @@ import 'widgets/relatorio_exportacoes_menu.dart';
 class RelatorioEstoqueMinimoPage extends StatefulWidget {
   const RelatorioEstoqueMinimoPage({super.key, required this.produtoRepository});
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
 
   @override
   State<RelatorioEstoqueMinimoPage> createState() =>
@@ -27,7 +26,8 @@ class _RelatorioEstoqueMinimoPageState extends State<RelatorioEstoqueMinimoPage>
   }
 
   void _carregar() {
-    final todos = widget.produtoRepository.listarTodos();
+    final todos =
+        (widget.produtoRepository.listarTodos() as List).cast<Produto>();
     final critico = todos
         .where((p) => p.estoqueExibicao < p.quantidadeMinima)
         .toList()

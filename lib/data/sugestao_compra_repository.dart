@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 
+import '../domain/produto_embalagem.dart';
 import '../model/produto.dart';
 import '../services/compras_preditivas_service.dart';
 import 'objectbox.dart';
+import 'sync/sync_entity_codec.dart';
 
 /// Linha do relatorio de sugestao de reposicao (somente leitura / exportacao).
 class LinhaSugestaoCompra {
@@ -43,6 +45,44 @@ class LinhaSugestaoCompra {
 
   /// Produto sem giro confiavel: alerta prioriza estoque de seguranca.
   final bool alertaPorEstoqueSeguranca;
+
+  static Map<String, dynamic> toApiMap(LinhaSugestaoCompra l) => {
+        'produto': SyncEntityCodec.produtoParaMap(l.produto),
+        'consumoNoPeriodoUnidades': l.consumoNoPeriodoUnidades,
+        'mediaUnidadesPorDia': l.mediaUnidadesPorDia,
+        'diasCoberturaComEstoqueAtual': l.diasCoberturaComEstoqueAtual,
+        'ultimaEntradaNfe': l.ultimaEntradaNfe?.toUtc().toIso8601String(),
+        'quantidadeSugerida': l.quantidadeSugerida,
+        'pontoPedido': l.pontoPedido,
+        'estoqueCritico': l.estoqueCritico,
+        'quantidadeSugeridaPorPp': l.quantidadeSugeridaPorPp,
+        'alertaPorEstoqueSeguranca': l.alertaPorEstoqueSeguranca,
+      };
+
+  static LinhaSugestaoCompra? fromApiMap(Map<String, dynamic> m) {
+    final prodRaw = m['produto'];
+    if (prodRaw is! Map) return null;
+    final produto =
+        SyncEntityCodec.produtoDeMap(Map<String, dynamic>.from(prodRaw));
+    return LinhaSugestaoCompra(
+      produto: produto,
+      consumoNoPeriodoUnidades:
+          (m['consumoNoPeriodoUnidades'] as num?)?.toInt() ?? 0,
+      mediaUnidadesPorDia:
+          (m['mediaUnidadesPorDia'] as num?)?.toDouble() ?? 0,
+      diasCoberturaComEstoqueAtual:
+          (m['diasCoberturaComEstoqueAtual'] as num?)?.toDouble(),
+      ultimaEntradaNfe: DateTime.tryParse(
+        (m['ultimaEntradaNfe'] ?? '').toString(),
+      ),
+      quantidadeSugerida: (m['quantidadeSugerida'] as num?)?.toInt() ?? 0,
+      pontoPedido: (m['pontoPedido'] as num?)?.toDouble() ?? 0,
+      estoqueCritico: m['estoqueCritico'] == true,
+      quantidadeSugeridaPorPp:
+          (m['quantidadeSugeridaPorPp'] as num?)?.toInt() ?? 0,
+      alertaPorEstoqueSeguranca: m['alertaPorEstoqueSeguranca'] == true,
+    );
+  }
 }
 
 /// Cruza vendas finalizadas, estoque minimo, PP e historico de entrada NF-e.
@@ -99,11 +139,14 @@ class SugestaoCompraRepository {
       if (!pr.ativo) continue;
 
       final vendido = consumoPorProduto[pr.id] ?? 0;
-      final mediaHistorico = vendido / dias;
-      final media = pr.vendaMediaDiaria > 0 ? pr.vendaMediaDiaria : mediaHistorico;
-      final livre = pr.estoqueLivreParaVenda;
-      final estoqueAtual = pr.estoqueAtual;
-      final minimo = pr.quantidadeMinima;
+      final vendidoExibicao =
+          ProdutoEmbalagem.valorEstoqueExibicao(pr, vendido);
+      final mediaHistorico = vendidoExibicao / dias;
+      final mediaPersistida = pr.vendaMediaDiariaExibicao;
+      final media = mediaPersistida > 0 ? mediaPersistida : mediaHistorico;
+      final livre = pr.estoqueLivreExibicao;
+      final estoqueAtual = pr.estoqueExibicao;
+      final minimo = pr.quantidadeMinima.toDouble();
 
       final pp = comprasSvc.calcularPontoPedidoExibicao(
         pr,
@@ -117,12 +160,12 @@ class SugestaoCompraRepository {
         pr,
         consumoNoPeriodo: vendido,
       );
-      final faltaPp = pp.ceil() - estoqueAtual;
+      final faltaPp = (pp - estoqueAtual).ceil();
       final qtdPorPp = faltaPp > 0 ? faltaPp : 0;
 
-      final faltaMinimo = livre < minimo ? (minimo - livre) : 0;
+      final faltaMinimo = livre < minimo ? (minimo - livre).ceil() : 0;
       final metaGiro = (media * cobertura).ceil();
-      final faltaGiro = livre < metaGiro ? (metaGiro - livre) : 0;
+      final faltaGiro = livre < metaGiro ? (metaGiro - livre).ceil() : 0;
       final qtdSugerida = math.max(math.max(faltaMinimo, faltaGiro), qtdPorPp);
 
       double? diasCobertura;
@@ -142,9 +185,8 @@ class SugestaoCompraRepository {
         }
       }
 
-      // Atualiza media persistida se ainda zerada e houve venda no periodo.
-      if (pr.vendaMediaDiaria <= 0 && mediaHistorico > 0) {
-        pr.vendaMediaDiaria = mediaHistorico;
+      // Atualiza media persistida (escala raw) se ainda zerada e houve venda.
+      if (pr.vendaMediaDiaria <= 0 && vendido > 0) {
         comprasSvc.atualizarVendaMediaDiaria(pr);
         _db.produtoBox.put(pr);
       }

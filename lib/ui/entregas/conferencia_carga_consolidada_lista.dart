@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
-import '../../data/conferencia_carga_repository.dart';
-import '../../data/sync/sync_refresh_hub.dart';
+import '../../data/api/lan_api_event_hub.dart';
+import '../../domain/entregas/buscar_na_loja.dart';
+import '../../domain/entregas/romaneio_carga_merge.dart';
 import '../../model/item_venda.dart';
 import '../../model/venda.dart';
+import '../widgets/lan_api_feedback.dart';
 import 'romaneio_carga_consolidada.dart';
 
-/// Lista de conferencia de carga consolidada (persistida por [escopoViagem], sync LAN).
+/// Lista da carga da viagem: itens + alerta para separar nesta loja.
 class ConferenciaCargaConsolidadaLista extends StatefulWidget {
   const ConferenciaCargaConsolidadaLista({
     super.key,
@@ -17,15 +19,24 @@ class ConferenciaCargaConsolidadaLista extends StatefulWidget {
     this.vendasGrupo,
     this.quantidadeEntrega,
     this.mensagemVazia = 'Nenhum item com quantidade para separar.',
+    this.expandir = false,
+    this.podeConfirmarBuscarNaLoja = false,
+    this.onConfirmarBuscarNaLoja,
   });
 
   final List<RomaneioCargaConsolidadaLinha> linhas;
   final String escopoViagem;
-  final ConferenciaCargaRepository conferenciaRepository;
+  final dynamic conferenciaRepository;
   final String usuarioAtual;
   final List<Venda>? vendasGrupo;
   final int Function(Venda venda, ItemVenda item)? quantidadeEntrega;
   final String mensagemVazia;
+  final bool expandir;
+  final bool podeConfirmarBuscarNaLoja;
+
+  /// Patio confirma itens solicitados pelo motorista (vendaId → itemIds).
+  final Future<void> Function(int vendaId, List<int> itemIds)?
+      onConfirmarBuscarNaLoja;
 
   @override
   State<ConferenciaCargaConsolidadaLista> createState() =>
@@ -34,54 +45,23 @@ class ConferenciaCargaConsolidadaLista extends StatefulWidget {
 
 class _ConferenciaCargaConsolidadaListaState
     extends State<ConferenciaCargaConsolidadaLista> {
-  final Map<String, bool> _conferencia = {};
-
   @override
   void initState() {
     super.initState();
-    _recarregarDoBanco();
-    SyncRefreshHub.instance.addListener(_aoAtualizarRede);
+    LanApiEventHub.instance.addListener(_aoAtualizarRede);
   }
 
   @override
   void dispose() {
-    SyncRefreshHub.instance.removeListener(_aoAtualizarRede);
+    LanApiEventHub.instance.removeListener(_aoAtualizarRede);
     super.dispose();
   }
 
   void _aoAtualizarRede() {
     if (!mounted) return;
-    _recarregarDoBanco();
-  }
-
-  @override
-  void didUpdateWidget(ConferenciaCargaConsolidadaLista oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.escopoViagem != widget.escopoViagem ||
-        oldWidget.linhas != widget.linhas) {
-      _recarregarDoBanco();
-    }
-  }
-
-  void _recarregarDoBanco() {
-    setState(() {
-      _conferencia
-        ..clear()
-        ..addAll(
-          widget.conferenciaRepository.mapaPorEscopo(widget.escopoViagem),
-        );
-    });
-  }
-
-  void _marcar(String chave, bool? marcado) {
-    final valor = marcado ?? false;
-    setState(() => _conferencia[chave] = valor);
-    widget.conferenciaRepository.salvarConferencia(
-      escopoViagem: widget.escopoViagem,
-      chaveProduto: chave,
-      conferido: valor,
-      usuarioLogin: widget.usuarioAtual,
-    );
+    final ent = LanApiEventHub.instance.ultimaEntidade;
+    if (ent != 'entrega' && ent != 'venda') return;
+    setState(() {});
   }
 
   Widget _conteudoVazio(BuildContext context) {
@@ -145,38 +125,171 @@ class _ConferenciaCargaConsolidadaListaState
     if (widget.linhas.isEmpty) {
       return _conteudoVazio(context);
     }
-    final conferidos = widget.conferenciaRepository.contarConferidos(
-      widget.escopoViagem,
-      widget.linhas.map((l) => l.chaveMerge),
-    );
     return Column(
+      key: ValueKey(widget.escopoViagem),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          '$conferidos/${widget.linhas.length} conferidos (gravado · sincroniza na rede). '
-          'Obrigatorio antes de marcar "Saiu".',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-        ),
-        const SizedBox(height: 4),
-        ...widget.linhas.map(
-          (l) => CheckboxListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-            value: _conferencia[l.chaveMerge] ?? false,
-            onChanged: (v) => _marcar(l.chaveMerge, v),
-            title: Text(
-              l.nomeProduto,
-              style: const TextStyle(fontWeight: FontWeight.w600),
+        if (widget.expandir)
+          Expanded(
+            child: ListView.builder(
+              itemCount: widget.linhas.length,
+              itemBuilder: (context, i) => _tileItem(widget.linhas[i]),
             ),
-            subtitle: Text(
-              'SKU ${l.codigoSku} · ${l.unidade} · Qtd total: ${l.quantidadeTotal}',
+          )
+        else
+          ...widget.linhas.map(_tileItem),
+      ],
+    );
+  }
+
+  Map<int, List<int>> _pendentesBuscarDaLinha(RomaneioCargaConsolidadaLinha l) {
+    final porVenda = <int, List<int>>{};
+    for (final v in widget.vendasGrupo ?? const <Venda>[]) {
+      for (final item in RomaneioCargaMerge.itensDaVendaSafe(v)) {
+        if (item.id <= 0) continue;
+        if (RomaneioCargaMerge.chaveMergeDeItem(item) != l.chaveMerge) {
+          continue;
+        }
+        if (!BuscarNaLoja.ehSolicitado(item.buscarNaLojaStatus)) continue;
+        porVenda.putIfAbsent(v.id, () => []).add(item.id);
+      }
+    }
+    return porVenda;
+  }
+
+  String _textoPendenteBuscar(
+    RomaneioCargaConsolidadaLinha l,
+    Map<int, List<int>> pendentes,
+  ) {
+    final rotulo = _rotuloQtdPendente(l, pendentes);
+    if (rotulo == null) {
+      return 'Motorista: não tem na outra loja — separar aqui';
+    }
+    return 'Motorista: buscar $rotulo nesta loja';
+  }
+
+  String _rotuloBotaoSeparar(
+    RomaneioCargaConsolidadaLinha l,
+    Map<int, List<int>> pendentes,
+  ) {
+    final rotulo = _rotuloQtdPendente(l, pendentes);
+    if (rotulo == null || rotulo.endsWith('x')) return 'Separar aqui';
+    return 'Separar $rotulo aqui';
+  }
+
+  String? _rotuloQtdPendente(
+    RomaneioCargaConsolidadaLinha l,
+    Map<int, List<int>> pendentes,
+  ) {
+    ItemVenda? unico;
+    Venda? vendaDoItem;
+    var n = 0;
+    for (final v in widget.vendasGrupo ?? const <Venda>[]) {
+      final ids = pendentes[v.id];
+      if (ids == null || ids.isEmpty) continue;
+      for (final item in RomaneioCargaMerge.itensDaVendaSafe(v)) {
+        if (!ids.contains(item.id)) continue;
+        if (RomaneioCargaMerge.chaveMergeDeItem(item) != l.chaveMerge) {
+          continue;
+        }
+        n++;
+        unico = item;
+        vendaDoItem = v;
+      }
+    }
+    if (n != 1 || unico == null || vendaDoItem == null) return null;
+    return BuscarNaLoja.rotuloQuantidade(vendaDoItem, unico);
+  }
+
+  bool _linhaSeparadaNestaLoja(RomaneioCargaConsolidadaLinha l) {
+    var algum = false;
+    for (final v in widget.vendasGrupo ?? const <Venda>[]) {
+      for (final item in RomaneioCargaMerge.itensDaVendaSafe(v)) {
+        if (RomaneioCargaMerge.chaveMergeDeItem(item) != l.chaveMerge) {
+          continue;
+        }
+        if (BuscarNaLoja.ehSeparado(item.buscarNaLojaStatus)) algum = true;
+        if (BuscarNaLoja.ehSolicitado(item.buscarNaLojaStatus)) return false;
+      }
+    }
+    return algum;
+  }
+
+  Future<void> _confirmarBuscarLinha(RomaneioCargaConsolidadaLinha l) async {
+    final cb = widget.onConfirmarBuscarNaLoja;
+    if (cb == null) return;
+    final mapa = _pendentesBuscarDaLinha(l);
+    if (mapa.isEmpty) return;
+    try {
+      for (final e in mapa.entries) {
+        await cb(e.key, e.value);
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Falha ao separar nesta loja',
+      );
+    }
+  }
+
+  Widget _tileItem(RomaneioCargaConsolidadaLinha l) {
+    final pendentes = _pendentesBuscarDaLinha(l);
+    final temPendente = pendentes.isNotEmpty;
+    final separadoAqui = !temPendente && _linhaSeparadaNestaLoja(l);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l.nomeProduto,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  'SKU ${l.codigoSku} · ${l.unidade} · Qtd total: ${l.quantidadeTotal}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (temPendente)
+                  Text(
+                    _textoPendenteBuscar(l, pendentes),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.orange.shade800,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                if (separadoAqui)
+                  Text(
+                    'Separado nesta loja',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.green.shade800,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+              ],
             ),
           ),
-        ),
-      ],
+          if (temPendente &&
+              widget.podeConfirmarBuscarNaLoja &&
+              widget.onConfirmarBuscarNaLoja != null) ...[
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: () => _confirmarBuscarLinha(l),
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: Colors.orange.shade800,
+              ),
+              child: Text(_rotuloBotaoSeparar(l, pendentes)),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

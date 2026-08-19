@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/nfe_saida_fiscal_store.dart';
+import 'package:sistema_vendas/domain/fiscal/nfe_carta_correcao_registro.dart';
 import 'package:sistema_vendas/domain/fiscal/nfe_historico_timeline.dart';
 
 void main() {
@@ -15,7 +16,13 @@ void main() {
       statusSefaz: '100',
       numero: '123',
       serie: '1',
-      numeroCartaCorrecao: 2,
+      cartasCorrecao: [
+        NfeCartaCorrecaoRegistro(
+          numeroSequencia: 2,
+          textoCorrecao: 'Correcao de teste',
+          emitidaEm: DateTime.now(),
+        ),
+      ],
     );
     final itens = NfeHistoricoTimelineBuilder.fromRegistro(r);
     expect(itens.any((i) => i.titulo.contains('Autorizada')), isTrue);

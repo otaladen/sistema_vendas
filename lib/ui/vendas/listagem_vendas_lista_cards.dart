@@ -12,7 +12,7 @@ typedef ListagemVendaAcaoCallback = void Function(
 );
 
 /// Cards compactos para listagem em telas estreitas.
-class ListagemVendasListaCards extends StatelessWidget {
+class ListagemVendasListaCards extends StatefulWidget {
   const ListagemVendasListaCards({
     super.key,
     required this.itens,
@@ -27,16 +27,54 @@ class ListagemVendasListaCards extends StatelessWidget {
   final ListagemVendaMenuBuilder menuBuilder;
 
   @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      itemCount: itens.length,
-      separatorBuilder: (_, index) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final item = itens[index];
-        final theme = Theme.of(context);
-        final scheme = theme.colorScheme;
+  State<ListagemVendasListaCards> createState() =>
+      _ListagemVendasListaCardsState();
+}
 
-        return Card(
+class _ListagemVendasListaCardsState extends State<ListagemVendasListaCards> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void didUpdateWidget(covariant ListagemVendasListaCards oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.itens, widget.itens) ||
+        oldWidget.itens.length != widget.itens.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        final pos = _scrollController.position;
+        if (!pos.hasContentDimensions) return;
+        final max = pos.maxScrollExtent;
+        if (_scrollController.offset > max) {
+          _scrollController.jumpTo(max < 0 ? 0 : max);
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: true,
+      interactive: true,
+      child: ListView.separated(
+        controller: _scrollController,
+        primary: false,
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: widget.itens.length,
+        separatorBuilder: (_, index) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          final item = widget.itens[index];
+          final theme = Theme.of(context);
+          final scheme = theme.colorScheme;
+
+          return Card(
           elevation: 0,
           margin: EdgeInsets.zero,
           shape: RoundedRectangleBorder(
@@ -47,7 +85,7 @@ class ListagemVendasListaCards extends StatelessWidget {
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
-            onTap: () => onTapItem(item),
+            onTap: () => widget.onTapItem(item),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
               child: Column(
@@ -114,8 +152,8 @@ class ListagemVendasListaCards extends StatelessWidget {
                         ),
                       ),
                       PopupMenuButton<String>(
-                        onSelected: (v) => onAcaoMenu(v, item),
-                        itemBuilder: (_) => menuBuilder(item),
+                        onSelected: (v) => widget.onAcaoMenu(v, item),
+                        itemBuilder: (_) => widget.menuBuilder(item),
                         child: const Icon(Icons.more_vert),
                       ),
                     ],
@@ -137,6 +175,11 @@ class ListagemVendasListaCards extends StatelessWidget {
                         texto: item.entrega,
                         cor: scheme.tertiary,
                       ),
+                      if (item.temDevolucaoTroca)
+                        _ChipInfo(
+                          texto: 'Dev/Troca',
+                          cor: Colors.deepOrange,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -173,7 +216,8 @@ class ListagemVendasListaCards extends StatelessWidget {
             ),
           ),
         );
-      },
+        },
+      ),
     );
   }
 }

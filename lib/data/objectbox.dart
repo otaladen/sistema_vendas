@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:objectbox/objectbox.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -12,6 +13,7 @@ import '../model/cliente.dart';
 import '../model/fornecedor_nfe.dart';
 import '../model/historico_entrada.dart';
 import '../model/movimento_estoque.dart';
+import '../model/lote_produto.dart';
 import '../model/fechamento_rh_funcionario.dart';
 import '../model/funcionario.dart';
 import '../model/lancamento_funcionario.dart';
@@ -26,14 +28,17 @@ import '../model/promocao.dart';
 import '../model/promocao_combo_item.dart';
 import '../model/promocao_item.dart';
 import '../model/auditoria_evento.dart';
+import '../model/item_inventario.dart';
 import '../model/item_lista_compra.dart';
 import '../model/produto_sugestao_venda.dart';
 import '../model/sugestao_venda_metrica_evento.dart';
 import '../model/recado_loja.dart';
 import '../model/conferencia_carga_romaneio.dart';
+import '../model/sessao_inventario.dart';
 import '../model/reajuste_preco.dart';
 import '../model/reajuste_preco_item.dart';
 import '../model/nfe_importada_registro.dart';
+import '../model/obrigacao_mensal_fixa.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../objectbox.g.dart';
@@ -61,6 +66,7 @@ class ObjectBox {
   late Box<VinculoFornecedorProduto> vinculoFornecedorProdutoBox;
   late Box<HistoricoEntrada> historicoEntradaBox;
   late Box<MovimentoEstoque> movimentoEstoqueBox;
+  late Box<LoteProduto> loteProdutoBox;
   late Box<NfeImportadaRegistro> nfeImportadaRegistroBox;
   late Box<KitOrcamento> kitOrcamentoBox;
   late Box<KitOrcamentoItem> kitOrcamentoItemBox;
@@ -78,6 +84,9 @@ class ObjectBox {
   late Box<SugestaoVendaMetricaEvento> sugestaoVendaMetricaEventoBox;
   late Box<RecadoLoja> recadoLojaBox;
   late Box<ConferenciaCargaRomaneio> conferenciaCargaRomaneioBox;
+  late Box<ObrigacaoMensalFixa> obrigacaoMensalFixaBox;
+  late Box<SessaoInventario> sessaoInventarioBox;
+  late Box<ItemInventario> itemInventarioBox;
   late Directory productImagesDir;
   late Directory funcionarioImagesDir;
   late String storeDirectoryPath;
@@ -100,6 +109,7 @@ class ObjectBox {
     vinculoFornecedorProdutoBox = Box<VinculoFornecedorProduto>(store);
     historicoEntradaBox = Box<HistoricoEntrada>(store);
     movimentoEstoqueBox = Box<MovimentoEstoque>(store);
+    loteProdutoBox = Box<LoteProduto>(store);
     nfeImportadaRegistroBox = Box<NfeImportadaRegistro>(store);
     kitOrcamentoBox = Box<KitOrcamento>(store);
     kitOrcamentoItemBox = Box<KitOrcamentoItem>(store);
@@ -117,6 +127,9 @@ class ObjectBox {
     sugestaoVendaMetricaEventoBox = Box<SugestaoVendaMetricaEvento>(store);
     recadoLojaBox = Box<RecadoLoja>(store);
     conferenciaCargaRomaneioBox = Box<ConferenciaCargaRomaneio>(store);
+    obrigacaoMensalFixaBox = Box<ObrigacaoMensalFixa>(store);
+    sessaoInventarioBox = Box<SessaoInventario>(store);
+    itemInventarioBox = Box<ItemInventario>(store);
   }
 
   /// Fecha o banco para copia consistente de `data.mdb` (backup/restauracao).
@@ -157,5 +170,27 @@ class ObjectBox {
     instance.funcionarioImagesDir = funcionarioImagesDir;
     instance.storeDirectoryPath = objectBoxDir.path;
     return instance;
+  }
+
+  /// Abre um ObjectBox temporario (testes de integracao).
+  static ObjectBox createForTest(Directory directory) {
+    if (!directory.existsSync()) {
+      directory.createSync(recursive: true);
+    }
+    final store = Store(
+      getObjectBoxModel(),
+      directory: directory.path,
+    );
+    final instance = ObjectBox._create(store);
+    instance.productImagesDir = directory;
+    instance.funcionarioImagesDir = directory;
+    instance.storeDirectoryPath = directory.path;
+    return instance;
+  }
+
+  void close() {
+    if (!store.isClosed()) {
+      store.close();
+    }
   }
 }

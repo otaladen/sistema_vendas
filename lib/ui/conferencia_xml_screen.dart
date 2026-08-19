@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import '../data/api/lan_api_client.dart';
+import '../data/api/lan_api_event_hub.dart';
+import '../data/api/nfe_entrada_api_repository.dart';
+import '../data/api/produto_api_repository.dart';
 import '../data/app_config_repository.dart';
 import '../data/nfe_entrada_repository.dart';
-import '../data/produto_repository.dart';
 import '../domain/conferencia_nfe_opcoes.dart';
-import '../domain/produto_unidade_exibicao.dart';
 import '../domain/produto_embalagem.dart';
 import '../model/item_nota_temporario.dart';
 import '../model/produto.dart';
@@ -16,7 +18,8 @@ import 'fiscal/widgets/conferencia_nfe_financeiro_painel.dart';
 import 'fiscal/widgets/conferencia_nfe_opcoes_painel.dart';
 import 'fiscal/widgets/conferencia_nfe_rodape.dart';
 import 'fiscal/widgets/conferencia_nfe_tabela_itens.dart';
-import 'widgets/produto_busca_input.dart';
+import 'produtos/produto_pesquisa_dialog.dart';
+import 'widgets/lan_api_feedback.dart';
 import 'widgets/operacao_feedback.dart';
 import 'theme/app_semantic_helper.dart';
 
@@ -33,13 +36,17 @@ class ConferenciaXmlScreen extends StatefulWidget {
     required this.produtoRepository,
     this.appConfigRepository,
     this.xmlOriginal = '',
+    this.sugestoesIniciais,
   });
 
   final NfeXmlParseResult nfe;
-  final NfeEntradaRepository nfeRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic nfeRepository;
+  final dynamic produtoRepository;
   final AppConfigRepository? appConfigRepository;
   final String xmlOriginal;
+
+  /// Quando ja veio do `POST /api/nfe/ler-xml` (evita segundo parse no terminal).
+  final List<SugestaoLinhaConferencia>? sugestoesIniciais;
 
   @override
   State<ConferenciaXmlScreen> createState() => _ConferenciaXmlScreenState();
@@ -51,12 +58,16 @@ class _LinhaEdicao {
     required this.fatorCtrl,
     required this.unidade,
     required this.embalagemMultiplica,
+    required this.loteCtrl,
+    this.dataValidade,
   });
 
   final SugestaoLinhaConferencia sugestao;
   final TextEditingController fatorCtrl;
+  final TextEditingController loteCtrl;
   String unidade;
   bool embalagemMultiplica;
+  DateTime? dataValidade;
 
   /// Quando preenchido, substitui a sugestao automatica (ex.: vincular item "novo" a um cadastro).
   int? vinculoManualProdutoId;
@@ -124,27 +135,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   @override
   void initState() {
     super.initState();
-    try {
-      final sugestoes =
-          widget.nfeRepository.prepararSugestoesConferencia(widget.nfe);
-      _linhas = sugestoes.map((s) {
-        final c = TextEditingController(text: _formatarFator(s.fatorInicial));
-        return _LinhaEdicao(
-          sugestao: s,
-          fatorCtrl: c,
-          unidade: s.unidadeInternaInicial,
-          embalagemMultiplica: s.embalagemMultiplicaInicial,
-        );
-      }).toList();
-    } catch (e, st) {
-      _initError = e is FormatException || e is StateError
-          ? e.toString()
-          : 'Nao foi possivel montar a conferencia da nota.';
-      assert(() {
-        debugPrint('ConferenciaXmlScreen initState: $e\n$st');
-        return true;
-      }());
-    }
+    _iniciarSugestoes();
     _carregarMargemMinima();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -152,6 +143,68 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         setState(() => _modoExibicao = _ConferenciaNfeModoExibicao.tabela);
       }
     });
+  }
+
+  Future<void> _iniciarSugestoes() async {
+    try {
+      List<SugestaoLinhaConferencia> sugestoes =
+          widget.sugestoesIniciais ?? const [];
+      if (sugestoes.isEmpty) {
+        final repo = widget.nfeRepository;
+        final xml = widget.xmlOriginal.trim();
+        if (repo is NfeEntradaApiRepository && xml.isNotEmpty) {
+          sugestoes = await repo.prepararSugestoesConferenciaRemoto(xml);
+        } else {
+          sugestoes = repo.prepararSugestoesConferencia(widget.nfe)
+              as List<SugestaoLinhaConferencia>;
+        }
+      }
+      await _hidratarProdutosVinculados(sugestoes);
+      if (!mounted) return;
+      setState(() {
+        _linhas = sugestoes.map((s) {
+          final c = TextEditingController(text: _formatarFator(s.fatorInicial));
+          final lote = TextEditingController(text: s.item.numeroLote);
+          return _LinhaEdicao(
+            sugestao: s,
+            fatorCtrl: c,
+            unidade: s.unidadeInternaInicial,
+            embalagemMultiplica: s.embalagemMultiplicaInicial,
+            loteCtrl: lote,
+            dataValidade: s.item.dataValidade,
+          );
+        }).toList();
+        _initError = null;
+      });
+    } catch (e, st) {
+      debugPrint('ConferenciaXml init: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _initError = e is FormatException || e is StateError
+            ? e.toString()
+            : 'Nao foi possivel montar a conferencia da nota.';
+      });
+    }
+  }
+
+  /// Terminal leve: IDs vindos do PC1 precisam estar no cache local.
+  Future<void> _hidratarProdutosVinculados(
+    List<SugestaoLinhaConferencia> sugestoes,
+  ) async {
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoApiRepository) return;
+    final ids = <int>{
+      for (final s in sugestoes)
+        if ((s.produtoExistenteId ?? 0) > 0) s.produtoExistenteId!,
+    };
+    if (ids.isEmpty) return;
+    final faltando = ids.where((id) => repo.obterPorId(id) == null).toList();
+    if (faltando.isEmpty) return;
+    try {
+      await repo.atualizarEstoquePorIds(faltando);
+    } catch (e) {
+      debugPrint('ConferenciaXml hidratar produtos: $e');
+    }
   }
 
   void _alterarOpcoes(ConferenciaNfeOpcoes opcoes) {
@@ -188,10 +241,23 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     final id = linha.produtoDestinoId();
     final custoXml = _custoUnitarioXmlConvertidoInterno(linha);
     if (id == null || custoXml == null) return;
-    final p = widget.produtoRepository.obterPorId(id);
+    final p = await _obterProdutoDestino(id);
     if (p == null) return;
     p.precoCusto = custoXml;
-    widget.produtoRepository.salvar(p);
+    try {
+      final repo = widget.produtoRepository;
+      if (repo is ProdutoApiRepository) {
+        await repo.salvarRemoto(p);
+      } else {
+        repo.salvar(p);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel atualizar custo: $e')),
+      );
+      return;
+    }
     if (!mounted) return;
     setState(() {});
     ScaffoldMessenger.of(context).showSnackBar(
@@ -209,10 +275,23 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   ) async {
     final id = linha.produtoDestinoId();
     if (id == null) return;
-    final p = widget.produtoRepository.obterPorId(id);
+    final p = await _obterProdutoDestino(id);
     if (p == null) return;
     p.precoVenda = precoSugerido;
-    widget.produtoRepository.salvar(p);
+    try {
+      final repo = widget.produtoRepository;
+      if (repo is ProdutoApiRepository) {
+        await repo.salvarRemoto(p);
+      } else {
+        repo.salvar(p);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel atualizar preco: $e')),
+      );
+      return;
+    }
     if (!mounted) return;
     setState(() {});
     ScaffoldMessenger.of(context).showSnackBar(
@@ -246,6 +325,28 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     final id = linha.produtoDestinoId();
     if (id == null) return null;
     return widget.produtoRepository.obterPorId(id);
+  }
+
+  /// Campos de lote so quando o produto destino controla validade, ou o XML ja trouxe rastro.
+  bool _linhaMostraCamposLote(_LinhaEdicao linha) {
+    final p = _produtoDestinoLinha(linha);
+    if (p != null && p.controlaLoteValidade) return true;
+    final item = linha.sugestao.item;
+    return item.numeroLote.trim().isNotEmpty || item.dataValidade != null;
+  }
+
+  Future<Produto?> _obterProdutoDestino(int id) async {
+    final local = widget.produtoRepository.obterPorId(id);
+    if (local != null) return local;
+    final repo = widget.produtoRepository;
+    if (repo is ProdutoApiRepository) {
+      try {
+        return await repo.obterPorIdRemoto(id);
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
   }
 
   ({int armazenado, double unidadeVenda}) _entradaNotaCalculada(
@@ -1400,6 +1501,61 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               ],
             ),
             const SizedBox(height: 10),
+            if (_linhaMostraCamposLote(linha)) ...[
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: TextFormField(
+                      controller: linha.loteCtrl,
+                      onChanged: (_) =>
+                          _atualizarUi(aoAtualizar: aoAtualizar),
+                      decoration: const InputDecoration(
+                        labelText: 'Lote',
+                        hintText: 'Nº do lote',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Validade',
+                        isDense: true,
+                      ),
+                      child: InkWell(
+                        onTap: () async {
+                          final inicial =
+                              linha.dataValidade?.toLocal() ?? DateTime.now();
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: inicial,
+                            firstDate: DateTime(2000),
+                            lastDate: DateTime(2100),
+                          );
+                          if (picked == null) return;
+                          linha.dataValidade = DateTime.utc(
+                            picked.year,
+                            picked.month,
+                            picked.day,
+                          );
+                          _atualizarUi(aoAtualizar: aoAtualizar);
+                        },
+                        child: Text(
+                          linha.dataValidade == null
+                              ? 'Selecionar'
+                              : DateFormat('dd/MM/yyyy')
+                                  .format(linha.dataValidade!.toLocal()),
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
             DecoratedBox(
               decoration: BoxDecoration(
                 color: cs.surface,
@@ -1434,15 +1590,26 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                               fontWeight: FontWeight.w800,
                             ),
                       ),
-                      if (_estoqueTotalAposConfirmar(linha) case final total?)
-                        Text(
-                          'Estoque apos confirmar: ${_nfQtd.format(total)} ${linha.unidade.trim()} '
-                          '(atual ${_nfQtd.format(_produtoDestinoLinha(linha)!.estoqueExibicao)})',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: cs.onSurfaceVariant,
-                                fontWeight: FontWeight.w600,
-                              ),
+                      if (_estoqueTotalAposConfirmar(linha) case final total?) ...[
+                        Builder(
+                          builder: (context) {
+                            final atual = _produtoDestinoLinha(linha);
+                            final atualTxt = atual == null
+                                ? ''
+                                : ' (atual ${_nfQtd.format(atual.estoqueExibicao)})';
+                            return Text(
+                              'Estoque apos confirmar: ${_nfQtd.format(total)} ${linha.unidade.trim()}$atualTxt',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            );
+                          },
                         ),
+                      ],
                     ],
                   ),
                 ),
@@ -1653,105 +1820,27 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   }
 
   Future<void> _abrirDialogVincularProduto(_LinhaEdicao linha) async {
-    final buscaCtrl = TextEditingController();
-    List<Produto> resultados = widget.produtoRepository.pesquisarPadraoPdv(
-      '',
-      limite: 50,
-      somenteAtivos: false,
-    );
-
-    await showDialog<void>(
+    final escolhido = await showProdutoPesquisaDialog(
       context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDlg) {
-            void buscar(String t) {
-              resultados = widget.produtoRepository.pesquisarPadraoPdv(
-                t,
-                limite: 50,
-                somenteAtivos: false,
-              );
-              setDlg(() {});
-            }
-
-            return AlertDialog(
-              title: const Text('Vincular a produto cadastrado'),
-              content: SizedBox(
-                width: 420,
-                height: 420,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TextField(
-                      controller: buscaCtrl,
-                      decoration: produtoBuscaInputDecoration(isDense: true),
-                      onChanged: buscar,
-                      autofocus: true,
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: resultados.isEmpty
-                          ? const Center(
-                              child: Text('Nenhum produto encontrado.'),
-                            )
-                          : ListView.builder(
-                              itemCount: resultados.length,
-                              itemBuilder: (_, i) {
-                                final p = resultados[i];
-                                return ListTile(
-                                  dense: true,
-                                  title: Text(
-                                    p.nome,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  subtitle: Text(
-                                    '${p.codigoInterno} · Un ${rotuloUnidadeProdutoLista(p)} · '
-                                    'EAN ${p.codigoBarras.isEmpty ? "—" : p.codigoBarras} · '
-                                    'Fisico ${ProdutoEmbalagem.formatarEstoque(p, p.estoqueReal, comUnidade: true)}',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  onTap: () {
-                                    final u = p.unidade.trim().toUpperCase();
-                                    linha.vinculoManualProdutoId = p.id;
-                                    linha.vinculoManualProdutoNome =
-                                        '${p.codigoInterno} · ${p.nome}';
-                                    linha.embalagemMultiplica =
-                                        p.embalagemMultiplica;
-                                    if (NfeEntradaRepository
-                                        .unidadesInternasValidas
-                                        .contains(u)) {
-                                      linha.unidade = u;
-                                    }
-                                    Navigator.pop(ctx);
-                                    _agendarRebuild();
-                                  },
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancelar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      produtoRepository: widget.produtoRepository,
     );
-    buscaCtrl.dispose();
+    if (escolhido == null || !mounted) return;
+    final u = escolhido.unidade.trim().toUpperCase();
+    linha.vinculoManualProdutoId = escolhido.id;
+    linha.vinculoManualProdutoNome =
+        '${escolhido.codigoInterno} · ${escolhido.nome}';
+    linha.embalagemMultiplica = escolhido.embalagemMultiplica;
+    if (NfeEntradaRepository.unidadesInternasValidas.contains(u)) {
+      linha.unidade = u;
+    }
+    _agendarRebuild();
   }
 
   @override
   void dispose() {
     for (final l in _linhas) {
       l.fatorCtrl.dispose();
+      l.loteCtrl.dispose();
     }
     super.dispose();
   }
@@ -1803,6 +1892,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           unidadeInterna: linha.unidade,
           embalagemMultiplica: linha.embalagemMultiplica,
           produtoExistenteId: linha.produtoDestinoId(),
+          numeroLote: linha.loteCtrl.text.trim(),
+          dataValidade: linha.dataValidade,
         ),
       );
     }
@@ -1814,17 +1905,29 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
 
     setState(() => _confirmando = true);
     try {
-      widget.nfeRepository.confirmarEntrada(
+      if (widget.nfeRepository is NfeEntradaApiRepository &&
+          !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+        return;
+      }
+      final confirmar = widget.nfeRepository.confirmarEntrada(
         nfe: widget.nfe,
         linhas: confirmacoes,
         opcoes: _opcoes,
         margemMinimaVendaPercentual: _margemMinimaPadrao,
         xmlOriginal: widget.xmlOriginal,
       );
-      widget.produtoRepository.invalidarCacheBusca();
+      if (confirmar is Future) {
+        await confirmar;
+      }
+      try {
+        widget.produtoRepository.invalidarCacheBusca();
+      } catch (_) {}
       if (!mounted) return;
       OperacaoFeedback.sucesso(context, 'Entrada da NF-e registrada com sucesso.');
       Navigator.of(context).pop(true);
+    } on LanApiException catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(context, e, prefixo: 'Confirmar NF-e');
     } on StateError catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1832,9 +1935,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao confirmar: $e')),
-      );
+      LanApiFeedback.snackErro(context, e, prefixo: 'Erro ao confirmar');
     } finally {
       if (mounted) setState(() => _confirmando = false);
     }

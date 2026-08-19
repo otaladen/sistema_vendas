@@ -1,8 +1,9 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/produto_repository.dart';
 import '../../data/venda_repository.dart';
+import '../../model/produto.dart';
+import '../../model/venda.dart';
 import 'relatorio_comparativo.dart';
 import 'relatorio_drill_down.dart';
 import 'relatorio_export_util.dart';
@@ -30,8 +31,8 @@ class RelatorioProdutosMaisVendidosPage extends StatefulWidget {
     required this.produtoRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic vendaRepository;
+  final dynamic produtoRepository;
 
   @override
   State<RelatorioProdutosMaisVendidosPage> createState() =>
@@ -50,12 +51,13 @@ class _RelatorioProdutosMaisVendidosPageState
 
   void _agregarVendas(LimitesPeriodo limites, Map<String, _AggProd> map) {
     final vendas = relatorioVendasFinalizadasPeriodo(widget.vendaRepository, limites);
-    for (final v in vendas) {
-      for (final item in v.itens) {
+    for (final Venda v in vendas) {
+      for (final item in relatorioItensDaVenda(widget.vendaRepository, v)) {
         final pid = item.produto.targetId;
         final chave = pid > 0 ? 'id:$pid' : 'nome:${item.nomeProduto}';
         final nome = pid > 0
-            ? (widget.produtoRepository.obterPorId(pid)?.nome ?? item.nomeProduto)
+            ? ((widget.produtoRepository.obterPorId(pid) as Produto?)?.nome ??
+                item.nomeProduto)
             : item.nomeProduto;
         map.putIfAbsent(chave, () => _AggProd(nome: nome, produtoId: pid));
         final a = map[chave]!;
@@ -69,9 +71,11 @@ class _RelatorioProdutosMaisVendidosPageState
         );
       }
     }
-    for (final d in widget.vendaRepository.listarDeltasProdutosDevolucaoPeriodo(
+    final deltas = (widget.vendaRepository.listarDeltasProdutosDevolucaoPeriodo(
           relatorioPeriodoFiltro(limites),
-        )) {
+        ) as List)
+        .cast<DeltaProdutoDevolucao>();
+    for (final DeltaProdutoDevolucao d in deltas) {
       map.putIfAbsent(
         d.chaveAgg,
         () => _AggProd(nome: d.nomeExibicao, produtoId: d.produtoId),
@@ -197,6 +201,7 @@ class _RelatorioProdutosMaisVendidosPageState
       body: Column(
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: _calcular,
             onAtualizar: lim != null ? () => _calcular(lim) : null,
             filtrosExtras: [

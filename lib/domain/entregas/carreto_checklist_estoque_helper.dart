@@ -26,14 +26,15 @@ abstract final class CarretoChecklistEstoqueHelper {
   }
 
   static String orientacaoCorrecao() =>
-      'Ao marcar "Saiu", o sistema baixa o estoque fisico e consome a reserva '
-      'do carreto. Isso so funciona se a venda tiver reserva na finalizacao.\n\n'
-      'O que fazer:\n'
+      'Ao marcar "Saiu", o sistema consome a reserva do carreto e baixa o '
+      'fisico. A conferencia no patio (SKU) nao substitui o cadastro de estoque.\n\n'
+      'Se "Permitir venda sem estoque" estiver ligado em Configuracoes, a saida '
+      'segue mesmo com fisico zerado (o saldo pode ficar negativo).\n\n'
+      'O que fazer se ainda bloquear:\n'
       '1. Estoque → localize o produto → confira Fisico e Reservado.\n'
       '2. Estoque → Diagnostico → veja alertas de reserva de carreto.\n'
       '3. Revise o kardex abaixo (movimentos deste pedido).\n'
-      '4. Se a reserva sumiu, ajuste o estoque com motivo documentado ou '
-      'reprocesse a finalizacao com suporte.';
+      '4. Se a reserva sumiu, ajuste o estoque com motivo documentado.';
 
   /// Itens do pedido que ainda exigem estoque no romaneio.
   static List<({ItemVenda item, int quantidade, Produto? produto})>
@@ -42,7 +43,13 @@ abstract final class CarretoChecklistEstoqueHelper {
     for (final item in venda.itens) {
       final q = GerenciadorEstoqueService.quantidadeItemParaEstoqueCarreto(item);
       if (q <= 0) continue;
-      lista.add((item: item, quantidade: q, produto: item.produto.target));
+      Produto? produto;
+      try {
+        produto = item.produto.target;
+      } catch (_) {
+        produto = null;
+      }
+      lista.add((item: item, quantidade: q, produto: produto));
     }
     return lista;
   }
@@ -162,10 +169,15 @@ abstract final class CarretoChecklistEstoqueHelper {
           'necessario ${par.quantidade} para despachar.',
         );
       }
-      if (produto.estoqueReal < par.quantidade) {
+      final qFisico =
+          GerenciadorEstoqueService.quantidadeFisicaDestaLojaCarreto(
+        venda,
+        par.item,
+      );
+      if (qFisico > 0 && produto.estoqueReal < qFisico) {
         falhas.add(
           '${produto.nome}: fisico ${produto.estoqueReal}, '
-          'necessario ${par.quantidade} para saida.',
+          'necessario $qFisico para saida.',
         );
       }
     }

@@ -358,4 +358,24 @@ void main() {
       QuantidadeVendaUtil.paraArmazenamento(2.63, fracionada: true),
     );
   });
+
+  test('valorMediaDiariaExibicao converte milésimos em m2/dia', () {
+    final produto = pisoCx()..vendaMediaDiaria = 2410.33;
+    expect(
+      ProdutoEmbalagem.valorMediaDiariaExibicao(produto, 2410.33),
+      closeTo(2.41033, 0.0001),
+    );
+    expect(
+      ProdutoEmbalagem.formatarMediaDiaria(produto, 2410.33, comUnidade: true),
+      '2,41 M2',
+    );
+  });
+
+  test('valorMediaDiariaExibicao preserva media ja na unidade de venda', () {
+    final produto = pisoCx()..vendaMediaDiaria = 2.41;
+    expect(
+      ProdutoEmbalagem.valorMediaDiariaExibicao(produto, 2.41),
+      closeTo(2.41, 0.001),
+    );
+  });
 }

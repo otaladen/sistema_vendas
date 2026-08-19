@@ -1,4 +1,4 @@
-import '../data/kit_orcamento_repository.dart';
+import '../data/produto_busca_util.dart';
 import '../data/produto_repository.dart';
 import '../data/produto_sugestao_venda_repository.dart';
 import '../data/venda_repository.dart';
@@ -187,7 +187,7 @@ abstract final class PdvConsultaInsightsService {
     required Produto produto,
     required ProdutoRepository produtoRepository,
     required VendaRepository vendaRepository,
-    KitOrcamentoRepository? kitOrcamentoRepository,
+    dynamic kitOrcamentoRepository,
     ProdutoSugestaoVendaRepository? sugestaoVendaRepository,
     int? clienteId,
     required String precoListaAtivo,
@@ -397,8 +397,8 @@ abstract final class PdvConsultaInsightsService {
   static List<PdvConsultaAgregadoVenda> listarAgregadosParaPdv({
     required Produto referencia,
     ProdutoSugestaoVendaRepository? sugestaoVendaRepository,
-    required VendaRepository vendaRepository,
-    required ProdutoRepository produtoRepository,
+    required dynamic vendaRepository,
+    required dynamic produtoRepository,
     required String precoListaAtivo,
     required double Function(Produto produto, String precoTipo) precoUnitarioDe,
     int limite = 8,
@@ -428,6 +428,12 @@ abstract final class PdvConsultaInsightsService {
     final restante = limite - manual.length;
     if (restante <= 0) return manual;
 
+    // Historico de co-ocorrencia exige ObjectBox (VendaRepository local).
+    if (vendaRepository is! VendaRepository ||
+        produtoRepository is! ProdutoRepository) {
+      return manual;
+    }
+
     final idsManual = manual.map((e) => e.produtoId).toSet();
     final historico = PdvSugestaoVendaHistoricoService.listarAgregadosHistorico(
       referencia.id,
@@ -445,19 +451,32 @@ abstract final class PdvConsultaInsightsService {
   }
 
   static List<PdvConsultaKitResumo> listarKitsComProduto(
-    KitOrcamentoRepository repository,
+    dynamic repository,
     int produtoId, {
     int limite = 3,
   }) {
-    if (produtoId <= 0 || limite <= 0) return const [];
-    return repository
-        .listarAtivosComProduto(produtoId, limite: limite)
+    if (produtoId <= 0 || limite <= 0 || repository == null) return const [];
+    final kits =
+        repository.listarAtivosComProduto(produtoId, limite: limite) as List;
+    return kits
+        .whereType<KitOrcamento>()
         .map(
-          (KitOrcamento k) => PdvConsultaKitResumo(
-            kitId: k.id,
-            nome: k.nome,
-            quantidadeItens: k.itens.length,
-          ),
+          (k) {
+            var qtdItens = 0;
+            try {
+              qtdItens = k.itens.length;
+            } catch (_) {
+              try {
+                final r = repository.itensDoKit(k);
+                if (r is List) qtdItens = r.length;
+              } catch (_) {}
+            }
+            return PdvConsultaKitResumo(
+              kitId: k.id,
+              nome: k.nome,
+              quantidadeItens: qtdItens,
+            );
+          },
         )
         .toList();
   }
@@ -507,14 +526,33 @@ abstract final class PdvConsultaInsightsService {
     return null;
   }
 
-  /// Filtro local: termo presente na descricao ou apelidos.
+  /// Filtro local: termo presente na descricao ou apelidos (suporta curingas `%`).
   static bool produtoCombinaAplicacao(Produto produto, String termoBusca) {
-    final termo = _norm(termoBusca);
+    final bruto = termoBusca.trim();
+    if (bruto.length < 3) return true;
+
+    final texto = normalizarTextoBuscaProduto(
+      '${produto.descricao} ${produto.apelidosBusca}',
+    );
+    if (texto.trim().isEmpty) return false;
+
+    if (bruto.contains('%')) {
+      final consulta = normalizarConsultaCuringa(
+        bruto,
+        normalizarTextoBuscaProduto,
+      );
+      if (!consultaUsaModoCuringa(consulta)) {
+        final sem = normalizarTextoBuscaProduto(bruto.replaceAll('%', ' '));
+        return sem.length < 3 || texto.contains(sem);
+      }
+      final curinga = parseConsultaCuringa(consulta);
+      if (curinga == null) return false;
+      return avaliarMatchCuringa(texto, curinga.segmentos) != null;
+    }
+
+    final termo = normalizarTextoBuscaProduto(bruto);
     if (termo.length < 3) return true;
-    final desc = _norm(produto.descricao);
-    if (desc.contains(termo)) return true;
-    final apelidos = _norm(produto.apelidosBusca);
-    return apelidos.contains(termo);
+    return texto.contains(termo);
   }
 
   static String _norm(String s) => s.trim().toLowerCase();

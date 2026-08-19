@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../domain/fiscal/nota_fiscal_entrada_fechamento_item.dart';
+import '../domain/fiscal/nfe_venda_sync.dart';
 import '../model/cliente.dart';
 import '../domain/fiscal/nota_fiscal_fechamento_item.dart';
 import '../services/fechamento_xml_tributos_parser.dart';
@@ -136,8 +137,17 @@ class FechamentoFiscalLocalSource {
     DateTime inicioUtc,
     DateTime fimUtc,
   ) {
+    final repo = _vendaRepository;
+    final registros = repo != null
+        ? NfeVendaSync.listarHistoricoUnificado(
+            store: _nfeStore,
+            vendaRepository: repo,
+            limiteVendas: 500,
+          )
+        : _nfeStore.listar();
+
     final lista = <NotaFiscalFechamentoItem>[];
-    for (final reg in _nfeStore.listar()) {
+    for (final reg in registros) {
       if (!reg.incluirNoFechamentoContabil) continue;
       final em = reg.emitidaEm.toUtc();
       if (em.isBefore(inicioUtc) || em.isAfter(fimUtc)) continue;
@@ -150,7 +160,9 @@ class FechamentoFiscalLocalSource {
           serie: reg.serie,
           chaveAcesso: reg.chaveNfe,
           documentoDestinatario: _documentoDestinatarioVenda(reg.vendaId),
-          valorTotal: reg.valorTotal,
+          valorTotal: reg.valorTotal > 0
+              ? reg.valorTotal
+              : (_vendaRepository?.obterPorId(reg.vendaId)?.total ?? 0),
           status: reg.rotuloStatus,
           statusFocus: reg.statusFocus,
           urlXml: reg.urlXml.trim(),
@@ -201,7 +213,12 @@ class FechamentoFiscalLocalSource {
         if (venda.nfceChaveAcesso.trim().isEmpty) continue;
         final em = venda.nfceEmitidaEm;
         if (em == null) continue;
-        final cliente = venda.cliente.target;
+        Cliente? cliente;
+        try {
+          cliente = venda.cliente.target;
+        } catch (_) {
+          cliente = null;
+        }
         final statusFocus = venda.nfceStatusFocus.trim().isNotEmpty
             ? venda.nfceStatusFocus.trim()
             : 'autorizado';
@@ -350,7 +367,14 @@ class FechamentoFiscalLocalSource {
     final repo = _vendaRepository;
     if (repo == null || vendaId <= 0) return '';
     final venda = repo.obterPorId(vendaId);
-    return _documentoCliente(venda?.cliente.target);
+    if (venda == null) return '';
+    Cliente? cliente;
+    try {
+      cliente = venda.cliente.target;
+    } catch (_) {
+      cliente = null;
+    }
+    return _documentoCliente(cliente);
   }
 
   static String _documentoCliente(Cliente? cliente) {

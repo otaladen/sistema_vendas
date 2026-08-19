@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../../data/cliente_repository.dart';
-import '../../data/usuario_repository.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/operacao_permissao_guard.dart';
 import '../../model/usuario_sistema.dart';
 import '../../model/venda.dart';
 import '../../services/venda_fiscal_service.dart';
 import '../fiscal/widgets/nfe_historico_acoes_dialog.dart';
+import '../widgets/lan_api_feedback.dart';
 
 enum CancelarVendaUiResultado {
   sucesso,
@@ -28,13 +28,15 @@ class CancelarVendaUi {
 
   static Future<(bool autorizado, UsuarioSistema? usuario)> autorizar({
     required BuildContext context,
-    required UsuarioRepository usuarioRepository,
+    required dynamic usuarioRepository,
     required String usuarioAtual,
     required bool podeCancelarVendas,
   }) async {
     if (podeCancelarVendas) {
-      final todos = await usuarioRepository.listarTodos();
-      for (final u in todos) {
+      final todos = await usuarioRepository.listarTodos() as List;
+      for (final raw in todos) {
+        if (raw is! UsuarioSistema) continue;
+        final u = raw;
         if (u.login == usuarioAtual &&
             u.ativo &&
             OperacaoPermissaoGuard.podeCancelarVendas(u)) {
@@ -93,7 +95,8 @@ class CancelarVendaUi {
     final senha = senhaController.text.trim();
     loginController.dispose();
     senhaController.dispose();
-    final usuario = await usuarioRepository.autenticar(login, senha);
+    final usuario =
+        await usuarioRepository.autenticar(login, senha) as UsuarioSistema?;
     final autorizado = usuario != null &&
         usuario.ativo &&
         OperacaoPermissaoGuard.podeCancelarVendas(usuario);
@@ -105,9 +108,9 @@ class CancelarVendaUi {
 
   static Future<CancelarVendaUiResultado> executar({
     required BuildContext context,
-    required VendaRepository vendaRepository,
-    required ClienteRepository clienteRepository,
-    required UsuarioRepository usuarioRepository,
+    required dynamic vendaRepository,
+    required dynamic clienteRepository,
+    required dynamic usuarioRepository,
     required String usuarioAtual,
     required bool podeCancelarVendas,
     required Venda venda,
@@ -135,11 +138,22 @@ class CancelarVendaUi {
     }
 
     final vendaAtual = vendaRepository.obterPorId(venda.id) ?? venda;
-    final fiscalSvc = VendaFiscalService(
-      vendaRepository: vendaRepository,
-      clienteRepository: clienteRepository,
-    );
-    final exigeFiscal = fiscalSvc.vendaExigeCancelamentoFiscal(vendaAtual);
+    final apiRepo =
+        vendaRepository is VendaApiRepository ? vendaRepository : null;
+    final viaApi = apiRepo != null;
+    final VendaFiscalService? fiscalSvc;
+    final bool exigeFiscal;
+    if (vendaRepository is VendaRepository) {
+      fiscalSvc = VendaFiscalService(
+        vendaRepository: vendaRepository,
+        clienteRepository: clienteRepository,
+      );
+      exigeFiscal = fiscalSvc.vendaExigeCancelamentoFiscal(vendaAtual);
+    } else {
+      fiscalSvc = null;
+      exigeFiscal =
+          vendaAtual.nfceAutorizadaAtiva || vendaAtual.nfe55Autorizada;
+    }
 
     String justificativaFiscal = '';
     if (exigeFiscal) {
@@ -214,6 +228,62 @@ class CancelarVendaUi {
       return CancelarVendaUiResultado.canceladoPeloUsuario;
     }
 
+    if (exigeFiscal && viaApi) {
+      if (!context.mounted) {
+        return CancelarVendaUiResultado.canceladoPeloUsuario;
+      }
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  'Cancelando documento fiscal na SEFAZ (PC servidor)...',
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      try {
+        final m = await apiRepo.cancelarVendaFiscalRemoto(
+          vendaAtual.id,
+          justificativa: justificativaFiscal,
+          motivo: motivoExtra,
+          canceladaPor: autorizado.$2!.login,
+        );
+        if (context.mounted) Navigator.of(context).pop();
+        if (!context.mounted) return CancelarVendaUiResultado.sucesso;
+        final msg = (m['mensagem'] ?? '').toString().trim();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              msg.isNotEmpty
+                  ? msg
+                  : '${rotuloVendaParaUsuario(vendaAtual)} cancelada '
+                      '(SEFAZ + ERP) por ${autorizado.$2!.login}.',
+            ),
+          ),
+        );
+        return CancelarVendaUiResultado.sucesso;
+      } catch (e) {
+        if (context.mounted) Navigator.of(context).pop();
+        if (context.mounted) {
+          LanApiFeedback.snackErro(
+            context,
+            e,
+            prefixo: 'Cancelamento fiscal',
+          );
+        }
+        return CancelarVendaUiResultado.erro;
+      }
+    }
+
     if (exigeFiscal) {
       if (!context.mounted) {
         return CancelarVendaUiResultado.canceladoPeloUsuario;
@@ -232,7 +302,7 @@ class CancelarVendaUi {
         ),
       );
 
-      final fiscalRes = await fiscalSvc.cancelarDocumentosFiscaisVenda(
+      final fiscalRes = await fiscalSvc!.cancelarDocumentosFiscaisVenda(
         venda: vendaAtual,
         justificativa: justificativaFiscal,
       );
@@ -261,12 +331,21 @@ class CancelarVendaUi {
     ].join(' | ');
 
     try {
-      vendaRepository.cancelarVenda(
-        vendaAtual.id,
-        motivo: motivo,
-        canceladaPor: autorizado.$2!.login,
-        usuarioExecutor: autorizado.$2,
-      );
+      final repo = vendaRepository;
+      if (repo is VendaApiRepository) {
+        await repo.cancelarVendaRemoto(
+          vendaAtual.id,
+          motivo: motivo,
+          canceladaPor: autorizado.$2!.login,
+        );
+      } else {
+        (repo as VendaRepository).cancelarVenda(
+          vendaAtual.id,
+          motivo: motivo,
+          canceladaPor: autorizado.$2!.login,
+          usuarioExecutor: autorizado.$2,
+        );
+      }
       if (!context.mounted) return CancelarVendaUiResultado.sucesso;
       final sufixoMotivo = motivo.isEmpty ? '' : ' Motivo: $motivo';
       ScaffoldMessenger.of(context).showSnackBar(
@@ -279,8 +358,10 @@ class CancelarVendaUi {
       return CancelarVendaUiResultado.sucesso;
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Nao foi possivel cancelar venda: $e')),
+        LanApiFeedback.snackErro(
+          context,
+          e,
+          prefixo: 'Nao foi possivel cancelar venda',
         );
       }
       return CancelarVendaUiResultado.erro;

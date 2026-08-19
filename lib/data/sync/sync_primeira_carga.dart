@@ -84,12 +84,13 @@ class SyncPrimeiraCargaProgresso {
   }
 }
 
-/// Detecta se o aparelho precisa da tela de carga inicial antes do menu/PDV.
+/// Detecta se o aparelho *poderia* hidratar do servidor (uso opcional em UI).
+/// O app nao bloqueia mais o login/menu por causa disso — configure em Rede.
 abstract final class SyncPrimeiraCarga {
   SyncPrimeiraCarga._();
 
-  /// Cliente com banco vazio ou sem cursor de sync — precisa hidratar do servidor.
-  /// Servidor local (PC modo servidor) nao entra: ele e a fonte dos dados.
+  /// Cliente com banco vazio ou sem cursor de sync — candidato a pull inicial.
+  /// Servidor local (PC modo servidor) nao precisa.
   static Future<bool> precisa({
     required ObjectBox objectBox,
     required bool redeSincronizacaoAtiva,
@@ -105,9 +106,23 @@ abstract final class SyncPrimeiraCarga {
     return revision == 0 || produtos == 0;
   }
 
-  /// Variante quando a config de rede ainda nao foi lida.
+  /// Banco sem produtos / sem cursor.
   static Future<bool> precisaPorBanco(ObjectBox objectBox) async {
     final revision = await SyncCursorStorage().carregarUltimaRevision();
     return revision == 0 || objectBox.produtoBox.count() == 0;
+  }
+
+  /// Cliente com sync ativa, URL do servidor e banco vazio.
+  /// (Nao trava o app; so indica que um "Sync agora" faz sentido.)
+  static bool deveForcarGateCliente({
+    required bool redeModoServidor,
+    required bool redeSincronizacaoAtiva,
+    required String redeServidorUrl,
+    required bool bancoVazio,
+  }) {
+    if (redeModoServidor) return false;
+    if (!bancoVazio) return false;
+    if (!redeSincronizacaoAtiva) return false;
+    return redeServidorUrl.trim().isNotEmpty;
   }
 }

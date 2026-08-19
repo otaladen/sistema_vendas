@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/cliente_repository.dart';
-import '../../data/produto_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../model/cliente.dart';
+import '../../model/produto.dart';
 import '../../model/venda.dart';
 import 'relatorio_abc_util.dart';
 import 'relatorio_drill_down.dart';
@@ -22,9 +21,9 @@ class RelatorioCurvaAbcPage extends StatefulWidget {
     required this.produtoRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
+  final dynamic produtoRepository;
 
   @override
   State<RelatorioCurvaAbcPage> createState() => _RelatorioCurvaAbcPageState();
@@ -52,13 +51,10 @@ class _RelatorioCurvaAbcPageState extends State<RelatorioCurvaAbcPage>
     super.dispose();
   }
 
-  Cliente? _cliente(Venda v) {
-    final t = v.cliente.target;
-    if (t != null) return t;
-    final id = v.cliente.targetId;
-    if (id == 0) return null;
-    return widget.clienteRepository.obterPorId(id);
-  }
+  Cliente? _cliente(Venda v) => relatorioClienteDaVenda(
+        v,
+        clienteRepository: widget.clienteRepository,
+      );
 
   void _calcular(LimitesPeriodo limites) {
     final vendas = relatorioVendasFinalizadasPeriodo(widget.vendaRepository, limites);
@@ -66,10 +62,11 @@ class _RelatorioCurvaAbcPageState extends State<RelatorioCurvaAbcPage>
     for (final v in vendas) {
       final id = v.cliente.targetId;
       final c = _cliente(v);
+      final nomeRazao = c?.nomeRazao.trim();
       final nome = id == 0
           ? 'Sem cliente'
-          : (c?.nomeRazao.trim().isNotEmpty == true
-              ? c!.nomeRazao.trim()
+          : (nomeRazao != null && nomeRazao.isNotEmpty
+              ? nomeRazao
               : 'Cliente #$id');
       final cur = mapCli[id];
       if (cur == null) {
@@ -83,7 +80,8 @@ class _RelatorioCurvaAbcPageState extends State<RelatorioCurvaAbcPage>
     for (final e in imp.porClienteFaturamento.entries) {
       final id = e.key;
       if (e.value.abs() < 0.0001) continue;
-      final cli = id == 0 ? null : widget.clienteRepository.obterPorId(id);
+      final Cliente? cli =
+          id == 0 ? null : widget.clienteRepository.obterPorId(id) as Cliente?;
       final nome = id == 0
           ? 'Sem cliente'
           : (cli?.nomeRazao ?? 'Cliente #$id');
@@ -97,11 +95,14 @@ class _RelatorioCurvaAbcPageState extends State<RelatorioCurvaAbcPage>
 
     final mapProd = <String, ({String nome, double valor, int produtoId})>{};
     for (final v in vendas) {
-      for (final item in v.itens) {
+      for (final item in relatorioItensDaVenda(widget.vendaRepository, v)) {
         final pid = item.produto.targetId;
         final chave = pid > 0 ? 'id:$pid' : 'nome:${item.nomeProduto}';
+        final Produto? prod = pid > 0
+            ? widget.produtoRepository.obterPorId(pid) as Produto?
+            : null;
         final nome = pid > 0
-            ? (widget.produtoRepository.obterPorId(pid)?.nome ?? item.nomeProduto)
+            ? (prod?.nome ?? item.nomeProduto)
             : item.nomeProduto;
         final cur = mapProd[chave];
         if (cur == null) {
@@ -113,6 +114,27 @@ class _RelatorioCurvaAbcPageState extends State<RelatorioCurvaAbcPage>
             produtoId: pid,
           );
         }
+      }
+    }
+    final deltas = (widget.vendaRepository.listarDeltasProdutosDevolucaoPeriodo(
+          relatorioPeriodoFiltro(limites),
+        ) as List)
+        .cast<DeltaProdutoDevolucao>();
+    for (final d in deltas) {
+      if (d.deltaValor.abs() < 0.0001) continue;
+      final cur = mapProd[d.chaveAgg];
+      if (cur == null) {
+        mapProd[d.chaveAgg] = (
+          nome: d.nomeExibicao,
+          valor: d.deltaValor,
+          produtoId: d.produtoId,
+        );
+      } else {
+        mapProd[d.chaveAgg] = (
+          nome: cur.nome,
+          valor: cur.valor + d.deltaValor,
+          produtoId: cur.produtoId,
+        );
       }
     }
 
@@ -271,6 +293,7 @@ class _RelatorioCurvaAbcPageState extends State<RelatorioCurvaAbcPage>
       body: Column(
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: _calcular,
             onAtualizar: _limites != null ? () => _calcular(_limites!) : null,
             resumo: _limites == null

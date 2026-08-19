@@ -1,8 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/venda_repository.dart';
-import '../../data/vendedor_repository.dart';
 import '../../model/vendedor.dart';
 import 'relatorio_comparativo.dart';
 import 'relatorio_drill_down.dart';
@@ -27,8 +25,8 @@ class RelatorioComissaoVendedoresPage extends StatefulWidget {
     required this.vendedorRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final VendedorRepository vendedorRepository;
+  final dynamic vendaRepository;
+  final dynamic vendedorRepository;
 
   @override
   State<RelatorioComissaoVendedoresPage> createState() =>
@@ -82,7 +80,12 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
       final id = v.vendedor.targetId;
       if (_filtroVendedorId != null && id != _filtroVendedorId) continue;
 
-      final w = id == 0 ? null : (v.vendedor.target ?? widget.vendedorRepository.obterPorId(id));
+      final Vendedor? w = id == 0
+          ? null
+          : relatorioVendedorDaVenda(
+              v,
+              vendedorRepository: widget.vendedorRepository,
+            );
       if (_somenteVendedoresAtivos && id != 0 && (w == null || !w.ativo)) {
         continue;
       }
@@ -105,7 +108,8 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
       if (adj.abs() < 0.0001) continue;
       if (_filtroVendedorId != null && id != _filtroVendedorId) continue;
 
-      final w = id == 0 ? null : widget.vendedorRepository.obterPorId(id);
+      final Vendedor? w =
+          id == 0 ? null : widget.vendedorRepository.obterPorId(id) as Vendedor?;
       if (_somenteVendedoresAtivos && id != 0 && (w == null || !w.ativo)) {
         continue;
       }
@@ -132,9 +136,10 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
     for (final e in map.entries) {
       final id = e.key;
       final agg = e.value;
-      final w = id == 0 ? null : widget.vendedorRepository.obterPorId(id);
+      final Vendedor? w =
+          id == 0 ? null : widget.vendedorRepository.obterPorId(id) as Vendedor?;
       final pct = w?.percentualComissao ?? 0;
-      final comissao = agg.baseAcumulada * pct / 100.0;
+      final comissao = relatorioComissaoPisoZero(agg.baseAcumulada, pct);
       final inativo = w != null && !w.ativo;
       saida.add((
         vendedorId: id,
@@ -170,7 +175,8 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
     for (final v in vendas) {
       final id = v.vendedor.targetId;
       if (_filtroVendedorId != null && id != _filtroVendedorId) continue;
-      final w = id == 0 ? null : widget.vendedorRepository.obterPorId(id);
+      final Vendedor? w =
+          id == 0 ? null : widget.vendedorRepository.obterPorId(id) as Vendedor?;
       if (_somenteVendedoresAtivos && id != 0 && (w == null || !w.ativo)) {
         continue;
       }
@@ -185,7 +191,8 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
     for (final e in porVend.entries) {
       final id = e.key;
       if (_filtroVendedorId != null && id != _filtroVendedorId) continue;
-      final w = id == 0 ? null : widget.vendedorRepository.obterPorId(id);
+      final Vendedor? w =
+          id == 0 ? null : widget.vendedorRepository.obterPorId(id) as Vendedor?;
       if (_somenteVendedoresAtivos && id != 0 && (w == null || !w.ativo)) {
         continue;
       }
@@ -193,9 +200,11 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
     }
     var total = 0.0;
     for (final e in map.entries) {
-      final w = e.key == 0 ? null : widget.vendedorRepository.obterPorId(e.key);
+      final Vendedor? w = e.key == 0
+          ? null
+          : widget.vendedorRepository.obterPorId(e.key) as Vendedor?;
       final pct = w?.percentualComissao ?? 0;
-      total += e.value * pct / 100.0;
+      total += relatorioComissaoPisoZero(e.value, pct);
     }
     return total;
   }
@@ -298,7 +307,8 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
 
   @override
   Widget build(BuildContext context) {
-    final vendedoresOpcoes = widget.vendedorRepository.listarTodos();
+    final vendedoresOpcoes =
+        (widget.vendedorRepository.listarTodos() as List).cast<Vendedor>();
     final lim = _limites;
     final periodoAnt =
         lim != null && _compararPeriodo ? relatorioPeriodoAnterior(lim) : null;
@@ -321,6 +331,7 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: _onPeriodo,
             onAtualizar: _limites != null ? _recalcular : null,
             filtrosExtras: [
@@ -449,12 +460,18 @@ class _RelatorioComissaoVendedoresPageState extends State<RelatorioComissaoVende
                       final w = r.vendedor;
                       String? refMeta;
                       Widget? barraMeta;
-                      if (w != null && w.metaMensalValor > 0 && r.base > 0) {
-                        final ating =
-                            (r.base / w.metaMensalValor).clamp(0.0, 1.5);
+                      if (w != null && w.metaMensalValor > 0 && _limites != null) {
+                        final metaProp = relatorioMetaProporcional(
+                          w.metaMensalValor,
+                          _limites!,
+                        );
+                        final ating = metaProp > 0.001
+                            ? (r.base / metaProp).clamp(0.0, 1.5)
+                            : 0.0;
                         refMeta =
-                            'Meta ${_fmt(w.metaMensalValor)} · '
-                            '${(ating * 100).toStringAsFixed(0)}% no periodo';
+                            'Meta do periodo ${_fmt(metaProp)} '
+                            '(mensal ${_fmt(w.metaMensalValor)}) · '
+                            '${(ating * 100).toStringAsFixed(0)}%';
                         barraMeta = Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: LinearProgressIndicator(

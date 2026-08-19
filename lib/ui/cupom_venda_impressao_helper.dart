@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +10,8 @@ import '../data/app_config_repository.dart';
 import '../model/config_layout_impressao.dart';
 import '../services/cupom_pdf_gerado.dart';
 import '../services/cupom_pdf_layout.dart';
+import '../services/esc_pos_cupom_builder.dart';
+import '../services/esc_pos_printer_service.dart';
 import '../services/print_service.dart';
 
 /// Envelope para PDFs legados que ainda retornam apenas bytes.
@@ -61,27 +62,39 @@ Future<String?> escolherSalvarPdfCupomVenda({
   return file.path;
 }
 
-/// Dialogo padrao: imprimir, impressao direta ou PDF (mesmo fluxo do Caixa).
+/// Dialogo padrao: imprimir (PDF ou ESC/POS conforme config), direta ou PDF.
 Future<void> mostrarFluxoImpressaoCupomVenda(
   BuildContext context, {
   required PrintService printService,
   required EmpresaConfig config,
   required Future<CupomPdfGerado> Function() gerarPdf,
   required String suggestedFileName,
+  CupomBalcaoDados? dadosEscPos,
   String title = 'Cupom da venda',
   String content = 'Deseja imprimir o cupom agora ou gerar PDF?',
 }) async {
   if (!context.mounted) return;
+  final modoEscPos =
+      config.modoImpressaoBalcao == 'escpos' && dadosEscPos != null;
   final acao = await showDialog<String>(
     context: context,
     barrierDismissible: false,
     builder: (context) => _DialogoCupomVendaImpressao(
       title: title,
       content: content,
+      modoEscPos: modoEscPos,
     ),
   );
   if (!context.mounted || acao == null || acao == 'fechar') return;
   try {
+    if (acao == 'escpos' || (acao == 'imprimir' && modoEscPos)) {
+      final r = await EscPosPrinterService.imprimirCupomDireto(dadosEscPos!);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(r.mensagem)),
+      );
+      return;
+    }
     final pdf = await gerarPdf();
     if (!context.mounted) return;
     if (acao == 'imprimir') {
@@ -137,10 +150,12 @@ class _DialogoCupomVendaImpressao extends StatefulWidget {
   const _DialogoCupomVendaImpressao({
     required this.title,
     required this.content,
+    this.modoEscPos = false,
   });
 
   final String title;
   final String content;
+  final bool modoEscPos;
 
   @override
   State<_DialogoCupomVendaImpressao> createState() =>
@@ -186,14 +201,14 @@ class _DialogoCupomVendaImpressaoState extends State<_DialogoCupomVendaImpressao
     }
     if (key == LogicalKeyboardKey.digit3 ||
         key == LogicalKeyboardKey.numpad3) {
-      _fechar('direto');
+      _fechar(widget.modoEscPos ? 'escpos' : 'direto');
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.digit4 ||
         key == LogicalKeyboardKey.numpad4 ||
         key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter) {
-      _fechar('imprimir');
+      _fechar(widget.modoEscPos ? 'escpos' : 'imprimir');
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -201,6 +216,7 @@ class _DialogoCupomVendaImpressaoState extends State<_DialogoCupomVendaImpressao
 
   @override
   Widget build(BuildContext context) {
+    final esc = widget.modoEscPos;
     return Focus(
       autofocus: true,
       onKeyEvent: _atalhoTeclado,
@@ -213,8 +229,10 @@ class _DialogoCupomVendaImpressaoState extends State<_DialogoCupomVendaImpressao
             Text(widget.content),
             const SizedBox(height: 10),
             Text(
-              'Teclado: Esc ou 1 — fechar · 2 — PDF · 3 — impressao direta · '
-              '4 ou Enter — imprimir',
+              esc
+                  ? 'Teclado: Esc/1 fechar · 2 PDF · 3/4/Enter termica ESC/POS'
+                  : 'Teclado: Esc ou 1 — fechar · 2 — PDF · 3 — impressao direta · '
+                      '4 ou Enter — imprimir',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -229,17 +247,22 @@ class _DialogoCupomVendaImpressaoState extends State<_DialogoCupomVendaImpressao
             icon: const Icon(Icons.picture_as_pdf_outlined),
             label: const Text('Mandar cupom em PDF (2)'),
           ),
-          OutlinedButton.icon(
-            onPressed: () => _fechar('direto'),
-            icon: const Icon(Icons.print),
-            label: const Text('Impressao direta (3)'),
-          ),
+          if (!esc)
+            OutlinedButton.icon(
+              onPressed: () => _fechar('direto'),
+              icon: const Icon(Icons.print),
+              label: const Text('Impressao direta (3)'),
+            ),
           Focus(
             focusNode: _focusImprimir,
             child: FilledButton.icon(
-              onPressed: () => _fechar('imprimir'),
-              icon: const Icon(Icons.print_outlined),
-              label: const Text('Imprimir cupom (4 · Enter)'),
+              onPressed: () => _fechar(esc ? 'escpos' : 'imprimir'),
+              icon: Icon(esc ? Icons.receipt_long : Icons.print_outlined),
+              label: Text(
+                esc
+                    ? 'Imprimir termica ESC/POS (Enter)'
+                    : 'Imprimir cupom (4 · Enter)',
+              ),
             ),
           ),
         ],

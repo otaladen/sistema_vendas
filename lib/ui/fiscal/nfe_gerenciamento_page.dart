@@ -12,15 +12,20 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/sync/sync_cursor_storage.dart';
 import '../../services/focus_nfe_reconsulta_helper.dart';
 import '../../config/focus_nfe_runtime.dart';
+import '../../data/api/cliente_api_repository.dart';
+import '../../data/api/lan_api_client.dart';
+import '../../data/api/lan_api_event_hub.dart';
+import '../../data/api/produto_api_repository.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../data/app_config_repository.dart';
-import '../../data/cliente_repository.dart';
 import '../../data/nfe_inutilizacao_store.dart';
 import '../../data/nfe_saida_fiscal_store.dart';
+import '../../data/sync/sync_refresh_hub.dart';
 import '../../data/venda_repository.dart';
 import '../../config/fiscal_config.dart';
 import '../../domain/fiscal/endereco_fiscal_ibge_resolver.dart';
 import '../../domain/auditoria_catalogo.dart';
-import '../../data/usuario_repository.dart';
+import '../../domain/entregas/romaneio_carga_merge.dart';
 import '../../domain/fiscal/nfe_carta_correcao_registro.dart';
 import '../../domain/fiscal/nfe_cce_reconciliacao.dart';
 import '../../domain/fiscal/nfe_cce_xml_local_service.dart';
@@ -37,13 +42,17 @@ import '../../domain/fiscal/nfe_registro_focus_merge.dart';
 import '../../domain/fiscal/nfe_venda_sync.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/fiscal/nfe_whatsapp_helper.dart';
+import '../../domain/venda_relacao_safe.dart';
 import '../../model/usuario_sistema.dart';
 import '../../services/auditoria_registrar.dart';
 import '../../domain/fiscal/nfe_logistica_sugerida.dart';
 import '../../domain/entrega_venda_helper.dart';
 import '../../model/cliente.dart';
+import '../../model/item_venda.dart';
 import '../../model/venda.dart';
 import '../../services/focus_nfe_service.dart';
+import '../shell/main_menu_deps.dart';
+import '../widgets/lan_api_feedback.dart';
 import 'exportar_fechamento_page.dart';
 import 'nfe_autorizacao.dart';
 import 'nfe_enviar_email_dialog.dart';
@@ -74,8 +83,8 @@ class NfeGerenciamentoPage extends StatefulWidget {
     this.abaInicial = 0,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
   final AppConfigRepository appConfigRepository;
   final UsuarioSistema usuarioLogado;
   final int? vendaIdInicial;
@@ -89,10 +98,13 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
   late FocusNfeService _focusNfe;
-  late final NfeSaidaFiscalStore _historicoStore;
-  late final NfeInutilizacaoStore _inutilizacaoStore;
-  late final UsuarioRepository _usuarioRepository;
+  NfeSaidaFiscalStore? _historicoStore;
+  NfeInutilizacaoStore? _inutilizacaoStore;
+  late final dynamic _usuarioRepository;
   Timer? _timerReconsultaPendencias;
+  Timer? _wsDebounce;
+  VoidCallback? _syncHubListener;
+  bool? _apiOnlineAnterior;
   final _currency = NumberFormat('#,##0.00', 'pt_BR');
   final _buscaVendaController = TextEditingController();
   final _historicoBuscaController = TextEditingController();
@@ -140,6 +152,8 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   final _volumesController = TextEditingController(text: '1');
   final _pesoController = TextEditingController();
 
+  bool get _viaApi => widget.vendaRepository is VendaApiRepository;
+
   @override
   void initState() {
     super.initState();
@@ -149,18 +163,33 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       vsync: this,
       initialIndex: widget.abaInicial.clamp(0, 2),
     );
-    _historicoStore = NfeSaidaFiscalStore(
-      widget.vendaRepository.objectBox.storeDirectoryPath,
-    );
-    _inutilizacaoStore = NfeInutilizacaoStore(
-      widget.vendaRepository.objectBox.storeDirectoryPath,
-    );
+    if (!_viaApi && widget.vendaRepository is VendaRepository) {
+      final path =
+          (widget.vendaRepository as VendaRepository).objectBox.storeDirectoryPath;
+      _historicoStore = NfeSaidaFiscalStore(path);
+      _inutilizacaoStore = NfeInutilizacaoStore(path);
+    }
     _focusNfe = FocusNfeService(config: criarFocusNfeConfigPadrao());
     unawaited(_recarregarConfigFocus());
-    _usuarioRepository = UsuarioRepository();
+    _usuarioRepository =
+        MainMenuDeps.resolverUsuarioRepository(context);
     _tabs.addListener(_onTabIndexChanged);
-    _recarregarHistorico();
-    _carregarVendas();
+    if (_viaApi) {
+      _apiOnlineAnterior = LanApiEventHub.instance.online;
+      LanApiEventHub.instance.addListener(_onLanApiEvento);
+    } else {
+      _syncHubListener = () {
+        if (!mounted) return;
+        unawaited(_recarregarHistorico());
+        unawaited(_carregarVendas());
+      };
+      SyncRefreshHub.instance.addListener(_syncHubListener!);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_recarregarHistorico());
+      unawaited(_carregarVendas());
+    });
     _carregarEmpresa();
     unawaited(_carregarDeviceIdSync());
     if (idInicial != null && idInicial > 0) {
@@ -169,6 +198,30 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         unawaited(_inicializarComVendaInicial(idInicial));
       });
     }
+  }
+
+  void _onLanApiEvento() {
+    if (!_viaApi) return;
+    final hub = LanApiEventHub.instance;
+    final online = hub.online;
+    final ficouOnline = online && _apiOnlineAnterior == false;
+    _apiOnlineAnterior = online;
+    if (hub.deveBloquearOperacoes) return;
+    final ent = hub.ultimaEntidade;
+    if (!ficouOnline &&
+        ent != 'venda' &&
+        ent != 'nfe_saida' &&
+        ent != 'fiscal' &&
+        ent != 'produto' &&
+        ent != 'cliente') {
+      return;
+    }
+    _wsDebounce?.cancel();
+    _wsDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      unawaited(_recarregarHistorico());
+      unawaited(_carregarVendas());
+    });
   }
 
   /// Abertura pelo caixa: aba Emitir, busca da venda e resolucao IBGE automaticas.
@@ -182,6 +235,12 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
 
   @override
   void dispose() {
+    _wsDebounce?.cancel();
+    LanApiEventHub.instance.removeListener(_onLanApiEvento);
+    if (_syncHubListener != null) {
+      SyncRefreshHub.instance.removeListener(_syncHubListener!);
+      _syncHubListener = null;
+    }
     _pararTimerReconsulta();
     _tabs.removeListener(_onTabIndexChanged);
     _tabs.dispose();
@@ -237,17 +296,25 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   }
 
   void _persistirRegistro(NfeSaidaFiscalRegistro registro) {
-    _historicoStore.gravar(registro);
-    NfeVendaSync.aplicarRegistroNoRepositorio(
-      vendaRepository: widget.vendaRepository,
-      registro: registro,
-    );
+    if (_viaApi) {
+      // Persistencia ocorre no PC servidor via API.
+      return;
+    }
+    _historicoStore?.gravar(registro);
+    if (widget.vendaRepository is VendaRepository) {
+      NfeVendaSync.aplicarRegistroNoRepositorio(
+        vendaRepository: widget.vendaRepository as VendaRepository,
+        registro: registro,
+      );
+    }
     unawaited(_arquivarXmlLocal(registro));
   }
 
   Future<void> _arquivarXmlLocal(NfeSaidaFiscalRegistro registro) async {
+    if (_viaApi || widget.vendaRepository is! VendaRepository) return;
     final chave = registro.chaveNfe.trim();
-    final storePath = widget.vendaRepository.objectBox.storeDirectoryPath;
+    final storePath =
+        (widget.vendaRepository as VendaRepository).objectBox.storeDirectoryPath;
     if (registro.urlXml.trim().isNotEmpty) {
       await NfeXmlLocalService.arquivarOuEnfileirar(
         storeDirectoryPath: storePath,
@@ -280,10 +347,172 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     );
   }
 
-  void _recarregarHistorico() {
+  Future<void> _recarregarHistorico() async {
+    if (_viaApi) {
+      if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+        return;
+      }
+      final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+      if (client == null) {
+        if (mounted) {
+          setState(() {
+            _historico = [];
+            _pendenciasVendas = [];
+            _pendenciasProcessando = [];
+            _pendenciasRejeitadas = [];
+          });
+        }
+        return;
+      }
+      try {
+        final painel = await client.listarNfeSaidaPainel();
+        final raw = painel['items'];
+        final lista = raw is List
+            ? raw
+                .whereType<Map>()
+                .map(
+                  (e) => NfeSaidaFiscalRegistro.fromJson(
+                    Map<String, dynamic>.from(e),
+                  ),
+                )
+                .toList(growable: false)
+            : <NfeSaidaFiscalRegistro>[];
+        final mapa = <int, bool>{};
+        for (final r in lista) {
+          if (r.vendaId > 0 && r.autorizada) mapa[r.vendaId] = true;
+        }
+
+        final pend = painel['pendencias'];
+        List<NfePendenciaVenda> vendasSem = const [];
+        List<NfeSaidaFiscalRegistro> processando = const [];
+        List<NfeSaidaFiscalRegistro> rejeitadas = const [];
+        if (pend is Map) {
+          final vs = pend['vendasSemNfe'];
+          if (vs is List) {
+            vendasSem = [
+              for (final e in vs)
+                if (e is Map)
+                  NfePendenciaVenda(
+                    venda: LanApiClient.vendaCompletaDeMap(
+                      Map<String, dynamic>.from(
+                        e['venda'] is Map
+                            ? Map<String, dynamic>.from(e['venda'] as Map)
+                            : e,
+                      ),
+                    ),
+                    clienteNome: (e['clienteNome'] ?? 'Sem cliente').toString(),
+                    ultimoStatusNfe: (e['ultimoStatusNfe'] ?? '').toString(),
+                  ),
+            ];
+          }
+          final pr = pend['processando'];
+          if (pr is List) {
+            processando = pr
+                .whereType<Map>()
+                .map(
+                  (e) => NfeSaidaFiscalRegistro.fromJson(
+                    Map<String, dynamic>.from(e),
+                  ),
+                )
+                .toList();
+          }
+          final rj = pend['rejeitadas'];
+          if (rj is List) {
+            rejeitadas = rj
+                .whereType<Map>()
+                .map(
+                  (e) => NfeSaidaFiscalRegistro.fromJson(
+                    Map<String, dynamic>.from(e),
+                  ),
+                )
+                .toList();
+          }
+        } else {
+          processando = lista.where((r) => r.processando).toList();
+          rejeitadas = lista.where((r) => r.rejeitada).toList();
+        }
+
+        final meta = painel['meta'];
+        final NfePainelResumo resumo;
+        if (meta is Map) {
+          resumo = NfePainelResumo(
+            totalRegistros: (meta['totalRegistros'] as num?)?.toInt() ??
+                lista.length,
+            autorizadas: (meta['autorizadas'] as num?)?.toInt() ??
+                lista.where((r) => r.autorizada).length,
+            processando: (meta['processando'] as num?)?.toInt() ??
+                processando.length,
+            rejeitadas:
+                (meta['rejeitadas'] as num?)?.toInt() ?? rejeitadas.length,
+            canceladas: (meta['canceladas'] as num?)?.toInt() ??
+                lista.where((r) => r.cancelada).length,
+            vendasSemNfeAutorizada:
+                (meta['vendasSemNfeAutorizada'] as num?)?.toInt() ??
+                    vendasSem.length,
+            totalCartasCorrecao:
+                (meta['totalCartasCorrecao'] as num?)?.toInt() ?? 0,
+            cartasCorrecaoProcessando:
+                (meta['cartasCorrecaoProcessando'] as num?)?.toInt() ?? 0,
+            lacunasNumeracaoSerie1:
+                (meta['lacunasNumeracaoSerie1'] as num?)?.toInt() ?? 0,
+            inutilizacoesRegistradas:
+                (meta['inutilizacoesRegistradas'] as num?)?.toInt() ?? 0,
+          );
+        } else {
+          resumo = NfePainelResumo(
+            totalRegistros: lista.length,
+            autorizadas: lista.where((r) => r.autorizada).length,
+            processando: processando.length,
+            rejeitadas: rejeitadas.length,
+            canceladas: lista.where((r) => r.cancelada).length,
+            vendasSemNfeAutorizada: vendasSem.length,
+            totalCartasCorrecao:
+                lista.fold<int>(0, (a, r) => a + r.totalCartasCorrecao),
+            cartasCorrecaoProcessando:
+                lista.fold<int>(0, (a, r) => a + r.cartasCorrecaoProcessando),
+            lacunasNumeracaoSerie1: 0,
+            inutilizacoesRegistradas: 0,
+          );
+        }
+
+        if (!mounted) return;
+        setState(() {
+          _historico = lista;
+          _vendaComNfeAutorizada
+            ..clear()
+            ..addAll(mapa);
+          _pendenciasVendas = _filtroPendencias.aplicar(
+            vendasSem,
+            clienteRepository: widget.clienteRepository,
+          );
+          _pendenciasProcessando = processando;
+          _pendenciasRejeitadas = rejeitadas;
+          _resumo = resumo;
+        });
+        _atualizarPreEmissao();
+      } catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackErro(
+            context,
+            e,
+            prefixo: 'Falha ao carregar historico NF-e',
+          );
+        }
+      }
+      return;
+    }
+
+    final store = _historicoStore;
+    final inut = _inutilizacaoStore;
+    if (store == null ||
+        inut == null ||
+        widget.vendaRepository is! VendaRepository) {
+      return;
+    }
+    final vendaRepo = widget.vendaRepository as VendaRepository;
     final lista = NfeVendaSync.listarHistoricoUnificado(
-      store: _historicoStore,
-      vendaRepository: widget.vendaRepository,
+      store: store,
+      vendaRepository: vendaRepo,
     );
     final mapa = <int, bool>{};
     for (final r in lista) {
@@ -293,21 +522,23 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     }
     final semNfe = _filtroPendencias.aplicar(
       NfePendenciasService.listarVendasSemNfeAutorizada(
-        vendaRepository: widget.vendaRepository,
-        nfeStore: _historicoStore,
+        vendaRepository: vendaRepo,
+        nfeStore: store,
       ),
+      clienteRepository: widget.clienteRepository,
     );
     final comAuth = NfePendenciasService.idsVendasComNfeAutorizada(
-      _historicoStore,
-      vendaRepository: widget.vendaRepository,
+      store,
+      vendaRepository: vendaRepo,
     );
     final resumo = NfePainelResumoBuilder.calcular(
       historico: lista,
       vendasSemNfe: semNfe.length,
-      inutilizacaoStore: _inutilizacaoStore,
-      nfeStore: _historicoStore,
+      inutilizacaoStore: inut,
+      nfeStore: store,
       vendasComNfeAutorizada: comAuth,
     );
+    if (!mounted) return;
     setState(() {
       _historico = lista;
       _vendaComNfeAutorizada
@@ -315,12 +546,12 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         ..addAll(mapa);
       _pendenciasVendas = semNfe;
       _pendenciasProcessando = NfePendenciasService.listarProcessando(
-        _historicoStore,
-        vendaRepository: widget.vendaRepository,
+        store,
+        vendaRepository: vendaRepo,
       );
       _pendenciasRejeitadas = NfePendenciasService.listarRejeitadasRecentes(
-        _historicoStore,
-        vendaRepository: widget.vendaRepository,
+        store,
+        vendaRepository: vendaRepo,
       );
       _resumo = resumo;
     });
@@ -333,6 +564,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     String entidadeId = '',
     Map<String, dynamic>? detalhes,
   }) {
+    if (_viaApi) return;
     AuditoriaRegistrar.registrar(
       modulo: AuditoriaModulo.fiscal,
       acao: acao,
@@ -343,18 +575,40 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     );
   }
 
+  List<ItemVenda> _itensDaVenda(Venda venda) {
+    if (widget.vendaRepository is VendaApiRepository) {
+      return (widget.vendaRepository as VendaApiRepository)
+          .itensDaVendaSafe(venda);
+    }
+    return RomaneioCargaMerge.itensDaVendaSafe(venda);
+  }
+
+  dynamic get _produtoRepository =>
+      MainMenuDeps.maybeOf(context)?.produtoRepository;
+
   void _atualizarPreEmissao() {
     final venda = _vendaSelecionada;
     if (venda == null) {
       setState(() => _preEmissao = null);
       return;
     }
-    final nfeAuth = widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id) ??
-        _historicoStore.ultimaAutorizadaPorVenda(venda.id);
+    NfeSaidaFiscalRegistro? nfeAuth;
+    final rawAuth =
+        widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id);
+    if (rawAuth is NfeSaidaFiscalRegistro) {
+      nfeAuth = rawAuth;
+    }
+    nfeAuth ??= _historicoStore?.ultimaAutorizadaPorVenda(venda.id);
+    nfeAuth ??= _historico.cast<NfeSaidaFiscalRegistro?>().firstWhere(
+          (r) => r != null && r.vendaId == venda.id && r.autorizada,
+          orElse: () => null,
+        );
     final historicoVenda = _historicoDaVenda(venda.id);
     final nfeUltima = historicoVenda.isNotEmpty
         ? historicoVenda.first
-        : _historicoStore.ultimaPorVenda(venda.id);
+        : _historicoStore?.ultimaPorVenda(venda.id);
+    final itens = _itensDaVenda(venda);
+    final prodRepo = _produtoRepository;
     setState(() {
       _preEmissao = NfePreEmissaoService.avaliar(
         venda: venda,
@@ -363,20 +617,50 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         nfeAutorizada: nfeAuth,
         nfeUltima: nfeUltima,
         deviceIdAtual: _deviceIdSync,
+        emissaoNoServidor: _viaApi,
+        itens: itens,
+        resolverProduto: prodRepo == null
+            ? null
+            : (id) {
+                try {
+                  return prodRepo.obterPorId(id);
+                } catch (_) {
+                  return null;
+                }
+              },
       );
     });
   }
 
   Future<void> _carregarVendas() async {
+    if (_viaApi &&
+        !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+      if (mounted) setState(() => _carregandoVendas = false);
+      return;
+    }
     setState(() => _carregandoVendas = true);
-    final lista = widget.vendaRepository.listarUltimasVendasFinalizadas(
-      limit: 80,
-    );
-    if (!mounted) return;
-    setState(() {
-      _vendasElegiveis = lista;
-      _carregandoVendas = false;
-    });
+    try {
+      if (_viaApi && widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .hidratarVendasFinalizadas(limit: 120);
+      }
+      final lista = widget.vendaRepository.listarUltimasVendasFinalizadas(
+        limit: 80,
+      );
+      if (!mounted) return;
+      setState(() {
+        _vendasElegiveis = List<Venda>.from(lista);
+        _carregandoVendas = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _carregandoVendas = false);
+      if (_viaApi) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Falha ao carregar vendas');
+      } else {
+        _snack('Falha ao carregar vendas: $e', erro: true);
+      }
+    }
   }
 
   Future<void> _buscarVendaPorNumero() async {
@@ -385,7 +669,31 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       _snack('Informe o numero do orcamento ou ID da venda.', erro: true);
       return;
     }
-    final v = widget.vendaRepository.buscarVendaFinalizadaPorNumeroOuId(n);
+    var v = widget.vendaRepository.buscarVendaFinalizadaPorNumeroOuId(n);
+    if (v == null &&
+        _viaApi &&
+        widget.vendaRepository is VendaApiRepository) {
+      if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
+      try {
+        final atualizada = await (widget.vendaRepository as VendaApiRepository)
+            .atualizarVendaFinalizadaNoCache(n);
+        if (atualizada != null &&
+            atualizada.status == 'finalizada' &&
+            !atualizada.cancelada) {
+          v = atualizada;
+        } else {
+          // Busca por numero de orcamento: hidrata lista e tenta de novo.
+          await (widget.vendaRepository as VendaApiRepository)
+              .hidratarVendasFinalizadas(limit: 200);
+          v = widget.vendaRepository.buscarVendaFinalizadaPorNumeroOuId(n);
+        }
+      } catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackErro(context, e, prefixo: 'Busca de venda');
+        }
+        return;
+      }
+    }
     if (v == null) {
       _snack('Venda finalizada nao encontrada.', erro: true);
       return;
@@ -394,11 +702,43 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   }
 
   Future<void> _selecionarVenda(Venda venda) async {
-    final vendaCompleta =
-        widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    if (_viaApi &&
+        !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+      return;
+    }
+    Venda vendaCompleta = venda;
+    if (_viaApi && widget.vendaRepository is VendaApiRepository) {
+      try {
+        final atualizada = await (widget.vendaRepository as VendaApiRepository)
+            .atualizarVendaFinalizadaNoCache(venda.id);
+        if (atualizada != null) vendaCompleta = atualizada;
+      } catch (_) {
+        vendaCompleta =
+            widget.vendaRepository.obterPorId(venda.id) ?? venda;
+      }
+    } else {
+      vendaCompleta = widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    }
+
+    var cliente = VendaRelacaoSafe.cliente(
+      vendaCompleta,
+      clienteRepository: widget.clienteRepository,
+    );
+    if (cliente == null &&
+        vendaCompleta.cliente.targetId > 0 &&
+        widget.clienteRepository is ClienteApiRepository) {
+      try {
+        cliente = await (widget.clienteRepository as ClienteApiRepository)
+            .obterPorIdRemoto(vendaCompleta.cliente.targetId);
+      } catch (_) {}
+    }
+
+    await _garantirProdutosDosItens(vendaCompleta);
+
+    if (!mounted) return;
     setState(() {
       _vendaSelecionada = vendaCompleta;
-      _cliente = vendaCompleta.cliente.target;
+      _cliente = cliente;
       _ibgeResolvido = null;
       _preEmissao = null;
       _statusIbge = 'Resolvendo codigo IBGE...';
@@ -425,8 +765,20 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         _cliente!,
         ibge.endereco!,
       );
-      widget.clienteRepository.salvar(atualizado);
-      _cliente = widget.clienteRepository.obterPorId(_cliente!.id) ?? atualizado;
+      if (widget.clienteRepository is ClienteApiRepository) {
+        try {
+          await (widget.clienteRepository as ClienteApiRepository)
+              .salvarRemoto(atualizado);
+          _cliente =
+              widget.clienteRepository.obterPorId(_cliente!.id) ?? atualizado;
+        } catch (_) {
+          _cliente = atualizado;
+        }
+      } else {
+        widget.clienteRepository.salvar(atualizado);
+        _cliente =
+            widget.clienteRepository.obterPorId(_cliente!.id) ?? atualizado;
+      }
     }
 
     setState(() {
@@ -439,8 +791,26 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     _atualizarPreEmissao();
   }
 
+  Future<void> _garantirProdutosDosItens(Venda venda) async {
+    final prodRepo = _produtoRepository;
+    if (prodRepo is! ProdutoApiRepository) return;
+    final ids = <int>{};
+    for (final item in _itensDaVenda(venda)) {
+      final pid = item.produto.targetId;
+      if (pid > 0 && prodRepo.obterPorId(pid) == null) ids.add(pid);
+    }
+    for (final id in ids) {
+      try {
+        await prodRepo.obterPorIdRemoto(id);
+      } catch (_) {}
+    }
+  }
+
   void _aplicarLogisticaSugerida(Venda venda) {
-    final sug = NfeLogisticaSugerida.calcular(venda);
+    final sug = NfeLogisticaSugerida.calcular(
+      venda,
+      itens: _itensDaVenda(venda),
+    );
     _modalidadeFrete = sug.modalidadeFrete;
     _volumesController.text = '${sug.volumes}';
     _pesoController.text = sug.pesoBrutoKg.toStringAsFixed(3);
@@ -483,6 +853,10 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       _snack('Sem permissao para emitir NF-e de saida.', erro: true);
       return;
     }
+    if (_viaApi &&
+        !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+      return;
+    }
     if (_preEmissao == null || !_preEmissao!.podeEmitir) {
       _snack(
         'Corrija as pendencias do checklist antes de emitir a NF-e.',
@@ -496,6 +870,34 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         _statusIbge.isEmpty ? 'Dados do destinatario incompletos.' : _statusIbge,
         erro: true,
       );
+      return;
+    }
+
+    if (_viaApi) {
+      final confirmou = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Emitir NF-e no servidor'),
+          content: Text(
+            'A emissao sera executada no PC servidor (Focus/SEFAZ) para a '
+            'venda #${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}.\n\n'
+            'Destinatario: ${dest.nome}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Emitir'),
+            ),
+          ],
+        ),
+      );
+      if (confirmou == true && mounted) {
+        await _executarEmissaoNfeViaApi(venda, dest);
+      }
       return;
     }
 
@@ -535,6 +937,72 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
 
     if (confirmou == true && mounted) {
       await _executarEmissaoNfe(venda, dest, referencia: referencia);
+    }
+  }
+
+  Future<void> _executarEmissaoNfeViaApi(
+    Venda venda,
+    FocusNfeDestinatarioNfe dest,
+  ) async {
+    final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+    if (client == null) {
+      _snack('API do servidor indisponivel para emitir NF-e.', erro: true);
+      return;
+    }
+    setState(() => _emitindo = true);
+    final logistica = _montarLogistica();
+    try {
+      final r = await client.emitirNfe(
+        venda.id,
+        destinatario: {
+          'nome': dest.nome,
+          'documento': dest.documento,
+          'inscricaoEstadual': dest.inscricaoEstadual,
+          'indicadorInscricaoEstadual': dest.indicadorInscricaoEstadual,
+          'logradouro': dest.logradouro,
+          'numero': dest.numero,
+          'bairro': dest.bairro,
+          'municipio': dest.municipio,
+          'codigoMunicipioIbge': dest.codigoMunicipioIbge,
+          'uf': dest.uf,
+          'cep': dest.cep,
+          'telefone': dest.telefone,
+          'email': dest.email,
+          'complemento': dest.complemento,
+        },
+        logistica: {
+          'modalidadeFrete': logistica.modalidadeFrete,
+          'placaVeiculo': logistica.placaVeiculo,
+          'volumes': logistica.volumes,
+          'pesoBrutoKg': logistica.pesoBrutoKg,
+          'especieVolumes': logistica.especieVolumes,
+        },
+      );
+      if (!mounted) return;
+      setState(() => _emitindo = false);
+      if (r['ok'] == true) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .hidratarVendasFinalizadas(limit: 120);
+        await _recarregarHistorico();
+        await _carregarVendas();
+        final num = (r['numero'] ?? '').toString();
+        _snack(
+          r['autorizada'] == true
+              ? 'NF-e $num autorizada no servidor.'
+              : 'NF-e em processamento no servidor.',
+        );
+        final urlDanfe = (r['urlDanfe'] ?? '').toString();
+        if (urlDanfe.isNotEmpty) {
+          // ignore: discarded_futures
+          launchUrl(Uri.parse(urlDanfe), mode: LaunchMode.externalApplication);
+        }
+      } else {
+        _snack('${r['error'] ?? 'Falha ao emitir NF-e'}', erro: true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _emitindo = false);
+      _snack('Falha ao emitir NF-e: $e', erro: true);
     }
   }
 
@@ -672,15 +1140,48 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     }
   }
 
+  LanApiClient? get _apiClient => MainMenuDeps.maybeOf(context)?.lanApiClient;
+
   Future<void> _reconsultar(NfeSaidaFiscalRegistro reg) async {
+    if (_viaApi) {
+      final client = _apiClient;
+      if (client == null) {
+        _snack('API do servidor indisponivel.', erro: true);
+        return;
+      }
+      setState(() => _emitindo = true);
+      try {
+        final r = await client.reconsultarNfeSaida(reg.referenciaFocus);
+        if (!mounted) return;
+        setState(() => _emitindo = false);
+        await _recarregarHistorico();
+        if (r['ok'] != true) {
+          _snack('${r['error'] ?? 'Falha na reconsulta'}', erro: true);
+          return;
+        }
+        final auth = r['autorizada'] == true;
+        _snack(
+          auth
+              ? 'NF-e autorizada na reconsulta. Estoque atualizado.'
+              : 'Status atualizado: ${r['status'] ?? ''}',
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _emitindo = false);
+        LanApiFeedback.snackErro(context, e, prefixo: 'Falha na reconsulta');
+      }
+      return;
+    }
     setState(() => _emitindo = true);
     final r = await _focusNfe.consultarNfe(reg.referenciaFocus);
     if (!mounted) return;
     var atualizado = mesclarRegistroComResultadoFocus(reg, r);
+    final storePath =
+        (widget.vendaRepository as VendaRepository).objectBox.storeDirectoryPath;
     atualizado = await reconsultarCartasCorrecaoPendentes(
       registro: atualizado,
       focusNfe: _focusNfe,
-      storeDirectoryPath: widget.vendaRepository.objectBox.storeDirectoryPath,
+      storeDirectoryPath: storePath,
     );
     setState(() => _emitindo = false);
 
@@ -700,10 +1201,37 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   }
 
   Future<void> _reconsultarTodasProcessando() async {
+    if (_viaApi) {
+      final client = _apiClient;
+      if (client == null || _pendenciasProcessando.isEmpty) return;
+      setState(() => _emitindo = true);
+      try {
+        final r = await client.reconsultarNfeSaidaProcessando();
+        if (!mounted) return;
+        setState(() => _emitindo = false);
+        await _recarregarHistorico();
+        final ok = (r['autorizadas'] as num?)?.toInt() ?? 0;
+        final total = (r['total'] as num?)?.toInt() ?? 0;
+        _snack(
+          ok > 0
+              ? '$ok nota(s) autorizada(s) apos reconsulta em lote.'
+              : total == 0
+                  ? 'Nenhuma NF-e processando.'
+                  : 'Reconsulta em lote concluida. Verifique o historico.',
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _emitindo = false);
+        LanApiFeedback.snackErro(context, e, prefixo: 'Falha na reconsulta');
+      }
+      return;
+    }
     final fila = List<NfeSaidaFiscalRegistro>.from(_pendenciasProcessando);
     if (fila.isEmpty) return;
     setState(() => _emitindo = true);
     var ok = 0;
+    final storePath =
+        (widget.vendaRepository as VendaRepository).objectBox.storeDirectoryPath;
     for (final reg in fila) {
       final r = await _focusNfe.consultarNfe(reg.referenciaFocus);
       if (!mounted) return;
@@ -711,7 +1239,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       atualizado = await reconsultarCartasCorrecaoPendentes(
         registro: atualizado,
         focusNfe: _focusNfe,
-        storeDirectoryPath: widget.vendaRepository.objectBox.storeDirectoryPath,
+        storeDirectoryPath: storePath,
       );
       _persistirRegistro(atualizado);
       if (atualizado.autorizada) {
@@ -774,27 +1302,52 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   }
 
   void _abrirInutilizacaoNumeracao() {
+    final nfeStore = _historicoStore;
+    final inutStore = _inutilizacaoStore;
+    if (nfeStore == null || inutStore == null) {
+      _snack(
+        'Inutilizacao de numeracao deve ser feita no PC servidor.',
+        erro: true,
+      );
+      return;
+    }
     showNfeInutilizacaoDialog(
       context: context,
       focusNfe: _focusNfe,
       usuarioLogin: widget.usuarioLogado.login,
-      nfeStore: _historicoStore,
-      inutilizacaoStore: _inutilizacaoStore,
+      nfeStore: nfeStore,
+      inutilizacaoStore: inutStore,
     ).then((_) {
       if (mounted) _recarregarHistorico();
     });
   }
 
   void _abrirHistoricoInutilizacao() {
+    final inutStore = _inutilizacaoStore;
+    if (inutStore == null) {
+      _snack(
+        'Historico de inutilizacao disponivel no PC servidor.',
+        erro: true,
+      );
+      return;
+    }
     showNfeInutilizacaoHistoricoDialog(
       context,
-      _inutilizacaoStore,
+      inutStore,
       focusNfe: _focusNfe,
     );
   }
 
   Future<void> _enviarEmailNfe(NfeSaidaFiscalRegistro reg) async {
     if (!reg.autorizada) return;
+    if (_viaApi && !FiscalConfigStore.configurado) {
+      _snack(
+        'Envio de e-mail da NF-e pelo Focus exige configuracao fiscal '
+        'local ou use o PC servidor.',
+        erro: true,
+      );
+      return;
+    }
     final ok = await showNfeEnviarEmailDialog(
       context: context,
       focusNfe: _focusNfe,
@@ -802,6 +1355,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       emailsSugeridos: emailsSugeridosDaVenda(
         widget.vendaRepository,
         reg.vendaId,
+        clienteRepository: widget.clienteRepository,
       ),
     );
     if (ok == true) {
@@ -817,7 +1371,12 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   Future<void> _enviarWhatsappNfe(NfeSaidaFiscalRegistro reg) async {
     if (!reg.autorizada || reg.urlDanfe.trim().isEmpty) return;
     final venda = widget.vendaRepository.obterPorId(reg.vendaId);
-    final cliente = venda?.cliente.target;
+    final cliente = venda == null
+        ? null
+        : VendaRelacaoSafe.cliente(
+            venda,
+            clienteRepository: widget.clienteRepository,
+          );
     final tel = NfeWhatsappHelper.telefoneCliente(cliente);
     if (tel == null) {
       _snack('Cliente sem WhatsApp/telefone cadastrado.', erro: true);
@@ -884,6 +1443,42 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     );
     if (confirma != true || !mounted) return;
 
+    if (_viaApi) {
+      final client = _apiClient;
+      if (client == null) {
+        _snack('API do servidor indisponivel.', erro: true);
+        return;
+      }
+      setState(() => _emitindo = true);
+      try {
+        final r = await client.cancelarNfeSaida(
+          referencia: reg.referenciaFocus,
+          justificativa: just,
+        );
+        if (!mounted) return;
+        setState(() => _emitindo = false);
+        if (r['ok'] != true) {
+          await _dialogoErroNfe(
+            (r['error'] ?? 'Cancelamento nao aceito pela SEFAZ.').toString(),
+          );
+          return;
+        }
+        await _recarregarHistorico();
+        _snack(
+          (r['mensagem'] ??
+                  (r['cancelada'] == true
+                      ? 'NF-e cancelada na SEFAZ.'
+                      : 'Solicitacao enviada.'))
+              .toString(),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _emitindo = false);
+        LanApiFeedback.snackErro(context, e, prefixo: 'Falha ao cancelar');
+      }
+      return;
+    }
+
     setState(() => _emitindo = true);
     final r = await _focusNfe.cancelarNfe(
       reg.referenciaFocus,
@@ -920,6 +1515,42 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     final texto = await showNfeCartaCorrecaoDialog(context);
     if (texto == null || !mounted) return;
 
+    if (_viaApi) {
+      final client = _apiClient;
+      if (client == null) {
+        _snack('API do servidor indisponivel.', erro: true);
+        return;
+      }
+      setState(() => _emitindo = true);
+      try {
+        final res = await client.cartaCorrecaoNfeSaida(
+          referencia: reg.referenciaFocus,
+          correcao: texto,
+        );
+        if (!mounted) return;
+        setState(() => _emitindo = false);
+        if (res['ok'] != true) {
+          await _dialogoErroNfe(
+            (res['error'] ?? 'Falha ao emitir CC-e.').toString(),
+          );
+          return;
+        }
+        await _recarregarHistorico();
+        _snack(
+          (res['mensagem'] ??
+                  (res['processando'] == true
+                      ? 'CC-e enviada — aguardando SEFAZ.'
+                      : 'CC-e registrada.'))
+              .toString(),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _emitindo = false);
+        LanApiFeedback.snackErro(context, e, prefixo: 'Falha na CC-e');
+      }
+      return;
+    }
+
     setState(() => _emitindo = true);
     final res = await _focusNfe.emitirCartaCorrecaoNfe(
       reg.referenciaFocus,
@@ -951,7 +1582,9 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
       unawaited(
         NfeCceXmlLocalService.arquivarOuEnfileirar(
           storeDirectoryPath:
-              widget.vendaRepository.objectBox.storeDirectoryPath,
+              (widget.vendaRepository as VendaRepository)
+                  .objectBox
+                  .storeDirectoryPath,
           chaveAcesso: reg.chaveNfe,
           numeroSequencia: res.numeroSequencia > 0 ? res.numeroSequencia : 1,
           urlXml: res.urlXml,
@@ -1533,7 +2166,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Total venda: ${_formatarMoeda(v.total)}'),
-              Text('Itens: ${v.itens.length}'),
+              Text('Itens: ${_itensDaVenda(v).length}'),
               if (v.valorFrete > 0)
                 Text('Frete: ${_formatarMoeda(v.valorFrete)}'),
               if (v.descontoImplicitoTotal > 0)

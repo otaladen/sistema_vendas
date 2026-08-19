@@ -67,6 +67,8 @@ class UsuarioPermissaoHelper {
         return u.podeCadastros;
       case PermissaoUsuario.estoque:
         return u.podeEstoque;
+      case PermissaoUsuario.fiscal:
+        return u.podeFiscal;
       case PermissaoUsuario.vendasHub:
         return u.podeVendas ||
             u.podeAcessarPdv ||
@@ -153,6 +155,22 @@ class UsuarioPermissaoHelper {
     return false;
   }
 
+  /// Motorista de campo: so o painel simplificado, sem expedicao nem precos.
+  static bool ehMotoristaCampoSomente(UsuarioSistema u) {
+    if (!u.ativo) return false;
+    if (u.admin) return false;
+    if (!podeUsarModoMotorista(u)) return false;
+    if (podeGerenciarEntregas(u)) return false;
+    return true;
+  }
+
+  /// Modulo Entregas (expedicao). Motorista puro usa so o Modo motorista.
+  static bool podeAcessarModuloEntregas(UsuarioSistema u) {
+    if (!podeVisualizarEntregas(u)) return false;
+    if (ehMotoristaCampoSomente(u)) return false;
+    return true;
+  }
+
   /// Painel simplificado: entregas do motorista logado + POD.
   static bool podeUsarModoMotorista(UsuarioSistema u) {
     if (!u.ativo) return false;
@@ -176,13 +194,13 @@ class UsuarioPermissaoHelper {
   static bool podeEmitirNfeSaida(UsuarioSistema u) {
     if (!u.ativo) return false;
     if (u.admin) return true;
-    return u.podeEmitirNfeSaida;
+    return u.podeFiscal && u.podeEmitirNfeSaida;
   }
 
   static bool podeCancelarNfeSaida(UsuarioSistema u) {
     if (!u.ativo) return false;
     if (u.admin) return true;
-    return u.podeCancelarNfeSaida;
+    return u.podeFiscal && u.podeCancelarNfeSaida;
   }
 
   static bool podeReajustePrecoLote(UsuarioSistema u) {
@@ -216,6 +234,8 @@ class UsuarioPermissaoHelper {
         return u.podeCadastros;
       case PermissaoUsuario.estoque:
         return u.podeEstoque;
+      case PermissaoUsuario.fiscal:
+        return u.podeFiscal;
       case PermissaoUsuario.vendasHub:
         return u.podeVendas;
       case PermissaoUsuario.acessarPdv:
@@ -287,6 +307,8 @@ class UsuarioPermissaoHelper {
         return r.copyWith(podeCadastros: valor);
       case PermissaoUsuario.estoque:
         return r.copyWith(podeEstoque: valor);
+      case PermissaoUsuario.fiscal:
+        return r.copyWith(podeFiscal: valor);
       case PermissaoUsuario.vendasHub:
         return r.copyWith(podeVendas: valor);
       case PermissaoUsuario.acessarPdv:
@@ -395,8 +417,10 @@ class UsuarioPermissaoHelper {
     if (tem(u, PermissaoUsuario.acessarListagemVendas)) {
       chips.add('Listagem');
     }
-    if (podeVisualizarEntregas(u)) chips.add('Entregas');
+    if (podeAcessarModuloEntregas(u)) chips.add('Entregas');
+    if (podeUsarModoMotorista(u)) chips.add('Modo motorista');
     if (tem(u, PermissaoUsuario.estoque)) chips.add('Estoque');
+    if (tem(u, PermissaoUsuario.fiscal)) chips.add('Fiscal');
     if (tem(u, PermissaoUsuario.reajustePrecoLote)) chips.add('Reajuste');
     if (tem(u, PermissaoUsuario.cancelarVendas)) chips.add('Cancelar');
     return chips.isEmpty ? const ['Basico'] : chips;
@@ -435,7 +459,7 @@ class UsuarioPermissaoHelper {
 
   /// Badge de pendencias fiscais no tile de notas.
   static bool podeVerBadgeFiscalDashboard(UsuarioSistema u) =>
-      tem(u, PermissaoUsuario.estoque);
+      tem(u, PermissaoUsuario.fiscal);
 
   /// Painel Loja ao vivo — blocos filtrados por permissao na pagina.
   static bool podeAcessarLojaAoVivo(UsuarioSistema u) {
@@ -443,7 +467,7 @@ class UsuarioPermissaoHelper {
     return podeVerFaturamentoTotalLoja(u) ||
         tem(u, PermissaoUsuario.acessarCaixa) ||
         tem(u, PermissaoUsuario.estoque) ||
-        podeVisualizarEntregas(u) ||
+        podeAcessarModuloEntregas(u) ||
         podeVerMinhasVendasHoje(u);
   }
 }

@@ -200,6 +200,18 @@ class _ProdutoFotoViewState extends State<ProdutoFotoView> {
         }
         final path = snap.data?.trim() ?? '';
         if (path.isEmpty || !File(path).existsSync()) {
+          // Miniaturas compactas / modo local: icone simples, sem texto longo.
+          final compacto = (widget.width ?? 0) > 0 && (widget.width ?? 0) <= 56;
+          if (modo == ProdutoFotoModo.somenteLocal || compacto) {
+            return _caixa(
+              scheme,
+              child: Icon(
+                Icons.image_outlined,
+                size: compacto ? 18 : 20,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+              ),
+            );
+          }
           final msg = (_erroDownload ?? widget.errorLabel).trim();
           return Material(
             color: Colors.transparent,

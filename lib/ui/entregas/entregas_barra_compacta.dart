@@ -33,12 +33,12 @@ class EntregasBarraCompacta extends StatelessWidget {
     required this.onSemanaAnterior,
     required this.onSemanaProxima,
     required this.onSelecionarDiaSemana,
+    this.compacto = false,
   });
 
   static const statusRapidos = [
     'todos',
     'pendente',
-    'roteirizada',
     'saiu_entrega',
     'entregue',
   ];
@@ -70,17 +70,21 @@ class EntregasBarraCompacta extends StatelessWidget {
   final VoidCallback onSemanaAnterior;
   final VoidCallback onSemanaProxima;
   final ValueChanged<DateTime> onSelecionarDiaSemana;
+  final bool compacto;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final estreita = MediaQuery.sizeOf(context).width < 520;
+    final compacto = this.compacto || MediaQuery.sizeOf(context).height < 800;
+    final padV = compacto ? 3.0 : 6.0;
+    final gap = compacto ? 2.0 : 6.0;
 
     return Material(
       color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
       borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: EdgeInsets.symmetric(horizontal: compacto ? 6 : 8, vertical: padV),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -151,14 +155,15 @@ class EntregasBarraCompacta extends StatelessWidget {
               ],
             ),
             if (mostrarPlanejamento) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Dia da entrega',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
+              SizedBox(height: gap),
+              if (!compacto)
+                Text(
+                  'Dia da entrega',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
+              if (!compacto) SizedBox(height: gap),
               FaixaSemanaPlanejamentoEntrega(
                 inicioSemana: inicioSemanaExibida,
                 resumoPorDia: resumoPorDia,
@@ -166,16 +171,19 @@ class EntregasBarraCompacta extends StatelessWidget {
                 onSelecionarDia: onSelecionarDiaSemana,
                 onSemanaAnterior: onSemanaAnterior,
                 onSemanaProxima: onSemanaProxima,
+                compacto: compacto,
               ),
-              const SizedBox(height: 6),
-              BarraPlanejamentoEntregaDia(
-                resumoPorDia: resumoPorDia,
-                chaveSelecionada: chaveDiaSelecionada,
-                onSelecionar: onSelecionarDia,
-                onAbrirSeletor: onAbrirSeletorDia,
-              ),
+              if (!compacto) ...[
+                SizedBox(height: gap),
+                BarraPlanejamentoEntregaDia(
+                  resumoPorDia: resumoPorDia,
+                  chaveSelecionada: chaveDiaSelecionada,
+                  onSelecionar: onSelecionarDia,
+                  onAbrirSeletor: onAbrirSeletorDia,
+                ),
+              ],
             ],
-            if (mostrarProximosDias) ...[
+            if (mostrarProximosDias && !compacto) ...[
               const SizedBox(height: 2),
               InkWell(
                 onTap: onAlternarProximosDias,
@@ -212,49 +220,51 @@ class EntregasBarraCompacta extends StatelessWidget {
                   mostrarTitulo: false,
                 ),
             ],
-            const SizedBox(height: 6),
-            Text(
-              'Status',
-              style: theme.textTheme.labelMedium?.copyWith(
-                fontWeight: FontWeight.w700,
+            if (!compacto) ...[
+              SizedBox(height: gap),
+              Text(
+                'Status',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 4,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                for (final status in statusRapidos)
+              SizedBox(height: gap),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final status in statusRapidos)
+                    FilterChip(
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      label: Text(
+                        rotuloStatus(status),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      selected: statusSelecionado == status,
+                      onSelected: (_) => onStatusRapido(status),
+                    ),
                   FilterChip(
                     visualDensity: VisualDensity.compact,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    avatar: Icon(
+                      Icons.person_off_outlined,
+                      size: 16,
+                      color: filtroSemMotoristaAtivo
+                          ? theme.colorScheme.error
+                          : Colors.grey,
+                    ),
                     label: Text(
-                      rotuloStatus(status),
+                      estreita ? 'S/ mot.' : 'Sem motorista',
                       style: const TextStyle(fontSize: 12),
                     ),
-                    selected: statusSelecionado == status,
-                    onSelected: (_) => onStatusRapido(status),
+                    selected: filtroSemMotoristaAtivo,
+                    onSelected: onFiltroSemMotorista,
                   ),
-                FilterChip(
-                  visualDensity: VisualDensity.compact,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  avatar: Icon(
-                    Icons.person_off_outlined,
-                    size: 16,
-                    color: filtroSemMotoristaAtivo
-                        ? theme.colorScheme.error
-                        : Colors.grey,
-                  ),
-                  label: Text(
-                    estreita ? 'S/ mot.' : 'Sem motorista',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  selected: filtroSemMotoristaAtivo,
-                  onSelected: onFiltroSemMotorista,
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

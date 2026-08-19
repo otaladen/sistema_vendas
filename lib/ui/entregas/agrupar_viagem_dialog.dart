@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../data/motorista_repository.dart';
 import '../../model/venda.dart';
 import 'logistica_entregas.dart';
 import 'selecionar_motorista_dialog.dart';
@@ -8,7 +7,7 @@ import 'selecionar_motorista_dialog.dart';
 /// Dialogo para escolher motorista ao agrupar pedidos na mesma viagem.
 Future<String?> showAgruparViagemMotoristaDialog(
   BuildContext context,
-  MotoristaRepository motoristaRepository, {
+  dynamic motoristaRepository, {
   String? motoristaSugerido,
   List<Venda> vendasSelecionadas = const [],
 }) {

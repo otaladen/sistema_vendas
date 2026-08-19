@@ -18,12 +18,24 @@ class UsuarioRepository {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_kUsuarios);
     if (raw == null || raw.trim().isEmpty) return [];
-    final decoded = jsonDecode(raw);
-    if (decoded is! List) return [];
-    return decoded
-        .whereType<Map>()
-        .map((e) => UsuarioSistema.fromMap(e.cast<String, dynamic>()))
-        .toList();
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <UsuarioSistema>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        try {
+          out.add(
+            UsuarioSistema.fromMap(Map<String, dynamic>.from(e)),
+          );
+        } catch (_) {
+          // Um registro corrompido nao pode derrubar a lista inteira.
+        }
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<UsuarioSistema?> obterPorId(String id) async {

@@ -77,9 +77,7 @@ class _EntregaPodFotoPanelState extends State<EntregaPodFotoPanel> {
       _erro = null;
     });
 
-    final lan = EntregaPodLanService(
-      configRepository: widget.configRepository ?? AppConfigRepository(),
-    );
+    final lan = EntregaPodLanService();
     final path = await lan.baixarParaCache(
       podFotoPathServidor: servidor,
       podFotoPathLocal: local,
@@ -91,7 +89,8 @@ class _EntregaPodFotoPanelState extends State<EntregaPodFotoPanel> {
       if (path != null && File(path).existsSync()) {
         _caminhoFoto = path;
       } else if (servidor.isNotEmpty) {
-        _erro = 'Foto no servidor indisponivel (verifique rede/sync).';
+        _erro =
+            'Foto nao encontrada. Verifique a rede ou se a retencao ja removeu o arquivo.';
       }
     });
   }

@@ -22,9 +22,23 @@ class MotoristaRepository {
   List<Motorista> pesquisar(String termo) {
     final t = termo.trim().toLowerCase();
     if (t.isEmpty) return listarTodos();
+    final digitos = termo.replaceAll(RegExp(r'\D'), '');
     return listarTodos().where((m) {
-      return m.nome.toLowerCase().contains(t) ||
-          m.telefone.toLowerCase().contains(t);
+      if (m.nome.toLowerCase().contains(t) ||
+          m.telefone.toLowerCase().contains(t) ||
+          m.codigoInterno.toLowerCase().contains(t) ||
+          m.cpf.toLowerCase().contains(t) ||
+          m.cnhNumero.toLowerCase().contains(t) ||
+          m.cnhCategoria.toLowerCase().contains(t)) {
+        return true;
+      }
+      if (digitos.isEmpty) return false;
+      final nums = [
+        m.telefone,
+        m.cpf,
+        m.cnhNumero,
+      ].map((s) => s.replaceAll(RegExp(r'\D'), ''));
+      return nums.any((n) => n.contains(digitos));
     }).toList();
   }
 
@@ -44,6 +58,16 @@ class MotoristaRepository {
     return ok;
   }
 
+  String proximoCodigoInterno() {
+    var maior = 0;
+    for (final m in listarTodos()) {
+      final digits = m.codigoInterno.replaceAll(RegExp(r'\D'), '');
+      final n = int.tryParse(digits);
+      if (n != null && n > maior) maior = n;
+    }
+    return (maior + 1).toString();
+  }
+
   bool existeNomeParaOutro({
     required String nomeNormalizado,
     required int ignorarId,
@@ -54,6 +78,46 @@ class MotoristaRepository {
       if (m.id != ignorarId && m.nome.trim().toLowerCase() == n) {
         return true;
       }
+    }
+    return false;
+  }
+
+  bool existeCodigoParaOutro({
+    required String codigoNormalizado,
+    required int ignorarId,
+  }) {
+    final c = codigoNormalizado.trim().toLowerCase();
+    if (c.isEmpty) return false;
+    for (final m in listarTodos()) {
+      if (m.id != ignorarId && m.codigoInterno.trim().toLowerCase() == c) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool existeCpfParaOutro({
+    required String cpfSomenteDigitos,
+    required int ignorarId,
+  }) {
+    final cpf = cpfSomenteDigitos.replaceAll(RegExp(r'\D'), '');
+    if (cpf.length != 11) return false;
+    for (final m in listarTodos()) {
+      if (m.id == ignorarId) continue;
+      if (m.cpf.replaceAll(RegExp(r'\D'), '') == cpf) return true;
+    }
+    return false;
+  }
+
+  bool existeCnhParaOutro({
+    required String cnhSomenteDigitos,
+    required int ignorarId,
+  }) {
+    final cnh = cnhSomenteDigitos.replaceAll(RegExp(r'\D'), '');
+    if (cnh.isEmpty) return false;
+    for (final m in listarTodos()) {
+      if (m.id == ignorarId) continue;
+      if (m.cnhNumero.replaceAll(RegExp(r'\D'), '') == cnh) return true;
     }
     return false;
   }

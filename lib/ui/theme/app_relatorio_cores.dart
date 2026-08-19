@@ -29,6 +29,10 @@ enum AppRelatorioId {
   devolucoesPeriodo,
   pendenciasEntrega,
   historicoEntregas,
+  margemMarkup,
+  performanceEntregas,
+  sugestaoCompra,
+  fiscalMensal,
 }
 
 /// Cores de destaque dos relatorios derivadas do tema ativo.
@@ -83,6 +87,14 @@ abstract final class AppRelatorioCores {
         return AppModuloCores.destino(context, MainMenuDestino.entregas);
       case AppRelatorioId.historicoEntregas:
         return AppModuloCores.harmonizar(scheme, 230);
+      case AppRelatorioId.margemMarkup:
+        return AppModuloCores.harmonizar(scheme, 145);
+      case AppRelatorioId.performanceEntregas:
+        return AppModuloCores.destino(context, MainMenuDestino.entregas);
+      case AppRelatorioId.sugestaoCompra:
+        return AppModuloCores.destino(context, MainMenuDestino.estoque);
+      case AppRelatorioId.fiscalMensal:
+        return AppModuloCores.destino(context, MainMenuDestino.notasFiscais);
     }
   }
 }

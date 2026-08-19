@@ -20,6 +20,12 @@ class ItemVenda {
     required this.precoCustoUnitario,
     this.promocaoId = 0,
     this.promocaoNomeSnapshot = '',
+    this.loteConsumosJson = '',
+    this.botaForaAplicado = false,
+    this.percentualBotaForaAplicado = 0,
+    this.lojaOrigemMercadoria = '',
+    this.buscarNaLojaStatus = '',
+    this.quantidadeBuscarNaLoja = 0,
   });
 
   @Id(assignable: true)
@@ -51,32 +57,60 @@ class ItemVenda {
   /// Nome da campanha no momento da venda (relatorios).
   String promocaoNomeSnapshot;
 
+  /// JSON: [{"loteId":1,"numeroLote":"001","dataValidade":"...","qtd":5}]
+  String loteConsumosJson;
+
+  /// Desconto Bota-Fora aplicado automaticamente no PDV.
+  bool botaForaAplicado;
+
+  double percentualBotaForaAplicado;
+
+  /// Loja de onde este item saiu de fato.
+  /// Vazio (antes da saida) = padrao carreto: outra loja, sem baixa fisica aqui.
+  String lojaOrigemMercadoria;
+
+  /// Motorista pediu para buscar nesta loja: vazio | solicitado | separado.
+  String buscarNaLojaStatus;
+
+  /// Unidades desta linha que a outra loja nao tem (buscar nesta prateleira).
+  /// Zero = linha inteira segue a origem gravada.
+  int quantidadeBuscarNaLoja;
+
   final produto = ToOne<Produto>();
   final venda = ToOne<Venda>();
 
+  /// Leitura segura: Terminal Leve / entidade detached nao tem ToOne inicializado.
+  Produto? get produtoOuNull {
+    try {
+      return produto.target;
+    } catch (_) {
+      return null;
+    }
+  }
+
   double get quantidadeVendaEfetiva =>
       ProdutoEmbalagem.quantidadeVendaEfetivaItem(
-        produto: produto.target,
+        produto: produtoOuNull,
         quantidadeArmazenada: quantidade,
       );
 
   /// Quantidade em unidades de estoque ([Produto.unidade]) para baixa/reserva.
   int get quantidadeUnidadeEstoque =>
       ProdutoEmbalagem.unidadeEstoqueDeQuantidadeArmazenada(
-        produto: produto.target,
+        produto: produtoOuNull,
         quantidadeArmazenada: quantidade,
       );
 
   int quantidadeUnidadeEstoqueDe(int quantidadeArmazenada) =>
       ProdutoEmbalagem.unidadeEstoqueDeQuantidadeArmazenada(
-        produto: produto.target,
+        produto: produtoOuNull,
         quantidadeArmazenada: quantidadeArmazenada,
       );
 
   /// Quantidade formatada para listagens, cupom e detalhe da venda.
   String get quantidadeExibicaoVenda =>
       ProdutoEmbalagem.textoQuantidadeArmazenada(
-        produto: produto.target,
+        produto: produtoOuNull,
         quantidadeArmazenada: quantidade,
       );
 

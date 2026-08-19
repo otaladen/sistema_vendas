@@ -1,4 +1,4 @@
-/// Tabelas de preco do PDV (preco1 prazo, preco2 vista, preco3 atacado).
+/// Tabelas de preco do PDV (preco1 prazo, preco2 vista, preco3 especial).
 abstract final class PdvTabelaPrecoUtil {
   PdvTabelaPrecoUtil._();
 
@@ -29,7 +29,7 @@ abstract final class PdvTabelaPrecoUtil {
       case 'preco2':
         return 'Vista';
       case 'preco3':
-        return 'Atacado';
+        return 'Especial';
       default:
         return 'Prazo';
     }

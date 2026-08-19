@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entrega_venda_helper.dart';
+import '../../domain/entregas/loja_origem_mercadoria.dart';
+import '../../domain/venda_relacao_safe.dart';
 import '../../model/venda.dart';
+import 'entrega_insucesso_faixa.dart';
 import 'entrega_pod_chip.dart';
 import 'logistica_entregas.dart';
 
@@ -21,6 +24,8 @@ class EntregaCardListaCallbacks {
     required this.corStatus,
     required this.observacaoSemMotorista,
     required this.textoResumoComplemento,
+    this.textoBuscarNaLoja,
+    this.onSepararNestaLoja,
     required this.podeDevolucaoPosCarreto,
     required this.podeRetiradaLojaAntesSaida,
     required this.onTapDetalhes,
@@ -48,6 +53,8 @@ class EntregaCardListaCallbacks {
   final Color Function(ColorScheme scheme, String status) corStatus;
   final String Function(Venda) observacaoSemMotorista;
   final String? Function(Venda) textoResumoComplemento;
+  final String? Function(Venda)? textoBuscarNaLoja;
+  final Future<void> Function(Venda venda)? onSepararNestaLoja;
   final bool Function(Venda) podeDevolucaoPosCarreto;
   final bool Function(Venda) podeRetiradaLojaAntesSaida;
   final VoidCallback onTapDetalhes;
@@ -100,7 +107,7 @@ class EntregaCardLista extends StatelessWidget {
     final progressoCarga = callbacks.progressoCarga(venda);
     final corCarga = callbacks.corProgressoCarga(context, progressoCarga);
     final acaoLabel = callbacks.labelAcaoPrincipal(venda);
-    final cliente = venda.cliente.target?.nomeRazao ?? 'Sem cliente';
+    final cliente = VendaRelacaoSafe.nomeCliente(venda);
     final bairro = callbacks.extrairBairro(venda);
     final motorista = callbacks.nomeMotorista(venda);
     final semMotorista = !motoristaLogisticaDefinido(motorista);
@@ -212,6 +219,18 @@ class EntregaCardLista extends StatelessWidget {
                                 materialTapTargetSize:
                                     MaterialTapTargetSize.shrinkWrap,
                               ),
+                            if (venda.lojaOrigemMercadoria.trim().isNotEmpty &&
+                                !LojaOrigemMercadoria.ehLocal(
+                                  venda.lojaOrigemMercadoria,
+                                ))
+                              Chip(
+                                label: Text(
+                                  'Origem: ${LojaOrigemMercadoria.rotulo(venda.lojaOrigemMercadoria)}',
+                                ),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
                             EntregaPodChip(venda: venda),
                           ],
                         ),
@@ -227,6 +246,20 @@ class EntregaCardLista extends StatelessWidget {
                               ),
                             ),
                           ),
+                        if (callbacks.textoBuscarNaLoja?.call(venda)
+                            case final buscar?)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              buscar,
+                              style: TextStyle(
+                                color: Colors.orange.shade900,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        EntregaInsucessoFaixa(venda: venda),
                       ],
                     ),
                   ),
@@ -247,6 +280,20 @@ class EntregaCardLista extends StatelessWidget {
                       ),
                     ),
                   if (acaoLabel != null) const SizedBox(width: 4),
+                  if (callbacks.textoBuscarNaLoja?.call(venda) != null &&
+                      callbacks.onSepararNestaLoja != null &&
+                      callbacks.podeGerenciarStatus)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: OutlinedButton(
+                        onPressed: () => callbacks.onSepararNestaLoja!(venda),
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          foregroundColor: Colors.orange.shade900,
+                        ),
+                        child: const Text('Separar'),
+                      ),
+                    ),
                   IconButton(
                     tooltip: 'Navegar',
                     visualDensity: VisualDensity.compact,
@@ -303,10 +350,18 @@ class EntregaCardLista extends StatelessWidget {
                           if (callbacks.observacaoSemMotorista(venda).trim().isNotEmpty)
                             Text('Obs: ${callbacks.observacaoSemMotorista(venda)}'),
                           if (venda.tipoEntrega == EntregaVendaHelper.tipoMisto)
-                            Text(
-                              EntregaVendaHelper.resumoContagem(
-                                venda.itens.map((i) => i.tipoEntregaItem),
-                              ),
+                            Builder(
+                              builder: (context) {
+                                Iterable<String> tipos = const [];
+                                try {
+                                  tipos = venda.itens.map(
+                                    (i) => i.tipoEntregaItem,
+                                  );
+                                } catch (_) {}
+                                return Text(
+                                  EntregaVendaHelper.resumoContagem(tipos),
+                                );
+                              },
                             ),
                           const SizedBox(height: 4),
                           Wrap(
@@ -406,13 +461,8 @@ class EntregaCardLista extends StatelessWidget {
       ),
       PopupMenuItem(
         enabled: callbacks.podeGerenciarStatus,
-        value: 'roteirizada',
-        child: const Text('Status: Roteirizada'),
-      ),
-      PopupMenuItem(
-        enabled: callbacks.podeGerenciarStatus,
         value: 'saiu_entrega',
-        child: const Text('Status: Saiu para entrega'),
+        child: const Text('Liberar saida (se o motorista nao fez)'),
       ),
       if (venda.statusEntrega != 'saiu_entrega' &&
           venda.statusEntrega != 'entregue_complemento_pendente')

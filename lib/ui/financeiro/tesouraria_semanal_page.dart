@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../data/api/lan_api_client.dart';
+import '../../data/api/lan_api_event_hub.dart';
 import '../../data/objectbox.dart';
-import '../../data/venda_repository.dart';
 import '../../domain/financeiro_resumo.dart';
 import '../../domain/tesouraria_semanal.dart';
 import '../theme/app_modulo_cores.dart';
 import '../theme/app_semantic_helper.dart';
+import '../widgets/lan_api_feedback.dart';
 import '../../model/caixa_sessao.dart';
 import '../../data/caixa_sessao_repository.dart';
 
@@ -18,12 +20,14 @@ final DateFormat _diaCurto = DateFormat('dd/MM');
 class TesourariaSemanalPage extends StatefulWidget {
   const TesourariaSemanalPage({
     super.key,
-    required this.objectBox,
+    this.objectBox,
     required this.vendaRepository,
+    this.lanApiClient,
   });
 
-  final ObjectBox objectBox;
-  final VendaRepository vendaRepository;
+  final ObjectBox? objectBox;
+  final dynamic vendaRepository;
+  final LanApiClient? lanApiClient;
 
   @override
   State<TesourariaSemanalPage> createState() => _TesourariaSemanalPageState();
@@ -43,26 +47,52 @@ class _TesourariaSemanalPageState extends State<TesourariaSemanalPage> {
 
   Future<void> _carregar() async {
     setState(() => _carregando = true);
-    final repo = CaixaSessaoRepository();
-    final terminalId = await repo.obterTerminalId();
-    final sessoes = await repo.listarTodasSessoes();
-    final CaixaSessao? sessao = sessoes[terminalId];
+    try {
+      final usaApi = widget.lanApiClient != null;
+      if (usaApi &&
+          !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+        if (mounted) setState(() => _carregando = false);
+        return;
+      }
+      if (!usaApi && widget.objectBox == null) {
+        throw StateError(
+          'Tesouraria indisponivel: sem API do servidor nem banco local.',
+        );
+      }
 
-    final snap = TesourariaSemanalService.montar(
-      vendaRepository: widget.vendaRepository,
-      objectBox: widget.objectBox,
-    );
-    final resumo = FinanceiroResumoService.montar(
-      vendaRepository: widget.vendaRepository,
-      objectBox: widget.objectBox,
-      sessaoCaixaLocal: sessao,
-    );
-    if (!mounted) return;
-    setState(() {
-      _snapshot = snap;
-      _resumo = resumo;
-      _carregando = false;
-    });
+      late final TesourariaSemanalSnapshot snap;
+      late final FinanceiroResumoSnapshot resumo;
+      if (usaApi) {
+        final t = await widget.lanApiClient!.tesourariaSemanal();
+        snap = TesourariaSemanalSnapshot.fromMap(t);
+        final r = await widget.lanApiClient!.financeiroResumo();
+        resumo = FinanceiroResumoSnapshot.fromMap(r);
+      } else {
+        final repo = CaixaSessaoRepository();
+        final terminalId = await repo.obterTerminalId();
+        final sessoes = await repo.listarTodasSessoes();
+        final CaixaSessao? sessao = sessoes[terminalId];
+        snap = TesourariaSemanalService.montar(
+          vendaRepository: widget.vendaRepository,
+          objectBox: widget.objectBox!,
+        );
+        resumo = FinanceiroResumoService.montar(
+          vendaRepository: widget.vendaRepository,
+          objectBox: widget.objectBox!,
+          sessaoCaixaLocal: sessao,
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _snapshot = snap;
+        _resumo = resumo;
+        _carregando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _carregando = false);
+      LanApiFeedback.snackErro(context, e, prefixo: 'Tesouraria');
+    }
   }
 
   @override

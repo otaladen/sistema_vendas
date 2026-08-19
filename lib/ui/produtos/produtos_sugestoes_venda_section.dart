@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../data/produto_repository.dart';
+import '../../data/api/produto_api_repository.dart';
 import '../../domain/sugestao_venda_tipo.dart';
 import '../../model/produto.dart';
 import '../../model/produto_sugestao_venda.dart';
@@ -46,7 +46,8 @@ class ProdutosSugestoesVendaSection extends StatelessWidget {
     this.produtoEmEdicaoId,
   });
 
-  final ProdutoRepository produtoRepository;
+  /// [ProdutoRepository] local ou API no terminal leve.
+  final dynamic produtoRepository;
   final List<SugestaoVendaCadastroDraft> sugestoes;
   final ValueChanged<List<SugestaoVendaCadastroDraft>> onChanged;
   final int? produtoEmEdicaoId;
@@ -203,7 +204,7 @@ class _SugestaoVendaDialog extends StatefulWidget {
     required this.idsJaUsados,
   });
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
   final int? produtoEmEdicaoId;
   final Set<int> idsJaUsados;
 
@@ -227,17 +228,29 @@ class _SugestaoVendaDialogState extends State<_SugestaoVendaDialog> {
     super.dispose();
   }
 
-  void _buscar() {
+  Future<void> _buscar() async {
     final termo = _buscaCtrl.text.trim();
     if (termo.length < 2) {
       setState(() => _resultados = const []);
       return;
     }
-    final todos = widget.produtoRepository
-        .pesquisarPadraoPdv(termo)
-        .where((p) => p.ativo)
-        .take(40)
-        .toList();
+    List<Produto> todos;
+    final repo = widget.produtoRepository;
+    try {
+      if (repo is ProdutoApiRepository) {
+        todos = await repo.pesquisarRemoto(termo, limite: 40);
+      } else {
+        todos = (repo.pesquisarPadraoPdv(termo) as List)
+            .whereType<Produto>()
+            .toList();
+      }
+    } catch (_) {
+      todos = (repo.pesquisarPadraoPdv(termo) as List)
+          .whereType<Produto>()
+          .toList();
+    }
+    todos = todos.where((p) => p.ativo).take(40).toList();
+    if (!mounted) return;
     setState(() => _resultados = todos);
   }
 

@@ -52,43 +52,84 @@ class EntregaVendaHelper {
     return tiposItens.any((t) => normalizarTipoItem(t) == tipoRetiradaFutura);
   }
 
-  static bool vendaTemItensCarreto(Venda venda) {
-    if (venda.tipoEntrega == tipoEntregaLoja) return true;
-    return venda.itens.any(
-      (i) => normalizarTipoItem(i.tipoEntregaItem) == tipoEntregaLoja,
-    );
+  static bool vendaTemItensCarreto(Venda venda, {List<ItemVenda>? itens}) {
+    try {
+      final lista = itens ?? List<ItemVenda>.from(venda.itens);
+      if (lista.isNotEmpty) {
+        return lista.any(
+          (i) => normalizarTipoItem(i.tipoEntregaItem) == tipoEntregaLoja,
+        );
+      }
+    } catch (_) {}
+    return venda.tipoEntrega == tipoEntregaLoja;
   }
 
-  static bool vendaTemItensRetiradaFutura(Venda venda) {
-    if (venda.tipoEntrega == tipoRetiradaFutura && venda.entregaPendente) {
-      return true;
-    }
-    return venda.itens.any(
-      (i) => normalizarTipoItem(i.tipoEntregaItem) == tipoRetiradaFutura,
-    );
+  static bool vendaTemItensRetiradaFutura(Venda venda, {List<ItemVenda>? itens}) {
+    try {
+      final lista = itens ?? List<ItemVenda>.from(venda.itens);
+      if (lista.isNotEmpty) {
+        return lista.any(
+          (i) => normalizarTipoItem(i.tipoEntregaItem) == tipoRetiradaFutura,
+        );
+      }
+    } catch (_) {}
+    return venda.tipoEntrega == tipoRetiradaFutura && venda.entregaPendente;
   }
 
   /// Itens "leva agora" com quantidade ainda nao baixada no cupom interno.
-  static bool vendaTemItensRetiradaImediataPendenteCupom(Venda venda) {
-    return venda.itens.any(
-      (i) =>
-          tipoEfetivoItem(i) == tipoRetirada &&
-          i.quantidade > 0 &&
-          i.quantidadeJaRetirada < i.quantidade,
-    );
+  static bool vendaTemItensRetiradaImediataPendenteCupom(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
+    try {
+      final lista = itens ?? List<ItemVenda>.from(venda.itens);
+      return lista.any(
+        (i) =>
+            tipoEfetivoItem(i) == tipoRetirada &&
+            i.quantidade > 0 &&
+            i.quantidadeJaRetirada < i.quantidade,
+      );
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Orcamentos antigos (tipo so no cabecalho): replica no item antes de finalizar.
-  static void aplicarLegadoTipoUnicoNosItensSeNecessario(Venda venda) {
-    if (venda.tipoEntrega == tipoMisto || venda.tipoEntrega == tipoRetirada) {
+  ///
+  /// Regras (nao promover "leva agora" a reserva por engano):
+  /// - Cabecalho [tipoRetirada] ou [tipoMisto]: **nunca** altera itens.
+  /// - Cabecalho unico futura/carreto + **todos** os itens ainda no padrao
+  ///   "retirada" (tipo de item perdido no persist): replica o cabecalho.
+  /// - Nao usar [Venda.entregaPendente] sozinho — flag stale em orcamento
+  ///   "leva agora" convertia tudo em reserva sem baixa fisica.
+  static void aplicarLegadoTipoUnicoNosItensSeNecessario(
+    Venda venda, {
+    Iterable<ItemVenda>? itens,
+  }) {
+    List<ItemVenda> lista;
+    try {
+      lista = (itens ?? venda.itens).toList();
+    } catch (_) {
       return;
     }
-    final todosPadraoRetirada = venda.itens.every(
+    if (lista.isEmpty) return;
+
+    final cabecalho = venda.tipoEntrega;
+    if (cabecalho == tipoMisto || cabecalho == tipoRetirada) {
+      return;
+    }
+    if (cabecalho != tipoRetiradaFutura && cabecalho != tipoEntregaLoja) {
+      return;
+    }
+
+    final todosPadraoRetirada = lista.every(
       (i) => normalizarTipoItem(i.tipoEntregaItem) == tipoRetirada,
     );
     if (!todosPadraoRetirada) return;
-    for (final item in venda.itens) {
-      item.tipoEntregaItem = normalizarTipoItem(venda.tipoEntrega);
+
+    final tipoCabecalho = normalizarTipoItem(cabecalho);
+    for (final item in lista) {
+      item.tipoEntregaItem = tipoCabecalho;
     }
   }
 
@@ -104,6 +145,18 @@ class EntregaVendaHelper {
         return 'Retirada futura';
       default:
         return 'Leva agora';
+    }
+  }
+
+  /// Modalidade curta para PDF de orcamento (materiais de construcao).
+  static String rotuloModalidadeOrcamentoPdf(String tipo) {
+    switch (normalizarTipoItem(tipo)) {
+      case tipoEntregaLoja:
+        return '[ENTREGA/CARRETO]';
+      case tipoRetiradaFutura:
+        return '[RETIRADA FUTURA]';
+      default:
+        return '[RETIRA LOGO]';
     }
   }
 
@@ -133,10 +186,20 @@ class EntregaVendaHelper {
   }
 
   /// Texto de entrega no cabecalho (PDF / listagens).
-  static String textoEntregaCabecalhoVenda(Venda venda) {
+  ///
+  /// Passe [itens] no Terminal Leve (ToMany detached quebra sem override).
+  static String textoEntregaCabecalhoVenda(
+    Venda venda, {
+    Iterable<ItemVenda>? itens,
+  }) {
     if (venda.tipoEntrega == tipoMisto) {
-      final resumo = resumoContagem(venda.itens.map((i) => i.tipoEntregaItem));
-      return resumo.isEmpty ? 'Venda mista' : 'Venda mista ($resumo)';
+      try {
+        final lista = itens ?? venda.itens;
+        final resumo = resumoContagem(lista.map((i) => i.tipoEntregaItem));
+        return resumo.isEmpty ? 'Venda mista' : 'Venda mista ($resumo)';
+      } catch (_) {
+        return 'Venda mista';
+      }
     }
     return rotuloTipoEntregaVenda(venda.tipoEntrega);
   }
@@ -177,30 +240,53 @@ class EntregaVendaHelper {
   }
 
   /// Venda com itens migrados retirada futura > carreto (nao usar retirada na loja nativa).
-  static bool vendaTemItensMigradosRetiradaParaCarreto(Venda venda) {
-    return venda.itens.any(itemMigradoRetiradaFuturaParaCarreto);
+  static bool vendaTemItensMigradosRetiradaParaCarreto(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
+    try {
+      final lista = itens ?? List<ItemVenda>.from(venda.itens);
+      return lista.any(itemMigradoRetiradaFuturaParaCarreto);
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Cliente pode buscar na loja itens de carreto antes do romaneio sair.
-  static bool vendaPermiteRetiradaLojaCarretoAntesSaida(Venda venda) {
+  static bool vendaPermiteRetiradaLojaCarretoAntesSaida(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
     if (venda.cancelada || venda.status != 'finalizada') return false;
     if (!venda.carretoReservaAteSaida || venda.cargaSaiu) return false;
-    return venda.itens.any((i) => i.quantidadeAindaNoCarretoAntesSaida > 0);
+    try {
+      final lista = itens ?? List<ItemVenda>.from(venda.itens);
+      return lista.any((i) => i.quantidadeAindaNoCarretoAntesSaida > 0);
+    } catch (_) {
+      return false;
+    }
   }
 
-  static bool vendaCarretoReservaNativaSemMigracao(Venda venda) {
+  static bool vendaCarretoReservaNativaSemMigracao(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
     return venda.carretoReservaAteSaida &&
-        vendaTemItensCarreto(venda) &&
-        !vendaTemItensMigradosRetiradaParaCarreto(venda);
+        vendaTemItensCarreto(venda, itens: itens) &&
+        !vendaTemItensMigradosRetiradaParaCarreto(venda, itens: itens);
   }
 
   /// Mesma regra da tela Entregas / romaneio consolidado.
-  static int quantidadeRomaneioCarga(Venda venda, ItemVenda item) {
+  static int quantidadeRomaneioCarga(
+    Venda venda,
+    ItemVenda item, {
+    List<ItemVenda>? itens,
+  }) {
     if (!itemEntraNaCargaEntrega(venda, item)) return 0;
-    if (vendaTemItensMigradosRetiradaParaCarreto(venda)) {
+    if (vendaTemItensMigradosRetiradaParaCarreto(venda, itens: itens)) {
       return item.quantidadeParaExibicaoEntrega(true);
     }
-    if (vendaCarretoReservaNativaSemMigracao(venda)) {
+    if (vendaCarretoReservaNativaSemMigracao(venda, itens: itens)) {
       return item.quantidadeParaExibicaoEntrega(
         false,
         carretoReservaNativoAntesSaida: true,

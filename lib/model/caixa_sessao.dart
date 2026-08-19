@@ -57,7 +57,7 @@ class CaixaSessao {
   static CaixaSessao fromMap(Map<String, dynamic> map) {
     return CaixaSessao(
       terminalId: (map['terminalId'] ?? '').toString(),
-      aberto: map['aberto'] == true,
+      aberto: boolFrom(map['aberto']),
       operador: (map['operador'] ?? '').toString(),
       aberturaEm: DateTime.tryParse((map['aberturaEm'] ?? '').toString()),
       fundoTroco: ((map['fundoTroco'] as num?) ?? 0).toDouble(),
@@ -65,6 +65,14 @@ class CaixaSessao {
       sangrias: ((map['sangrias'] as num?) ?? 0).toDouble(),
       atualizadoEm: DateTime.tryParse((map['atualizadoEm'] ?? '').toString()),
     );
+  }
+
+  /// Aceita bool, 1/0 e "true"/"false" (prefs / JSON legados).
+  static bool boolFrom(Object? v) {
+    if (v == true || v == 1) return true;
+    if (v == false || v == 0 || v == null) return false;
+    final s = v.toString().trim().toLowerCase();
+    return s == 'true' || s == '1' || s == 'sim';
   }
 
   static CaixaSessao vazia(String terminalId) => CaixaSessao(terminalId: terminalId);

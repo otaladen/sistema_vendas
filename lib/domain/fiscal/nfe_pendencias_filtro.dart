@@ -1,5 +1,8 @@
 import '../entrega_venda_helper.dart';
+import '../entregas/romaneio_carga_merge.dart';
+import '../venda_relacao_safe.dart';
 import '../../model/cliente.dart';
+import '../../model/item_venda.dart';
 import '../../model/venda.dart';
 import 'cliente_fiscal_helper.dart';
 import 'nfe_pendencias_service.dart';
@@ -31,26 +34,36 @@ class NfePendenciasFiltro {
     );
   }
 
-  static bool vendaComEntregaOuCarreto(Venda venda) {
+  static bool vendaComEntregaOuCarreto(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
     if (venda.valorFrete > 0.009) return true;
     if (venda.tipoEntrega == EntregaVendaHelper.tipoEntregaLoja) {
       return true;
     }
+    final lista = itens ?? RomaneioCargaMerge.itensDaVendaSafe(venda);
     if (venda.tipoEntrega == EntregaVendaHelper.tipoMisto) {
-      return venda.itens.any(
+      return lista.any(
         (i) =>
             EntregaVendaHelper.tipoEfetivoItem(i) ==
             EntregaVendaHelper.tipoEntregaLoja,
       );
     }
-    return venda.itens.any(
+    return lista.any(
       (i) => EntregaVendaHelper.itemEntraNaCargaEntrega(venda, i),
     );
   }
 
-  bool aceita(NfePendenciaVenda pendencia) {
+  bool aceita(
+    NfePendenciaVenda pendencia, {
+    dynamic clienteRepository,
+  }) {
     final venda = pendencia.venda;
-    final cliente = venda.cliente.target;
+    final cliente = VendaRelacaoSafe.cliente(
+      venda,
+      clienteRepository: clienteRepository,
+    );
     if (somenteCnpj && !_clienteCnpj(cliente)) return false;
     if (somenteComEntrega && !vendaComEntregaOuCarreto(venda)) return false;
     if (valorMinimo > 0.009 && venda.total < valorMinimo) return false;
@@ -60,8 +73,13 @@ class NfePendenciasFiltro {
   static bool _clienteCnpj(Cliente? cliente) =>
       ClienteFiscalHelper.clienteExigeNfe55(cliente);
 
-  List<NfePendenciaVenda> aplicar(List<NfePendenciaVenda> lista) {
+  List<NfePendenciaVenda> aplicar(
+    List<NfePendenciaVenda> lista, {
+    dynamic clienteRepository,
+  }) {
     if (!ativo) return lista;
-    return lista.where(aceita).toList();
+    return lista
+        .where((p) => aceita(p, clienteRepository: clienteRepository))
+        .toList();
   }
 }

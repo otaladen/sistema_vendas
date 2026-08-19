@@ -1,7 +1,48 @@
 import '../../data/nfe_saida_fiscal_store.dart';
 import '../../data/venda_repository.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../model/venda.dart';
 import 'nfe_pendencias_service.dart';
+
+/// Linha leve de NFC-e pendente (API / terminal sem entidade Venda).
+class FiscalBloqueioNfcePreview {
+  const FiscalBloqueioNfcePreview({
+    required this.vendaId,
+    required this.rotulo,
+    required this.dataIso,
+    required this.total,
+  });
+
+  final int vendaId;
+  final String rotulo;
+  final String dataIso;
+  final double total;
+
+  Map<String, dynamic> toJson() => {
+        'vendaId': vendaId,
+        'rotulo': rotulo,
+        'data': dataIso,
+        'total': total,
+      };
+
+  factory FiscalBloqueioNfcePreview.fromJson(Map<String, dynamic> m) {
+    return FiscalBloqueioNfcePreview(
+      vendaId: (m['vendaId'] as num?)?.toInt() ?? 0,
+      rotulo: (m['rotulo'] ?? '').toString(),
+      dataIso: (m['data'] ?? '').toString(),
+      total: (m['total'] as num?)?.toDouble() ?? 0,
+    );
+  }
+
+  factory FiscalBloqueioNfcePreview.fromVenda(Venda v) {
+    return FiscalBloqueioNfcePreview(
+      vendaId: v.id,
+      rotulo: VendaDocumentoRotuloHelper.rotuloIdentificacaoLista(v),
+      dataIso: v.data.toUtc().toIso8601String(),
+      total: v.total,
+    );
+  }
+}
 
 /// Pendencias que podem afetar o fechamento contabil do mes.
 class FiscalBloqueiosFechamento {
@@ -11,6 +52,11 @@ class FiscalBloqueiosFechamento {
     required this.vendasNfceProcessando,
     required this.nfeProcessando,
     required this.nfeRejeitadas,
+    this.qtdNfceProcessandoOverride,
+    this.qtdNfeProcessandoOverride,
+    this.qtdNfeRejeitadasOverride,
+    this.bloqueiaExportacaoOverride,
+    this.nfceProcessandoPreview = const [],
   });
 
   final int mes;
@@ -19,17 +65,39 @@ class FiscalBloqueiosFechamento {
   final List<NfeSaidaFiscalRegistro> nfeProcessando;
   final List<NfeSaidaFiscalRegistro> nfeRejeitadas;
 
-  int get qtdNfceProcessando => vendasNfceProcessando.length;
-  int get qtdNfeProcessando => nfeProcessando.length;
-  int get qtdNfeRejeitadas => nfeRejeitadas.length;
+  /// Contagens vindas da API (terminal leve) quando as listas locais estao vazias.
+  final int? qtdNfceProcessandoOverride;
+  final int? qtdNfeProcessandoOverride;
+  final int? qtdNfeRejeitadasOverride;
+  final bool? bloqueiaExportacaoOverride;
+
+  /// Detalhe das NFC-e processando (servidor local ou payload da API).
+  final List<FiscalBloqueioNfcePreview> nfceProcessandoPreview;
+
+  int get qtdNfceProcessando =>
+      qtdNfceProcessandoOverride ?? vendasNfceProcessando.length;
+  int get qtdNfeProcessando =>
+      qtdNfeProcessandoOverride ?? nfeProcessando.length;
+  int get qtdNfeRejeitadas =>
+      qtdNfeRejeitadasOverride ?? nfeRejeitadas.length;
 
   /// Bloqueia exportacao do fechamento (NFC-e sem chave no periodo).
-  bool get bloqueiaExportacao => qtdNfceProcessando > 0;
+  bool get bloqueiaExportacao =>
+      bloqueiaExportacaoOverride ?? qtdNfceProcessando > 0;
 
   bool get temBloqueioCritico =>
       bloqueiaExportacao || qtdNfeProcessando > 0;
 
   bool get temAviso => temBloqueioCritico || qtdNfeRejeitadas > 0;
+
+  List<FiscalBloqueioNfcePreview> get nfcePreviewEfetivo {
+    if (nfceProcessandoPreview.isNotEmpty) return nfceProcessandoPreview;
+    if (vendasNfceProcessando.isEmpty) return const [];
+    return [
+      for (final v in vendasNfceProcessando)
+        FiscalBloqueioNfcePreview.fromVenda(v),
+    ];
+  }
 }
 
 abstract final class FiscalBloqueiosFechamentoService {
@@ -87,6 +155,9 @@ abstract final class FiscalBloqueiosFechamentoService {
       vendasNfceProcessando: nfce,
       nfeProcessando: nfeProc,
       nfeRejeitadas: nfeRej,
+      nfceProcessandoPreview: [
+        for (final v in nfce) FiscalBloqueioNfcePreview.fromVenda(v),
+      ],
     );
   }
 

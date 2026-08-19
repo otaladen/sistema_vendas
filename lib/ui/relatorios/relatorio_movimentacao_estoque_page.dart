@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/movimento_estoque_repository.dart';
 import '../../data/objectbox.dart';
-import '../../data/produto_repository.dart';
+import '../../data/api/lan_api_client.dart';
+import '../../data/sync/sync_entity_codec_operacional.dart';
 import '../../domain/estoque/movimento_estoque_helper.dart';
+import '../../model/movimento_estoque.dart';
 import '../../domain/relatorios/movimentacao_estoque_relatorio.dart';
 import '../../model/produto.dart';
 import '../widgets/produto_busca_input.dart';
@@ -17,11 +21,13 @@ class RelatorioMovimentacaoEstoquePage extends StatefulWidget {
   const RelatorioMovimentacaoEstoquePage({
     super.key,
     required this.produtoRepository,
-    required this.objectBox,
+    this.objectBox,
+    this.lanApiClient,
   });
 
-  final ProdutoRepository produtoRepository;
-  final ObjectBox objectBox;
+  final dynamic produtoRepository;
+  final ObjectBox? objectBox;
+  final LanApiClient? lanApiClient;
 
   @override
   State<RelatorioMovimentacaoEstoquePage> createState() =>
@@ -45,12 +51,14 @@ class _RelatorioMovimentacaoEstoquePageState
   List<ResumoMovimentacaoEstoqueLinha> _resumo = [];
   List<DetalheMovimentacaoEstoqueLinha> _detalhes = [];
 
-  MovimentoEstoqueRepository get _movRepo =>
-      MovimentoEstoqueRepository(widget.objectBox);
+  MovimentoEstoqueRepository? get _movRepo => widget.objectBox == null
+      ? null
+      : MovimentoEstoqueRepository(widget.objectBox!);
 
   Map<int, Produto> get _produtosPorId {
     final map = <int, Produto>{};
-    for (final p in widget.produtoRepository.listarTodos()) {
+    for (final Produto p
+        in (widget.produtoRepository.listarTodos() as List).cast<Produto>()) {
       map[p.id] = p;
     }
     return map;
@@ -62,17 +70,18 @@ class _RelatorioMovimentacaoEstoquePageState
     final porBarras = widget.produtoRepository.resolverLeitorCodigoBarras(
       t,
       somenteAtivos: false,
-    );
+    ) as Produto?;
     if (porBarras != null) return porBarras;
-    final hits = widget.produtoRepository.pesquisarPadraoPdv(
+    final hits = (widget.produtoRepository.pesquisarPadraoPdv(
       t,
       limite: 20,
       somenteAtivos: false,
-    );
+    ) as List)
+        .cast<Produto>();
     if (hits.isEmpty) return null;
     if (hits.length == 1) return hits.first;
     final lower = t.toLowerCase();
-    for (final p in hits) {
+    for (final Produto p in hits) {
       if (p.codigoInterno.toLowerCase() == lower) return p;
     }
     return hits.first;
@@ -84,13 +93,14 @@ class _RelatorioMovimentacaoEstoquePageState
     final porBarras = widget.produtoRepository.resolverLeitorCodigoBarras(
       t,
       somenteAtivos: false,
-    );
+    ) as Produto?;
     if (porBarras != null) return [porBarras];
-    return widget.produtoRepository.pesquisarPadraoPdv(
+    return (widget.produtoRepository.pesquisarPadraoPdv(
       t,
       limite: 40,
       somenteAtivos: false,
-    );
+    ) as List)
+        .cast<Produto>();
   }
 
   void _aplicarProduto(Produto? p) {
@@ -110,11 +120,49 @@ class _RelatorioMovimentacaoEstoquePageState
   }
 
   void _carregar(LimitesPeriodo limites) {
-    final movimentos = _movRepo.listarPorPeriodo(
-      inicio: limites.$1,
-      fim: limites.$2,
-      produtoId: _produtoFiltro?.id,
-    );
+    unawaited(_carregarAsync(limites));
+  }
+
+  Future<void> _carregarAsync(LimitesPeriodo limites) async {
+    if (!mounted) return;
+    List<MovimentoEstoque> movimentos;
+    if (_movRepo != null) {
+      movimentos = _movRepo!.listarPorPeriodo(
+        inicio: limites.$1,
+        fim: limites.$2,
+        produtoId: _produtoFiltro?.id,
+      );
+    } else {
+      final client = widget.lanApiClient;
+      if (client == null) {
+        if (!mounted) return;
+        setState(() {
+          _resumo = [];
+          _detalhes = [];
+        });
+        return;
+      }
+      try {
+        final raw = await client.listarMovimentosEstoque(
+          produtoId: _produtoFiltro?.id,
+          desde: limites.$1,
+          ate: limites.$2,
+          limit: 5000,
+        );
+        movimentos = raw
+            .map(SyncEntityCodecOperacional.movimentoEstoqueDeMap)
+            .toList(growable: false);
+      } on LanApiException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Movimentacao: $e')),
+          );
+        }
+        movimentos = const [];
+      } catch (_) {
+        movimentos = const [];
+      }
+    }
     final produtos = _produtosPorId;
     final resumo = agregarMovimentacaoEstoque(
       movimentos: movimentos,
@@ -131,6 +179,7 @@ class _RelatorioMovimentacaoEstoquePageState
       produtoIdFiltro: _produtoFiltro?.id,
       somenteAtivos: _somenteAtivos,
     );
+    if (!mounted) return;
     setState(() {
       _limites = limites;
       _resumo = resumo;

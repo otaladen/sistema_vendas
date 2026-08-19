@@ -119,9 +119,8 @@ Future<void> main() async {
           paragrafo('Dica: de manhã use Montagem. Durante o dia use Lista ou Kanban.'),
         ]),
         secao('Palavras importantes', [
-          bullet('Pendente — ainda não organizou / falta preparar.'),
-          bullet('Roteirizada — já tem motorista e ordem; pronta para sair.'),
-          bullet('Saiu para entrega — o carro já foi com a mercadoria.'),
+          bullet('Pendente / no pátio — ainda na loja (com ou sem motorista).'),
+          bullet('Em rota — o carro já saiu com a mercadoria.'),
           bullet('Entregue — o cliente recebeu.'),
           bullet('Complemento pendente — faltou algo; volta outra viagem.'),
           bullet('Carga 0/3 a 3/3 — checklist: Separado → Carregado → Saiu.'),
@@ -188,10 +187,9 @@ Future<void> main() async {
       build: (context) => [
         pw.Text('Kanban e Lista', style: titulo(18)),
         espaco(12),
-        secao('Kanban — 4 colunas (esquerda → direita)', [
-          bullet('Pendentes hoje'),
-          bullet('Roteirizadas'),
-          bullet('Saiu para entrega'),
+        secao('Kanban — 3 colunas (esquerda → direita)', [
+          bullet('No pátio'),
+          bullet('Em rota'),
           bullet('Entregue'),
           paragrafo('Arraste o card para a coluna certa. O sistema valida os passos.'),
         ]),

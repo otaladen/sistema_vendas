@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Dicas de resolucao e dialogos da aba Rede (sync LAN).
+/// Dicas de resolucao e dialogos da aba Rede (API-first).
 abstract final class SyncRedeAjuda {
   SyncRedeAjuda._();
 
@@ -13,21 +13,9 @@ abstract final class SyncRedeAjuda {
             m.contains('403') ||
             m.contains('401'))) {
       return const [
-        'No PC servidor: Configuracoes > Rede > copie o token (icone de olho/copiar).',
-        'No PC cliente: cole o mesmo token, sem espacos no fim.',
-        'Salve nos dois PCs e use Testar conexao antes de sincronizar.',
-      ];
-    }
-    if (m.contains('objectbox') ||
-        m.contains('internal id sequence') ||
-        m.contains('obx_error') ||
-        m.contains('use id 0')) {
-      return const [
-        'Atualize o app nos dois PCs para a mesma versao (correcao de IDs na sync).',
-        'No PC cliente: feche o app e apague apenas os dados locais deste PC '
-        '(nao apague no servidor).',
-        'Abra de novo, configure token e endereco, e sincronize do zero.',
-        'Se persistir: Backup e Dados > restaurar backup vazio no cliente antes da primeira sync.',
+        'No PC servidor: Configuracoes > Rede > copie o token.',
+        'No Terminal: cole o mesmo token, sem espacos no fim.',
+        'Salve nos dois PCs e use Testar conexao.',
       ];
     }
     if (m.contains('firewall') ||
@@ -36,27 +24,28 @@ abstract final class SyncRedeAjuda {
         m.contains('socket') ||
         m.contains('connection refused') ||
         m.contains('timed out') ||
-        m.contains('dhcp')) {
+        m.contains('dhcp') ||
+        m.contains('inacessivel') ||
+        m.contains('8788')) {
       return const [
-        'Servidor local nao encontrado: confirme Wi-Fi/cabo na mesma rede.',
-        'No PC servidor: anote o IP atual (ipconfig) — DHCP pode ter mudado.',
-        'Atualize o endereco nos clientes (ex.: http://192.168.0.10:8787).',
-        'No servidor: Liberar porta no firewall (secao Avancado) e Iniciar servidor.',
-        'Desative VPN temporariamente para testar.',
+        'Confirme Wi-Fi/cabo na mesma rede.',
+        'No PC servidor: anote o IP (ipconfig) — DHCP pode ter mudado.',
+        'No servidor: Ativar como servidor e Liberar portas no firewall.',
+        'Deixe o app aberto no PC servidor (ou "Servidor ao ligar o PC").',
+        'Terminais (PC ou celular) usam a API na porta 8788.',
       ];
     }
     if (m.contains('servico de sync') ||
         m.contains('nao respondeu') ||
         m.contains('nao esta ativo')) {
       return const [
-        'Servidor local nao encontrado (servico parado).',
-        'No PC servidor: marque Servidor neste PC e clique Iniciar servidor.',
-        'Use Ativar como servidor e sincronizar ou Salvar com sync ativa.',
+        'No PC servidor: marque Servidor neste PC e Ativar como servidor.',
+        'Confirme que a API :8788 esta ativa (status verde na tela Rede).',
       ];
     }
     return const [
-      'Use Testar conexao e corrija token/endereco antes de sincronizar.',
-      'Veja Problemas na primeira sincronizacao? no final desta tela.',
+      'Use Testar conexao e corrija token/endereco.',
+      'Veja "Como configurar a rede?" no final desta tela.',
     ];
   }
 
@@ -64,42 +53,46 @@ abstract final class SyncRedeAjuda {
     return showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Primeira sincronizacao na rede'),
+        title: const Text('Como configurar a rede'),
         content: const SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Siga esta ordem nos dois computadores:',
+                'Arquitetura (API-first):',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
-              SizedBox(height: 12),
-              Text('1. PC servidor'),
-              Text('   • Servidor neste PC\n'
-                  '   • Ative sincronizacao\n'
-                  '   • Gere/copie o token\n'
-                  '   • Ativar como servidor e sincronizar\n'
-                  '   • Copie o endereco (IP:porta) para o outro PC'),
-              SizedBox(height: 10),
-              Text('2. PC cliente'),
-              Text('   • Outro PC e o servidor\n'
-                  '   • Cole IP:porta e o mesmo token\n'
-                  '   • Testar conexao (deve ficar verde)\n'
-                  '   • Conectar ao servidor e sincronizar'),
-              SizedBox(height: 10),
-              Text('3. Se der erro de banco (ObjectBox) no cliente'),
+              SizedBox(height: 8),
               Text(
-                '   Atualize o app, feche o cliente e limpe apenas os dados '
-                'locais deste PC. Nunca apague dados no servidor.',
-                style: TextStyle(fontSize: 13),
+                '• PC servidor: guarda o banco e sobe a API dos terminais '
+                'na porta 8788.\n'
+                '• Terminal Leve (PC Windows ou celular): le e grava direto '
+                'na API :8788 (sem banco local). Se o servidor cair, o terminal para.\n'
+                '• Hub :8787 e opcional/legado (nao e o caminho do terminal).',
+                style: TextStyle(fontSize: 13, height: 1.35),
+              ),
+              SizedBox(height: 14),
+              Text('1. PC servidor', style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(
+                '   • Servidor neste PC\n'
+                '   • Ative a rede local\n'
+                '   • Gere/copie o token\n'
+                '   • Ativar como servidor\n'
+                '   • Copie o endereco API (IP:8788) para o terminal',
               ),
               SizedBox(height: 10),
-              Text('4. Fotos de entrega (POD)'),
+              Text('2. Terminal (PC ou celular)',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
               Text(
-                '   No PC servidor, o servico de sync grava JPEG em '
-                'pod_entrega/ (ou SYNC_POD_PATH). Libere a mesma porta no '
-                'firewall. Outros PCs baixam a foto ao abrir os detalhes da entrega.',
+                '   • Ative “Usar rede local” / informe IP:8788\n'
+                '   • Cole o mesmo token\n'
+                '   • Testar conexao e salvar\n'
+                '   • Reinicie o app no celular se ainda estiver no modo antigo',
+              ),
+              SizedBox(height: 10),
+              Text(
+                'Nunca apague o banco do PC servidor para "testar" o terminal.',
                 style: TextStyle(fontSize: 13),
               ),
             ],

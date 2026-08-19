@@ -58,4 +58,39 @@ class EstoqueDiagnosticoResultado {
   int get quantidadeInformativos => achados
       .where((a) => a.severidade == EstoqueDiagnosticoSeveridade.info)
       .length;
+
+  static EstoqueDiagnosticoResultado? fromApiMap(Map<String, dynamic>? m) {
+    if (m == null) return null;
+    final achadosRaw = m['achados'];
+    if (achadosRaw is! List) return null;
+    final achados = <EstoqueDiagnosticoAchado>[];
+    for (final raw in achadosRaw.whereType<Map>()) {
+      final a = Map<String, dynamic>.from(raw);
+      final codigoNome = (a['codigo'] ?? '').toString();
+      final sevNome = (a['severidade'] ?? '').toString();
+      achados.add(
+        EstoqueDiagnosticoAchado(
+          codigo: EstoqueDiagnosticoCodigo.values.firstWhere(
+            (c) => c.name == codigoNome,
+            orElse: () => EstoqueDiagnosticoCodigo.saldoDivergenteKardex,
+          ),
+          severidade: EstoqueDiagnosticoSeveridade.values.firstWhere(
+            (s) => s.name == sevNome,
+            orElse: () => EstoqueDiagnosticoSeveridade.alerta,
+          ),
+          titulo: (a['titulo'] ?? '').toString(),
+          detalhe: (a['detalhe'] ?? '').toString(),
+          vendaId: (a['vendaId'] as num?)?.toInt(),
+          produtoId: (a['produtoId'] as num?)?.toInt(),
+          podeReprocessarBaixa: a['podeReprocessarBaixa'] == true,
+        ),
+      );
+    }
+    final geradoEm =
+        DateTime.tryParse((m['geradoEm'] ?? '').toString()) ?? DateTime.now();
+    return EstoqueDiagnosticoResultado(
+      achados: achados,
+      geradoEm: geradoEm,
+    );
+  }
 }

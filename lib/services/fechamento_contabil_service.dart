@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -135,7 +136,7 @@ class FechamentoContabilService {
         inutilizacoes.where((i) => i.sucesso).length;
     final totalPassos = pacote.saidas.length +
         pacote.entradas.length +
-        pacote.saidas.where((s) => s.urlXmlEventoCancelamento.isNotEmpty).length +
+        pacote.saidas.where((s) => s.cancelada || s.urlXmlEventoCancelamento.isNotEmpty).length +
         cceLocais.length +
         inutSucesso;
     var passo = 0;
@@ -145,75 +146,58 @@ class FechamentoContabilService {
       onProgresso?.call(
         passo,
         totalPassos > 0 ? totalPassos : 1,
-        'Saida: baixando XML ${passo} de ${pacote.saidas.length}...',
+        'Saida: XML ${passo} de ${pacote.saidas.length}...',
       );
 
       var item = await _enriquecerSaidaComFocus(nota);
-      final nome = item.nomeArquivoXml(canceladaSuffix: item.cancelada);
       try {
-        final local = _local.arquivoXmlSaidaLocal(
-          item.chaveAcesso,
-          cancelada: item.cancelada,
-        );
-        List<int> bytes;
-        var xmlTexto = '';
-        if (local != null) {
-          bytes = await local.readAsBytes();
-          xmlTexto = String.fromCharCodes(bytes);
-        } else {
-          final url = await _resolverUrlXmlSaida(item);
-          if (url.isEmpty) {
-            xmlsFalha++;
-            erros.add(
-              '${item.modelo} nº ${item.numero.isEmpty ? "?" : item.numero} '
-              '(${item.status}): URL do XML indisponivel.',
-            );
-            saidasEnriquecidas.add(item);
-            continue;
+        // 1) XML autorizado (nfeProc/nfceProc) → Autorizadas/NFCe|NFe
+        final autorizado = await _obterXmlAutorizado(item);
+        if (autorizado != null && autorizado.isNotEmpty) {
+          final xmlTexto = String.fromCharCodes(autorizado);
+          if (xmlTexto.trim().isNotEmpty) {
+            item = _local.comTributosDoXml(item, xmlTexto);
           }
-          final response = await _http
-              .get(Uri.parse(url))
-              .timeout(const Duration(seconds: 90));
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            xmlsFalha++;
-            erros.add(
-              '$nome: HTTP ${response.statusCode}',
-            );
-            saidasEnriquecidas.add(item);
-            continue;
-          }
-          bytes = response.bodyBytes;
-          xmlTexto = response.body;
+          final pasta = item.modelo == '65'
+              ? 'Autorizadas/NFCe'
+              : 'Autorizadas/NFe';
+          final nome = item.nomeArquivoXml(canceladaSuffix: false);
+          arquivosZip.add(
+            ArchiveFile('$pasta/$nome', autorizado.length, autorizado),
+          );
+          xmlsOk++;
+        } else if (!item.cancelada) {
+          xmlsFalha++;
+          erros.add(
+            '${item.modelo} nº ${item.numero.isEmpty ? "?" : item.numero} '
+            '(${item.status}): XML autorizado indisponivel '
+            '(local e Focus).',
+          );
         }
-        if (xmlTexto.isNotEmpty) {
-          item = _local.comTributosDoXml(item, xmlTexto);
-        }
-        arquivosZip.add(
-          ArchiveFile('xml/$nome', bytes.length, bytes),
-        );
-        xmlsOk++;
 
-        if (item.urlXmlEventoCancelamento.trim().isNotEmpty) {
+        // 2) Evento de cancelamento → Canceladas/
+        if (item.cancelada ||
+            item.urlXmlEventoCancelamento.trim().isNotEmpty) {
           passo++;
           onProgresso?.call(
             passo,
-            totalPassos,
-            'Evento cancelamento: ${item.numero}...',
+            totalPassos > 0 ? totalPassos : 1,
+            'Cancelamento: ${item.numero}...',
           );
-          final ev = await _baixarBytes(item.urlXmlEventoCancelamento);
-          if (ev != null && ev.isNotEmpty) {
+          final evento = await _obterXmlCancelamento(item);
+          if (evento != null && evento.isNotEmpty) {
             arquivosZip.add(
               ArchiveFile(
-                'xml/eventos/${item.nomeArquivoEventoCancelamento}',
-                ev.length,
-                ev,
+                'Canceladas/${item.nomeArquivoEventoCancelamento}',
+                evento.length,
+                evento,
               ),
             );
             xmlsOk++;
           } else {
             xmlsFalha++;
             erros.add(
-              'Evento cancelamento ${item.chaveAcesso}: falha no download.',
+              'Cancelamento ${item.chaveAcesso}: XML do evento indisponivel.',
             );
           }
         }
@@ -251,7 +235,7 @@ class FechamentoContabilService {
         }
         arquivosZip.add(
           ArchiveFile(
-            'xml_entradas/${entrada.nomeArquivoXml}',
+            'Entradas/${entrada.nomeArquivoXml}',
             bytes.length,
             bytes,
           ),
@@ -281,7 +265,7 @@ class FechamentoContabilService {
         }
         arquivosZip.add(
           ArchiveFile(
-            'xml/cce/${cce.chave}_cce_${cce.sequencia}.xml',
+            'Cartas_Correcao/${cce.chave}_cce_${cce.sequencia}.xml',
             bytes.length,
             bytes,
           ),
@@ -298,7 +282,8 @@ class FechamentoContabilService {
       onProgresso?.call(
         passo,
         totalPassos > 0 ? totalPassos : 1,
-        'Inutilizacao: serie ${inut.serie} ${inut.numeroInicial}-${inut.numeroFinal}...',
+        'Inutilizacao: ${inut.rotuloModelo} serie ${inut.serie} '
+        '${inut.numeroInicial}-${inut.numeroFinal}...',
       );
       try {
         List<int>? bytes;
@@ -311,15 +296,14 @@ class FechamentoContabilService {
         if (bytes == null || bytes.isEmpty) {
           xmlsFalha++;
           erros.add(
-            'Inutilizacao serie ${inut.serie} ${inut.numeroInicial}-'
-            '${inut.numeroFinal}: XML indisponivel (regrave na Focus ou '
-            'refaca a inutilizacao em homologacao).',
+            'Inutilizacao ${inut.rotuloModelo} serie ${inut.serie} '
+            '${inut.numeroInicial}-${inut.numeroFinal}: XML indisponivel.',
           );
           continue;
         }
         arquivosZip.add(
           ArchiveFile(
-            'xml/inutilizacao/${inut.nomeArquivoXml}',
+            'Inutilizadas/${inut.nomeArquivoXml}',
             bytes.length,
             bytes,
           ),
@@ -328,31 +312,10 @@ class FechamentoContabilService {
       } catch (e) {
         xmlsFalha++;
         erros.add(
-          'Inutilizacao serie ${inut.serie} ${inut.numeroInicial}-'
-          '${inut.numeroFinal}: $e',
+          'Inutilizacao ${inut.rotuloModelo} serie ${inut.serie} '
+          '${inut.numeroInicial}-${inut.numeroFinal}: $e',
         );
       }
-    }
-
-    onProgresso?.call(totalPassos, totalPassos, 'Compactando ZIP...');
-    final archive = Archive();
-    for (final f in arquivosZip) {
-      archive.addFile(f);
-    }
-    if (archive.files.isEmpty) {
-      final aviso =
-          'Nenhum XML foi incluido. Consulte a aba de erros na planilha Excel.';
-      archive.addFile(
-        ArchiveFile(
-          'LEIA-ME.txt',
-          aviso.length,
-          aviso.codeUnits,
-        ),
-      );
-    }
-    final zipEncoded = ZipEncoder().encode(archive);
-    if (zipEncoded.isEmpty) {
-      throw FechamentoContabilException('Falha ao gerar arquivo ZIP.');
     }
 
     final totais = _calcularTotais(
@@ -373,6 +336,33 @@ class FechamentoContabilService {
       errosDownload: erros,
     );
 
+    onProgresso?.call(totalPassos, totalPassos, 'Compactando ZIP...');
+    final archive = Archive();
+    for (final f in arquivosZip) {
+      archive.addFile(f);
+    }
+    // Planilha na raiz do ZIP (padrao contabilidade).
+    final nomeXlsx =
+        'fechamento_contabilidade_${mes.toString().padLeft(2, '0')}_$ano.xlsx';
+    archive.addFile(
+      ArchiveFile(nomeXlsx, excelBytes.length, excelBytes),
+    );
+    if (arquivosZip.isEmpty) {
+      final aviso =
+          'Nenhum XML foi incluido. Consulte a aba de erros na planilha Excel.';
+      archive.addFile(
+        ArchiveFile(
+          'LEIA-ME.txt',
+          aviso.length,
+          aviso.codeUnits,
+        ),
+      );
+    }
+    final zipEncoded = ZipEncoder().encode(archive);
+    if (zipEncoded.isEmpty) {
+      throw FechamentoContabilException('Falha ao gerar arquivo ZIP.');
+    }
+
     return FechamentoContabilResultado(
       mes: mes,
       ano: ano,
@@ -382,6 +372,53 @@ class FechamentoContabilService {
       zipBytes: Uint8List.fromList(zipEncoded),
       excelBytes: excelBytes,
       errosDownload: erros,
+    );
+  }
+
+  /// XML autorizado: prioriza arquivo local; Focus so como fallback.
+  Future<List<int>?> _obterXmlAutorizado(NotaFiscalFechamentoItem item) async {
+    final local = _arquivoXmlSaidaPorModelo(
+      item,
+      cancelada: false,
+    );
+    if (local != null) {
+      try {
+        final bytes = await local.readAsBytes();
+        if (bytes.isNotEmpty) return bytes;
+      } catch (_) {}
+    }
+    final url = await _resolverUrlXmlSaida(item);
+    if (url.isEmpty) return null;
+    return _baixarBytes(url);
+  }
+
+  /// XML do evento de cancelamento: local (sufixo cancelada) → URL Focus.
+  Future<List<int>?> _obterXmlCancelamento(NotaFiscalFechamentoItem item) async {
+    final local = _arquivoXmlSaidaPorModelo(item, cancelada: true);
+    if (local != null) {
+      try {
+        final bytes = await local.readAsBytes();
+        if (bytes.isNotEmpty) return bytes;
+      } catch (_) {}
+    }
+    final url = item.urlXmlEventoCancelamento.trim();
+    if (url.isEmpty) return null;
+    return _baixarBytes(url);
+  }
+
+  File? _arquivoXmlSaidaPorModelo(
+    NotaFiscalFechamentoItem item, {
+    required bool cancelada,
+  }) {
+    if (item.modelo == '65') {
+      return _local.arquivoXmlNfceSaidaLocal(
+        item.chaveAcesso,
+        cancelada: cancelada,
+      );
+    }
+    return _local.arquivoXmlSaidaLocal(
+      item.chaveAcesso,
+      cancelada: cancelada,
     );
   }
 
@@ -541,6 +578,7 @@ class FechamentoContabilService {
     final rows = <List<String>>[..._cabecalhoEmitenteRows(mes, ano)];
     rows.add([
       'Data',
+      'Modelo',
       'Serie',
       'Numero Inicial',
       'Numero Final',
@@ -555,6 +593,7 @@ class FechamentoContabilService {
       final qtd = inut.numeroFinal - inut.numeroInicial + 1;
       rows.add([
         _fmtData.format(inut.registradaEm.toLocal()),
+        inut.rotuloModelo,
         inut.serie,
         inut.numeroInicial.toString(),
         inut.numeroFinal.toString(),
@@ -734,6 +773,39 @@ class FechamentoContabilPacote {
   final List<NotaFiscalEntradaFechamentoItem> entradas;
 
   int get totalDocumentos => saidas.length + entradas.length;
+
+  Map<String, dynamic> toJson() => {
+        'saidas': saidas.map((e) => e.toJson()).toList(),
+        'entradas': entradas.map((e) => e.toJson()).toList(),
+        'totalDocumentos': totalDocumentos,
+      };
+
+  factory FechamentoContabilPacote.fromJson(Map<String, dynamic> json) {
+    final saidasRaw = json['saidas'];
+    final entradasRaw = json['entradas'];
+    return FechamentoContabilPacote(
+      saidas: saidasRaw is List
+          ? saidasRaw
+              .whereType<Map>()
+              .map(
+                (e) => NotaFiscalFechamentoItem.fromJson(
+                  Map<String, dynamic>.from(e),
+                ),
+              )
+              .toList()
+          : const [],
+      entradas: entradasRaw is List
+          ? entradasRaw
+              .whereType<Map>()
+              .map(
+                (e) => NotaFiscalEntradaFechamentoItem.fromJson(
+                  Map<String, dynamic>.from(e),
+                ),
+              )
+              .toList()
+          : const [],
+    );
+  }
 }
 
 class FechamentoContabilException implements Exception {

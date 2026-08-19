@@ -43,11 +43,18 @@ abstract final class NfeVendaSync {
   }
 
   static NfeSaidaFiscalRegistro registroFromVenda(Venda venda) {
+    // Nao usar venda.cliente.target: entidade detached (API) lanca StateError.
+    String nomeCliente = '';
+    try {
+      nomeCliente = venda.cliente.target?.nomeRazao ?? '';
+    } catch (_) {
+      nomeCliente = '';
+    }
     return NfeSaidaFiscalRegistro(
       id: 'venda_sync_${venda.id}_${venda.nfeReferenciaFocus}',
       vendaId: venda.id,
       numeroOrcamento: venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id,
-      clienteNome: venda.cliente.target?.nomeRazao ?? '',
+      clienteNome: nomeCliente,
       referenciaFocus: venda.nfeReferenciaFocus,
       statusFocus: venda.nfeStatusFocus,
       emitidaEm: venda.nfeEmitidaEm ?? venda.data,

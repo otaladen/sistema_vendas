@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../data/usuario_repository.dart';
 import '../../model/usuario_sistema.dart';
 
 /// Credenciais informadas no dialogo de autorizacao do gerente.
@@ -20,7 +19,20 @@ bool _podeAutorizarComoGerenteCaixa(UsuarioSistema? usuario) {
 /// Pede login e senha de gerente/supervisor (admin ou financeiro).
 Future<bool> solicitarAutorizacaoGerenteCaixa(
   BuildContext context,
-  UsuarioRepository usuarioRepository,
+  dynamic usuarioRepository,
+) async {
+  final cred = await solicitarCredenciaisGerenteCaixa(
+    context,
+    usuarioRepository,
+  );
+  return cred != null;
+}
+
+/// Igual a [solicitarAutorizacaoGerenteCaixa], mas devolve as credenciais
+/// para revalidacao no servidor.
+Future<CredenciaisGerenteCaixa?> solicitarCredenciaisGerenteCaixa(
+  BuildContext context,
+  dynamic usuarioRepository,
 ) async {
   final credenciais = await showDialog<CredenciaisGerenteCaixa>(
     context: context,
@@ -30,14 +42,14 @@ Future<bool> solicitarAutorizacaoGerenteCaixa(
   );
 
   if (credenciais == null || !context.mounted) {
-    return false;
+    return null;
   }
 
   if (credenciais.login.isEmpty || credenciais.senha.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Preencha login e senha.')),
     );
-    return false;
+    return null;
   }
 
   final usuario = await usuarioRepository.autenticar(
@@ -46,7 +58,7 @@ Future<bool> solicitarAutorizacaoGerenteCaixa(
   );
   final ok = _podeAutorizarComoGerenteCaixa(usuario);
 
-  if (!context.mounted) return false;
+  if (!context.mounted) return null;
 
   if (!ok) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -57,10 +69,10 @@ Future<bool> solicitarAutorizacaoGerenteCaixa(
         ),
       ),
     );
-    return false;
+    return null;
   }
 
-  return true;
+  return credenciais;
 }
 
 class _DialogoAutorizacaoGerenteCaixa extends StatefulWidget {

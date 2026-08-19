@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../data/api/conta_pagar_api_repository.dart';
+import '../../data/api/lan_api_event_hub.dart';
 import '../../data/conta_pagar_repository.dart';
 import '../../data/models/conta_pagar.dart';
 import '../../data/objectbox.dart';
 import '../../domain/filtro_contas_pagar.dart';
 import '../relatorios/relatorio_export_util.dart';
 import '../relatorios/widgets/relatorio_exportacoes_menu.dart';
+import '../widgets/lan_api_feedback.dart';
 
 class _GrupoFornecedorPagar {
   _GrupoFornecedorPagar({
@@ -28,11 +31,16 @@ class _GrupoFornecedorPagar {
 class RelatorioContasPagarPage extends StatefulWidget {
   const RelatorioContasPagarPage({
     super.key,
-    required this.objectBox,
+    this.objectBox,
+    this.contaPagarRepository,
     this.filtroInicial = FiltroContasPagar.todos,
-  });
+  }) : assert(
+          objectBox != null || contaPagarRepository != null,
+          'Informe objectBox ou contaPagarRepository',
+        );
 
-  final ObjectBox objectBox;
+  final ObjectBox? objectBox;
+  final dynamic contaPagarRepository;
   final FiltroContasPagar filtroInicial;
 
   @override
@@ -44,7 +52,7 @@ class _RelatorioContasPagarPageState extends State<RelatorioContasPagarPage> {
   static final _fmtData = DateFormat('dd/MM/yyyy');
   static final _fmtMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
 
-  late ContaPagarRepository _repo;
+  late dynamic _repo;
   late FiltroContasPagar _filtro;
   bool _agruparFornecedor = true;
   List<ContaPagar> _linhas = [];
@@ -53,7 +61,15 @@ class _RelatorioContasPagarPageState extends State<RelatorioContasPagarPage> {
   @override
   void initState() {
     super.initState();
-    _repo = ContaPagarRepository(widget.objectBox);
+    _repo = widget.contaPagarRepository ??
+        (widget.objectBox != null
+            ? ContaPagarRepository(widget.objectBox!)
+            : null);
+    if (_repo == null) {
+      throw StateError(
+        'Relatorio contas a pagar: informe contaPagarRepository ou objectBox.',
+      );
+    }
     _filtro = widget.filtroInicial;
     _atualizar();
   }
@@ -72,20 +88,51 @@ class _RelatorioContasPagarPageState extends State<RelatorioContasPagarPage> {
   }
 
   String _nomeFornecedor(ContaPagar c) {
-    final f = c.fornecedor.target;
-    if (f == null) return 'Fornecedor';
-    final nome = f.nomeFantasia.trim().isNotEmpty
-        ? f.nomeFantasia
-        : f.razaoSocial;
-    return nome.trim().isEmpty ? 'Fornecedor' : nome;
+    try {
+      final viaRepo = _repo.nomeFornecedorDe(c) as String?;
+      if (viaRepo != null &&
+          viaRepo.trim().isNotEmpty &&
+          viaRepo.trim() != '—') {
+        return viaRepo.trim();
+      }
+    } catch (_) {}
+    try {
+      final f = c.fornecedor.target;
+      if (f != null) {
+        final nome = f.nomeFantasia.trim().isNotEmpty
+            ? f.nomeFantasia
+            : f.razaoSocial;
+        if (nome.trim().isNotEmpty) return nome.trim();
+      }
+    } catch (_) {}
+    return 'Fornecedor';
   }
 
-  void _atualizar() {
-    _repo.sincronizarPendenteParaAtrasado();
+  Future<void> _atualizar() async {
+    if (_repo is ContaPagarApiRepository) {
+      if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+        return;
+      }
+      try {
+        await (_repo as ContaPagarApiRepository).hidratar();
+      } catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackErro(
+            context,
+            e,
+            prefixo: 'Falha ao carregar relatorio',
+          );
+        }
+        return;
+      }
+    }
+    try {
+      _repo.sincronizarPendenteParaAtrasado();
+    } catch (_) {}
     final linhas = _repo.listar(
       status: _statusDe(_filtro),
       ordenarDesc: _filtro == FiltroContasPagar.pagos,
-    );
+    ) as List<ContaPagar>;
     final map = <String, _GrupoFornecedorPagar>{};
     for (final c in linhas) {
       final nome = _nomeFornecedor(c);
@@ -97,6 +144,7 @@ class _RelatorioContasPagarPageState extends State<RelatorioContasPagarPage> {
     }
     final grupos = map.values.toList()
       ..sort((a, b) => b.total.compareTo(a.total));
+    if (!mounted) return;
     setState(() {
       _linhas = linhas;
       _grupos = grupos;

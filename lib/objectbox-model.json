@@ -5,7 +5,7 @@
   "entities": [
     {
       "id": "1:805574422642691043",
-      "lastPropertyId": "14:3971069615921588392",
+      "lastPropertyId": "20:8472910563847201938",
       "name": "ItemVenda",
       "properties": [
         {
@@ -84,13 +84,43 @@
           "id": "14:3971069615921588392",
           "name": "promocaoNomeSnapshot",
           "type": 9
+        },
+        {
+          "id": "15:2870199116495819726",
+          "name": "loteConsumosJson",
+          "type": 9
+        },
+        {
+          "id": "16:4986389238952961216",
+          "name": "botaForaAplicado",
+          "type": 1
+        },
+        {
+          "id": "17:113402771085145769",
+          "name": "percentualBotaForaAplicado",
+          "type": 8
+        },
+        {
+          "id": "18:7718959250749872190",
+          "name": "lojaOrigemMercadoria",
+          "type": 9
+        },
+        {
+          "id": "19:6281947365820193847",
+          "name": "buscarNaLojaStatus",
+          "type": 9
+        },
+        {
+          "id": "20:8472910563847201938",
+          "name": "quantidadeBuscarNaLoja",
+          "type": 6
         }
       ],
       "relations": []
     },
     {
       "id": "2:12069401530715107",
-      "lastPropertyId": "50:4327383752342422592",
+      "lastPropertyId": "54:5433533917708839671",
       "name": "Produto",
       "properties": [
         {
@@ -350,13 +380,28 @@
           "id": "50:4327383752342422592",
           "name": "substitutosIds",
           "type": 9
+        },
+        {
+          "id": "51:6600042652009628786",
+          "name": "precoAlteradoEm",
+          "type": 10
+        },
+        {
+          "id": "52:67467534427623421",
+          "name": "controlaLoteValidade",
+          "type": 1
+        },
+        {
+          "id": "53:6410863274184816605",
+          "name": "percentualBotaFora",
+          "type": 8
         }
       ],
       "relations": []
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "65:7538825013182930492",
+      "lastPropertyId": "67:5378506698038242135",
       "name": "Venda",
       "properties": [
         {
@@ -693,6 +738,18 @@
           "id": "65:7538825013182930492",
           "name": "finalizadaEm",
           "type": 10
+        },
+        {
+          "id": "66:4773505673133219361",
+          "name": "uuidLocal",
+          "indexId": "75:4616887603039494595",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "67:5378506698038242135",
+          "name": "lojaOrigemMercadoria",
+          "type": 9
         }
       ],
       "relations": []
@@ -1311,7 +1368,7 @@
     },
     {
       "id": "8:3546637958251126967",
-      "lastPropertyId": "5:6874770349840271468",
+      "lastPropertyId": "10:3766587024823285085",
       "name": "Motorista",
       "properties": [
         {
@@ -1338,6 +1395,31 @@
         {
           "id": "5:6874770349840271468",
           "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "6:1465726284794404371",
+          "name": "codigoInterno",
+          "type": 9
+        },
+        {
+          "id": "7:1932706077387556282",
+          "name": "cpf",
+          "type": 9
+        },
+        {
+          "id": "8:5477315136034293816",
+          "name": "cnhNumero",
+          "type": 9
+        },
+        {
+          "id": "9:8646202512329117006",
+          "name": "cnhCategoria",
+          "type": 9
+        },
+        {
+          "id": "10:3766587024823285085",
+          "name": "cnhValidade",
           "type": 10
         }
       ],
@@ -1497,7 +1579,7 @@
     },
     {
       "id": "12:6223739968660994756",
-      "lastPropertyId": "4:3451572505916393876",
+      "lastPropertyId": "17:336422994381636166",
       "name": "FornecedorNfe",
       "properties": [
         {
@@ -1522,6 +1604,71 @@
           "id": "4:3451572505916393876",
           "name": "nomeFantasia",
           "type": 9
+        },
+        {
+          "id": "5:2632602021690743977",
+          "name": "inscricaoEstadual",
+          "type": 9
+        },
+        {
+          "id": "6:2450198117404403130",
+          "name": "telefone",
+          "type": 9
+        },
+        {
+          "id": "7:4577878719015170152",
+          "name": "whatsapp",
+          "type": 9
+        },
+        {
+          "id": "8:5241692859087472349",
+          "name": "email",
+          "type": 9
+        },
+        {
+          "id": "9:3385248572202906651",
+          "name": "cep",
+          "type": 9
+        },
+        {
+          "id": "10:7022043945508312031",
+          "name": "endereco",
+          "type": 9
+        },
+        {
+          "id": "11:6550980440579402582",
+          "name": "numero",
+          "type": 9
+        },
+        {
+          "id": "12:3958050450103091838",
+          "name": "bairro",
+          "type": 9
+        },
+        {
+          "id": "13:2217639698551220882",
+          "name": "cidade",
+          "type": 9
+        },
+        {
+          "id": "14:8112360602370652301",
+          "name": "uf",
+          "type": 9
+        },
+        {
+          "id": "15:8354643513862413176",
+          "name": "observacoes",
+          "type": 9
+        },
+        {
+          "id": "16:5559716513553784129",
+          "name": "ativo",
+          "type": 1
+        },
+        {
+          "id": "17:336422994381636166",
+          "name": "atualizadoEm",
+          "type": 12
         }
       ],
       "relations": []
@@ -2910,10 +3057,341 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "35:7873041756429916078",
+      "lastPropertyId": "7:6858726852777654472",
+      "name": "LoteProduto",
+      "properties": [
+        {
+          "id": "1:2220003615928942337",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:1599632822029202206",
+          "name": "numeroLote",
+          "indexId": "72:1487942740836830383",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "3:6467200882438188894",
+          "name": "dataValidade",
+          "type": 10
+        },
+        {
+          "id": "4:1886853297565246716",
+          "name": "quantidadeEstoque",
+          "type": 6
+        },
+        {
+          "id": "5:5642986992030512196",
+          "name": "dataEntrada",
+          "type": 10
+        },
+        {
+          "id": "6:6048980468342438031",
+          "name": "ativo",
+          "indexId": "73:5923459356723647393",
+          "type": 1,
+          "flags": 8
+        },
+        {
+          "id": "7:6858726852777654472",
+          "name": "produtoId",
+          "indexId": "74:1501462018330982945",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Produto"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "36:2844497098229561852",
+      "lastPropertyId": "9:5852826576634998448",
+      "name": "ObrigacaoMensalFixa",
+      "properties": [
+        {
+          "id": "1:8531841871174640899",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:3975059384615958526",
+          "name": "descricao",
+          "type": 9
+        },
+        {
+          "id": "3:3924285565126350126",
+          "name": "valor",
+          "type": 8
+        },
+        {
+          "id": "4:3743695860694329105",
+          "name": "diaVencimento",
+          "type": 6
+        },
+        {
+          "id": "5:7281936528339500301",
+          "name": "cnpj",
+          "type": 9
+        },
+        {
+          "id": "6:5438790797307309926",
+          "name": "ativo",
+          "type": 1
+        },
+        {
+          "id": "7:314101909545055460",
+          "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "8:7838855604743132746",
+          "name": "periodicidade",
+          "type": 9
+        },
+        {
+          "id": "9:5852826576634998448",
+          "name": "mesVencimento",
+          "type": 6
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "37:5508486690175351693",
+      "lastPropertyId": "24:1813260760582510371",
+      "name": "ItemInventario",
+      "properties": [
+        {
+          "id": "1:3675026505217923299",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:618416510667184398",
+          "name": "sessaoId",
+          "indexId": "76:2878829424906204870",
+          "type": 6,
+          "flags": 8
+        },
+        {
+          "id": "3:529954579667990945",
+          "name": "produtoId",
+          "indexId": "77:4508506336596888896",
+          "type": 6,
+          "flags": 8
+        },
+        {
+          "id": "4:2782545939836163754",
+          "name": "nomeSnapshot",
+          "type": 9
+        },
+        {
+          "id": "5:2677673634195279164",
+          "name": "codigoInterno",
+          "type": 9
+        },
+        {
+          "id": "6:8187861272842196203",
+          "name": "codigoBarras",
+          "type": 9
+        },
+        {
+          "id": "7:6411033348714154763",
+          "name": "unidade",
+          "type": 9
+        },
+        {
+          "id": "8:3586450132979530003",
+          "name": "categoria",
+          "type": 9
+        },
+        {
+          "id": "9:792453798642166248",
+          "name": "subcategoria",
+          "type": 9
+        },
+        {
+          "id": "10:698994719146332959",
+          "name": "permiteQuantidadeFracionada",
+          "type": 1
+        },
+        {
+          "id": "11:2906131433069116058",
+          "name": "quantidadePorEmbalagem",
+          "type": 8
+        },
+        {
+          "id": "12:3037982499340381336",
+          "name": "embalagemMultiplica",
+          "type": 1
+        },
+        {
+          "id": "13:4311405450875026255",
+          "name": "unidadeCompra",
+          "type": 9
+        },
+        {
+          "id": "14:5095370215759065486",
+          "name": "controlaLoteValidade",
+          "type": 1
+        },
+        {
+          "id": "15:4980276250428606661",
+          "name": "snapshotFisico",
+          "type": 6
+        },
+        {
+          "id": "16:8044079398956357105",
+          "name": "snapshotLivre",
+          "type": 6
+        },
+        {
+          "id": "17:3643816021934160244",
+          "name": "snapshotReservado",
+          "type": 6
+        },
+        {
+          "id": "18:4091612392305343554",
+          "name": "quantidadeContada",
+          "type": 6
+        },
+        {
+          "id": "19:9033883826996399682",
+          "name": "conferido",
+          "type": 1
+        },
+        {
+          "id": "20:1652291931884892312",
+          "name": "estado",
+          "indexId": "78:5724851501945112962",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "21:459581380710741567",
+          "name": "conferidoPor",
+          "type": 9
+        },
+        {
+          "id": "22:5297962675303225093",
+          "name": "conferidoEm",
+          "type": 10
+        },
+        {
+          "id": "23:1453172657202757450",
+          "name": "custoUnitario",
+          "type": 8
+        },
+        {
+          "id": "24:1813260760582510371",
+          "name": "aplicado",
+          "type": 1
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "38:827949580553706855",
+      "lastPropertyId": "16:6644800052534979070",
+      "name": "SessaoInventario",
+      "properties": [
+        {
+          "id": "1:9204091346080193401",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:3489791006213032217",
+          "name": "nome",
+          "type": 9
+        },
+        {
+          "id": "3:4813382568002943680",
+          "name": "status",
+          "indexId": "79:8119576664302985405",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "4:3771518679791035886",
+          "name": "filtroCategoria",
+          "type": 9
+        },
+        {
+          "id": "5:5894847100696721121",
+          "name": "filtroSubcategoria",
+          "type": 9
+        },
+        {
+          "id": "6:1093224968312718494",
+          "name": "contagemCega",
+          "type": 1
+        },
+        {
+          "id": "7:8332984083930385362",
+          "name": "criadoPor",
+          "type": 9
+        },
+        {
+          "id": "8:7207884889600178640",
+          "name": "criadoEm",
+          "type": 10
+        },
+        {
+          "id": "9:601223402447027783",
+          "name": "aplicadaEm",
+          "type": 10
+        },
+        {
+          "id": "10:6489778500417356686",
+          "name": "aplicadaPor",
+          "type": 9
+        },
+        {
+          "id": "11:8169502641693281110",
+          "name": "totalItens",
+          "type": 6
+        },
+        {
+          "id": "12:589732716844490433",
+          "name": "totalConferidos",
+          "type": 6
+        },
+        {
+          "id": "13:3266687343460788141",
+          "name": "totalDivergentes",
+          "type": 6
+        },
+        {
+          "id": "14:6254133664714562513",
+          "name": "valorSobras",
+          "type": 8
+        },
+        {
+          "id": "15:8910879962417513544",
+          "name": "valorPerdas",
+          "type": 8
+        },
+        {
+          "id": "16:6644800052534979070",
+          "name": "observacao",
+          "type": 9
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "34:3947576677985920049",
-  "lastIndexId": "71:1493233917749634520",
+  "lastEntityId": "38:827949580553706855",
+  "lastIndexId": "79:8119576664302985405",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,
@@ -2922,7 +3400,8 @@
   "retiredIndexUids": [],
   "retiredPropertyUids": [
     8694161291238035285,
-    8618464481167645405
+    8618464481167645405,
+    5433533917708839671
   ],
   "retiredRelationUids": [],
   "version": 1

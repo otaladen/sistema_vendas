@@ -1,3 +1,4 @@
+import '../../domain/venda_relacao_safe.dart';
 import '../../model/venda.dart';
 
 /// Ordena paradas do mesmo carro: [ordemEntrega] crescente; 0 ou igual vai ao desempate por id.
@@ -67,8 +68,12 @@ int contarEntregasSemMotorista(List<Venda> entregas) => entregas
 /// True quando ha 2+ clientes distintos entre as vendas (agrupamento multi-parada).
 bool agrupamentoTemClientesDistintos(List<Venda> vendas) {
   if (vendas.length < 2) return false;
-  final clientes = vendas.map((v) => v.cliente.targetId).where((id) => id > 0);
-  return clientes.toSet().length > 1;
+  final clientes = <int>{};
+  for (final v in vendas) {
+    final id = VendaRelacaoSafe.clienteId(v);
+    if (id > 0) clientes.add(id);
+  }
+  return clientes.length > 1;
 }
 
 String rotuloGrupoLogistica(List<Venda> bloco) {

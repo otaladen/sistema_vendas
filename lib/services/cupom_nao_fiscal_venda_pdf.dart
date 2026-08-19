@@ -131,11 +131,13 @@ class CupomNaoFiscalVendaPdf {
     Cliente? cliente,
     bool segundaVia,
     ConfigLayoutImpressao layout,
-    String rodape,
-  ) {
+    String rodape, {
+    List<ItemVenda>? itens,
+  }) {
+    final lista = _itensDaVenda(venda, itens);
     if (layout.estiloCupomNfce) {
       return CupomPdfLayout.contarLinhasExtrasNfce(
-        qtdItens: venda.itens.length,
+        qtdItens: lista.length,
         segundaVia: segundaVia,
         temDesconto: venda.descontoImplicitoTotal > 0,
         temEntrega: layout.exibirEntrega,
@@ -150,8 +152,21 @@ class CupomNaoFiscalVendaPdf {
     return _contarLinhasCupom(venda, cliente, segundaVia);
   }
 
+  /// ToMany detached (Terminal Leve): nao usar `venda.itens` direto.
+  static List<ItemVenda> _itensDaVenda(Venda venda, List<ItemVenda>? override) {
+    if (override != null) return List<ItemVenda>.from(override);
+    try {
+      return List<ItemVenda>.from(venda.itens);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static double _somaSubtotalItens(List<ItemVenda> itens) =>
+      itens.fold<double>(0, (s, i) => s + i.subtotal);
+
   static ({String codigo, String unidade}) _dadosProdutoItem(ItemVenda item) {
-    final p = item.produto.target;
+    final p = item.produtoOuNull;
     final codigo = p?.codigoInterno.trim();
     return (
       codigo: (codigo != null && codigo.isNotEmpty)
@@ -264,7 +279,7 @@ class CupomNaoFiscalVendaPdf {
 
   static String _quantidadeItemNfce(ItemVenda item) {
     final fracionada =
-        item.produto.target?.permiteQuantidadeFracionada ?? false;
+        item.produtoOuNull?.permiteQuantidadeFracionada ?? false;
     return QuantidadeVendaUtil.formatarExibicao(
       item.quantidadeVendaEfetiva,
       fracionada: fracionada,
@@ -294,7 +309,9 @@ class CupomNaoFiscalVendaPdf {
     required String dataLinhaPrincipal,
     String? dataReimpressao,
     Uint8List? logoBytes,
+    List<ItemVenda>? itens,
   }) {
+    final itensCupom = _itensDaVenda(venda, itens);
     final descontoNota = venda.descontoImplicitoTotal;
     final chaveValida = _chaveNfceValida(venda);
     final contingenciaSefaz = _vendaNfceEmContingencia(venda);
@@ -342,7 +359,7 @@ class CupomNaoFiscalVendaPdf {
         linha2: CupomPdfLayout.tituloDanfeNfceLegadoLinha2,
       ),
       CupomPdfLayout.cabecalhoTabelaItensLegadoLdv(layout),
-      ...venda.itens.asMap().entries.map((entry) {
+      ...itensCupom.asMap().entries.map((entry) {
         final idx = entry.key;
         final item = entry.value;
         final dados = _dadosProdutoItem(item);
@@ -366,8 +383,8 @@ class CupomNaoFiscalVendaPdf {
       }),
       CupomPdfLayout.blocoTotaisLegadoLdv(
         layout: layout,
-        qtdItens: venda.itens.length,
-        subtotal: formatarValorNumerico(venda.somaSubtotalItens),
+        qtdItens: itensCupom.length,
+        subtotal: formatarValorNumerico(_somaSubtotalItens(itensCupom)),
         desconto: formatarValorNumerico(descontoNota),
         frete: formatarValorNumerico(venda.valorFrete),
         valorTotal: formatarValorNumerico(venda.total),
@@ -431,8 +448,18 @@ class CupomNaoFiscalVendaPdf {
     String? dataReimpressao,
     required bool comLogo,
     required Uint8List logoBytes,
+    List<ItemVenda>? itens,
   }) {
+    final itensCupom = _itensDaVenda(venda, itens);
     final descontoNota = venda.descontoImplicitoTotal;
+    var temCarreto = venda.tipoEntrega == EntregaVendaHelper.tipoEntregaLoja;
+    if (!temCarreto) {
+      temCarreto = itensCupom.any(
+        (i) =>
+            EntregaVendaHelper.normalizarTipoItem(i.tipoEntregaItem) ==
+            EntregaVendaHelper.tipoEntregaLoja,
+      );
+    }
     return [
       ...CupomPdfLayout.cabecalhoEmpresa(
         layout: layout,
@@ -496,14 +523,17 @@ class CupomNaoFiscalVendaPdf {
             children: [
               const pw.TextSpan(text: 'Entrega: '),
               pw.TextSpan(
-                text: EntregaVendaHelper.textoEntregaCabecalhoVenda(venda),
+                text: EntregaVendaHelper.textoEntregaCabecalhoVenda(
+                  venda,
+                  itens: itensCupom,
+                ),
                 style: CupomPdfLayout.estilo(
                   layout,
                   fontSize: layout.tamanhoFonteCorpo.fontSizeCorpo,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              if (EntregaVendaHelper.vendaTemItensCarreto(venda))
+              if (temCarreto)
                 pw.TextSpan(
                   text: ' | Frete: ${formatarMoeda(venda.valorFrete)}',
                 ),
@@ -520,7 +550,7 @@ class CupomNaoFiscalVendaPdf {
       CupomPdfLayout.tituloSecao('ITENS', layout),
       if (CupomPdfLayout.cabecalhoColunasItens(layout) != null)
         CupomPdfLayout.cabecalhoColunasItens(layout)!,
-      ...venda.itens.map(
+      ...itensCupom.map(
         (item) => CupomPdfLayout.itemVenda(
           layout: layout,
           nomeProduto: ProdutoNomeExibicao.paraImpressaoItem(item),
@@ -537,7 +567,7 @@ class CupomNaoFiscalVendaPdf {
       CupomPdfLayout.linhaTotal(
         layout: layout,
         rotulo: 'Subtotal produtos:',
-        valor: formatarMoeda(venda.somaSubtotalItens),
+        valor: formatarMoeda(_somaSubtotalItens(itensCupom)),
       ),
       CupomPdfLayout.linhaTotal(
         layout: layout,
@@ -602,6 +632,7 @@ class CupomNaoFiscalVendaPdf {
     required double troco,
     bool segundaVia = false,
     DateTime? dataCabecalhoVenda,
+    List<ItemVenda>? itens,
   }) async {
     return (await gerar(
       venda: venda,
@@ -612,6 +643,7 @@ class CupomNaoFiscalVendaPdf {
       troco: troco,
       segundaVia: segundaVia,
       dataCabecalhoVenda: dataCabecalhoVenda,
+      itens: itens,
     ))
         .bytes;
   }
@@ -625,7 +657,9 @@ class CupomNaoFiscalVendaPdf {
     required double troco,
     bool segundaVia = false,
     DateTime? dataCabecalhoVenda,
+    List<ItemVenda>? itens,
   }) async {
+    final itensCupom = _itensDaVenda(venda, itens);
     final logoBytes = config.logoPath.trim().isNotEmpty
         ? await File(
             config.logoPath,
@@ -655,14 +689,15 @@ class CupomNaoFiscalVendaPdf {
         segundaVia,
         layout,
         config.rodapeNota,
+        itens: itensCupom,
       );
     } else {
       linhasTexto = _contarLinhasCupom(venda, cliente, segundaVia);
       linhasExtras = CupomPdfLayout.linhasTexto(config.rodapeNota).length + 2;
       final unidades = CupomPdfLayout.unidadesAlturaItensTermico(
-        venda.itens.map(ProdutoNomeExibicao.paraImpressaoItem),
+        itensCupom.map(ProdutoNomeExibicao.paraImpressaoItem),
       );
-      qtdItens = unidades > 0 ? unidades : venda.itens.length;
+      qtdItens = unidades > 0 ? unidades : itensCupom.length;
     }
 
     final pageFormat = CupomPdfLayout.formatoPagina(
@@ -692,6 +727,7 @@ class CupomNaoFiscalVendaPdf {
                   dataLinhaPrincipal: dataLinhaPrincipal,
                   dataReimpressao: dataReimpressao,
                   logoBytes: comLogo ? logoBytes : null,
+                  itens: itensCupom,
                 )
               : _buildCorpoClassico(
                   venda: venda,
@@ -706,6 +742,7 @@ class CupomNaoFiscalVendaPdf {
                   dataReimpressao: dataReimpressao,
                   comLogo: comLogo,
                   logoBytes: logoBytes,
+                  itens: itensCupom,
                 );
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,

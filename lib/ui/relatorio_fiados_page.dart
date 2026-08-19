@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../data/cliente_repository.dart';
+import '../data/api/lan_api_event_hub.dart';
+import '../data/api/venda_api_repository.dart';
 import '../data/titulo_receber_repository.dart';
-import '../data/venda_repository.dart';
-import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
 import 'relatorios/relatorio_drill_down.dart';
 import 'relatorios/relatorio_export_util.dart';
 import 'relatorios/widgets/relatorio_exportacoes_menu.dart';
+import 'widgets/lan_api_feedback.dart';
 
 class _GrupoFiadoCliente {
   _GrupoFiadoCliente({
@@ -43,9 +43,9 @@ class RelatorioFiadosPage extends StatefulWidget {
     this.vendedorRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
-  final VendedorRepository? vendedorRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
+  final dynamic vendedorRepository;
 
   @override
   State<RelatorioFiadosPage> createState() => _RelatorioFiadosPageState();
@@ -66,36 +66,61 @@ class _RelatorioFiadosPageState extends State<RelatorioFiadosPage> {
     _atualizar();
   }
 
-  void _atualizar() {
-    widget.vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
-    final linhas = widget.vendaRepository.titulos.listarTodosAbertos(
-      somenteVencidos: _somenteVencidos,
-    );
-    final map = <int, _GrupoFiadoCliente>{};
-    for (final l in linhas) {
-      final cid = l.titulo.cliente.targetId;
-      final cli = l.titulo.cliente.target ??
-          (cid > 0 ? widget.clienteRepository.obterPorId(cid) : null);
-      final nome = l.nomeCliente.trim().isNotEmpty
-          ? l.nomeCliente
-          : (cli?.nomeRazao ?? 'Cliente #$cid');
-      map.putIfAbsent(
-        cid,
-        () => _GrupoFiadoCliente(
-          clienteId: cid,
-          nome: nome,
-          cliente: cli,
-          titulos: [],
-        ),
+  Future<void> _atualizar() async {
+    final repo = widget.vendaRepository;
+    try {
+      if (repo is VendaApiRepository) {
+        if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+          return;
+        }
+        await repo.hidratarTitulos();
+      }
+      try {
+        widget.vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+      } catch (_) {}
+      final linhas = widget.vendaRepository.titulos.listarTodosAbertos(
+        somenteVencidos: _somenteVencidos,
+      ) as List<TituloReceberResumoLinha>;
+      final map = <int, _GrupoFiadoCliente>{};
+      for (final l in linhas) {
+        final cid = l.titulo.cliente.targetId;
+        Cliente? cli;
+        if (cid > 0) {
+          try {
+            cli = widget.clienteRepository.obterPorId(cid) as Cliente?;
+          } catch (_) {
+            cli = null;
+          }
+        }
+        final nome = l.nomeCliente.trim().isNotEmpty
+            ? l.nomeCliente
+            : (cli?.nomeRazao ?? (cid > 0 ? 'Cliente #$cid' : 'Sem cliente'));
+        map.putIfAbsent(
+          cid,
+          () => _GrupoFiadoCliente(
+            clienteId: cid,
+            nome: nome,
+            cliente: cli,
+            titulos: [],
+          ),
+        );
+        map[cid]!.titulos.add(l);
+      }
+      final grupos = map.values.toList()
+        ..sort((a, b) => b.saldoTotal.compareTo(a.saldoTotal));
+      if (!mounted) return;
+      setState(() {
+        _linhas = linhas;
+        _grupos = grupos;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Falha ao carregar relatorio de fiados',
       );
-      map[cid]!.titulos.add(l);
     }
-    final grupos = map.values.toList()
-      ..sort((a, b) => b.saldoTotal.compareTo(a.saldoTotal));
-    setState(() {
-      _linhas = linhas;
-      _grupos = grupos;
-    });
   }
 
   List<List<String>> _linhasCsv() {

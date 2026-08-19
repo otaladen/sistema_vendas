@@ -2,22 +2,29 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../data/cliente_repository.dart';
 import '../data/conferencia_carga_repository.dart';
-import '../data/motorista_repository.dart';
-import '../data/produto_repository.dart';
+import '../data/api/conferencia_carga_api_repository.dart';
+import '../data/api/lan_api_client.dart';
+import '../data/api/lan_api_event_hub.dart';
 import '../data/usuario_repository.dart';
-import '../data/venda_repository.dart';
-import '../data/vendedor_repository.dart';
+import '../data/api/funcionario_api_repository.dart';
+import '../data/api/venda_api_repository.dart';
+import '../data/sync/entrega_local_refresh_hub.dart';
+import '../data/sync/entregas_foco_hub.dart';
+import '../data/lote_produto_repository.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../services/lote_fefo_service.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/complemento_entrega_codec.dart';
+import '../domain/motorista_lista_safe.dart';
+import '../domain/venda_relacao_safe.dart';
 import '../model/historico_entrega.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
@@ -39,9 +46,11 @@ import 'entregas/romaneio_carga_consolidada.dart';
 import 'entregas/romaneio_pdf.dart';
 import 'entregas/romaneio_relatorios.dart';
 import '../data/app_config_repository.dart';
-import '../data/sync/sync_refresh_hub.dart';
+import '../domain/entregas/loja_origem_mercadoria.dart';
+import '../domain/entregas/buscar_na_loja.dart';
 import '../domain/entrega_pod_regra.dart';
 import '../domain/entregas/carreto_checklist_estoque_helper.dart';
+import '../services/entrega_fluxo_service.dart';
 import '../services/entrega_pod_finalizacao.dart';
 import '../services/entrega_pod_prefetch_service.dart';
 import 'entregas/entrega_pod_chip.dart';
@@ -49,11 +58,59 @@ import 'entregas/entrega_pod_foto_panel.dart';
 import 'entregas/pod_entrega_dialog.dart';
 import 'pdv_vendedor_bloqueio.dart';
 import 'registrar_devolucao_troca_page.dart';
+import 'shell/main_menu_deps.dart';
+import 'widgets/lan_api_feedback.dart';
 
 /// Filtro rapido pelos contadores de resumo (atrasadas / pendentes hoje).
-enum _FiltroResumoEntregas { nenhum, atrasadas, pendentesHoje }
+enum _FiltroResumoEntregas { nenhum, atrasadas, pendentesHoje, buscarNaLoja }
 
 enum _ModoVisualizacaoDia { lista, kanban }
+
+enum _TipoLinhaListaEntrega { cabecalho, rota, carreto, card }
+
+/// Linha virtualizada da lista do dia (evita montar todos os cards do grupo).
+class _LinhaListaEntrega {
+  const _LinhaListaEntrega._({
+    required this.tipo,
+    this.rotuloGrupo,
+    this.quantidade = 0,
+    this.motorista,
+    this.vendas,
+    this.venda,
+  });
+
+  factory _LinhaListaEntrega.cabecalho(String grupo, int n) =>
+      _LinhaListaEntrega._(
+        tipo: _TipoLinhaListaEntrega.cabecalho,
+        rotuloGrupo: grupo,
+        quantidade: n,
+      );
+
+  factory _LinhaListaEntrega.rota(String motorista, List<Venda> vendas) =>
+      _LinhaListaEntrega._(
+        tipo: _TipoLinhaListaEntrega.rota,
+        motorista: motorista,
+        vendas: vendas,
+      );
+
+  factory _LinhaListaEntrega.carreto(List<Venda> bloco) =>
+      _LinhaListaEntrega._(
+        tipo: _TipoLinhaListaEntrega.carreto,
+        vendas: bloco,
+      );
+
+  factory _LinhaListaEntrega.card(Venda venda) => _LinhaListaEntrega._(
+        tipo: _TipoLinhaListaEntrega.card,
+        venda: venda,
+      );
+
+  final _TipoLinhaListaEntrega tipo;
+  final String? rotuloGrupo;
+  final int quantidade;
+  final String? motorista;
+  final List<Venda>? vendas;
+  final Venda? venda;
+}
 
 const _kMenuMarcarDataEntrega = '__acao_marcar_data_entrega__';
 const _kMenuLimparDataEntrega = '__acao_limpar_data_entrega__';
@@ -72,18 +129,23 @@ class EntregasPage extends StatefulWidget {
     required this.podeRegistrarPodEntrega,
     required this.podeRegistrarDevolucaoTrocaSemSenha,
     this.appConfigRepository,
+    this.ocultarValoresMonetarios = false,
   });
 
-  final VendaRepository vendaRepository;
-  final ProdutoRepository produtoRepository;
-  final MotoristaRepository motoristaRepository;
-  final VendedorRepository vendedorRepository;
+  final dynamic vendaRepository;
+  final dynamic produtoRepository;
+  final dynamic motoristaRepository;
+  final dynamic vendedorRepository;
   final AppConfigRepository? appConfigRepository;
   final String usuarioAtual;
   final bool podeGerenciarStatusEntrega;
   final bool podeRegistrarPodEntrega;
+
   /// Mesmo criterio da listagem de vendas (admin / financeiro / auditoria de caixa).
   final bool podeRegistrarDevolucaoTrocaSemSenha;
+
+  /// Motorista de campo: nao mostra preco nem total da carga.
+  final bool ocultarValoresMonetarios;
 
   @override
   State<EntregasPage> createState() => _EntregasPageState();
@@ -91,9 +153,28 @@ class EntregasPage extends StatefulWidget {
 
 class _EntregasPageState extends State<EntregasPage>
     with SingleTickerProviderStateMixin {
-  late final ConferenciaCargaRepository _conferenciaCargaRepository =
-      ConferenciaCargaRepository(widget.vendaRepository.objectBox);
-  final UsuarioRepository _usuarioRepository = UsuarioRepository();
+  dynamic _conferenciaCargaRepository;
+  late dynamic _usuarioRepository;
+
+  bool get _usaVendaApi => widget.vendaRepository is VendaApiRepository;
+
+  VendaApiRepository get _vendaApiRepo =>
+      widget.vendaRepository as VendaApiRepository;
+
+  dynamic _criarConferenciaCargaRepository() {
+    if (widget.vendaRepository is VendaApiRepository) {
+      final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+      if (client != null) {
+        return ConferenciaCargaApiRepository(client);
+      }
+      return null;
+    }
+    try {
+      return ConferenciaCargaRepository(widget.vendaRepository.objectBox);
+    } catch (_) {
+      return null;
+    }
+  }
 
   late TabController _tabEntregasController;
   bool _mostrarDicasEntregas = true;
@@ -105,7 +186,6 @@ class _EntregasPageState extends State<EntregasPage>
   final _statuses = const [
     'todos',
     'pendente',
-    'roteirizada',
     'saiu_entrega',
     'entregue_complemento_pendente',
     'entregue',
@@ -142,6 +222,9 @@ class _EntregasPageState extends State<EntregasPage>
 
   final ScrollController _kanbanHScrollController = ScrollController();
 
+  Timer? _refreshEntregaDebounce;
+  bool _refreshEntregaViaApi = false;
+
   void _selecionarDiaPlanejamento(String? chave) {
     setState(() {
       _chaveDiaPlanejamentoSelecionado = chave;
@@ -163,8 +246,9 @@ class _EntregasPageState extends State<EntregasPage>
 
   void _deslocarSemanaExibida(int deltaSemanas) {
     setState(() {
-      _inicioSemanaExibida = PlanejamentoEntregaDia.soDia(_inicioSemanaExibida)
-          .add(Duration(days: 7 * deltaSemanas));
+      _inicioSemanaExibida = PlanejamentoEntregaDia.soDia(
+        _inicioSemanaExibida,
+      ).add(Duration(days: 7 * deltaSemanas));
     });
   }
 
@@ -188,8 +272,8 @@ class _EntregasPageState extends State<EntregasPage>
       case 'amanha':
         _chaveDiaPlanejamentoSelecionado =
             PlanejamentoEntregaDia.chaveDeDateTime(
-          DateTime.now().add(const Duration(days: 1)),
-        );
+              DateTime.now().add(const Duration(days: 1)),
+            );
       case 'sem_data':
         _chaveDiaPlanejamentoSelecionado = PlanejamentoEntregaDia.semData;
       case 'todos':
@@ -213,10 +297,13 @@ class _EntregasPageState extends State<EntregasPage>
 
   String _nomeMotoristaFiltroExibicao() {
     if (_filtroMotorista == 'todos') return 'Todos';
-    final m = widget.motoristaRepository.listarAtivos().where(
-          (x) => x.nome.trim().toLowerCase() == _filtroMotorista,
-        );
-    return m.isNotEmpty ? m.first.nome : _filtroMotorista;
+    final ativos = MotoristaListaSafe.listarAtivos(widget.motoristaRepository);
+    for (final x in ativos) {
+      if (x.nome.trim().toLowerCase() == _filtroMotorista) {
+        return x.nome;
+      }
+    }
+    return _filtroMotorista;
   }
 
   String _nomeVendedorFiltroExibicao() {
@@ -253,7 +340,9 @@ class _EntregasPageState extends State<EntregasPage>
         _carregarEntregas();
       },
       filtroMotorista: _filtroMotorista,
-      motoristasAtivos: widget.motoristaRepository.listarAtivos(),
+      motoristasAtivos: MotoristaListaSafe.listarAtivos(
+        widget.motoristaRepository,
+      ),
       onMotorista: (v) {
         setState(() => _filtroMotorista = v);
         _carregarEntregas();
@@ -299,26 +388,86 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _conferenciaCargaRepository ??= _criarConferenciaCargaRepository();
+  }
+
+  @override
   void initState() {
     super.initState();
+    _usuarioRepository =
+        MainMenuDeps.resolverUsuarioRepository(context);
     _tabEntregasController = TabController(
       length: 2,
       vsync: this,
       initialIndex: 1,
     );
-    _inicioSemanaExibida =
-        PlanejamentoEntregaDia.inicioSemana(DateTime.now());
+    _inicioSemanaExibida = PlanejamentoEntregaDia.inicioSemana(DateTime.now());
     _tabEntregasController.addListener(_onTabEntregasAlterada);
     _inicio = null;
     _fim = null;
-    _chaveDiaPlanejamentoSelecionado =
-        PlanejamentoEntregaDia.chaveDeDateTime(DateTime.now());
+    _chaveDiaPlanejamentoSelecionado = PlanejamentoEntregaDia.chaveDeDateTime(
+      DateTime.now(),
+    );
     _filtroDataMarcada = 'hoje';
-    SyncRefreshHub.instance.addListener(_onSyncHubNotificado);
-    _carregarEntregas();
+    LanApiEventHub.instance.addListener(_onLanApiEntregaChanged);
+    EntregaLocalRefreshHub.instance.addListener(_onEntregaLocalRefresh);
+    EntregasFocoHub.instance.addListener(_onEntregasFocoPedido);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onEntregasFocoPedido());
+    if (_usaVendaApi) {
+      unawaited(_inicializarEntregasApi());
+    } else {
+      _carregarEntregas();
+    }
     unawaited(_prefetchPodFotos());
     unawaited(_carregarPreferenciaDicasEntregas());
     unawaited(_aplicarPreferenciasAberturaSalvas());
+  }
+
+  void _onEntregasFocoPedido() {
+    final n = EntregasFocoHub.instance.numeroPedido;
+    if (n == null || n <= 0) return;
+    EntregasFocoHub.instance.consumir();
+    if (!mounted) return;
+    setState(() {
+      _numeroNotaController.text = '$n';
+      _filtroDataMarcada = 'todos';
+      _chaveDiaPlanejamentoSelecionado = null;
+      _statusSelecionado = 'todos';
+      _filtroResumoLista = _FiltroResumoEntregas.nenhum;
+      _filtroApenasSemMotorista = false;
+    });
+    _carregarEntregas();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Filtro do chat: pedido #$n')),
+    );
+  }
+
+  Future<void> _garantirMotoristasHidratados() async {
+    final repo = widget.motoristaRepository;
+    if (repo is! MotoristaApiRepository) return;
+    try {
+      await repo.hidratar();
+    } catch (_) {}
+  }
+
+  Future<void> _inicializarEntregasApi() async {
+    try {
+      await _vendaApiRepo.hidratarEntregas(limit: 500);
+      await _garantirMotoristasHidratados();
+    } on LanApiException catch (e) {
+      debugPrint('EntregasPage.hidratarEntregas: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Entregas: $e')),
+        );
+      }
+    } catch (e, st) {
+      debugPrint('EntregasPage.hidratarEntregas: $e\n$st');
+    }
+    if (mounted) _carregarEntregas();
   }
 
   Future<void> _aplicarPreferenciasAberturaSalvas() async {
@@ -344,8 +493,11 @@ class _EntregasPageState extends State<EntregasPage>
 
   void _aplicarDiaRapidoSimples({required bool amanha}) {
     final base = DateTime.now();
-    final dia = DateTime(base.year, base.month, base.day)
-        .add(Duration(days: amanha ? 1 : 0));
+    final dia = DateTime(
+      base.year,
+      base.month,
+      base.day,
+    ).add(Duration(days: amanha ? 1 : 0));
     _selecionarDiaPlanejamento(PlanejamentoEntregaDia.chaveDeDateTime(dia));
   }
 
@@ -360,6 +512,77 @@ class _EntregasPageState extends State<EntregasPage>
   bool get _diaSelecionadoEhHojeSimples => _filtroDataMarcada == 'hoje';
 
   bool get _diaSelecionadoEhAmanhaSimples => _filtroDataMarcada == 'amanha';
+
+  Widget _seletorAbaAvancadaAppBar() {
+    final aba = _tabEntregasController.index.clamp(0, 1);
+    final scheme = Theme.of(context).colorScheme;
+    final onBar =
+        Theme.of(context).appBarTheme.foregroundColor ?? scheme.onSurface;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Tooltip(
+        message: 'Patio (carga/rota) ou Dia (lista)',
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<int>(
+            value: aba,
+            isDense: true,
+            borderRadius: BorderRadius.circular(8),
+            icon: Icon(Icons.arrow_drop_down, color: onBar, size: 20),
+            dropdownColor: scheme.surface,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: onBar,
+                  fontWeight: FontWeight.w600,
+                ),
+            selectedItemBuilder: (context) => [
+              _rotuloAbaAvancada(
+                Icons.inventory_2_outlined,
+                'Patio',
+                onBar,
+              ),
+              _rotuloAbaAvancada(
+                Icons.calendar_view_week_outlined,
+                'Dia',
+                onBar,
+              ),
+            ],
+            items: [
+              DropdownMenuItem(
+                value: 0,
+                child: _rotuloAbaAvancada(
+                  Icons.inventory_2_outlined,
+                  'Patio',
+                  scheme.onSurface,
+                ),
+              ),
+              DropdownMenuItem(
+                value: 1,
+                child: _rotuloAbaAvancada(
+                  Icons.calendar_view_week_outlined,
+                  'Dia',
+                  scheme.onSurface,
+                ),
+              ),
+            ],
+            onChanged: (v) {
+              if (v == null || v == _tabEntregasController.index) return;
+              _tabEntregasController.animateTo(v);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _rotuloAbaAvancada(IconData icone, String texto, Color cor) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icone, size: 16, color: cor),
+        const SizedBox(width: 6),
+        Text(texto),
+      ],
+    );
+  }
 
   void _salvarPreferenciasAberturaAtual() {
     unawaited(
@@ -386,7 +609,40 @@ class _EntregasPageState extends State<EntregasPage>
     if (mounted) setState(() => _mostrarDicasEntregas = false);
   }
 
-  void _onSyncHubNotificado() {
+  void _onLanApiEntregaChanged() {
+    if (!mounted) return;
+    final ent = LanApiEventHub.instance.ultimaEntidade;
+    if (ent != 'entrega' &&
+        ent != 'venda' &&
+        ent != 'conferencia_carga' &&
+        ent != 'conferencia_carga_romaneio') {
+      return;
+    }
+    _agendarRefreshAposEventoEntrega(viaApi: true);
+  }
+
+  void _onEntregaLocalRefresh() {
+    if (!mounted) return;
+    _agendarRefreshAposEventoEntrega(viaApi: false);
+  }
+
+  void _agendarRefreshAposEventoEntrega({required bool viaApi}) {
+    if (viaApi) _refreshEntregaViaApi = true;
+    _refreshEntregaDebounce?.cancel();
+    _refreshEntregaDebounce = Timer(const Duration(milliseconds: 250), () {
+      final api = _refreshEntregaViaApi;
+      _refreshEntregaViaApi = false;
+      if (!mounted) return;
+      unawaited(_refreshAposEventoEntrega(viaApi: api));
+    });
+  }
+
+  Future<void> _refreshAposEventoEntrega({required bool viaApi}) async {
+    if (viaApi && _usaVendaApi) {
+      try {
+        await _vendaApiRepo.hidratarEntregas(limit: 500);
+      } catch (_) {}
+    }
     if (!mounted) return;
     _carregarEntregas();
     unawaited(_prefetchPodFotos());
@@ -395,8 +651,9 @@ class _EntregasPageState extends State<EntregasPage>
   Future<void> _prefetchPodFotos() async {
     final repo = widget.appConfigRepository;
     if (repo == null || _entregas.isEmpty) return;
-    await EntregaPodPrefetchService(configRepository: repo)
-        .prefetchLista(_entregas);
+    await EntregaPodPrefetchService(
+      configRepository: repo,
+    ).prefetchLista(_entregas);
   }
 
   void _copiarCamposPod(Venda destino, Venda origem) {
@@ -415,12 +672,16 @@ class _EntregasPageState extends State<EntregasPage>
       vendaId: venda.id,
       recebidoPorInicial: anterior,
       modoEdicao: true,
+      origemMercadoriaRotulo: _rotuloOrigemMercadoria(venda),
     );
     if (pod == null) return false;
     try {
       final podFinal = EntregaPodFinalizacao(
         configRepository: widget.appConfigRepository,
       );
+      final motivo = anterior.isEmpty
+          ? 'POD registrado — recebido por: ${pod.recebidoPor}'
+          : 'POD alterado — recebido por: ${pod.recebidoPor} (antes: $anterior)';
       await podFinal.registrarPod(
         vendaRepository: widget.vendaRepository,
         vendaId: venda.id,
@@ -428,17 +689,21 @@ class _EntregasPageState extends State<EntregasPage>
         usuarioLogin: widget.usuarioAtual,
         fotoPathLocal: pod.fotoPathLocal ?? venda.podFotoPath,
         fotoPathServidor: pod.fotoPathServidor ?? venda.podFotoPathServidor,
+        ocorrenciaMotivo:
+            widget.vendaRepository is VendaApiRepository ? motivo : '',
       );
       final atualizada = widget.vendaRepository.obterPorId(venda.id);
       if (atualizada != null) _copiarCamposPod(venda, atualizada);
-      widget.vendaRepository.registrarOcorrenciaEntrega(
-        vendaId: venda.id,
-        status: HistoricoEntregaEventos.podEntrega,
-        motivo: anterior.isEmpty
-            ? 'POD registrado — recebido por: ${pod.recebidoPor}'
-            : 'POD alterado — recebido por: ${pod.recebidoPor} (antes: $anterior)',
-        usuario: widget.usuarioAtual,
-      );
+      if (widget.vendaRepository is VendaApiRepository) {
+        // Ocorrencia ja enviada no payload do POD.
+      } else {
+        widget.vendaRepository.registrarOcorrenciaEntrega(
+          vendaId: venda.id,
+          status: HistoricoEntregaEventos.podEntrega,
+          motivo: motivo,
+          usuario: widget.usuarioAtual,
+        );
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Prova de entrega atualizada.')),
@@ -447,9 +712,9 @@ class _EntregasPageState extends State<EntregasPage>
       return true;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao alterar POD: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro ao alterar POD: $e')));
       }
       return false;
     }
@@ -457,9 +722,12 @@ class _EntregasPageState extends State<EntregasPage>
 
   @override
   void dispose() {
+    _refreshEntregaDebounce?.cancel();
     _tabEntregasController.removeListener(_onTabEntregasAlterada);
     _tabEntregasController.dispose();
-    SyncRefreshHub.instance.removeListener(_onSyncHubNotificado);
+    LanApiEventHub.instance.removeListener(_onLanApiEntregaChanged);
+    EntregaLocalRefreshHub.instance.removeListener(_onEntregaLocalRefresh);
+    EntregasFocoHub.instance.removeListener(_onEntregasFocoPedido);
     _kanbanHScrollController.dispose();
     _bairroController.dispose();
     _numeroNotaController.dispose();
@@ -468,20 +736,48 @@ class _EntregasPageState extends State<EntregasPage>
 
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
 
+  /// Itens sem depender de ToMany quebrado (terminal leve).
+  List<ItemVenda> _itensDaVenda(Venda v) {
+    try {
+      final viaRepo =
+          widget.vendaRepository.listarItensPorVenda(v.id) as List?;
+      if (viaRepo != null && viaRepo.isNotEmpty) {
+        return viaRepo.whereType<ItemVenda>().toList();
+      }
+    } catch (_) {}
+    try {
+      return v.itens.toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   bool _vendaUsaItensCarretoMigrado(Venda v) {
-    return EntregaVendaHelper.vendaTemItensMigradosRetiradaParaCarreto(v);
+    try {
+      return EntregaVendaHelper.vendaTemItensMigradosRetiradaParaCarreto(v);
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Carreto nativo (reserva ate a saida), nao migrado de retirada futura.
   bool _vendaCarretoReservaNativaSemMigracao(Venda v) {
-    return EntregaVendaHelper.vendaTemItensCarreto(v) &&
-        v.carretoReservaAteSaida &&
-        !_vendaUsaItensCarretoMigrado(v);
+    try {
+      return EntregaVendaHelper.vendaTemItensCarreto(v) &&
+          v.carretoReservaAteSaida &&
+          !_vendaUsaItensCarretoMigrado(v);
+    } catch (_) {
+      return false;
+    }
   }
 
   bool _podeRegistrarRetiradaLojaAntesSaidaCarreto(Venda v) {
-    return EntregaVendaHelper.vendaPermiteRetiradaLojaCarretoAntesSaida(v) &&
-        _vendaCarretoReservaNativaSemMigracao(v);
+    try {
+      return EntregaVendaHelper.vendaPermiteRetiradaLojaCarretoAntesSaida(v) &&
+          _vendaCarretoReservaNativaSemMigracao(v);
+    } catch (_) {
+      return false;
+    }
   }
 
   int _quantidadeExibicaoEntrega(Venda v, ItemVenda item) =>
@@ -495,20 +791,37 @@ class _EntregasPageState extends State<EntregasPage>
   bool _podeRegistrarDevolucaoTrocaBase(Venda v) {
     if (v.cancelada || v.status != 'finalizada') return false;
     if (v.vendaOrigemFreteRetiradaId > 0) return false;
-    return v.itens.any((i) => i.quantidade - i.quantidadeDevolvida > 0);
+    return _itensDaVenda(v).any((i) => i.quantidade - i.quantidadeDevolvida > 0);
   }
 
   /// Carreto com checklist "Saiu" e entrega em andamento ou concluida (mercadoria pode voltar).
   bool _podeDevolucaoPosCarretoNaEntrega(Venda v) {
-    if (!_podeRegistrarDevolucaoTrocaBase(v)) return false;
-    if (!EntregaVendaHelper.vendaTemItensCarreto(v)) return false;
-    if (!v.cargaSaiu) return false;
-    return v.statusEntrega == 'saiu_entrega' ||
-        v.statusEntrega == 'entregue' ||
-        v.statusEntrega == 'entregue_complemento_pendente';
+    try {
+      if (!_podeRegistrarDevolucaoTrocaBase(v)) return false;
+      if (!EntregaVendaHelper.vendaTemItensCarreto(v)) return false;
+      if (!v.cargaSaiu) return false;
+      return v.statusEntrega == 'saiu_entrega' ||
+          v.statusEntrega == 'entregue' ||
+          v.statusEntrega == 'entregue_complemento_pendente';
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _abrirRegistrarDevolucaoPosCarreto(Venda vIn) async {
+    final clienteRepository = MainMenuDeps.maybeOf(context)?.clienteRepository;
+    if (clienteRepository == null ||
+        widget.vendaRepository is VendaApiRepository) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Devolucoes exigem a base local e nao estao disponiveis neste terminal.',
+          ),
+        ),
+      );
+      return;
+    }
     final v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
     if (!_podeDevolucaoPosCarretoNaEntrega(v)) {
       if (!mounted) return;
@@ -527,7 +840,7 @@ class _EntregasPageState extends State<EntregasPage>
       MaterialPageRoute(
         builder: (_) => RegistrarDevolucaoTrocaPage(
           vendaRepository: widget.vendaRepository,
-          clienteRepository: ClienteRepository(widget.vendaRepository.objectBox),
+          clienteRepository: clienteRepository,
           produtoRepository: widget.produtoRepository,
           vendaId: v.id,
           usuarioAtual: widget.usuarioAtual,
@@ -591,10 +904,12 @@ class _EntregasPageState extends State<EntregasPage>
         return 'Retirada na loja (pre-saida)';
       case HistoricoEntregaEventos.complementoPendente:
         return 'Complemento pendente';
+      case HistoricoEntregaEventos.buscarNaLoja:
+        return 'Buscar nesta loja';
       case 'pendente':
         return 'Pendente';
       case 'roteirizada':
-        return 'Roteirizada';
+        return 'Aguardando motorista';
       case 'saiu_entrega':
         return 'Saiu para entrega';
       case 'entregue_complemento_pendente':
@@ -612,6 +927,8 @@ class _EntregasPageState extends State<EntregasPage>
 
   String _rotuloStatusFiltro(String status) {
     if (status == 'todos') return 'Todos';
+    if (status == 'pendente') return 'Pendente';
+    if (status == 'saiu_entrega') return 'Em rota';
     if (status == 'entregue_complemento_pendente') {
       return 'Compl. pendente';
     }
@@ -631,7 +948,6 @@ class _EntregasPageState extends State<EntregasPage>
       case 'cancelada':
         return scheme.error;
       case 'roteirizada':
-        return Colors.purple.shade700;
       case 'pendente':
       default:
         return scheme.primary;
@@ -671,7 +987,8 @@ class _EntregasPageState extends State<EntregasPage>
     DateTime? fim,
     String filtroMemoria,
     bool filtradoNoBanco,
-  }) _parametrosDataMarcadaFiltro() {
+  })
+  _parametrosDataMarcadaFiltro() {
     switch (_filtroDataMarcada) {
       case 'hoje':
         final h = PlanejamentoEntregaDia.soDia(DateTime.now());
@@ -729,7 +1046,7 @@ class _EntregasPageState extends State<EntregasPage>
     final usarPeriodo = paraContagemResumo
         ? false
         : (_filtroResumoLista == _FiltroResumoEntregas.nenhum &&
-            usarPeriodoVendaNaLista);
+              usarPeriodoVendaNaLista);
     final dataMarcada = paraContagemResumo
         ? (
             inicio: null,
@@ -760,54 +1077,77 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   void _carregarEntregas() {
-    final filtroLista = _montarFiltroEntregas(usarPeriodoVendaNaLista: true);
-    final filtroContagem = _montarFiltroEntregas(
-      usarPeriodoVendaNaLista: false,
-      paraContagemResumo: true,
-    );
-    final resultado = widget.vendaRepository.carregarListagemEntregasComResumo(
-      filtroLista: filtroLista,
-      filtroContagem: filtroContagem,
-    );
-    final resultadoResumoDias =
-        widget.vendaRepository.carregarListagemEntregasComResumo(
-      filtroLista: filtroContagem,
-      filtroContagem: filtroContagem,
-    );
-    final entregas = resultado.entregas;
-    final vendedoresDisponiveis =
-        (entregas
-            .map(_nomeVendedor)
-            .map((n) => n.trim())
-            .where((n) => n.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
-    setState(() {
-      _entregas = entregas;
-      _entregasResumoDias = resultadoResumoDias.entregas;
-      _contagemAtrasadasCache = resultado.atrasadas;
-      _contagemPendentesHojeCache = resultado.pendentesHoje;
-      _vendedoresDisponiveis = vendedoresDisponiveis;
-      if (_chaveDiaPlanejamentoSelecionado != null &&
-          _filtroDataMarcada == 'todos') {
-        final fmtPlanej = DateFormat('dd/MM/yyyy');
-        final aindaExiste = entregas.any(
-          (v) => _vendaNaChaveDiaPlanejamento(
-            v,
-            _chaveDiaPlanejamentoSelecionado!,
-            fmtPlanej,
-          ),
-        );
-        if (!aindaExiste) _chaveDiaPlanejamentoSelecionado = null;
-      }
-    });
-    unawaited(_prefetchPodFotos());
+    try {
+      final filtroLista = _montarFiltroEntregas(usarPeriodoVendaNaLista: true);
+      final filtroContagem = _montarFiltroEntregas(
+        usarPeriodoVendaNaLista: false,
+        paraContagemResumo: true,
+      );
+      final resultado = widget.vendaRepository.carregarListagemEntregasComResumo(
+        filtroLista: filtroLista,
+        filtroContagem: filtroContagem,
+      );
+      final resultadoResumoDias = widget.vendaRepository
+          .carregarListagemEntregasComResumo(
+            filtroLista: filtroContagem,
+            filtroContagem: filtroContagem,
+          );
+      final entregas = (resultado.entregas as List).whereType<Venda>().toList();
+      final resumoDias =
+          (resultadoResumoDias.entregas as List).whereType<Venda>().toList();
+      final vendedoresDisponiveis =
+          (entregas
+              .map(_nomeVendedor)
+              .map((n) => n.trim())
+              .where((n) => n.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
+      if (!mounted) return;
+      setState(() {
+        _entregas = entregas;
+        _entregasResumoDias = resumoDias;
+        _contagemAtrasadasCache = resultado.atrasadas as int? ?? 0;
+        _contagemPendentesHojeCache = resultado.pendentesHoje as int? ?? 0;
+        _vendedoresDisponiveis = vendedoresDisponiveis;
+        if (_chaveDiaPlanejamentoSelecionado != null &&
+            _filtroDataMarcada == 'todos') {
+          final fmtPlanej = DateFormat('dd/MM/yyyy');
+          final aindaExiste = entregas.any(
+            (v) => _vendaNaChaveDiaPlanejamento(
+              v,
+              _chaveDiaPlanejamentoSelecionado!,
+              fmtPlanej,
+            ),
+          );
+          if (!aindaExiste) _chaveDiaPlanejamentoSelecionado = null;
+        }
+      });
+      unawaited(_prefetchPodFotos());
+    } catch (e, st) {
+      debugPrint('EntregasPage._carregarEntregas: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _entregas = const [];
+        _entregasResumoDias = const [];
+        _contagemAtrasadasCache = 0;
+        _contagemPendentesHojeCache = 0;
+        _vendedoresDisponiveis = const [];
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao carregar entregas: $e')),
+      );
+    }
   }
 
   Future<void> _atualizarListaEntregas() async {
+    if (_usaVendaApi) {
+      try {
+        await _vendaApiRepo.hidratarEntregas(limit: 500);
+      } catch (_) {}
+    }
     _carregarEntregas();
-    await Future<void>.delayed(const Duration(milliseconds: 280));
+    await Future<void>.delayed(const Duration(milliseconds: 80));
   }
 
   void _alternarSelecaoEntrega(int vendaId) {
@@ -843,18 +1183,36 @@ class _EntregasPageState extends State<EntregasPage>
         ? nomesNasSelecionadas.first
         : null;
     if (!mounted) return;
-    final motorista = await showAgruparViagemMotoristaDialog(
-      context,
-      widget.motoristaRepository,
-      motoristaSugerido: motoristaSugerido,
-      vendasSelecionadas: selecionadas,
-    );
+    await _garantirMotoristasHidratados();
+    if (!mounted) return;
+    late final String? motorista;
+    try {
+      motorista = await showAgruparViagemMotoristaDialog(
+        context,
+        widget.motoristaRepository,
+        motoristaSugerido: motoristaSugerido,
+        vendasSelecionadas: selecionadas,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel escolher o motorista: $e')),
+      );
+      return;
+    }
     if (motorista == null || motorista.isEmpty || !mounted) return;
     try {
-      widget.vendaRepository.definirGrupoEntregaLogistica(
-        ids,
-        motoristaEntrega: motorista,
-      );
+      if (_usaVendaApi) {
+        await _vendaApiRepo.definirGrupoEntregaLogisticaRemoto(
+          ids,
+          motoristaEntrega: motorista,
+        );
+      } else {
+        widget.vendaRepository.definirGrupoEntregaLogistica(
+          ids,
+          motoristaEntrega: motorista,
+        );
+      }
       await _carregarEntregasSyncState();
       if (!mounted) return;
       setState(() {
@@ -866,15 +1224,16 @@ class _EntregasPageState extends State<EntregasPage>
           content: Text(
             agrupamentoTemClientesDistintos(selecionadas)
                 ? 'Viagem agrupada (${selecionadas.length} pedidos, clientes diferentes). '
-                    'Defina a ordem das paradas na rota.'
+                      'Defina a ordem das paradas na rota.'
                 : 'Pedidos agrupados na mesma viagem. '
-                    'Defina a ordem das paradas na rota, se precisar.',
+                      'Defina a ordem das paradas na rota, se precisar.',
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      final msg = e is LanApiException ? e.message : '$e';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
@@ -893,7 +1252,11 @@ class _EntregasPageState extends State<EntregasPage>
       return;
     }
     try {
-      widget.vendaRepository.limparGrupoEntregaLogisticaEm(ids);
+      if (_usaVendaApi) {
+        await _vendaApiRepo.limparGrupoEntregaLogisticaEmRemoto(ids);
+      } else {
+        widget.vendaRepository.limparGrupoEntregaLogisticaEm(ids);
+      }
       await _carregarEntregasSyncState();
       if (!mounted) return;
       setState(() => _idsEntregasSelecionadas.clear());
@@ -902,55 +1265,62 @@ class _EntregasPageState extends State<EntregasPage>
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      final msg = e is LanApiException ? e.message : '$e';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
   /// Mesma logica de [_carregarEntregas] sem segundo setState no fim (evita piscar).
   Future<void> _carregarEntregasSyncState() async {
-    final filtroLista = _montarFiltroEntregas(usarPeriodoVendaNaLista: true);
-    final filtroContagem = _montarFiltroEntregas(
-      usarPeriodoVendaNaLista: false,
-      paraContagemResumo: true,
-    );
-    final resultado = widget.vendaRepository.carregarListagemEntregasComResumo(
-      filtroLista: filtroLista,
-      filtroContagem: filtroContagem,
-    );
-    final resultadoResumoDias =
-        widget.vendaRepository.carregarListagemEntregasComResumo(
-      filtroLista: filtroContagem,
-      filtroContagem: filtroContagem,
-    );
-    final entregas = resultado.entregas;
-    final vendedoresDisponiveis =
-        (entregas
-            .map(_nomeVendedor)
-            .map((n) => n.trim())
-            .where((n) => n.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
-    if (!mounted) return;
-    setState(() {
-      _entregas = entregas;
-      _entregasResumoDias = resultadoResumoDias.entregas;
-      _contagemAtrasadasCache = resultado.atrasadas;
-      _contagemPendentesHojeCache = resultado.pendentesHoje;
-      _vendedoresDisponiveis = vendedoresDisponiveis;
-      if (_chaveDiaPlanejamentoSelecionado != null &&
-          _filtroDataMarcada == 'todos') {
-        final fmtPlanej = DateFormat('dd/MM/yyyy');
-        final aindaExiste = entregas.any(
-          (v) => _vendaNaChaveDiaPlanejamento(
-            v,
-            _chaveDiaPlanejamentoSelecionado!,
-            fmtPlanej,
-          ),
-        );
-        if (!aindaExiste) _chaveDiaPlanejamentoSelecionado = null;
-      }
-    });
+    try {
+      final filtroLista = _montarFiltroEntregas(usarPeriodoVendaNaLista: true);
+      final filtroContagem = _montarFiltroEntregas(
+        usarPeriodoVendaNaLista: false,
+        paraContagemResumo: true,
+      );
+      final resultado = widget.vendaRepository.carregarListagemEntregasComResumo(
+        filtroLista: filtroLista,
+        filtroContagem: filtroContagem,
+      );
+      final resultadoResumoDias = widget.vendaRepository
+          .carregarListagemEntregasComResumo(
+            filtroLista: filtroContagem,
+            filtroContagem: filtroContagem,
+          );
+      final entregas = (resultado.entregas as List).whereType<Venda>().toList();
+      final resumoDias =
+          (resultadoResumoDias.entregas as List).whereType<Venda>().toList();
+      final vendedoresDisponiveis =
+          (entregas
+              .map(_nomeVendedor)
+              .map((n) => n.trim())
+              .where((n) => n.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
+      if (!mounted) return;
+      setState(() {
+        _entregas = entregas;
+        _entregasResumoDias = resumoDias;
+        _contagemAtrasadasCache = resultado.atrasadas as int? ?? 0;
+        _contagemPendentesHojeCache = resultado.pendentesHoje as int? ?? 0;
+        _vendedoresDisponiveis = vendedoresDisponiveis;
+        if (_chaveDiaPlanejamentoSelecionado != null &&
+            _filtroDataMarcada == 'todos') {
+          final fmtPlanej = DateFormat('dd/MM/yyyy');
+          final aindaExiste = entregas.any(
+            (v) => _vendaNaChaveDiaPlanejamento(
+              v,
+              _chaveDiaPlanejamentoSelecionado!,
+              fmtPlanej,
+            ),
+          );
+          if (!aindaExiste) _chaveDiaPlanejamentoSelecionado = null;
+        }
+      });
+    } catch (e, st) {
+      debugPrint('EntregasPage._carregarEntregasSyncState: $e\n$st');
+    }
   }
 
   Widget _conteudoRomaneioUmaVenda(
@@ -962,7 +1332,7 @@ class _EntregasPageState extends State<EntregasPage>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '${venda.numeroOrcamento} · ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}',
+          '${venda.numeroOrcamento} · ${_nomeCliente(venda)}',
           style: Theme.of(context).textTheme.titleSmall,
         ),
         const SizedBox(height: 2),
@@ -992,42 +1362,19 @@ class _EntregasPageState extends State<EntregasPage>
           ),
         ),
         const SizedBox(height: 4),
-        Wrap(
-          spacing: 12,
-          runSpacing: 6,
-          children: [
-            FilterChip(
-              label: const Text('Separado'),
-              selected: venda.cargaSeparada,
-              onSelected: (v) {
-                _atualizarChecklistCarga(venda, separado: v);
-                setDialogState(() {
-                  venda.cargaSeparada = v;
-                });
-              },
-            ),
-            FilterChip(
-              label: const Text('Carregado'),
-              selected: venda.cargaCarregada,
-              onSelected: (v) {
-                _atualizarChecklistCarga(venda, carregado: v);
-                setDialogState(() {
-                  venda.cargaCarregada = v;
-                });
-              },
-            ),
-            FilterChip(
-              label: const Text('Saiu'),
-              selected: venda.cargaSaiu,
-              onSelected: (v) {
-                _atualizarChecklistCarga(venda, saiu: v);
-                setDialogState(() {
-                  venda.cargaSaiu = v;
-                });
-              },
-            ),
-          ],
-        ),
+        if (venda.cargaSaiu)
+          Text(
+            'Saida ja liberada (estoque baixado). Proximo passo: Entregue.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+          )
+        else
+          Text(
+            'O motorista libera a saida no celular. Aqui acompanhe a rota '
+            'e separe nesta loja so se ele pedir.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
       ],
     );
   }
@@ -1038,17 +1385,31 @@ class _EntregasPageState extends State<EntregasPage>
     StateSetter setDialogState,
   ) {
     if (bloco.length >= 2 && bloco.first.grupoEntregaFreteId > 0) {
-      return _PainelRomaneioGrupoMesmoCarro(
-        bloco: bloco,
-        setDialogStateRomaneio: setDialogState,
-        quantidadeItemEntrega: _quantidadeExibicaoEntrega,
-        conteudoRomaneioUmaVenda: _conteudoRomaneioUmaVenda,
-        escopoViagem: escopoViagemLogistica(bloco),
-        conferenciaRepository: _conferenciaCargaRepository,
-        usuarioAtual: widget.usuarioAtual,
+      final conf = _conferenciaCargaRepository;
+      if (conf != null) {
+        return _PainelRomaneioGrupoMesmoCarro(
+          bloco: bloco,
+          setDialogStateRomaneio: setDialogState,
+          quantidadeItemEntrega: _quantidadeExibicaoEntrega,
+          conteudoRomaneioUmaVenda: _conteudoRomaneioUmaVenda,
+          escopoViagem: escopoViagemLogistica(bloco),
+          conferenciaRepository: conf,
+          usuarioAtual: widget.usuarioAtual,
+          onConfirmarBuscarNaLoja: _confirmarBuscarNaLoja,
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final v in bloco) ...[
+            _conteudoRomaneioUmaVenda(context, v, setDialogState),
+            const SizedBox(height: 12),
+          ],
+        ],
       );
     }
-    return _conteudoRomaneioUmaVenda(context, bloco.single, setDialogState);
+    if (bloco.isEmpty) return const SizedBox.shrink();
+    return _conteudoRomaneioUmaVenda(context, bloco.first, setDialogState);
   }
 
   Future<void> _abrirRomaneioVisual() async {
@@ -1159,20 +1520,31 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   List<String> _linhasItensEntrega(Venda venda) {
-    if (venda.itens.isEmpty) return const ['Sem itens cadastrados'];
-    final linhas = venda.itens
+    final itens = _itensDaVenda(venda);
+    if (itens.isEmpty) return const ['Sem itens cadastrados'];
+    final linhas = itens
         .map((item) {
           final q = _quantidadeExibicaoEntrega(venda, item);
           if (q <= 0) return null;
-          final tag = EntregaVendaHelper.abreviacaoTipoItem(item.tipoEntregaItem);
-          return '${q}x ${item.nomeProduto} ($tag)';
+          final tag = EntregaVendaHelper.abreviacaoTipoItem(
+            item.tipoEntregaItem,
+          );
+          final base = '${q}x ${item.nomeProduto} ($tag)';
+          final lote = LoteFefoService.formatarRotuloRetiradaPatio(
+            LoteConsumoSnapshot.decodeList(item.loteConsumosJson),
+          );
+          if (lote.isEmpty) return base;
+          return '$base\n  → $lote';
         })
         .whereType<String>()
         .toList();
     return linhas.isEmpty ? const ['Sem itens para esta entrega'] : linhas;
   }
 
-  pw.TextStyle _estiloPdfRomaneio({double fontSize = 10, bool negrito = false}) {
+  pw.TextStyle _estiloPdfRomaneio({
+    double fontSize = 10,
+    bool negrito = false,
+  }) {
     final f = pw.Font.courier();
     return pw.TextStyle(
       font: f,
@@ -1182,7 +1554,7 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   pw.Widget _pdfRomaneioUmaEntrega(Venda venda, {int? parada}) {
-    final cliente = venda.cliente.target?.nomeRazao ?? 'Sem cliente';
+    final cliente = _nomeCliente(venda);
     final dataMarcada = venda.dataEntregaMarcada == null
         ? 'Sem data'
         : DateFormat('dd/MM/yyyy').format(venda.dataEntregaMarcada!.toLocal());
@@ -1212,7 +1584,9 @@ class _EntregasPageState extends State<EntregasPage>
           pw.Text('Vendedor: ${_nomeVendedor(venda)}', style: estilo),
           pw.Text('Data marcada: $dataMarcada', style: estilo),
           pw.Text(
-            endereco.isEmpty ? 'Endereco: (nao informado)' : 'Endereco: $endereco',
+            endereco.isEmpty
+                ? 'Endereco: (nao informado)'
+                : 'Endereco: $endereco',
             style: estilo,
           ),
           if (_observacaoSemMotorista(venda).trim().isNotEmpty)
@@ -1253,7 +1627,7 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   pw.Widget _pdfRomaneioUmaEntregaBobina(Venda venda, {int? parada}) {
-    final cliente = venda.cliente.target?.nomeRazao ?? 'Sem cliente';
+    final cliente = _nomeCliente(venda);
     final dataMarcada = venda.dataEntregaMarcada == null
         ? 'Sem data'
         : DateFormat('dd/MM/yyyy').format(venda.dataEntregaMarcada!.toLocal());
@@ -1286,10 +1660,7 @@ class _EntregasPageState extends State<EntregasPage>
             'Mot: ${_nomeMotorista(venda)} · Vend: ${_nomeVendedor(venda)}',
             style: estiloCorpo,
           ),
-          pw.Text(
-            'Data: $dataMarcada',
-            style: estiloCorpo,
-          ),
+          pw.Text('Data: $dataMarcada', style: estiloCorpo),
           pw.Text(
             endereco.isEmpty ? 'End: (nao informado)' : 'End: $endereco',
             style: estiloCorpo,
@@ -1329,12 +1700,9 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   List<Venda> _entregasParaRomaneioComRelacoes() {
-    return _entregasParaRomaneio().map((v) {
-      final fresca = widget.vendaRepository.obterPorId(v.id) ?? v;
-      fresca.cliente.target;
-      fresca.itens.length;
-      return fresca;
-    }).toList();
+    return _entregasParaRomaneio()
+        .map((v) => widget.vendaRepository.obterPorId(v.id) as Venda? ?? v)
+        .toList();
   }
 
   Future<void> _abrirRelatoriosEntrega() async {
@@ -1358,189 +1726,186 @@ class _EntregasPageState extends State<EntregasPage>
 
     final escolha =
         await showDialog<
-            ({
-              RelatorioEntregaTipo tipo,
-              RomaneioPdfLayout layout,
-              String acao,
-              String? motorista,
-              List<Venda>? viagem,
-            })?>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setLocal) {
-          return AlertDialog(
-            title: Text('Relatorios — $titulo'),
-            content: SizedBox(
-              width: 520,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Tipo de relatorio',
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    ...RelatorioEntregaTipo.values.map(
-                      (t) => RadioListTile<RelatorioEntregaTipo>(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(t.rotulo),
-                        value: t,
-                        groupValue: tipo,
-                        onChanged: (v) {
-                          if (v == null) return;
-                          setLocal(() => tipo = v);
-                        },
-                      ),
-                    ),
-                    if (tipo.exigeMotorista) ...[
-                      const SizedBox(height: 8),
-                      if (motoristas.isEmpty)
+          ({
+            RelatorioEntregaTipo tipo,
+            RomaneioPdfLayout layout,
+            String acao,
+            String? motorista,
+            List<Venda>? viagem,
+          })?
+        >(
+          context: context,
+          builder: (dialogContext) => StatefulBuilder(
+            builder: (context, setLocal) {
+              return AlertDialog(
+                title: Text('Relatorios — $titulo'),
+                content: SizedBox(
+                  width: 520,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          'Nenhum motorista nas entregas. Defina ao agrupar ou no botao Motorista.',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        )
-                      else
-                        DropdownButtonFormField<String>(
-                          initialValue: motoristaSel,
-                          decoration: const InputDecoration(
-                            labelText: 'Motorista',
-                          ),
-                          items: motoristas
-                              .map(
-                                (m) => DropdownMenuItem(
-                                  value: m,
-                                  child: Text(m),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) => setLocal(() => motoristaSel = v),
+                          'Tipo de relatorio',
+                          style: Theme.of(context).textTheme.titleSmall,
                         ),
-                    ],
-                    if (tipo.exigeViagem) ...[
-                      const SizedBox(height: 8),
-                      if (viagens.isEmpty)
-                        const Text(
-                          'Nenhuma viagem agrupada no periodo. Use "Agrupar mesmo carro".',
-                        )
-                      else
-                        DropdownButtonFormField<int>(
-                          initialValue: viagemSel?.first.grupoEntregaFreteId,
-                          decoration: const InputDecoration(
-                            labelText: 'Viagem (mesmo carro)',
+                        const SizedBox(height: 8),
+                        ...RelatorioEntregaTipo.values.map(
+                          (t) => RadioListTile<RelatorioEntregaTipo>(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(t.rotulo),
+                            value: t,
+                            groupValue: tipo,
+                            onChanged: (v) {
+                              if (v == null) return;
+                              setLocal(() => tipo = v);
+                            },
                           ),
-                          items: viagens
-                              .map(
-                                (bloco) => DropdownMenuItem(
-                                  value: bloco.first.grupoEntregaFreteId,
-                                  child: Text(rotuloGrupoLogistica(bloco)),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (g) {
-                            if (g == null) return;
-                            setLocal(() {
-                              viagemSel = viagens.firstWhere(
-                                (b) => b.first.grupoEntregaFreteId == g,
-                              );
-                            });
+                        ),
+                        if (tipo.exigeMotorista) ...[
+                          const SizedBox(height: 8),
+                          if (motoristas.isEmpty)
+                            Text(
+                              'Nenhum motorista nas entregas. Defina ao agrupar ou no botao Motorista.',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            )
+                          else
+                            DropdownButtonFormField<String>(
+                              initialValue: motoristaSel,
+                              decoration: const InputDecoration(
+                                labelText: 'Motorista',
+                              ),
+                              items: motoristas
+                                  .map(
+                                    (m) => DropdownMenuItem(
+                                      value: m,
+                                      child: Text(m),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) =>
+                                  setLocal(() => motoristaSel = v),
+                            ),
+                        ],
+                        if (tipo.exigeViagem) ...[
+                          const SizedBox(height: 8),
+                          if (viagens.isEmpty)
+                            const Text(
+                              'Nenhuma viagem agrupada no periodo. Use "Agrupar mesmo carro".',
+                            )
+                          else
+                            DropdownButtonFormField<int>(
+                              initialValue:
+                                  viagemSel?.first.grupoEntregaFreteId,
+                              decoration: const InputDecoration(
+                                labelText: 'Viagem (mesmo carro)',
+                              ),
+                              items: viagens
+                                  .map(
+                                    (bloco) => DropdownMenuItem(
+                                      value: bloco.first.grupoEntregaFreteId,
+                                      child: Text(rotuloGrupoLogistica(bloco)),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (g) {
+                                if (g == null) return;
+                                setLocal(() {
+                                  viagemSel = viagens.firstWhere(
+                                    (b) => b.first.grupoEntregaFreteId == g,
+                                  );
+                                });
+                              },
+                            ),
+                        ],
+                        const Divider(height: 20),
+                        Text(
+                          'Formato do papel',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 8),
+                        SegmentedButton<RomaneioPdfLayout>(
+                          segments: const [
+                            ButtonSegment(
+                              value: RomaneioPdfLayout.a4,
+                              label: Text('A4'),
+                            ),
+                            ButtonSegment(
+                              value: RomaneioPdfLayout.bobina80mm,
+                              label: Text('80 mm'),
+                            ),
+                          ],
+                          selected: {layoutEscolhido},
+                          onSelectionChanged: (next) {
+                            setLocal(() => layoutEscolhido = next.single);
                           },
                         ),
-                    ],
-                    const Divider(height: 20),
-                    Text(
-                      'Formato do papel',
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    SegmentedButton<RomaneioPdfLayout>(
-                      segments: const [
-                        ButtonSegment(
-                          value: RomaneioPdfLayout.a4,
-                          label: Text('A4'),
-                        ),
-                        ButtonSegment(
-                          value: RomaneioPdfLayout.bobina80mm,
-                          label: Text('80 mm'),
-                        ),
                       ],
-                      selected: {layoutEscolhido},
-                      onSelectionChanged: (next) {
-                        setLocal(() => layoutEscolhido = next.single);
-                      },
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, null),
-                child: const Text('Fechar'),
-              ),
-              TextButton.icon(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  _abrirRomaneioVisual();
-                },
-                icon: const Icon(Icons.visibility_outlined),
-                label: const Text('Visualizar na tela'),
-              ),
-              OutlinedButton.icon(
-                onPressed: () {
-                  if (tipo.exigeMotorista &&
-                      (motoristaSel == null || motoristaSel!.isEmpty)) {
-                    return;
-                  }
-                  if (tipo.exigeViagem && viagemSel == null) {
-                    return;
-                  }
-                  Navigator.pop(
-                    dialogContext,
-                    (
-                      tipo: tipo,
-                      layout: layoutEscolhido,
-                      acao: 'pdf',
-                      motorista: motoristaSel,
-                      viagem: viagemSel,
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.picture_as_pdf_outlined),
-                label: const Text('Exportar PDF'),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  if (tipo.exigeMotorista &&
-                      (motoristaSel == null || motoristaSel!.isEmpty)) {
-                    return;
-                  }
-                  if (tipo.exigeViagem && viagemSel == null) {
-                    return;
-                  }
-                  Navigator.pop(
-                    dialogContext,
-                    (
-                      tipo: tipo,
-                      layout: layoutEscolhido,
-                      acao: 'imprimir',
-                      motorista: motoristaSel,
-                      viagem: viagemSel,
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.print_outlined),
-                label: const Text('Imprimir'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, null),
+                    child: const Text('Fechar'),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                      _abrirRomaneioVisual();
+                    },
+                    icon: const Icon(Icons.visibility_outlined),
+                    label: const Text('Visualizar na tela'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      if (tipo.exigeMotorista &&
+                          (motoristaSel == null || motoristaSel!.isEmpty)) {
+                        return;
+                      }
+                      if (tipo.exigeViagem && viagemSel == null) {
+                        return;
+                      }
+                      Navigator.pop(dialogContext, (
+                        tipo: tipo,
+                        layout: layoutEscolhido,
+                        acao: 'pdf',
+                        motorista: motoristaSel,
+                        viagem: viagemSel,
+                      ));
+                    },
+                    icon: const Icon(Icons.picture_as_pdf_outlined),
+                    label: const Text('Exportar PDF'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      if (tipo.exigeMotorista &&
+                          (motoristaSel == null || motoristaSel!.isEmpty)) {
+                        return;
+                      }
+                      if (tipo.exigeViagem && viagemSel == null) {
+                        return;
+                      }
+                      Navigator.pop(dialogContext, (
+                        tipo: tipo,
+                        layout: layoutEscolhido,
+                        acao: 'imprimir',
+                        motorista: motoristaSel,
+                        viagem: viagemSel,
+                      ));
+                    },
+                    icon: const Icon(Icons.print_outlined),
+                    label: const Text('Imprimir'),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
     if (!mounted || escolha == null) return;
     if (escolha.tipo.exigeMotorista &&
         (escolha.motorista == null || escolha.motorista!.isEmpty)) {
@@ -1630,57 +1995,41 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   Future<void> _editarMotoristaGrupo(int grupoId, String atual) async {
-    final motoristas = widget.motoristaRepository.listarAtivos();
-    var escolhido = atual == 'Nao definido' || atual.isEmpty
-        ? (motoristas.isNotEmpty ? motoristas.first.nome : null)
-        : atual;
+    await _garantirMotoristasHidratados();
     if (!mounted) return;
-    final novo = await showDialog<String>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setLocal) {
-          return AlertDialog(
-            title: const Text('Motorista da viagem'),
-            content: motoristas.isEmpty
-                ? const Text(
-                    'Nenhum motorista ativo. Cadastre em Cadastros > Motoristas.',
-                  )
-                : DropdownButtonFormField<String>(
-                    initialValue: escolhido,
-                    decoration: const InputDecoration(labelText: 'Motorista'),
-                    items: motoristas
-                        .map(
-                          (m) => DropdownMenuItem(
-                            value: m.nome,
-                            child: Text(m.nome),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) => setLocal(() => escolhido = v),
-                  ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancelar'),
-              ),
-              ElevatedButton(
-                onPressed: motoristas.isEmpty || escolhido == null
-                    ? null
-                    : () => Navigator.pop(ctx, escolhido),
-                child: const Text('Salvar'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    if (novo == null || novo.isEmpty || !mounted) return;
+    late final String? novo;
     try {
-      widget.vendaRepository.definirMotoristaEntregaNoGrupo(grupoId, novo);
-      await _carregarEntregasSyncState();
+      novo = await showSelecionarMotoristaDialog(
+        context,
+        widget.motoristaRepository,
+        titulo: 'Motorista da viagem',
+        rotuloConfirmar: 'Salvar',
+        motoristaSugerido: atual,
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel escolher o motorista: $e')),
+      );
+      return;
+    }
+    if (novo == null || novo.isEmpty || !mounted) return;
+    try {
+      if (_usaVendaApi) {
+        await _vendaApiRepo.definirMotoristaEntregaNoGrupoRemoto(grupoId, novo);
+      } else {
+        widget.vendaRepository.definirMotoristaEntregaNoGrupo(grupoId, novo);
+      }
+      await _carregarEntregasSyncState();
+      final idsGrupo = _entregas
+          .where((v) => v.grupoEntregaFreteId == grupoId)
+          .map((v) => v.id);
+      await _autoRoteirizarIdsAposMotorista(idsGrupo);
+      if (mounted) await _carregarEntregasSyncState();
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e is LanApiException ? e.message : '$e';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
@@ -1741,12 +2090,18 @@ class _EntregasPageState extends State<EntregasPage>
   String _nomeMotorista(Venda venda) => nomeMotoristaEntrega(venda);
 
   String _nomeVendedor(Venda venda) {
-    final vendedor = venda.vendedor.target;
-    final nome = vendedor?.apelido.trim().isNotEmpty == true
-        ? vendedor!.apelido.trim()
-        : (vendedor?.nomeCompleto.trim() ?? '');
-    if (nome.isNotEmpty) return nome;
-    return 'Nao definido';
+    return VendaRelacaoSafe.nomeVendedor(
+      venda,
+      vendedorRepository: widget.vendedorRepository,
+    );
+  }
+
+  String _nomeCliente(Venda venda) {
+    final deps = MainMenuDeps.maybeOf(context);
+    return VendaRelacaoSafe.nomeCliente(
+      venda,
+      clienteRepository: deps?.clienteRepository,
+    );
   }
 
   String _enderecoCompletoParaNavegacao(Venda venda) =>
@@ -1772,10 +2127,10 @@ class _EntregasPageState extends State<EntregasPage>
     // em alguns builds. Abrir via rundll32 usa o navegador padrao sem o plugin.
     if (Platform.isWindows) {
       try {
-        final r = await Process.run(
-          'rundll32',
-          ['url.dll,FileProtocolHandler', url],
-        );
+        final r = await Process.run('rundll32', [
+          'url.dll,FileProtocolHandler',
+          url,
+        ]);
         if (r.exitCode == 0) return;
       } catch (_) {
         // segue para launchUrl
@@ -1797,9 +2152,9 @@ class _EntregasPageState extends State<EntregasPage>
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao abrir mapa: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao abrir mapa: $e')));
     }
   }
 
@@ -1821,14 +2176,22 @@ class _EntregasPageState extends State<EntregasPage>
     nova[indiceA] = nova[indiceB];
     nova[indiceB] = tmp;
     try {
-      widget.vendaRepository.atualizarSequenciaEntregaNoGrupo(
-        grupoId,
-        nova.map((x) => x.id).toList(),
-      );
+      if (_usaVendaApi) {
+        await _vendaApiRepo.atualizarSequenciaEntregaNoGrupoRemoto(
+          grupoId,
+          nova.map((x) => x.id).toList(),
+        );
+      } else {
+        widget.vendaRepository.atualizarSequenciaEntregaNoGrupo(
+          grupoId,
+          nova.map((x) => x.id).toList(),
+        );
+      }
       await _carregarEntregasSyncState();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      final msg = e is LanApiException ? e.message : '$e';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
@@ -1850,20 +2213,26 @@ class _EntregasPageState extends State<EntregasPage>
     nova[indiceA] = nova[indiceB];
     nova[indiceB] = tmp;
     try {
-      widget.vendaRepository.atualizarSequenciaEntregaMotorista(
-        motorista,
-        nova.map((x) => x.id).toList(),
-      );
+      if (_usaVendaApi) {
+        await _vendaApiRepo.atualizarSequenciaEntregaMotoristaRemoto(
+          motorista,
+          nova.map((x) => x.id).toList(),
+        );
+      } else {
+        widget.vendaRepository.atualizarSequenciaEntregaMotorista(
+          motorista,
+          nova.map((x) => x.id).toList(),
+        );
+      }
       await _carregarEntregasSyncState();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ordem da rota do motorista atualizada.'),
-        ),
+        const SnackBar(content: Text('Ordem da rota do motorista atualizada.')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      final msg = e is LanApiException ? e.message : '$e';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
@@ -1881,8 +2250,25 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   Future<void> _atualizarPrioridade(Venda venda, String novaPrioridade) async {
-    widget.vendaRepository.atualizarPrioridadeEntrega(venda.id, novaPrioridade);
-    _carregarEntregas();
+    try {
+      if (_usaVendaApi) {
+        await _vendaApiRepo.atualizarPrioridadeEntregaRemoto(
+          venda.id,
+          novaPrioridade,
+        );
+      } else {
+        widget.vendaRepository.atualizarPrioridadeEntrega(
+          venda.id,
+          novaPrioridade,
+        );
+      }
+      _carregarEntregas();
+    } on LanApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Prioridade: ${e.message}')),
+      );
+    }
   }
 
   Future<void> _definirMotoristaEmLoteIds(Set<int> ids) async {
@@ -1893,6 +2279,8 @@ class _EntregasPageState extends State<EntregasPage>
       );
       return;
     }
+    await _garantirMotoristasHidratados();
+    if (!mounted) return;
     final motorista = await showSelecionarMotoristaDialog(
       context,
       widget.motoristaRepository,
@@ -1903,85 +2291,83 @@ class _EntregasPageState extends State<EntregasPage>
     );
     if (motorista == null || motorista.isEmpty || !mounted) return;
     try {
-      final n = widget.vendaRepository.atualizarMotoristaEntregaEmLote(
-        ids,
-        motorista,
-      );
+      final n = _usaVendaApi
+          ? await _vendaApiRepo.atualizarMotoristaEntregaEmLoteRemoto(
+              ids,
+              motorista,
+            )
+          : widget.vendaRepository.atualizarMotoristaEntregaEmLote(
+              ids,
+              motorista,
+            );
       await _carregarEntregasSyncState();
+      await _autoRoteirizarIdsAposMotorista(ids);
+      if (mounted) await _carregarEntregasSyncState();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Motorista definido em $n entrega(s).')),
+        SnackBar(
+          content: Text(
+            'Motorista definido em $n entrega(s).',
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao definir motorista: $e')),
-      );
+      final msg = e is LanApiException ? e.message : 'Erro ao definir motorista: $e';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
   Future<void> _editarMotoristaEntrega(Venda venda) async {
     if (!mounted) return;
-    final motoristas = widget.motoristaRepository.listarAtivos();
-    final atual = venda.motoristaEntrega.trim();
-    String selecionado = atual;
-    final nome = await showDialog<String>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text('Motorista ${venda.numeroOrcamento}'),
-          content: motoristas.isEmpty
-              ? const Text(
-                  'Nenhum motorista ativo cadastrado. Cadastre em Cadastros > Motoristas.',
-                )
-              : DropdownButtonFormField<String>(
-                  initialValue: selecionado.isEmpty ? null : selecionado,
-                  decoration: const InputDecoration(labelText: 'Motorista'),
-                  items: motoristas
-                      .map(
-                        (m) => DropdownMenuItem<String>(
-                          value: m.nome.trim(),
-                          child: Text(
-                            m.telefone.trim().isEmpty
-                                ? m.nome
-                                : '${m.nome} · ${m.telefone}',
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setDialogState(() => selecionado = v ?? ''),
-                ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, ''),
-              child: const Text('Limpar'),
-            ),
-            ElevatedButton(
-              onPressed: motoristas.isEmpty
-                  ? null
-                  : () => Navigator.pop(context, selecionado.trim()),
-              child: const Text('Salvar'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (nome == null) return;
+    await _garantirMotoristasHidratados();
+    if (!mounted) return;
+    late final String? nome;
     try {
-      widget.vendaRepository.atualizarMotoristaEntrega(venda.id, nome);
-      _carregarEntregas();
-      if (!mounted) return;
-      ScaffoldMessenger.of(
+      nome = await showSelecionarMotoristaDialog(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Motorista atualizado.')));
+        widget.motoristaRepository,
+        titulo: 'Motorista ${venda.numeroOrcamento}',
+        rotuloConfirmar: 'Salvar',
+        motoristaSugerido: venda.motoristaEntrega,
+        permitirLimpar: true,
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao atualizar motorista: $e')),
+        SnackBar(content: Text('Nao foi possivel escolher o motorista: $e')),
+      );
+      return;
+    }
+    if (nome == null) return;
+    try {
+      if (_usaVendaApi) {
+        await _vendaApiRepo.atualizarMotoristaEntregaRemoto(venda.id, nome);
+      } else {
+        widget.vendaRepository.atualizarMotoristaEntrega(venda.id, nome);
+      }
+      venda.motoristaEntrega = nome;
+      if (nome.trim().isNotEmpty) {
+        await _autoRoteirizarAposMotorista(venda);
+      }
+      _carregarEntregas();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nome.trim().isEmpty
+                ? 'Motorista removido.'
+                : 'Motorista atualizado.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e is LanApiException ? e.message : 'Erro ao atualizar motorista: $e';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg)),
       );
     }
   }
@@ -2008,22 +2394,28 @@ class _EntregasPageState extends State<EntregasPage>
     );
     if (!mounted || escolhido == null) return;
     try {
-      widget.vendaRepository.atualizarDataEntregaMarcada(venda.id, escolhido);
+      if (_usaVendaApi) {
+        await _vendaApiRepo.atualizarDataEntregaMarcadaRemoto(
+          venda.id,
+          escolhido,
+        );
+      } else {
+        widget.vendaRepository.atualizarDataEntregaMarcada(venda.id, escolhido);
+      }
       _carregarEntregas();
       if (!mounted) return;
       final fmt = DateFormat('dd/MM/yyyy');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Data da entrega definida: ${fmt.format(escolhido)}.',
-          ),
+          content: Text('Data da entrega definida: ${fmt.format(escolhido)}.'),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao salvar data: $e')),
-      );
+      final msg = e is LanApiException ? e.message : 'Erro ao salvar data: $e';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
@@ -2057,7 +2449,11 @@ class _EntregasPageState extends State<EntregasPage>
     );
     if (!mounted || confirmar != true) return;
     try {
-      widget.vendaRepository.atualizarDataEntregaMarcada(venda.id, null);
+      if (_usaVendaApi) {
+        await _vendaApiRepo.atualizarDataEntregaMarcadaRemoto(venda.id, null);
+      } else {
+        widget.vendaRepository.atualizarDataEntregaMarcada(venda.id, null);
+      }
       _carregarEntregas();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2065,9 +2461,10 @@ class _EntregasPageState extends State<EntregasPage>
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao limpar data: $e')),
-      );
+      final msg = e is LanApiException ? e.message : 'Erro ao limpar data: $e';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
@@ -2077,8 +2474,9 @@ class _EntregasPageState extends State<EntregasPage>
       _inicio = null;
       _fim = null;
       _filtroDataMarcada = 'hoje';
-      _chaveDiaPlanejamentoSelecionado =
-          PlanejamentoEntregaDia.chaveDeDateTime(DateTime.now());
+      _chaveDiaPlanejamentoSelecionado = PlanejamentoEntregaDia.chaveDeDateTime(
+        DateTime.now(),
+      );
       _filtroApenasSemMotorista = false;
     });
     _carregarEntregas();
@@ -2089,8 +2487,9 @@ class _EntregasPageState extends State<EntregasPage>
     setState(() {
       _filtrosDropdownNonce++;
       _filtroResumoLista = _FiltroResumoEntregas.nenhum;
-      _chaveDiaPlanejamentoSelecionado =
-          PlanejamentoEntregaDia.chaveDeDateTime(DateTime.now());
+      _chaveDiaPlanejamentoSelecionado = PlanejamentoEntregaDia.chaveDeDateTime(
+        DateTime.now(),
+      );
       _statusSelecionado = 'todos';
       _filtroMotorista = 'todos';
       _filtroVendedor = 'todos';
@@ -2185,7 +2584,7 @@ class _EntregasPageState extends State<EntregasPage>
 
   String _mensagemBloqueioTransicao(String atual, String novo) {
     return 'Nao foi possivel mudar de "${_rotuloStatusEntrega(atual)}" para '
-        '"${_rotuloStatusEntrega(novo)}". Fluxo normal: Pendente -> Roteirizada -> '
+        '"${_rotuloStatusEntrega(novo)}". Fluxo normal: Pendente -> '
         'Saiu -> Entregue. Com falta na ida: em "Saiu" use "Faltou item" para registrar '
         'complemento pendente; depois "Concluir complemento" ou reabrir rota (Pendente).';
   }
@@ -2213,7 +2612,21 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   Future<void> _abrirHistoricoEntrega(Venda venda) async {
-    final historico = widget.vendaRepository.listarHistoricoEntrega(venda.id);
+    List historico;
+    if (_usaVendaApi) {
+      try {
+        historico = await _vendaApiRepo.listarHistoricoEntregaRemoto(venda.id);
+      } catch (e) {
+        if (!mounted) return;
+        final msg = e is LanApiException ? e.message : '$e';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Historico: $msg')),
+        );
+        return;
+      }
+    } else {
+      historico = widget.vendaRepository.listarHistoricoEntrega(venda.id);
+    }
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -2301,7 +2714,8 @@ class _EntregasPageState extends State<EntregasPage>
         );
         return false;
       }
-      if ((novoStatus == 'entregue' || novoStatus == 'entregue_complemento_pendente') &&
+      if ((novoStatus == 'entregue' ||
+              novoStatus == 'entregue_complemento_pendente') &&
           _progressoCarga(venda) < 3) {
         if (!mounted) return false;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2328,12 +2742,19 @@ class _EntregasPageState extends State<EntregasPage>
         }
       }
       String? motivo;
+      var retornouParaLoja = false;
       if (novoStatus == 'reagendada' || novoStatus == 'cancelada') {
-        motivo = await _solicitarMotivoMudancaStatus(novoStatus);
-        if (motivo == null) return false;
+        final pedido = await _solicitarMotivoMudancaStatus(novoStatus);
+        if (pedido == null) return false;
+        motivo = pedido.motivo;
+        retornouParaLoja = pedido.retornouParaLoja;
+        if (novoStatus == 'reagendada') {
+          motivo = retornouParaLoja
+              ? '$motivo. Carga retornou para a loja.'
+              : '$motivo. Carga permanece no caminhao.';
+        }
       }
-      final podComplemento =
-          statusAnterior == 'entregue_complemento_pendente';
+      final podComplemento = statusAnterior == 'entregue_complemento_pendente';
       if (EntregaPodRegra.deveSolicitarPod(
         novoStatus: novoStatus,
         statusAnterior: statusAnterior,
@@ -2344,6 +2765,7 @@ class _EntregasPageState extends State<EntregasPage>
           vendaId: venda.id,
           recebidoPorInicial: podComplemento ? '' : venda.podRecebidoPor.trim(),
           podComplemento: podComplemento,
+          origemMercadoriaRotulo: _rotuloOrigemMercadoria(venda),
         );
         if (pod == null) return false;
         final podFinal = EntregaPodFinalizacao(
@@ -2359,43 +2781,80 @@ class _EntregasPageState extends State<EntregasPage>
         );
         final atualizada = widget.vendaRepository.obterPorId(venda.id);
         venda.podRecebidoPor = pod.recebidoPor;
-        venda.podFotoPath =
-            atualizada?.podFotoPath ?? pod.fotoPathLocal ?? '';
+        venda.podFotoPath = atualizada?.podFotoPath ?? pod.fotoPathLocal ?? '';
         venda.podFotoPathServidor =
             atualizada?.podFotoPathServidor ?? pod.fotoPathServidor ?? '';
       }
-      widget.vendaRepository.atualizarStatusEntrega(
-        venda.id,
-        novoStatus,
-        complementoEntregaJson: complementoEntregaJson,
-      );
-      widget.vendaRepository.registrarHistoricoStatusEntrega(
-        vendaId: venda.id,
-        statusAnterior: statusAnterior,
-        statusNovo: novoStatus,
-        usuario: widget.usuarioAtual,
-      );
+      if (widget.vendaRepository is VendaApiRepository) {
+        final api = widget.vendaRepository as VendaApiRepository;
+        await api.atualizarStatusEntregaRemoto(
+          venda.id,
+          novoStatus,
+          complementoEntregaJson: complementoEntregaJson,
+          retornouParaLoja: retornouParaLoja,
+        );
+        await api.registrarHistoricoStatusEntregaRemoto(
+          vendaId: venda.id,
+          statusAnterior: statusAnterior,
+          statusNovo: novoStatus,
+          usuario: widget.usuarioAtual,
+        );
+      } else {
+        widget.vendaRepository.atualizarStatusEntrega(
+          venda.id,
+          novoStatus,
+          complementoEntregaJson: complementoEntregaJson,
+          retornouParaLoja: retornouParaLoja,
+        );
+        widget.vendaRepository.registrarHistoricoStatusEntrega(
+          vendaId: venda.id,
+          statusAnterior: statusAnterior,
+          statusNovo: novoStatus,
+          usuario: widget.usuarioAtual,
+        );
+      }
       if (novoStatus == 'entregue' && venda.podRecebidoPor.trim().isNotEmpty) {
         final comFoto = EntregaPodRegra.temReferenciaFoto(
           podFotoPath: venda.podFotoPath,
           podFotoPathServidor: venda.podFotoPathServidor,
         );
         final prefixo = podComplemento ? 'Complemento — ' : '';
-        widget.vendaRepository.registrarOcorrenciaEntrega(
-          vendaId: venda.id,
-          status: HistoricoEntregaEventos.podEntrega,
-          motivo:
-              '${prefixo}Recebido por: ${venda.podRecebidoPor.trim()}${comFoto ? ' (com foto)' : ''}',
-          usuario: widget.usuarioAtual,
-        );
+        final motivoPod =
+            '${prefixo}Recebido por: ${venda.podRecebidoPor.trim()}${comFoto ? ' (com foto)' : ''}';
+        if (widget.vendaRepository is VendaApiRepository) {
+          await (widget.vendaRepository as VendaApiRepository)
+              .registrarOcorrenciaEntregaRemoto(
+            vendaId: venda.id,
+            status: HistoricoEntregaEventos.podEntrega,
+            motivo: motivoPod,
+            usuario: widget.usuarioAtual,
+          );
+        } else {
+          widget.vendaRepository.registrarOcorrenciaEntrega(
+            vendaId: venda.id,
+            status: HistoricoEntregaEventos.podEntrega,
+            motivo: motivoPod,
+            usuario: widget.usuarioAtual,
+          );
+        }
       }
       if (motivo != null) {
-        widget.vendaRepository.registrarOcorrenciaEntrega(
-          vendaId: venda.id,
-          status: novoStatus,
-          motivo: motivo,
-          usuario: widget.usuarioAtual,
-        );
+        if (widget.vendaRepository is VendaApiRepository) {
+          await (widget.vendaRepository as VendaApiRepository)
+              .registrarOcorrenciaEntregaRemoto(
+            vendaId: venda.id,
+            status: novoStatus,
+            motivo: motivo,
+            usuario: widget.usuarioAtual,
+          );
+        } else {
+          widget.vendaRepository.registrarOcorrenciaEntrega(
+            vendaId: venda.id,
+            status: novoStatus,
+            motivo: motivo,
+            usuario: widget.usuarioAtual,
+          );
+        }
       }
       if (novoStatus == 'entregue_complemento_pendente' &&
           complementoEntregaJson != null) {
@@ -2406,17 +2865,25 @@ class _EntregasPageState extends State<EntregasPage>
         if (notaComplementoExtra != null &&
             notaComplementoExtra.trim().isNotEmpty) {
           final extra = notaComplementoExtra.trim();
-          resumo = resumo == null
-              ? 'Obs: $extra'
-              : '$resumo | Obs: $extra';
+          resumo = resumo == null ? 'Obs: $extra' : '$resumo | Obs: $extra';
         }
         if (resumo != null) {
-          widget.vendaRepository.registrarOcorrenciaEntrega(
-            vendaId: venda.id,
-            status: HistoricoEntregaEventos.complementoPendente,
-            motivo: resumo,
-            usuario: widget.usuarioAtual,
-          );
+          if (widget.vendaRepository is VendaApiRepository) {
+            await (widget.vendaRepository as VendaApiRepository)
+                .registrarOcorrenciaEntregaRemoto(
+              vendaId: venda.id,
+              status: HistoricoEntregaEventos.complementoPendente,
+              motivo: resumo,
+              usuario: widget.usuarioAtual,
+            );
+          } else {
+            widget.vendaRepository.registrarOcorrenciaEntrega(
+              vendaId: venda.id,
+              status: HistoricoEntregaEventos.complementoPendente,
+              motivo: resumo,
+              usuario: widget.usuarioAtual,
+            );
+          }
         }
       }
       _carregarEntregas();
@@ -2436,43 +2903,93 @@ class _EntregasPageState extends State<EntregasPage>
     }
   }
 
-  Future<String?> _solicitarMotivoMudancaStatus(String novoStatus) async {
+  Future<({String motivo, bool retornouParaLoja})?>
+      _solicitarMotivoMudancaStatus(String novoStatus) async {
     if (!mounted) return null;
     final controller = TextEditingController();
-    final motivo = await showDialog<String>(
+    var retornouParaLoja = false;
+    final confirmarReagendada = novoStatus == 'reagendada';
+    final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Motivo da ${_rotuloStatusEntrega(novoStatus).toLowerCase()}',
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: Text(
+            'Motivo da ${_rotuloStatusEntrega(novoStatus).toLowerCase()}',
+          ),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Motivo (obrigatorio)',
+                      hintText: 'Descreva o motivo desta alteracao',
+                    ),
+                  ),
+                  if (confirmarReagendada) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Mercadoria',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      selected: !retornouParaLoja,
+                      title: const Text('Permanece no caminhao'),
+                      leading: Icon(
+                        !retornouParaLoja
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                      ),
+                      onTap: () => setLocal(() => retornouParaLoja = false),
+                    ),
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      selected: retornouParaLoja,
+                      title: const Text('Voltou para a loja'),
+                      subtitle: const Text(
+                        'Estorna a saida de estoque do carreto.',
+                      ),
+                      leading: Icon(
+                        retornouParaLoja
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                      ),
+                      onTap: () => setLocal(() => retornouParaLoja = true),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (controller.text.trim().isEmpty) return;
+                Navigator.pop(context, true);
+              },
+              child: const Text('Confirmar'),
+            ),
+          ],
         ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          minLines: 2,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            labelText: 'Motivo (obrigatorio)',
-            hintText: 'Descreva o motivo desta alteracao',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final texto = controller.text.trim();
-              if (texto.isEmpty) return;
-              Navigator.pop(context, texto);
-            },
-            child: const Text('Confirmar'),
-          ),
-        ],
       ),
     );
+    final texto = controller.text.trim();
     controller.dispose();
-    if (motivo == null || motivo.trim().isEmpty) {
+    if (ok != true || texto.isEmpty) {
       if (!mounted) return null;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -2483,7 +3000,7 @@ class _EntregasPageState extends State<EntregasPage>
       );
       return null;
     }
-    return motivo.trim();
+    return (motivo: texto, retornouParaLoja: retornouParaLoja);
   }
 
   Future<void> _confirmarConcluirComplemento(Venda venda) async {
@@ -2534,15 +3051,13 @@ class _EntregasPageState extends State<EntregasPage>
       );
       return;
     }
-    final itens = venda.itens
+    final itens = _itensDaVenda(venda)
         .where((i) => _quantidadeExibicaoEntrega(venda, i) > 0)
         .toList();
     if (itens.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Nao ha itens de entrega neste pedido.'),
-        ),
+        const SnackBar(content: Text('Nao ha itens de entrega neste pedido.')),
       );
       return;
     }
@@ -2615,8 +3130,7 @@ class _EntregasPageState extends State<EntregasPage>
               onPressed: () {
                 final linhas = <LinhaComplementoEntrega>[];
                 for (final item in itens) {
-                  final raw =
-                      controllers[item.id]?.text.trim() ?? '';
+                  final raw = controllers[item.id]?.text.trim() ?? '';
                   final f = int.tryParse(raw) ?? 0;
                   final max = _quantidadeExibicaoEntrega(venda, item);
                   if (f < 0 || f > max) {
@@ -2675,12 +3189,25 @@ class _EntregasPageState extends State<EntregasPage>
     );
   }
 
-  void _atualizarChecklistCarga(
+  Future<bool> _permitirVendaSemEstoqueAtual() async {
+    final repo = widget.appConfigRepository;
+    if (repo == null) return true;
+    try {
+      final cfg = await repo.carregarEmpresaConfig();
+      return cfg.permitirVendaSemEstoque;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<bool> _atualizarChecklistCarga(
     Venda venda, {
     bool? separado,
     bool? carregado,
     bool? saiu,
-  }) {
+    String? lojaOrigemMercadoria,
+    Map<int, String>? origemPorItem,
+  }) async {
     try {
       if (!_checklistPodeAtualizar(
         venda,
@@ -2688,22 +3215,66 @@ class _EntregasPageState extends State<EntregasPage>
         carregado: carregado,
         saiu: saiu,
       )) {
-        if (!mounted) return;
+        if (!mounted) return false;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(_mensagemChecklistInvalido())));
-        return;
+        return false;
       }
-      widget.vendaRepository.atualizarChecklistCargaEntrega(
-        venda.id,
-        separado: separado,
-        carregado: carregado,
-        saiu: saiu,
+      if (_usaVendaApi) {
+        await _vendaApiRepo.atualizarChecklistCargaEntregaRemoto(
+          venda.id,
+          separado: separado,
+          carregado: carregado,
+          saiu: saiu,
+          lojaOrigemMercadoria: lojaOrigemMercadoria,
+          origemPorItem: origemPorItem,
+        );
+      } else {
+        widget.vendaRepository.atualizarChecklistCargaEntrega(
+          venda.id,
+          separado: separado,
+          carregado: carregado,
+          saiu: saiu,
+          permitirVendaSemEstoque: await _permitirVendaSemEstoqueAtual(),
+          lojaOrigemMercadoria: lojaOrigemMercadoria,
+          origemPorItem: origemPorItem,
+        );
+      }
+      // Atualiza flags locais imediatamente (evita flicker antes do hidratar).
+      if (separado != null) venda.cargaSeparada = separado;
+      if (carregado != null) venda.cargaCarregada = carregado;
+      if (saiu != null) venda.cargaSaiu = saiu;
+      if (lojaOrigemMercadoria != null) {
+        venda.lojaOrigemMercadoria =
+            LojaOrigemMercadoria.normalizar(lojaOrigemMercadoria);
+      }
+      if (origemPorItem != null && origemPorItem.isNotEmpty) {
+        for (final item in _itensDaVenda(venda)) {
+          if (!origemPorItem.containsKey(item.id)) continue;
+          item.lojaOrigemMercadoria =
+              LojaOrigemMercadoria.normalizar(origemPorItem[item.id]);
+        }
+        venda.lojaOrigemMercadoria = LojaOrigemMercadoria.resumo(
+          _itensDaVenda(venda).map(
+            (i) => LojaOrigemMercadoria.origemEfetiva(
+              origemItem: i.lojaOrigemMercadoria,
+              origemVenda: venda.lojaOrigemMercadoria,
+            ),
+          ),
+        );
+      }
+      if (mounted) setState(() {});
+      return true;
+    } on LanApiException catch (e) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Checklist: ${e.message}')),
       );
+      return false;
     } catch (e) {
-      if (!mounted) return;
-      if (saiu == true &&
-          CarretoChecklistEstoqueHelper.ehErroAoMarcarSaiu(e)) {
+      if (!mounted) return false;
+      if (saiu == true && CarretoChecklistEstoqueHelper.ehErroAoMarcarSaiu(e)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(CarretoChecklistEstoqueHelper.mensagemResumida(e)),
@@ -2714,11 +3285,156 @@ class _EntregasPageState extends State<EntregasPage>
             duration: const Duration(seconds: 8),
           ),
         );
-        return;
+        return false;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erro ao atualizar checklist: $e')),
       );
+      return false;
+    }
+  }
+
+  String _rotuloOrigemMercadoria(Venda venda) {
+    return LojaOrigemMercadoria.rotulo(venda.lojaOrigemMercadoria);
+  }
+
+  Future<void> _confirmarBuscarNaLoja(int vendaId, List<int> itemIds) async {
+    if (itemIds.isEmpty) return;
+    try {
+      if (_usaVendaApi) {
+        await _vendaApiRepo.atualizarBuscarNaLojaRemoto(
+          vendaId: vendaId,
+          acao: BuscarNaLoja.confirmar,
+          itemIds: itemIds,
+          usuario: widget.usuarioAtual,
+        );
+      } else {
+        widget.vendaRepository.atualizarBuscarNaLoja(
+          vendaId,
+          acao: BuscarNaLoja.confirmar,
+          itemIds: itemIds,
+          usuario: widget.usuarioAtual,
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Material marcado para sair desta loja.')),
+      );
+      _carregarEntregas();
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(context, e, prefixo: 'Separar nesta loja');
+    }
+  }
+
+  /// Marca Separado+Carregado+Saiu (baixa estoque) e status `saiu_entrega`.
+  Future<bool> _liberarSaidaEntrega(
+    Venda venda, {
+    bool mostrarSnackSucesso = true,
+    String? lojaOrigemMercadoria,
+    Map<int, String>? origemPorItem,
+  }) async {
+    if (!widget.podeGerenciarStatusEntrega) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_mensagemSemPermissaoStatus())));
+      return false;
+    }
+    if (!EntregaFluxoService.podeLiberarSaida(venda)) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Nao e possivel liberar saida a partir de '
+            '"${_rotuloStatusEntrega(venda.statusEntrega)}".',
+          ),
+        ),
+      );
+      return false;
+    }
+
+    var origem = lojaOrigemMercadoria;
+    var origensItem = origemPorItem;
+    origensItem ??= {
+      for (final i in _itensDaVenda(venda))
+        if (i.id > 0)
+          i.id: LojaOrigemMercadoria.origemEfetiva(
+            origemItem: i.lojaOrigemMercadoria,
+            origemVenda: venda.lojaOrigemMercadoria,
+          ),
+    };
+    origem ??= LojaOrigemMercadoria.resumo(origensItem.values);
+
+    final okChecklist = await _atualizarChecklistCarga(
+      venda,
+      separado: true,
+      carregado: true,
+      saiu: true,
+      lojaOrigemMercadoria: origem,
+      origemPorItem: origensItem,
+    );
+    if (!okChecklist) return false;
+
+    var atual = widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    if (atual.statusEntrega == 'pendente' ||
+        atual.statusEntrega == 'reagendada') {
+      final okRota = await _atualizarStatusEntrega(
+        atual,
+        'roteirizada',
+        mostrarSnackSucesso: false,
+      );
+      if (!okRota) return false;
+      atual = widget.vendaRepository.obterPorId(venda.id) ?? atual;
+    }
+
+    if (atual.statusEntrega == 'roteirizada') {
+      final okSaiu = await _atualizarStatusEntrega(
+        atual,
+        'saiu_entrega',
+        mostrarSnackSucesso: false,
+      );
+      if (!okSaiu) return false;
+    }
+
+    if (mostrarSnackSucesso && mounted) {
+      final origemTxt = LojaOrigemMercadoria.ehLocal(venda.lojaOrigemMercadoria)
+          ? 'estoque desta loja baixado'
+          : LojaOrigemMercadoria.ehMisto(venda.lojaOrigemMercadoria)
+              ? 'origem mista (baixa fisica so nos itens desta loja)'
+              : 'outra loja (sem baixa fisica local)';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Saida liberada — pedido ${venda.numeroOrcamento} em rota ($origemTxt).',
+          ),
+        ),
+      );
+    }
+    return true;
+  }
+
+  Future<bool> _autoRoteirizarAposMotorista(Venda venda) async {
+    if (!EntregaFluxoService.deveAutoRoteirizar(
+      statusEntrega: venda.statusEntrega,
+      motorista: venda.motoristaEntrega,
+    )) {
+      return false;
+    }
+    return _atualizarStatusEntrega(
+      venda,
+      'roteirizada',
+      mostrarSnackSucesso: false,
+    );
+  }
+
+  Future<void> _autoRoteirizarIdsAposMotorista(Iterable<int> ids) async {
+    for (final id in ids) {
+      final v = widget.vendaRepository.obterPorId(id);
+      if (v == null) continue;
+      try {
+        await _autoRoteirizarAposMotorista(v);
+      } catch (_) {}
     }
   }
 
@@ -2740,13 +3456,16 @@ class _EntregasPageState extends State<EntregasPage>
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (dialogContext, setDialogState) {
-            final exibir =
-                widget.vendaRepository.obterPorId(venda.id) ?? venda;
+            final exibir = widget.vendaRepository.obterPorId(venda.id) ?? venda;
             final usaMigrado = _vendaUsaItensCarretoMigrado(exibir);
-            final itensLista = exibir.itens
+            final itensLista = _itensDaVenda(exibir)
                 .where((i) => _quantidadeExibicaoEntrega(exibir, i) > 0)
                 .toList();
             return AlertDialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 24,
+              ),
               title: Text(
                 usaMigrado
                     ? 'Itens para entrega ${exibir.numeroOrcamento}'
@@ -2770,8 +3489,9 @@ class _EntregasPageState extends State<EntregasPage>
                         onEditar: () async {
                           final ok = await _editarPodEntrega(exibir);
                           if (ok) {
-                            final ref =
-                                widget.vendaRepository.obterPorId(venda.id);
+                            final ref = widget.vendaRepository.obterPorId(
+                              venda.id,
+                            );
                             if (ref != null) {
                               _copiarCamposPod(venda, ref);
                               _copiarCamposPod(exibir, ref);
@@ -2785,28 +3505,30 @@ class _EntregasPageState extends State<EntregasPage>
                         const Text('Nenhum item encontrado para esta entrega.')
                       else ...[
                         Text(
-                          'Cliente: ${exibir.cliente.target?.nomeRazao ?? 'Sem cliente'}',
+                          'Cliente: ${_nomeCliente(exibir)}',
                         ),
-                      Text('Vendedor: ${_nomeVendedor(exibir)}'),
-                      if (usaMigrado) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          'Somente o que segue no carreto (cliente ja pode ter retirado parte na loja).',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                      if (!usaMigrado &&
-                          _vendaCarretoReservaNativaSemMigracao(exibir) &&
-                          exibir.itens.any((i) => i.quantidadeJaRetirada > 0)) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          'Parte dos itens ja foi retirada na loja antes da saida do carro; '
-                          'abaixo consta o que ainda segue para entrega.',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      ListView.separated(
+                        Text('Vendedor: ${_nomeVendedor(exibir)}'),
+                        if (usaMigrado) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Somente o que segue no carreto (cliente ja pode ter retirado parte na loja).',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                        if (!usaMigrado &&
+                            _vendaCarretoReservaNativaSemMigracao(exibir) &&
+                            _itensDaVenda(exibir).any(
+                              (i) => i.quantidadeJaRetirada > 0,
+                            )) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Parte dos itens ja foi retirada na loja antes da saida do carro; '
+                            'abaixo consta o que ainda segue para entrega.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        ListView.separated(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: itensLista.length,
@@ -2815,86 +3537,141 @@ class _EntregasPageState extends State<EntregasPage>
                             final item = itensLista[index];
                             final q = _quantidadeExibicaoEntrega(exibir, item);
                             final sub = _subtotalExibicaoEntrega(exibir, item);
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                SizedBox(
-                                  width: 52,
-                                  child: Text(
-                                    '${q}x',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        item.nomeProduto,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      Text(
-                                        EntregaVendaHelper.rotuloTipoItem(
-                                          item.tipoEntregaItem,
-                                        ),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelSmall,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                SizedBox(
-                                  width: 170,
-                                  child: Text(
-                                    '${_formatarMoeda(item.precoUnitario)} / un',
-                                    textAlign: TextAlign.right,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                SizedBox(
-                                  width: 130,
-                                  child: Text(
-                                    _formatarMoeda(sub),
-                                    textAlign: TextAlign.right,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            return _linhaItemDetalheEntrega(
+                              context,
+                              item: item,
+                              quantidade: q,
+                              subtotal: sub,
+                              origemVenda: exibir.lojaOrigemMercadoria,
+                              cargaSaiu: exibir.cargaSaiu,
                             );
                           },
                         ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Total na carga: ${_formatarMoeda(itensLista.fold<double>(0, (s, i) => s + _subtotalExibicaoEntrega(exibir, i)))}',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      if (usaMigrado)
-                        Text(
-                          'Total da venda (produtos): ${_formatarMoeda(exibir.total)}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                  ],
+                        const SizedBox(height: 10),
+                        if (!widget.ocultarValoresMonetarios) ...[
+                          Text(
+                            'Total na carga: ${_formatarMoeda(itensLista.fold<double>(0, (s, i) => s + _subtotalExibicaoEntrega(exibir, i)))}',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          if (usaMigrado)
+                            Text(
+                              'Total da venda (produtos): ${_formatarMoeda(exibir.total)}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                        ],
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Fechar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _linhaItemDetalheEntrega(
+    BuildContext context, {
+    required ItemVenda item,
+    required int quantidade,
+    required double subtotal,
+    String origemVenda = '',
+    bool cargaSaiu = false,
+  }) {
+    final tipo = EntregaVendaHelper.rotuloTipoItem(item.tipoEntregaItem);
+    final preco = '${_formatarMoeda(item.precoUnitario)} / un';
+    final total = _formatarMoeda(subtotal);
+    final esconderValor = widget.ocultarValoresMonetarios;
+    final origemItem = LojaOrigemMercadoria.origemEfetiva(
+      origemItem: item.lojaOrigemMercadoria,
+      origemVenda: origemVenda,
+      cargaSaiu: cargaSaiu,
+    );
+    final origemTxt = LojaOrigemMercadoria.ehLocal(origemItem)
+        ? ''
+        : 'Origem: ${LojaOrigemMercadoria.rotulo(origemItem)}';
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final largura = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final estreito = largura < 420;
+        if (estreito) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${quantidade}x  ${item.nomeProduto}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              Text(tipo, style: Theme.of(context).textTheme.labelSmall),
+              if (origemTxt.isNotEmpty)
+                Text(
+                  origemTxt,
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              if (!esconderValor) ...[
+                const SizedBox(height: 2),
+                Text(
+                  '$preco  ·  $total',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 48,
+              child: Text(
+                '${quantidade}x',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.nomeProduto,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  Text(tipo, style: Theme.of(context).textTheme.labelSmall),
+                  if (origemTxt.isNotEmpty)
+                    Text(
+                      origemTxt,
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
                 ],
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Fechar'),
-            ),
+            const SizedBox(width: 8),
+            if (!esconderValor) ...[
+              Flexible(
+                child: Text(
+                  preco,
+                  textAlign: TextAlign.right,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  total,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
           ],
-            );
-          },
         );
       },
     );
@@ -2907,55 +3684,22 @@ class _EntregasPageState extends State<EntregasPage>
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final podeLiberar = EntregaFluxoService.podeLiberarSaida(venda) &&
+                widget.podeGerenciarStatusEntrega;
             return AlertDialog(
-              title: Text('Checklist de carga ${venda.numeroOrcamento}'),
+              title: Text('Carga ${venda.numeroOrcamento}'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Cliente: ${venda.cliente.target?.nomeRazao ?? 'Sem cliente'}',
-                  ),
+                  Text('Cliente: ${_nomeCliente(venda)}'),
                   Text('Vendedor: ${_nomeVendedor(venda)}'),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      FilterChip(
-                        label: const Text('Separado'),
-                        selected: venda.cargaSeparada,
-                        onSelected: (v) {
-                          _atualizarChecklistCarga(venda, separado: v);
-                          setDialogState(() {
-                            venda.cargaSeparada = v;
-                          });
-                          _carregarEntregas();
-                        },
-                      ),
-                      FilterChip(
-                        label: const Text('Carregado'),
-                        selected: venda.cargaCarregada,
-                        onSelected: (v) {
-                          _atualizarChecklistCarga(venda, carregado: v);
-                          setDialogState(() {
-                            venda.cargaCarregada = v;
-                          });
-                          _carregarEntregas();
-                        },
-                      ),
-                      FilterChip(
-                        label: const Text('Saiu'),
-                        selected: venda.cargaSaiu,
-                        onSelected: (v) {
-                          _atualizarChecklistCarga(venda, saiu: v);
-                          setDialogState(() {
-                            venda.cargaSaiu = v;
-                          });
-                          _carregarEntregas();
-                        },
-                      ),
-                    ],
+                  Text(
+                    venda.cargaSaiu
+                        ? 'Saida ja liberada. Proximo passo: marcar Entregue.'
+                        : 'O motorista libera a saida no celular. '
+                            'Use o menu do pedido so se precisar liberar daqui.',
                   ),
                 ],
               ),
@@ -2964,6 +3708,16 @@ class _EntregasPageState extends State<EntregasPage>
                   onPressed: () => Navigator.pop(context),
                   child: const Text('Fechar'),
                 ),
+                if (podeLiberar)
+                  TextButton(
+                    onPressed: () async {
+                      final ok = await _liberarSaidaEntrega(venda);
+                      if (!context.mounted) return;
+                      if (ok) Navigator.pop(context);
+                      setDialogState(() {});
+                    },
+                    child: const Text('Liberar saida (reserva)'),
+                  ),
               ],
             );
           },
@@ -3001,6 +3755,10 @@ class _EntregasPageState extends State<EntregasPage>
       _atualizarPrioridade(venda, value.split(':').last);
       return;
     }
+    if (value == 'saiu_entrega') {
+      _liberarSaidaEntrega(venda);
+      return;
+    }
     _atualizarStatusEntrega(venda, value);
   }
 
@@ -3034,6 +3792,16 @@ class _EntregasPageState extends State<EntregasPage>
         corStatus: _corStatus,
         observacaoSemMotorista: _observacaoSemMotorista,
         textoResumoComplemento: _textoResumoComplementoNaVenda,
+        textoBuscarNaLoja: (v) =>
+            BuscarNaLoja.resumoPendentes(v, _itensDaVenda(v)),
+        onSepararNestaLoja: widget.podeGerenciarStatusEntrega
+            ? (v) => _confirmarBuscarNaLoja(
+                  v.id,
+                  BuscarNaLoja.pendentesDaVenda(v, _itensDaVenda(v))
+                      .map((i) => i.id)
+                      .toList(),
+                )
+            : null,
         podeDevolucaoPosCarreto: _podeDevolucaoPosCarretoNaEntrega,
         podeRetiradaLojaAntesSaida: _podeRegistrarRetiradaLojaAntesSaidaCarreto,
         onTapDetalhes: () => _abrirDetalhesItensVenda(venda),
@@ -3105,11 +3873,11 @@ class _EntregasPageState extends State<EntregasPage>
                               onPressed: i == 0
                                   ? null
                                   : () => _swapParadasMotoristaDia(
-                                        motorista,
-                                        ordenado,
-                                        i,
-                                        i - 1,
-                                      ),
+                                      motorista,
+                                      ordenado,
+                                      i,
+                                      i - 1,
+                                    ),
                               icon: Icon(
                                 Icons.arrow_upward_rounded,
                                 size: 20,
@@ -3127,11 +3895,11 @@ class _EntregasPageState extends State<EntregasPage>
                               onPressed: i == ordenado.length - 1
                                   ? null
                                   : () => _swapParadasMotoristaDia(
-                                        motorista,
-                                        ordenado,
-                                        i,
-                                        i + 1,
-                                      ),
+                                      motorista,
+                                      ordenado,
+                                      i,
+                                      i + 1,
+                                    ),
                               icon: Icon(
                                 Icons.arrow_downward_rounded,
                                 size: 20,
@@ -3256,11 +4024,11 @@ class _EntregasPageState extends State<EntregasPage>
                               onPressed: i == 0
                                   ? null
                                   : () => _swapParadasMesmoCarro(
-                                        grupoId,
-                                        ordenado,
-                                        i,
-                                        i - 1,
-                                      ),
+                                      grupoId,
+                                      ordenado,
+                                      i,
+                                      i - 1,
+                                    ),
                               icon: Icon(
                                 Icons.arrow_upward_rounded,
                                 size: 20,
@@ -3278,11 +4046,11 @@ class _EntregasPageState extends State<EntregasPage>
                               onPressed: i == ordenado.length - 1
                                   ? null
                                   : () => _swapParadasMesmoCarro(
-                                        grupoId,
-                                        ordenado,
-                                        i,
-                                        i + 1,
-                                      ),
+                                      grupoId,
+                                      ordenado,
+                                      i,
+                                      i + 1,
+                                    ),
                               icon: Icon(
                                 Icons.arrow_downward_rounded,
                                 size: 20,
@@ -3326,6 +4094,9 @@ class _EntregasPageState extends State<EntregasPage>
           .where((v) => !motoristaLogisticaDefinido(nomeMotoristaEntrega(v)))
           .toList();
     }
+    if (_filtroResumoLista == _FiltroResumoEntregas.buscarNaLoja) {
+      lista = lista.where((v) => BuscarNaLoja.temPendente(v, _itensDaVenda(v))).toList();
+    }
     return lista;
   }
 
@@ -3345,24 +4116,24 @@ class _EntregasPageState extends State<EntregasPage>
     await _definirMotoristaEmLoteIds(ids);
   }
 
-  ({String label, bool complemento, String? status})? _acaoPrincipalEntrega(
-    Venda venda,
-  ) {
+  ({String label, bool complemento, String? status, bool liberarSaida})?
+      _acaoPrincipalEntrega(Venda venda) {
     if (!widget.podeGerenciarStatusEntrega) return null;
     switch (venda.statusEntrega) {
-      case 'pendente':
-      case 'reagendada':
-        return (label: 'Roteirizar', status: 'roteirizada', complemento: false);
-      case 'roteirizada':
-        return (
-          label: 'Saiu p/ entrega',
-          status: 'saiu_entrega',
-          complemento: false,
-        );
       case 'saiu_entrega':
-        return (label: 'Marcar entregue', status: 'entregue', complemento: false);
+        return (
+          label: 'Marcar entregue',
+          status: 'entregue',
+          complemento: false,
+          liberarSaida: false,
+        );
       case 'entregue_complemento_pendente':
-        return (label: 'Concluir complemento', status: null, complemento: true);
+        return (
+          label: 'Concluir complemento',
+          status: null,
+          complemento: true,
+          liberarSaida: false,
+        );
       default:
         return null;
     }
@@ -3375,36 +4146,50 @@ class _EntregasPageState extends State<EntregasPage>
       await _confirmarConcluirComplemento(venda);
       return;
     }
+    if (acao.liberarSaida) {
+      await _liberarSaidaEntrega(venda);
+      return;
+    }
     await _atualizarStatusEntrega(venda, acao.status!);
   }
 
-  bool _vendaKanbanColunaPendentesHoje(Venda v) {
-    final s = v.statusEntrega;
-    return s == 'pendente' || s == 'reagendada';
+  bool _statusKanbanNoPatio(String s) {
+    return s == 'pendente' || s == 'reagendada' || s == 'roteirizada';
   }
+
+  bool _vendaKanbanColunaPatio(Venda v) => _statusKanbanNoPatio(v.statusEntrega);
 
   int? _kanbanIndiceOrdenacaoStatus(String status) {
     switch (status) {
       case 'pendente':
       case 'reagendada':
-        return 0;
       case 'roteirizada':
-        return 1;
+        return 0;
       case 'saiu_entrega':
       case 'entregue_complemento_pendente':
-        return 2;
+        return 1;
       case 'entregue':
-        return 3;
+        return 2;
       default:
         return null;
     }
   }
 
-  /// Status alvo da coluna (0..3) no fluxo operacional principal.
-  String? _statusEntregaColunaKanban(int coluna) {
-    const statuses = ['pendente', 'roteirizada', 'saiu_entrega', 'entregue'];
-    if (coluna < 0 || coluna >= statuses.length) return null;
-    return statuses[coluna];
+  /// Status alvo da coluna visivel (0..2). Patio junta pendente e roteirizada.
+  String? _statusEntregaColunaKanban(int coluna, [Venda? venda]) {
+    switch (coluna) {
+      case 0:
+        if (venda != null && venda.motoristaEntrega.trim().isNotEmpty) {
+          return 'roteirizada';
+        }
+        return 'pendente';
+      case 1:
+        return 'saiu_entrega';
+      case 2:
+        return 'entregue';
+      default:
+        return null;
+    }
   }
 
   String? _proximoPassoKanbanEmDirecao(String atual, String destino) {
@@ -3413,14 +4198,20 @@ class _EntregasPageState extends State<EntregasPage>
     if (atual == 'entregue_complemento_pendente' && destino == 'entregue') {
       return 'entregue';
     }
+    if (_statusKanbanNoPatio(atual) &&
+        (destino == 'pendente' || destino == 'roteirizada')) {
+      return destino == atual ? null : destino;
+    }
     final ia = _kanbanIndiceOrdenacaoStatus(atual);
     final ib = _kanbanIndiceOrdenacaoStatus(destino);
     if (ia == null || ib == null) return null;
-    const seq = ['pendente', 'roteirizada', 'saiu_entrega', 'entregue'];
-    if (ib > ia) return seq[ia + 1];
+    if (ib > ia) {
+      if (ia == 0) return 'saiu_entrega';
+      if (ia == 1) return 'entregue';
+    }
     if (ib < ia) {
-      if (ia <= 0) return null;
-      return seq[ia - 1];
+      if (ia == 2) return 'saiu_entrega';
+      if (ia == 1) return destino == 'pendente' ? 'pendente' : 'roteirizada';
     }
     return null;
   }
@@ -3432,7 +4223,11 @@ class _EntregasPageState extends State<EntregasPage>
     while (s != destino && guard++ < 8) {
       final next = _proximoPassoKanbanEmDirecao(s, destino);
       if (next == null) return false;
-      if (!_transicaoStatusPermitida(s, next)) return false;
+      final puloLiberarSaida =
+          next == 'saiu_entrega' && _statusKanbanNoPatio(s);
+      if (!puloLiberarSaida && !_transicaoStatusPermitida(s, next)) {
+        return false;
+      }
       if ((next == 'entregue' || next == 'entregue_complemento_pendente') &&
           _progressoCarga(v) < 3) {
         return false;
@@ -3450,10 +4245,8 @@ class _EntregasPageState extends State<EntregasPage>
     final base = _filtrarKanban(visiveis);
     switch (col) {
       case 0:
-        return base.where(_vendaKanbanColunaPendentesHoje).toList();
+        return base.where(_vendaKanbanColunaPatio).toList();
       case 1:
-        return base.where((v) => v.statusEntrega == 'roteirizada').toList();
-      case 2:
         return base
             .where(
               (v) =>
@@ -3461,7 +4254,7 @@ class _EntregasPageState extends State<EntregasPage>
                   v.statusEntrega == 'entregue_complemento_pendente',
             )
             .toList();
-      case 3:
+      case 2:
         return base.where((v) => v.statusEntrega == 'entregue').toList();
       default:
         return const [];
@@ -3472,9 +4265,11 @@ class _EntregasPageState extends State<EntregasPage>
     if (!widget.podeGerenciarStatusEntrega) return false;
     final v = widget.vendaRepository.obterPorId(vendaId);
     if (v == null || v.statusEntrega == 'cancelada') return false;
-    final destino = _statusEntregaColunaKanban(colDestino);
+    final destino = _statusEntregaColunaKanban(colDestino, v);
     if (destino == null) return false;
-    if (v.statusEntrega == destino) return false;
+    if (_kanbanIndiceOrdenacaoStatus(v.statusEntrega) == colDestino) {
+      return false;
+    }
     if (destino == 'entregue' &&
         v.statusEntrega == 'entregue_complemento_pendente') {
       return true;
@@ -3489,7 +4284,7 @@ class _EntregasPageState extends State<EntregasPage>
     var v = widget.vendaRepository.obterPorId(vendaId);
     if (v == null || !mounted) return;
 
-    final destino = _statusEntregaColunaKanban(colDestino)!;
+    final destino = _statusEntregaColunaKanban(colDestino, v)!;
 
     if (destino == 'entregue' &&
         v.statusEntrega == 'entregue_complemento_pendente') {
@@ -3508,11 +4303,16 @@ class _EntregasPageState extends State<EntregasPage>
       if (v.statusEntrega == destino) break;
       final prox = _proximoPassoKanbanEmDirecao(v.statusEntrega, destino);
       if (prox == null) break;
-      final ok = await _atualizarStatusEntrega(
-        v,
-        prox,
-        mostrarSnackSucesso: false,
-      );
+      final bool ok;
+      if (prox == 'saiu_entrega') {
+        ok = await _liberarSaidaEntrega(v, mostrarSnackSucesso: false);
+      } else {
+        ok = await _atualizarStatusEntrega(
+          v,
+          prox,
+          mostrarSnackSucesso: false,
+        );
+      }
       if (!ok) break;
       algumPasso = true;
     }
@@ -3521,24 +4321,21 @@ class _EntregasPageState extends State<EntregasPage>
     if (!mounted) return;
     if (algumPasso && v != null && v.statusEntrega == destino) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Status de entrega atualizado (Kanban).'),
-        ),
+        const SnackBar(content: Text('Status de entrega atualizado (Kanban).')),
       );
     }
   }
 
   static const _titulosKanban = [
-    'Pendentes hoje (fila)',
-    'Roteirizadas',
-    'Saiu para entrega',
+    'Aguardando motorista',
+    'Em rota',
     'Entregue',
   ];
 
   Widget _kanbanCardMosaico(Venda venda, DateFormat dataFmt) {
     final scheme = Theme.of(context).colorScheme;
     final statusCor = _corStatus(scheme, venda.statusEntrega);
-    final subtitulo = venda.cliente.target?.nomeRazao ?? 'Sem cliente';
+    final subtitulo = _nomeCliente(venda);
     return Card(
       elevation: 1,
       margin: const EdgeInsets.only(bottom: 8),
@@ -3624,10 +4421,7 @@ class _EntregasPageState extends State<EntregasPage>
     );
   }
 
-  Widget _buildKanbanCompactCard(
-    Venda venda,
-    DateFormat dataFmt,
-  ) {
+  Widget _buildKanbanCompactCard(Venda venda, DateFormat dataFmt) {
     if (!widget.podeGerenciarStatusEntrega) {
       return _kanbanCardMosaico(venda, dataFmt);
     }
@@ -3725,10 +4519,8 @@ class _EntregasPageState extends State<EntregasPage>
                       : ListView.builder(
                           padding: const EdgeInsets.fromLTRB(8, 10, 8, 12),
                           itemCount: itens.length,
-                          itemBuilder: (context, i) => _buildKanbanCompactCard(
-                            itens[i],
-                            dataMarcadaFmt,
-                          ),
+                          itemBuilder: (context, i) =>
+                              _buildKanbanCompactCard(itens[i], dataMarcadaFmt),
                         ),
                 ),
               ],
@@ -3767,7 +4559,7 @@ class _EntregasPageState extends State<EntregasPage>
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                for (var c = 0; c < 4; c++)
+                for (var c = 0; c < 3; c++)
                   _colunaKanban(
                     context,
                     coluna: c,
@@ -3783,45 +4575,54 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   EntregasMontagemCallbacks get _callbacksMontagem => EntregasMontagemCallbacks(
-        atualizarChecklist: (v, {separado, carregado, saiu}) =>
-            _atualizarChecklistCarga(
+    atualizarChecklist: (v, {separado, carregado, saiu}) =>
+        _atualizarChecklistCarga(
           v,
           separado: separado,
           carregado: carregado,
           saiu: saiu,
         ),
-        atualizarStatus: _atualizarStatusEntrega,
-        emitirRelatorio: ({
-          required tipo,
-          motorista,
-          viagem,
-          required salvarPdf,
-        }) =>
-            _emitirRelatorioEntrega(
+    atualizarStatus: _atualizarStatusEntrega,
+    liberarSaida: _liberarSaidaEntrega,
+    emitirRelatorio: ({required tipo, motorista, viagem, required salvarPdf}) =>
+        _emitirRelatorioEntrega(
           tipo: tipo,
           motorista: motorista,
           viagem: viagem,
           salvarPdf: salvarPdf,
         ),
-        trocarParada: _swapParadasMesmoCarro,
-        trocarParadaMotorista: _swapParadasMotoristaDia,
-        editarMotoristaGrupo: _editarMotoristaGrupo,
-        abrirDetalheItens: _abrirDetalhesItensVenda,
-        abrirNavegacao: _abrirNavegacaoParaEntrega,
-        recarregar: _carregarEntregas,
-        confirmarAgrupamento: _confirmarAgrupamentoIds,
-        removerAgrupamento: _removerAgrupamentoIds,
-        editarMotoristaPedido: _editarMotoristaEntrega,
-        definirMotoristaEmLote: _definirMotoristaEmLoteIds,
-      );
+    trocarParada: _swapParadasMesmoCarro,
+    trocarParadaMotorista: _swapParadasMotoristaDia,
+    editarMotoristaGrupo: _editarMotoristaGrupo,
+    abrirDetalheItens: _abrirDetalhesItensVenda,
+    abrirNavegacao: _abrirNavegacaoParaEntrega,
+    recarregar: _atualizarListaEntregas,
+    confirmarAgrupamento: _confirmarAgrupamentoIds,
+    removerAgrupamento: _removerAgrupamentoIds,
+    editarMotoristaPedido: _editarMotoristaEntrega,
+    definirMotoristaEmLote: _definirMotoristaEmLoteIds,
+    confirmarBuscarNaLoja: _confirmarBuscarNaLoja,
+  );
 
   Widget _buildAbaMontagem(List<Venda> listaExibicao) {
+    if (_conferenciaCargaRepository == null) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Conferencia de carga requer conexao com o PC servidor. '
+            'Verifique a rede e reabra Entregas.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
     return PainelMontagemEntregas(
       entregas: listaExibicao,
       quantidadeItemEntrega: _quantidadeExibicaoEntrega,
       callbacks: _callbacksMontagem,
       podeGerenciarStatus: widget.podeGerenciarStatusEntrega,
-      conferenciaRepository: _conferenciaCargaRepository,
+      conferenciaRepository: _conferenciaCargaRepository!,
       usuarioAtual: widget.usuarioAtual,
     );
   }
@@ -3836,6 +4637,7 @@ class _EntregasPageState extends State<EntregasPage>
     final qtdSemMotorista = _contagemSemMotoristaLista(
       _listaEntregasPlanejadasExibicao(),
     );
+    final linhasLista = _linhasListaDia(gruposLista, groupedLista);
     return Column(
       children: [
         EntregasFaixaSemMotorista(
@@ -3847,11 +4649,11 @@ class _EntregasPageState extends State<EntregasPage>
               _filtroApenasSemMotorista = !_filtroApenasSemMotorista;
             });
           },
-          onDefinirMotoristaEmLote: qtdSemMotorista > 0 &&
-                  widget.podeGerenciarStatusEntrega
+          onDefinirMotoristaEmLote:
+              qtdSemMotorista > 0 && widget.podeGerenciarStatusEntrega
               ? () => _definirMotoristaEmLoteSemMotoristaLista(
-                    _listaEntregasPlanejadasExibicao(),
-                  )
+                  _listaEntregasPlanejadasExibicao(),
+                )
               : null,
         ),
         if (_modoAgruparMesmoCarro) ...[
@@ -3882,56 +4684,73 @@ class _EntregasPageState extends State<EntregasPage>
                 )
               : ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  itemCount: gruposLista.length,
-                  itemBuilder: (context, bairroIndex) {
-                    final grupo = gruposLista[bairroIndex];
-                    final vendasBairro =
-                        groupedLista[grupo] ?? const <Venda>[];
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Padding(
+                  itemCount: linhasLista.length,
+                  itemBuilder: (context, i) {
+                    final linha = linhasLista[i];
+                    switch (linha.tipo) {
+                      case _TipoLinhaListaEntrega.cabecalho:
+                        return Padding(
                           padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
                           child: Text(
-                            '${_agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}: $grupo (${vendasBairro.length})',
+                            '${_agrupamento == 'motorista' ? 'Motorista' : 'Bairro'}: ${linha.rotuloGrupo} (${linha.quantidade})',
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
-                        ),
-                        if (_agrupamento == 'motorista' &&
-                            motoristaLogisticaDefinido(grupo))
-                          _buildPainelRotaMotoristaLista(
-                            grupo,
-                            vendasBairro,
-                            dateFormat,
-                            dataMarcadaFmt,
-                          ),
-                        for (final bloco
-                            in blocosEntregaComCarretoAgrupado(vendasBairro))
-                          if (bloco.length >= 2 &&
-                              bloco.first.grupoEntregaFreteId > 0)
-                            _buildPainelGrupoCarretoLista(
-                              bloco,
-                              dateFormat,
-                              dataMarcadaFmt,
-                            )
-                          else
-                            ...bloco.map(
-                              (v) => _buildCardEntrega(
-                                v,
-                                dateFormat,
-                                dataMarcadaFmt,
-                                modoSelecao: _modoAgruparMesmoCarro,
-                                selecionada:
-                                    _idsEntregasSelecionadas.contains(v.id),
-                              ),
-                            ),
-                      ],
-                    );
+                        );
+                      case _TipoLinhaListaEntrega.rota:
+                        return _buildPainelRotaMotoristaLista(
+                          linha.motorista!,
+                          linha.vendas!,
+                          dateFormat,
+                          dataMarcadaFmt,
+                        );
+                      case _TipoLinhaListaEntrega.carreto:
+                        return _buildPainelGrupoCarretoLista(
+                          linha.vendas!,
+                          dateFormat,
+                          dataMarcadaFmt,
+                        );
+                      case _TipoLinhaListaEntrega.card:
+                        final v = linha.venda!;
+                        return _buildCardEntrega(
+                          v,
+                          dateFormat,
+                          dataMarcadaFmt,
+                          modoSelecao: _modoAgruparMesmoCarro,
+                          selecionada: _idsEntregasSelecionadas.contains(v.id),
+                        );
+                    }
                   },
                 ),
         ),
       ],
     );
+  }
+
+  List<_LinhaListaEntrega> _linhasListaDia(
+    List<String> gruposLista,
+    Map<String, List<Venda>> groupedLista,
+  ) {
+    final linhas = <_LinhaListaEntrega>[];
+    for (final grupo in gruposLista) {
+      final vendasGrupo = groupedLista[grupo] ?? const <Venda>[];
+      linhas.add(_LinhaListaEntrega.cabecalho(grupo, vendasGrupo.length));
+      if (_agrupamento == 'motorista' &&
+          widget.podeGerenciarStatusEntrega &&
+          vendasGrupo.length >= 2 &&
+          motoristaLogisticaDefinido(grupo)) {
+        linhas.add(_LinhaListaEntrega.rota(grupo, vendasGrupo));
+      }
+      for (final bloco in blocosEntregaComCarretoAgrupado(vendasGrupo)) {
+        if (bloco.length >= 2 && bloco.first.grupoEntregaFreteId > 0) {
+          linhas.add(_LinhaListaEntrega.carreto(bloco));
+        } else {
+          for (final v in bloco) {
+            linhas.add(_LinhaListaEntrega.card(v));
+          }
+        }
+      }
+    }
+    return linhas;
   }
 
   Widget _buildAbaDia(
@@ -3945,53 +4764,59 @@ class _EntregasPageState extends State<EntregasPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: SegmentedButton<_ModoVisualizacaoDia>(
-            segments: const [
-              ButtonSegment(
-                value: _ModoVisualizacaoDia.lista,
-                icon: Icon(Icons.view_list_outlined, size: 18),
-                label: Text('Lista'),
-              ),
-              ButtonSegment(
-                value: _ModoVisualizacaoDia.kanban,
-                icon: Icon(Icons.view_kanban_outlined, size: 18),
-                label: Text('Kanban'),
-              ),
-            ],
-            selected: {_modoVisualizacaoDia},
-            onSelectionChanged: (selecao) {
-              setState(() => _modoVisualizacaoDia = selecao.first);
-              _salvarPreferenciasAberturaAtual();
-            },
-          ),
-        ),
-        if (_modoVisualizacaoDia == _ModoVisualizacaoDia.lista)
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: () {
-                setState(() {
-                  _modoAgruparMesmoCarro = !_modoAgruparMesmoCarro;
-                  if (!_modoAgruparMesmoCarro) {
-                    _idsEntregasSelecionadas.clear();
-                  }
-                });
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SegmentedButton<_ModoVisualizacaoDia>(
+              segments: const [
+                ButtonSegment(
+                  value: _ModoVisualizacaoDia.lista,
+                  icon: Icon(Icons.view_list_outlined, size: 18),
+                  label: Text('Lista'),
+                ),
+                ButtonSegment(
+                  value: _ModoVisualizacaoDia.kanban,
+                  icon: Icon(Icons.view_kanban_outlined, size: 18),
+                  label: Text('Kanban'),
+                ),
+              ],
+              selected: {_modoVisualizacaoDia},
+              onSelectionChanged: (selecao) {
+                setState(() => _modoVisualizacaoDia = selecao.first);
+                _salvarPreferenciasAberturaAtual();
               },
-              icon: Icon(
-                Icons.merge_type_outlined,
-                color: _modoAgruparMesmoCarro
-                    ? Theme.of(context).colorScheme.primary
-                    : null,
-              ),
-              label: Text(
-                _modoAgruparMesmoCarro
-                    ? 'Sair do modo agrupar viagens'
-                    : 'Agrupar mesmo carro (lista)',
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
-          ),
+            if (_modoVisualizacaoDia == _ModoVisualizacaoDia.lista)
+              TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _modoAgruparMesmoCarro = !_modoAgruparMesmoCarro;
+                    if (!_modoAgruparMesmoCarro) {
+                      _idsEntregasSelecionadas.clear();
+                    }
+                  });
+                },
+                icon: Icon(
+                  Icons.merge_type_outlined,
+                  color: _modoAgruparMesmoCarro
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+                label: Text(
+                  _modoAgruparMesmoCarro
+                      ? 'Sair do modo agrupar viagens'
+                      : 'Agrupar mesmo carro (lista)',
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
         Expanded(
           child: _modoVisualizacaoDia == _ModoVisualizacaoDia.lista
               ? _buildAbaLista(
@@ -4026,10 +4851,12 @@ class _EntregasPageState extends State<EntregasPage>
     final dataMarcadaFmt = DateFormat('dd/MM/yyyy');
     final atrasadas = _contagemAtrasadasCache;
     final pendentesHoje = _contagemPendentesHojeCache;
-    final resumoPorDia =
-        PlanejamentoEntregaDia.resumoDeEntregas(_entregasResumoDias);
-    final temProximosDias =
-        PlanejamentoEntregaDia.proximosDiasComEntrega(resumoPorDia).isNotEmpty;
+    final resumoPorDia = PlanejamentoEntregaDia.resumoDeEntregas(
+      _entregasResumoDias,
+    );
+    final temProximosDias = PlanejamentoEntregaDia.proximosDiasComEntrega(
+      resumoPorDia,
+    ).isNotEmpty;
     final listaExibicao = _listaEntregasExibicaoFinal();
     final groupedLista = <String, List<Venda>>{};
     for (final venda in listaExibicao) {
@@ -4042,11 +4869,9 @@ class _EntregasPageState extends State<EntregasPage>
       ..sort((a, b) => a.compareTo(b));
 
     if (_visaoSimples) {
-      final motoristas = widget.motoristaRepository
-          .listarAtivos()
-          .map((m) => m.nome.trim())
-          .where((n) => n.isNotEmpty)
-          .toList();
+      final motoristas = MotoristaListaSafe.nomesAtivos(
+        widget.motoristaRepository,
+      );
       return Scaffold(
         appBar: AppBar(
           title: const Text('Entregas'),
@@ -4059,7 +4884,12 @@ class _EntregasPageState extends State<EntregasPage>
           ],
         ),
         body: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+          padding: EdgeInsets.fromLTRB(
+            10,
+            MediaQuery.sizeOf(context).height < 800 ? 6 : 10,
+            10,
+            MediaQuery.sizeOf(context).height < 800 ? 6 : 10,
+          ),
           child: EntregasVisaoSimples(
             entregas: listaExibicao,
             nomesMotoristas: motoristas,
@@ -4084,117 +4914,107 @@ class _EntregasPageState extends State<EntregasPage>
     }
 
     return Scaffold(
-        appBar: AppBar(
-          title: const Text('Entregas'),
-          bottom: TabBar(
-            controller: _tabEntregasController,
-            tabs: const [
-              Tab(
-                icon: Icon(Icons.inventory_2_outlined),
-                text: 'Patio',
-              ),
-              Tab(
-                icon: Icon(Icons.calendar_view_week_outlined),
-                text: 'Dia',
-              ),
-            ],
+      appBar: AppBar(
+        title: const Text('Entregas'),
+        actions: [
+          _seletorAbaAvancadaAppBar(),
+          TextButton.icon(
+            onPressed: () => unawaited(_definirVisaoSimples(true)),
+            icon: const Icon(Icons.view_agenda_outlined, size: 18),
+            label: const Text('Visão simples'),
           ),
-          actions: [
-            TextButton.icon(
-              onPressed: () => unawaited(_definirVisaoSimples(true)),
-              icon: const Icon(Icons.view_agenda_outlined, size: 18),
-              label: const Text('Visão simples'),
-            ),
-            IconButton(
-              tooltip: 'Como usar Entregas',
-              icon: const Icon(Icons.help_outline),
-              onPressed: () => EntregasGuia.mostrarDialogoCompleto(context),
-            ),
-            IconButton(
-              tooltip: 'Atualizar',
-              icon: const Icon(Icons.refresh),
-              onPressed: _atualizarListaEntregas,
-            ),
-          ],
+          IconButton(
+            tooltip: 'Como usar Entregas',
+            icon: const Icon(Icons.help_outline),
+            onPressed: () => EntregasGuia.mostrarDialogoCompleto(context),
+          ),
+          IconButton(
+            tooltip: 'Atualizar',
+            icon: const Icon(Icons.refresh),
+            onPressed: _atualizarListaEntregas,
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: EdgeInsets.fromLTRB(
+          8,
+          MediaQuery.sizeOf(context).height < 800 ? 4 : 8,
+          8,
+          MediaQuery.sizeOf(context).height < 800 ? 4 : 8,
         ),
-        body: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-          child: Column(
-            children: [
-              Builder(
-                builder: (context) {
-                  final alturaTela = MediaQuery.sizeOf(context).height;
-                  final barra = EntregasBarraCompacta(
-              atrasadas: atrasadas,
-              pendentesHoje: pendentesHoje,
-              filtroAtrasadasAtivo:
-                  _filtroResumoLista == _FiltroResumoEntregas.atrasadas,
-              filtroPendentesHojeAtivo:
-                  _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje,
-              onFiltroAtrasadas: (ligar) {
-                setState(() {
-                  _filtroResumoLista = ligar
-                      ? _FiltroResumoEntregas.atrasadas
-                      : _FiltroResumoEntregas.nenhum;
-                });
-                _carregarEntregas();
+        child: Column(
+          children: [
+            Builder(
+              builder: (context) {
+                return EntregasBarraCompacta(
+                  atrasadas: atrasadas,
+                  pendentesHoje: pendentesHoje,
+                  filtroAtrasadasAtivo:
+                      _filtroResumoLista == _FiltroResumoEntregas.atrasadas,
+                  filtroPendentesHojeAtivo:
+                      _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje,
+                  onFiltroAtrasadas: (ligar) {
+                    setState(() {
+                      _filtroResumoLista = ligar
+                          ? _FiltroResumoEntregas.atrasadas
+                          : _FiltroResumoEntregas.nenhum;
+                    });
+                    _carregarEntregas();
+                  },
+                  onFiltroPendentesHoje: (ligar) {
+                    setState(() {
+                      _filtroResumoLista = ligar
+                          ? _FiltroResumoEntregas.pendentesHoje
+                          : _FiltroResumoEntregas.nenhum;
+                    });
+                    _carregarEntregas();
+                  },
+                  mostrarPlanejamento: _entregasResumoDias.isNotEmpty,
+                  resumoPorDia: resumoPorDia,
+                  chaveDiaSelecionada: _chaveDiaPlanejamentoSelecionado,
+                  onSelecionarDia: _selecionarDiaPlanejamento,
+                  onAbrirSeletorDia: () =>
+                      _abrirSeletorPlanejamentoDia(resumoPorDia),
+                  filtrosAtivos: _contagemFiltrosAtivos(),
+                  onAbrirFiltros: _abrirFiltrosEntrega,
+                  mostrarRelatorios: _entregasResumoDias.isNotEmpty,
+                  onRelatorios: _abrirRelatoriosEntrega,
+                  mostrarProximosDias:
+                      _entregasResumoDias.isNotEmpty && temProximosDias,
+                  proximosDiasExpandido: _proximosDiasPlanejamentoExpandido,
+                  onAlternarProximosDias: () {
+                    setState(() {
+                      _proximosDiasPlanejamentoExpandido =
+                          !_proximosDiasPlanejamentoExpandido;
+                    });
+                  },
+                  statusSelecionado: _statusSelecionado,
+                  rotuloStatus: _rotuloStatusFiltro,
+                  onStatusRapido: (status) {
+                    setState(() => _statusSelecionado = status);
+                    _carregarEntregas();
+                  },
+                  filtroSemMotoristaAtivo: _filtroApenasSemMotorista,
+                  onFiltroSemMotorista: (ligar) {
+                    setState(() => _filtroApenasSemMotorista = ligar);
+                  },
+                  inicioSemanaExibida: _inicioSemanaExibida,
+                  onSemanaAnterior: () => _deslocarSemanaExibida(-1),
+                  onSemanaProxima: () => _deslocarSemanaExibida(1),
+                  onSelecionarDiaSemana: _selecionarDiaNaSemana,
+                  compacto: true,
+                );
               },
-              onFiltroPendentesHoje: (ligar) {
-                setState(() {
-                  _filtroResumoLista = ligar
-                      ? _FiltroResumoEntregas.pendentesHoje
-                      : _FiltroResumoEntregas.nenhum;
-                });
-                _carregarEntregas();
-              },
-              mostrarPlanejamento: _entregasResumoDias.isNotEmpty,
-              resumoPorDia: resumoPorDia,
-              chaveDiaSelecionada: _chaveDiaPlanejamentoSelecionado,
-              onSelecionarDia: _selecionarDiaPlanejamento,
-              onAbrirSeletorDia: () => _abrirSeletorPlanejamentoDia(resumoPorDia),
-              filtrosAtivos: _contagemFiltrosAtivos(),
-              onAbrirFiltros: _abrirFiltrosEntrega,
-              mostrarRelatorios: _entregasResumoDias.isNotEmpty,
-              onRelatorios: _abrirRelatoriosEntrega,
-              mostrarProximosDias: _entregasResumoDias.isNotEmpty && temProximosDias,
-              proximosDiasExpandido: _proximosDiasPlanejamentoExpandido,
-              onAlternarProximosDias: () {
-                setState(() {
-                  _proximosDiasPlanejamentoExpandido =
-                      !_proximosDiasPlanejamentoExpandido;
-                });
-              },
-              statusSelecionado: _statusSelecionado,
-              rotuloStatus: _rotuloStatusFiltro,
-              onStatusRapido: (status) {
-                setState(() => _statusSelecionado = status);
-                _carregarEntregas();
-              },
-              filtroSemMotoristaAtivo: _filtroApenasSemMotorista,
-              onFiltroSemMotorista: (ligar) {
-                setState(() => _filtroApenasSemMotorista = ligar);
-              },
-              inicioSemanaExibida: _inicioSemanaExibida,
-              onSemanaAnterior: () => _deslocarSemanaExibida(-1),
-              onSemanaProxima: () => _deslocarSemanaExibida(1),
-              onSelecionarDiaSemana: _selecionarDiaNaSemana,
-            );
-                  if (alturaTela >= 820) return barra;
-                  return ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: alturaTela < 720 ? 280 : 320,
-                    ),
-                    child: SingleChildScrollView(child: barra),
-                  );
-                },
-              ),
-            if (_mostrarDicasEntregas && _tabEntregasController.index != 0)
+            ),
+            if (_mostrarDicasEntregas &&
+                _tabEntregasController.index != 0 &&
+                MediaQuery.sizeOf(context).height >= 800)
               EntregasFaixaDicaAba(
                 indiceAba: _tabEntregasController.index,
-                kanban: _tabEntregasController.index == 1 &&
+                kanban:
+                    _tabEntregasController.index == 1 &&
                     _modoVisualizacaoDia == _ModoVisualizacaoDia.kanban,
-                onAbrirGuia: () =>
-                    EntregasGuia.mostrarDialogoCompleto(context),
+                onAbrirGuia: () => EntregasGuia.mostrarDialogoCompleto(context),
                 onOcultar: _ocultarDicasEntregas,
               ),
             if (!widget.podeGerenciarStatusEntrega) ...[
@@ -4209,12 +5029,55 @@ class _EntregasPageState extends State<EntregasPage>
                 actions: const [SizedBox.shrink()],
               ),
             ],
-            const SizedBox(height: 6),
+            if (BuscarNaLoja.contarPedidosPendentes(
+                  _listaEntregasPlanejadasExibicao(),
+                  _itensDaVenda,
+                ) >
+                0) ...[
+              const SizedBox(height: 4),
+              Material(
+                color: Colors.orange.shade50,
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(
+                    Icons.storefront_outlined,
+                    color: Colors.orange.shade800,
+                  ),
+                  title: Text(
+                    '${BuscarNaLoja.contarPedidosPendentes(_listaEntregasPlanejadasExibicao(), _itensDaVenda)} '
+                    'pedido(s) com material para buscar nesta loja',
+                    style: TextStyle(
+                      color: Colors.orange.shade900,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  trailing: TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _filtroResumoLista =
+                            _filtroResumoLista ==
+                                _FiltroResumoEntregas.buscarNaLoja
+                            ? _FiltroResumoEntregas.nenhum
+                            : _FiltroResumoEntregas.buscarNaLoja;
+                      });
+                    },
+                    child: Text(
+                      _filtroResumoLista == _FiltroResumoEntregas.buscarNaLoja
+                          ? 'Ver todos'
+                          : 'Ver',
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 4),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final alturaKanban =
-                      (constraints.maxHeight - 4).clamp(280.0, 4000.0);
+                  final alturaKanban = (constraints.maxHeight - 4).clamp(
+                    280.0,
+                    4000.0,
+                  );
                   return RefreshIndicator(
                     onRefresh: _atualizarListaEntregas,
                     child: _entregas.isEmpty
@@ -4264,6 +5127,7 @@ class _PainelRomaneioGrupoMesmoCarro extends StatefulWidget {
     required this.escopoViagem,
     required this.conferenciaRepository,
     required this.usuarioAtual,
+    this.onConfirmarBuscarNaLoja,
   });
 
   final List<Venda> bloco;
@@ -4273,10 +5137,13 @@ class _PainelRomaneioGrupoMesmoCarro extends StatefulWidget {
     BuildContext context,
     Venda venda,
     StateSetter setDialogStateRomaneio,
-  ) conteudoRomaneioUmaVenda;
+  )
+  conteudoRomaneioUmaVenda;
   final String escopoViagem;
-  final ConferenciaCargaRepository conferenciaRepository;
+  final dynamic conferenciaRepository;
   final String usuarioAtual;
+  final Future<void> Function(int vendaId, List<int> itemIds)?
+      onConfirmarBuscarNaLoja;
 
   @override
   State<_PainelRomaneioGrupoMesmoCarro> createState() =>
@@ -4309,9 +5176,9 @@ class _PainelRomaneioGrupoMesmoCarroState
         children: [
           Text(
             rotuloGrupoLogistica(widget.bloco),
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
           Text('${widget.bloco.length} pedidos no mesmo veiculo'),
           const SizedBox(height: 8),
@@ -4337,24 +5204,23 @@ class _PainelRomaneioGrupoMesmoCarroState
             ),
           ),
           const Divider(height: 16),
-          if (_abaRomaneioGrupo == _abaPorPedido)
-            ...[
-              for (var i = 0; i < widget.bloco.length; i++) ...[
-                widget.conteudoRomaneioUmaVenda(
-                  context,
-                  widget.bloco[i],
-                  widget.setDialogStateRomaneio,
-                ),
-                if (i < widget.bloco.length - 1) const Divider(height: 12),
-              ],
-            ]
-          else
+          if (_abaRomaneioGrupo == _abaPorPedido) ...[
+            for (var i = 0; i < widget.bloco.length; i++) ...[
+              widget.conteudoRomaneioUmaVenda(
+                context,
+                widget.bloco[i],
+                widget.setDialogStateRomaneio,
+              ),
+              if (i < widget.bloco.length - 1) const Divider(height: 12),
+            ],
+          ] else
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Quantidades somadas de todos os pedidos deste veiculo. '
-                  'Marque ao conferir a separacao no patio.',
+                  'O motorista libera a saida no celular; se faltar material '
+                  'nesta loja, use Separar aqui.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 6),
@@ -4365,6 +5231,8 @@ class _PainelRomaneioGrupoMesmoCarroState
                   usuarioAtual: widget.usuarioAtual,
                   vendasGrupo: widget.bloco,
                   quantidadeEntrega: widget.quantidadeItemEntrega,
+                  podeConfirmarBuscarNaLoja: widget.onConfirmarBuscarNaLoja != null,
+                  onConfirmarBuscarNaLoja: widget.onConfirmarBuscarNaLoja,
                 ),
               ],
             ),
@@ -4383,8 +5251,8 @@ class _DialogRetiradaLojaCarretoAntesSaida extends StatefulWidget {
   });
 
   final Venda venda;
-  final VendaRepository vendaRepository;
-  final VendedorRepository vendedorRepository;
+  final dynamic vendaRepository;
+  final dynamic vendedorRepository;
   final UsuarioRepository usuarioRepository;
 
   @override
@@ -4397,9 +5265,27 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
   late final Map<int, TextEditingController> _controllers;
   late final TextEditingController _quemRetirouController;
 
-  List<ItemVenda> get _itensCarretoPendentes => widget.venda.itens
-      .where((i) => i.quantidadeAindaNoCarretoAntesSaida > 0)
-      .toList();
+  List<ItemVenda> get _itensCarretoPendentes {
+    List<ItemVenda> itens;
+    try {
+      final viaRepo =
+          widget.vendaRepository.listarItensPorVenda(widget.venda.id) as List?;
+      if (viaRepo != null && viaRepo.isNotEmpty) {
+        itens = viaRepo.whereType<ItemVenda>().toList();
+      } else {
+        itens = widget.venda.itens.toList();
+      }
+    } catch (_) {
+      try {
+        itens = widget.venda.itens.toList();
+      } catch (_) {
+        itens = const [];
+      }
+    }
+    return itens
+        .where((i) => i.quantidadeAindaNoCarretoAntesSaida > 0)
+        .toList();
+  }
 
   @override
   void initState() {
@@ -4456,19 +5342,29 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
     if (operador == null || !mounted) return;
     try {
       final quem = _quemRetirouController.text.trim();
-      widget.vendaRepository.registrarRetiradaParcialLojaCarretoAntesSaida(
-        widget.venda.id,
-        map,
-        usuario: operador,
-        retiradoPor: quem.isEmpty ? null : quem,
-      );
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .registrarRetiradaParcialLojaCarretoAntesSaidaRemoto(
+          widget.venda.id,
+          map,
+          usuario: operador,
+          retiradoPor: quem.isEmpty ? null : quem,
+        );
+      } else {
+        widget.vendaRepository.registrarRetiradaParcialLojaCarretoAntesSaida(
+          widget.venda.id,
+          map,
+          usuario: operador,
+          retiradoPor: quem.isEmpty ? null : quem,
+        );
+      }
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel registrar: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Nao foi possivel registrar: $e')));
     }
   }
 

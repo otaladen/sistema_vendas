@@ -19,6 +19,7 @@ class ListagemVendaItemUi {
     required this.cancelada,
     this.statusDetalhe,
     this.alertas = const [],
+    this.temDevolucaoTroca = false,
   });
 
   final Venda venda;
@@ -36,4 +37,5 @@ class ListagemVendaItemUi {
   /// Texto completo do status (tooltip na tabela).
   final String? statusDetalhe;
   final List<String> alertas;
+  final bool temDevolucaoTroca;
 }

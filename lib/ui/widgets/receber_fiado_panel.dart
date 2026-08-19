@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/cliente_repository.dart';
-import '../../data/venda_repository.dart';
+import '../../data/api/cliente_api_repository.dart';
+import '../../data/api/lan_api_client.dart';
+import '../../data/api/venda_api_repository.dart';
+import 'lan_api_feedback.dart';
 import '../../model/cliente.dart';
 import '../../model/titulo_receber.dart';
 
@@ -31,8 +33,8 @@ class ReceberFiadoPanel extends StatefulWidget {
     this.clienteInicial,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
   final ValueChanged<RecebimentoFiadoResultado>? onRecebimentoRegistrado;
   final Cliente? clienteInicial;
 
@@ -42,11 +44,15 @@ class ReceberFiadoPanel extends StatefulWidget {
 
 class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
   static final _fmtData = DateFormat('dd/MM/yyyy');
-  static final _fmtMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+  static final _fmtMoeda = NumberFormat.currency(
+    locale: 'pt_BR',
+    symbol: 'R\$',
+  );
 
   final _buscaController = TextEditingController();
   Cliente? _clienteSelecionado;
   List<TituloReceber> _titulos = [];
+  final Map<int, int> _numeroOrcamentoPorTitulo = {};
 
   @override
   void initState() {
@@ -63,22 +69,74 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
     super.dispose();
   }
 
-  void _carregarTitulos() {
+  Future<void> _carregarTitulos() async {
     final id = _clienteSelecionado?.id;
     if (id == null || id <= 0) {
-      setState(() => _titulos = []);
+      setState(() {
+        _titulos = [];
+        _numeroOrcamentoPorTitulo.clear();
+      });
       return;
     }
-    widget.vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+    if (widget.vendaRepository is VendaApiRepository) {
+      try {
+        await widget.vendaRepository.hidratarTitulos();
+      } on LanApiException catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackAviso(context, e, prefixo: 'Titulos');
+        }
+      }
+    } else {
+      widget.vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+    }
+    if (!mounted) return;
+    final mapa = <int, int>{};
+    try {
+      final abertos = widget.vendaRepository.titulos.listarTodosAbertos()
+          as List;
+      for (final raw in abertos) {
+        try {
+          final tid = raw.titulo.id as int;
+          final n = raw.numeroOrcamento as int;
+          if (tid > 0 && n > 0) mapa[tid] = n;
+        } catch (_) {}
+      }
+    } catch (_) {}
     setState(() {
       _titulos = widget.vendaRepository.titulos.listarAbertosPorCliente(id);
+      _numeroOrcamentoPorTitulo
+        ..clear()
+        ..addAll(mapa);
     });
+  }
+
+  String _rotuloVendaTitulo(TituloReceber t) {
+    try {
+      final v = t.venda.target;
+      if (v != null) {
+        final n = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
+        return '$n';
+      }
+    } catch (_) {}
+    final cached = _numeroOrcamentoPorTitulo[t.id];
+    if (cached != null && cached > 0) return '$cached';
+    final vid = t.venda.targetId;
+    return vid > 0 ? '$vid' : '-';
   }
 
   Future<void> _buscarCliente() async {
     final termo = _buscaController.text.trim();
     if (termo.isEmpty) return;
-    final lista = widget.clienteRepository.pesquisar(termo);
+    var lista = widget.clienteRepository
+        .pesquisar(termo)
+        .whereType<Cliente>()
+        .toList();
+    final repo = widget.clienteRepository;
+    if (repo is ClienteApiRepository) {
+      try {
+        lista = await repo.pesquisarRemoto(termo, limit: 60);
+      } catch (_) {}
+    }
     if (!mounted) return;
     if (lista.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -107,7 +165,7 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
     }
     if (escolhido == null) return;
     setState(() => _clienteSelecionado = escolhido);
-    _carregarTitulos();
+    await _carregarTitulos();
   }
 
   void _notificarRecebimento({
@@ -153,15 +211,24 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: valorController,
-                  decoration: const InputDecoration(labelText: 'Valor recebido'),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Valor recebido',
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   initialValue: forma,
-                  decoration: const InputDecoration(labelText: 'Forma de pagamento'),
+                  decoration: const InputDecoration(
+                    labelText: 'Forma de pagamento',
+                  ),
                   items: const [
-                    DropdownMenuItem(value: 'dinheiro', child: Text('Dinheiro')),
+                    DropdownMenuItem(
+                      value: 'dinheiro',
+                      child: Text('Dinheiro'),
+                    ),
                     DropdownMenuItem(value: 'pix', child: Text('PIX')),
                     DropdownMenuItem(
                       value: 'cartao_debito',
@@ -180,7 +247,9 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
                 ),
                 TextField(
                   controller: obsController,
-                  decoration: const InputDecoration(labelText: 'Observação (opcional)'),
+                  decoration: const InputDecoration(
+                    labelText: 'Observação (opcional)',
+                  ),
                 ),
               ],
             ),
@@ -200,18 +269,28 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
     );
     if (ok != true) return;
 
-    final valor = double.tryParse(
+    final valor =
+        double.tryParse(
           valorController.text.replaceAll('.', '').replaceAll(',', '.'),
         ) ??
         0;
     try {
-      final id = widget.vendaRepository.recebimentos.registrarRecebimentoTitulo(
-        tituloId: titulo.id,
-        valorRecebido: valor,
-        formaPagamento: forma,
-        observacao: obsController.text,
-      );
-      final rec = widget.vendaRepository.recebimentos.obterPorId(id);
+      final id = widget.vendaRepository is VendaApiRepository
+          ? await widget.vendaRepository.registrarRecebimentoTituloRemoto(
+              tituloId: titulo.id,
+              valorRecebido: valor,
+              formaPagamento: forma,
+              observacao: obsController.text,
+            )
+          : widget.vendaRepository.recebimentos.registrarRecebimentoTitulo(
+              tituloId: titulo.id,
+              valorRecebido: valor,
+              formaPagamento: forma,
+              observacao: obsController.text,
+            );
+      final rec = widget.vendaRepository is VendaApiRepository
+          ? null
+          : widget.vendaRepository.recebimentos.obterPorId(id);
       final valorEfetivo = rec?.valorTotal ?? valor;
       _notificarRecebimento(
         recebimentoId: id,
@@ -220,14 +299,14 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Recebimento registrado: ${_fmtMoeda.format(valor)}')),
+        SnackBar(
+          content: Text('Recebimento registrado: ${_fmtMoeda.format(valor)}'),
+        ),
       );
-      _carregarTitulos();
+      await _carregarTitulos();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      LanApiFeedback.snackErro(context, e, prefixo: 'Recebimento');
     }
   }
 
@@ -252,11 +331,15 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
               TextField(
                 controller: valorController,
                 decoration: const InputDecoration(labelText: 'Valor recebido'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
               ),
               DropdownButtonFormField<String>(
                 initialValue: forma,
-                decoration: const InputDecoration(labelText: 'Forma de pagamento'),
+                decoration: const InputDecoration(
+                  labelText: 'Forma de pagamento',
+                ),
                 items: const [
                   DropdownMenuItem(value: 'dinheiro', child: Text('Dinheiro')),
                   DropdownMenuItem(value: 'pix', child: Text('PIX')),
@@ -292,17 +375,27 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
     );
     if (ok != true) return;
 
-    final valor = double.tryParse(
+    final valor =
+        double.tryParse(
           valorController.text.replaceAll('.', '').replaceAll(',', '.'),
         ) ??
         0;
     try {
-      final id = widget.vendaRepository.recebimentos.registrarRecebimentoFifo(
-        clienteId: _clienteSelecionado!.id,
-        valorRecebido: valor,
-        formaPagamento: forma,
-      );
-      final rec = widget.vendaRepository.recebimentos.obterPorId(id);
+      final id = widget.vendaRepository is VendaApiRepository
+          ? await (widget.vendaRepository as VendaApiRepository)
+              .registrarRecebimentoFifoRemoto(
+              clienteId: _clienteSelecionado!.id,
+              valorRecebido: valor,
+              formaPagamento: forma,
+            )
+          : widget.vendaRepository.recebimentos.registrarRecebimentoFifo(
+              clienteId: _clienteSelecionado!.id,
+              valorRecebido: valor,
+              formaPagamento: forma,
+            );
+      final rec = widget.vendaRepository is VendaApiRepository
+          ? null
+          : widget.vendaRepository.recebimentos.obterPorId(id);
       final valorEfetivo = rec?.valorTotal ?? valor;
       _notificarRecebimento(
         recebimentoId: id,
@@ -317,12 +410,10 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
           ),
         ),
       );
-      _carregarTitulos();
+      await _carregarTitulos();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      LanApiFeedback.snackErro(context, e, prefixo: 'Recebimento FIFO');
     }
   }
 
@@ -362,16 +453,16 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
                 child: Text(
                   cliente.nomeRazao,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               Text(
                 'Saldo: ${_fmtMoeda.format(saldoTotal)}',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
               ),
               const SizedBox(width: 8),
               FilledButton.tonal(
@@ -396,12 +487,10 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
                   itemCount: _titulos.length,
                   itemBuilder: (context, i) {
                     final t = _titulos[i];
-                    t.venda.target;
-                    final venda = t.venda.target;
                     final vencido = t.vencido;
                     return ListTile(
                       title: Text(
-                        'Venda ${venda?.numeroOrcamento ?? '-'} · '
+                        'Venda ${_rotuloVendaTitulo(t)} · '
                         'Parc. ${t.numeroParcela}/${t.totalParcelas}',
                       ),
                       subtitle: Text(
@@ -413,10 +502,9 @@ class _ReceberFiadoPanelState extends State<ReceberFiadoPanel> {
                         child: const Text('Receber'),
                       ),
                       tileColor: vencido
-                          ? Theme.of(context)
-                              .colorScheme
-                              .errorContainer
-                              .withValues(alpha: 0.35)
+                          ? Theme.of(
+                              context,
+                            ).colorScheme.errorContainer.withValues(alpha: 0.35)
                           : null,
                     );
                   },

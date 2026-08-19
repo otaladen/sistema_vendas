@@ -216,6 +216,7 @@ class XmlParserService {
       final ncm = _primeiroTexto(prod, 'NCM') ?? '';
       final cfop = (_primeiroTexto(prod, 'CFOP') ?? '').trim();
       final imposto = _extrairImpostoItem(el);
+      final rastro = _extrairRastro(prod);
 
       itens.add(
         ItemNotaTemporario(
@@ -237,6 +238,8 @@ class XmlParserService {
           icmsAliquotaSt: imposto.pIcmsSt,
           icmsValorSt: imposto.vIcmsSt,
           ipiValor: imposto.vIpi,
+          numeroLote: rastro.numeroLote,
+          dataValidade: rastro.dataValidade,
         ),
       );
     }
@@ -452,6 +455,27 @@ class XmlParserService {
       return DateTime.utc(ano, mes, dia);
     }
     throw FormatException('Data de vencimento da duplicata invalida: "$raw"');
+  }
+
+  /// Primeiro bloco `rastro` do item (`nLote` / `dVal`).
+  static ({String numeroLote, DateTime? dataValidade}) _extrairRastro(
+    XmlElement prod,
+  ) {
+    for (final c in prod.childElements) {
+      if (c.name.local != 'rastro') continue;
+      final nLote = (_primeiroTexto(c, 'nLote') ?? '').trim();
+      final dValRaw = (_primeiroTexto(c, 'dVal') ?? '').trim();
+      DateTime? dVal;
+      if (dValRaw.isNotEmpty) {
+        try {
+          dVal = _parseDataDup(dValRaw);
+        } on FormatException {
+          dVal = null;
+        }
+      }
+      return (numeroLote: nLote, dataValidade: dVal);
+    }
+    return (numeroLote: '', dataValidade: null);
   }
 
   static String? _primeiroTexto(XmlElement parent, String localName) {

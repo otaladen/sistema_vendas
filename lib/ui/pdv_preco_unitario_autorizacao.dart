@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../domain/auditoria_catalogo.dart';
-import '../data/usuario_repository.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/produto_limite_desconto_pdv.dart';
 import '../domain/usuario_permissao_helper.dart';
@@ -40,7 +39,7 @@ bool usuarioPodeAutorizarAlterarPrecoUnitarioPdv(UsuarioSistema u) {
 /// Login/senha de gerente + valor desejado para preco unitario no carrinho.
 Future<AlteracaoPrecoUnitarioPdvResult?> solicitarAlteracaoPrecoUnitarioPdv(
   BuildContext context,
-  UsuarioRepository usuarioRepository, {
+  dynamic usuarioRepository, {
   required UsuarioSistema usuarioLogado,
   required Produto produto,
   required String precoTipo,
@@ -130,7 +129,7 @@ Future<AlteracaoPrecoUnitarioPdvResult?> solicitarAlteracaoPrecoUnitarioPdv(
       );
       if (!context.mounted) return null;
       if (authDesconto == null) return null;
-      autorizadoPor = authDesconto;
+      autorizadoPor = authDesconto.login;
     }
   }
 

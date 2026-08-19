@@ -1,6 +1,7 @@
+import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
@@ -9,15 +10,14 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
-import '../data/cliente_repository.dart';
-import '../data/produto_repository.dart';
-import '../data/usuario_repository.dart';
+import '../data/api/lan_api_client.dart';
+import '../data/api/venda_api_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
+import 'shell/main_menu_deps.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/pagamento_orcamento.dart';
-import '../data/vendedor_repository.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/usuario_sistema.dart';
@@ -27,6 +27,7 @@ import '../services/cupom_nao_fiscal_venda_pdf.dart';
 import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'cupom_venda_impressao_helper.dart';
+import '../services/esc_pos_cupom_builder.dart';
 import 'segunda_via_cupom_autorizacao.dart';
 import '../services/venda_fiscal_service.dart';
 import 'vendas/cancelar_venda_ui.dart';
@@ -38,6 +39,7 @@ import 'vendas/listagem_vendas_lista_cards.dart';
 import 'vendas/listagem_vendas_ordenacao.dart';
 import 'vendas/listagem_vendas_tabela.dart';
 import '../config/focus_nfe_runtime.dart';
+import 'widgets/lan_api_feedback.dart';
 import '../domain/fiscal/abrir_danfe_focus.dart';
 import '../services/focus_nfe_service.dart';
 import 'fiscal/abrir_documento_fiscal.dart';
@@ -59,20 +61,42 @@ class ListagemVendasPage extends StatefulWidget {
     required this.usuarioAtual,
     required this.podeCancelarVendas,
     required this.usuarioLogado,
+    this.periodoPresetInicial,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
-  final VendedorRepository vendedorRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
+  final dynamic vendedorRepository;
+  final dynamic produtoRepository;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
   final String usuarioAtual;
   final bool podeCancelarVendas;
   final UsuarioSistema usuarioLogado;
 
+  /// Preset inicial (`hoje`, `ultimos_30`, …). Usado pelo KPI "Vendas hoje".
+  final String? periodoPresetInicial;
+
   @override
   State<ListagemVendasPage> createState() => _ListagemVendasPageState();
+}
+
+/// Filtro pendente ao abrir a listagem pelo KPI do Inicio.
+abstract final class ListagemVendasAbertura {
+  static String? _periodoPresetPendente;
+
+  static bool get temPeriodoPendente =>
+      (_periodoPresetPendente ?? '').trim().isNotEmpty;
+
+  static void agendarPeriodo(String preset) {
+    _periodoPresetPendente = preset;
+  }
+
+  static String? consumirPeriodo() {
+    final v = _periodoPresetPendente;
+    _periodoPresetPendente = null;
+    return v;
+  }
 }
 
 class _ListagemVendasPageState extends State<ListagemVendasPage> {
@@ -82,9 +106,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
   final DateFormat _dataDia = DateFormat('dd/MM/yyyy');
   final _buscaController = TextEditingController();
-  final UsuarioRepository _usuarioRepository = UsuarioRepository();
-  late final FocusNfeService _focusNfeService =
-      FocusNfeService(config: criarFocusNfeConfigPadrao());
+  late dynamic _usuarioRepository;
+  late final FocusNfeService _focusNfeService = FocusNfeService(
+    config: criarFocusNfeConfigPadrao(),
+  );
 
   String _periodoPreset = 'ultimos_30';
   DateTime? _dataPersonalizadaInicio;
@@ -95,77 +120,87 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   String _filtroFiscal = 'todos';
   String _filtroCancelamento = 'ativas';
   String _canceladaPorFiltro = 'todos';
-  int? _clienteIdFiltro;
-  int? _vendedorIdFiltro;
 
   List<Venda> _resultados = [];
+
   /// Itens ja resolvidos (sem query no build).
   List<ListagemVendaItemUi> _itensUi = [];
-  List<Cliente> _clientesAtivosCache = [];
-  List<Vendedor> _vendedoresAtivosCache = [];
   List<String> _distintosCanceladaPor = [];
   int _offsetListagem = 0;
   int _totalListagemVendas = 0;
+  double _valorTotalFiltro = 0;
+  bool _carregandoListagem = false;
+  int _pesquisaSeq = 0;
+  Timer? _debounceFiltros;
   ListagemVendasColuna _colunaOrdenacao = ListagemVendasColuna.data;
   bool _ordenacaoAscendente = false;
 
   @override
   void initState() {
     super.initState();
-    _distintosCanceladaPor = widget.vendaRepository.listarDistintosCanceladaPor();
-    _atualizarCachesFiltro();
-    // Theme.of so funciona apos o 1o frame.
+    final periodo =
+        widget.periodoPresetInicial ?? ListagemVendasAbertura.consumirPeriodo();
+    if (periodo != null && periodo.trim().isNotEmpty) {
+      _periodoPreset = periodo.trim();
+    }
+    _usuarioRepository =
+        MainMenuDeps.resolverUsuarioRepository(context);
+    try {
+      _distintosCanceladaPor = (widget.vendaRepository
+                  .listarDistintosCanceladaPor() as List?)
+              ?.whereType<String>()
+              .toList() ??
+          const [];
+    } catch (e) {
+      debugPrint('ListagemVendas.initState: $e');
+      _distintosCanceladaPor = const [];
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _pesquisar();
+      if (mounted) unawaited(_pesquisar());
     });
   }
 
   @override
   void dispose() {
+    _debounceFiltros?.cancel();
     _buscaController.dispose();
     super.dispose();
   }
 
-  String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
-
-  void _atualizarCachesFiltro() {
-    _clientesAtivosCache = widget.clienteRepository
-        .listarTodos()
-        .where((c) => c.ativo)
-        .toList();
-    _vendedoresAtivosCache = widget.vendedorRepository.listarAtivos();
+  void _agendarPesquisa() {
+    _debounceFiltros?.cancel();
+    _debounceFiltros = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) unawaited(_pesquisar());
+    });
   }
+
+  String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
 
   /// Resolve NF-e 55 uma vez (preferindo campos ja na venda).
   VendaDocumentoNfe55Resumo? _nfe55ResumoDeVenda(Venda v) {
-    if (v.nfe55Autorizada) {
-      return VendaDocumentoNfe55Resumo(
-        numero: v.nfeNumero,
-        autorizada: true,
-      );
+    try {
+      if (v.nfe55Autorizada) {
+        return VendaDocumentoNfe55Resumo(numero: v.nfeNumero, autorizada: true);
+      }
+      final nfe55 = widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id);
+      if (nfe55 == null) return null;
+      final numero = (nfe55.numero ?? '').toString();
+      final autorizada = nfe55.autorizada == true;
+      if (!autorizada) return null;
+      return VendaDocumentoNfe55Resumo(numero: numero, autorizada: true);
+    } catch (_) {
+      return null;
     }
-    final nfe55 = widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id);
-    if (nfe55 == null) return null;
-    return VendaDocumentoNfe55Resumo(
-      numero: nfe55.numero,
-      autorizada: nfe55.autorizada,
-    );
   }
 
-  String _rotuloCupomFiscalLista(
-    Venda v, {
-    VendaDocumentoNfe55Resumo? nfe55,
-  }) {
+  String _rotuloCupomFiscalLista(Venda v, {VendaDocumentoNfe55Resumo? nfe55}) {
     return VendaDocumentoRotuloHelper.rotuloIdentificacaoLista(
       v,
       nfe55: nfe55 ?? _nfe55ResumoDeVenda(v),
     );
   }
 
-  String _statusOperacionalLista(
-    Venda v, {
-    VendaDocumentoNfe55Resumo? nfe55,
-  }) {
+  String _statusOperacionalLista(Venda v, {VendaDocumentoNfe55Resumo? nfe55}) {
     return VendaDocumentoRotuloHelper.statusOperacionalLista(
       v,
       nfe55: nfe55 ?? _nfe55ResumoDeVenda(v),
@@ -196,15 +231,62 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   EmitirNfceVendaDeps get _emitirNfceDeps => EmitirNfceVendaDeps(
-        vendaRepository: widget.vendaRepository,
-        clienteRepository: widget.clienteRepository,
-        vendedorRepository: widget.vendedorRepository,
-        appConfigRepository: widget.appConfigRepository,
-        printService: widget.printService,
-        focusNfeService: _focusNfeService,
-      );
+    vendaRepository: widget.vendaRepository,
+    clienteRepository: widget.clienteRepository,
+    vendedorRepository: widget.vendedorRepository,
+    produtoRepository: widget.produtoRepository,
+    appConfigRepository: widget.appConfigRepository,
+    printService: widget.printService,
+    focusNfeService: _focusNfeService,
+  );
 
   Future<void> _emitirNfce(Venda v) async {
+    // Terminal leve: Focus/SEFAZ so no PC servidor (mesmo padrao do caixa).
+    if (widget.vendaRepository is VendaApiRepository) {
+      final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+      if (client == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'API do servidor indisponivel para emitir NFC-e.',
+            ),
+          ),
+        );
+        return;
+      }
+      try {
+        final r = await client.emitirNfce(v.id);
+        if (!mounted) return;
+        if (r['ok'] == true) {
+          try {
+            await (widget.vendaRepository as VendaApiRepository)
+                .atualizarVendaFinalizadaNoCache(v.id);
+          } catch (_) {}
+          if (mounted) setState(_pesquisar);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                r['autorizada'] == true
+                    ? 'NFC-e ${(r['numero'] ?? '').toString()} autorizada no servidor.'
+                    : 'NFC-e em processamento no servidor.',
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${r['error'] ?? 'Falha ao emitir NFC-e'}'),
+            ),
+          );
+        }
+      } catch (e) {
+        if (!mounted) return;
+        LanApiFeedback.snackErro(context, e, prefixo: 'Falha ao emitir NFC-e');
+      }
+      return;
+    }
     await EmitirNfceVendaFlow.executar(
       context,
       deps: _emitirNfceDeps,
@@ -245,12 +327,24 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   bool _podeRegistrarDevolucaoTroca(Venda v) {
     if (v.cancelada || v.status != 'finalizada') return false;
     if (v.vendaOrigemFreteRetiradaId > 0) return false;
-    return v.itens.any((i) => i.quantidade - i.quantidadeDevolvida > 0);
+    return _itensDaVendaSync(v)
+        .any((i) => i.quantidade - i.quantidadeDevolvida > 0);
   }
 
   Future<void> _abrirDevolucoesFiscais(Venda v) async {
+    if (widget.vendaRepository is! VendaRepository) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Consulta de devolucoes fiscais disponivel no PC servidor.',
+          ),
+        ),
+      );
+      return;
+    }
     final fiscalSvc = VendaFiscalService(
-      vendaRepository: widget.vendaRepository,
+      vendaRepository: widget.vendaRepository as VendaRepository,
       clienteRepository: widget.clienteRepository,
     );
     final fiscais = fiscalSvc.listarDevolucoesFiscaisPorVenda(v.id);
@@ -267,8 +361,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   bool _temDevolucaoFiscal(Venda v) {
+    if (widget.vendaRepository is! VendaRepository) return false;
     final fiscalSvc = VendaFiscalService(
-      vendaRepository: widget.vendaRepository,
+      vendaRepository: widget.vendaRepository as VendaRepository,
       clienteRepository: widget.clienteRepository,
     );
     return fiscalSvc.listarDevolucoesFiscaisPorVenda(v.id).isNotEmpty;
@@ -279,9 +374,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Devolucao/troca nao disponivel para esta venda.',
-          ),
+          content: Text('Devolucao/troca nao disponivel para esta venda.'),
         ),
       );
       return;
@@ -312,7 +405,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     if (v.cancelada || v.status != 'finalizada') return false;
     if (v.tipoEntrega != 'retirada_futura' || !v.entregaPendente) return false;
     if (v.idOrcamentoFreteRetiradaAberto != 0) return false;
-    return v.itens.any((i) => i.quantidadePendenteRetirada > 0);
+    return _itensDaVendaSync(v).any((i) => i.quantidadePendenteRetirada > 0);
   }
 
   String _montarEnderecoEntregaClienteListagem(Cliente cliente) {
@@ -366,7 +459,20 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         ),
       );
       if (!mounted || c == null) return;
-      widget.vendaRepository.vincularClienteVendaFinalizada(v.id, c.id);
+      final repo = widget.vendaRepository;
+      try {
+        if (repo is VendaApiRepository) {
+          await repo.vincularClienteVendaFinalizadaRemoto(v.id, c.id);
+        } else {
+          repo.vincularClienteVendaFinalizada(v.id, c.id);
+        }
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(LanApiFeedback.mensagem(e))),
+        );
+        return;
+      }
       v = widget.vendaRepository.obterPorId(v.id) ?? v;
     }
 
@@ -407,19 +513,32 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       VendaDocumentoRotuloHelper.badgeNumeroCurto(v);
 
   Cliente? _clienteDaVenda(Venda venda) {
-    final ligado = venda.cliente.target;
-    if (ligado != null) return ligado;
+    // Entidade detached (API): .target pode lancar; preferir targetId + repo.
+    try {
+      final ligado = venda.cliente.target;
+      if (ligado != null) return ligado;
+    } catch (_) {}
     final id = venda.cliente.targetId;
     if (id == 0) return null;
-    return widget.clienteRepository.obterPorId(id);
+    try {
+      return widget.clienteRepository.obterPorId(id) as Cliente?;
+    } catch (_) {
+      return null;
+    }
   }
 
   Vendedor? _vendedorDaVenda(Venda venda) {
-    final ligado = venda.vendedor.target;
-    if (ligado != null) return ligado;
+    try {
+      final ligado = venda.vendedor.target;
+      if (ligado != null) return ligado;
+    } catch (_) {}
     final id = venda.vendedor.targetId;
     if (id == 0) return null;
-    return widget.vendedorRepository.obterPorId(id);
+    try {
+      return widget.vendedorRepository.obterPorId(id) as Vendedor?;
+    } catch (_) {
+      return null;
+    }
   }
 
   String _rotuloVendedorUmLinha(Venda venda) {
@@ -483,8 +602,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   Future<void> _escolherDataInicioPersonalizado() async {
     final hoje = DateTime.now();
-    final inicial = _dataPersonalizadaInicio ??
-        DateTime(hoje.year, hoje.month, hoje.day);
+    final inicial =
+        _dataPersonalizadaInicio ?? DateTime(hoje.year, hoje.month, hoje.day);
     final d = await showDatePicker(
       context: context,
       initialDate: inicial,
@@ -507,11 +626,13 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         );
       }
     });
+    _agendarPesquisa();
   }
 
   Future<void> _escolherDataFimPersonalizado() async {
     final hoje = DateTime.now();
-    final inicial = _dataPersonalizadaFim ??
+    final inicial =
+        _dataPersonalizadaFim ??
         _dataPersonalizadaInicio ??
         DateTime(hoje.year, hoje.month, hoje.day);
     final d = await showDatePicker(
@@ -532,6 +653,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         );
       }
     });
+    _agendarPesquisa();
   }
 
   String _rotuloFormaPagamento(String forma) {
@@ -575,7 +697,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   String _textoEntregaLista(Venda v) {
     if (v.tipoEntrega == EntregaVendaHelper.tipoMisto) {
-      return '${_rotuloTipoEntrega(v.tipoEntrega)} (${EntregaVendaHelper.resumoContagem(v.itens.map((i) => i.tipoEntregaItem))})';
+      final tipos = _itensDaVendaSync(v).map((i) => i.tipoEntregaItem);
+      return '${_rotuloTipoEntrega(v.tipoEntrega)} (${EntregaVendaHelper.resumoContagem(tipos)})';
     }
     return _rotuloTipoEntrega(v.tipoEntrega);
   }
@@ -584,7 +707,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     if (!v.entregaPendente) {
       return 'Retirada futura: Nao';
     }
-    final unidades = v.itens.fold<int>(
+    final unidades = _itensDaVendaSync(v).fold<int>(
       0,
       (a, i) => a + i.quantidadePendenteRetirada,
     );
@@ -593,8 +716,16 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   bool _vendaTemRetiradaPendenteParaCliente(Venda v) {
     if (v.cancelada || v.status != 'finalizada') return false;
-    return v.itens.any((i) => i.quantidadePendenteRetirada > 0) ||
-        EntregaVendaHelper.vendaPermiteRetiradaLojaCarretoAntesSaida(v);
+    try {
+      final itens = _itensDaVendaSync(v);
+      return itens.any((i) => i.quantidadePendenteRetirada > 0) ||
+          EntregaVendaHelper.vendaPermiteRetiradaLojaCarretoAntesSaida(
+            v,
+            itens: itens,
+          );
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _abrirRegistrarRetirada(Venda v) async {
@@ -611,19 +742,30 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       );
       return;
     }
+    final itens = await _itensDaVendaAsync(atual);
+    if (!mounted) return;
+    if (itens.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nao foi possivel carregar os itens desta venda.'),
+        ),
+      );
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => _DialogRegistrarRetiradaCliente(
         venda: atual,
+        itens: itens,
         vendaRepository: widget.vendaRepository,
         vendedorRepository: widget.vendedorRepository,
         usuarioRepository: _usuarioRepository,
       ),
     );
     if (ok == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Retirada registrada.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Retirada registrada.')));
       _pesquisar();
     }
   }
@@ -631,47 +773,84 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   /// Observacao de entrega (log com data/operador) ou itens com retirada ja registrada.
   bool _temRegistroRetiradaOuEntrega(Venda v) {
     if (v.observacaoEntrega.trim().isNotEmpty) return true;
-    return v.itens.any((i) => i.quantidadeJaRetirada > 0);
+    try {
+      final itens = _itensDaVendaSync(v);
+      return itens.any((i) => i.quantidadeJaRetirada > 0);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Itens da venda sem depender de ToMany (quebrado no terminal leve / entidade detached).
+  List<ItemVenda> _itensDaVendaSync(Venda v) {
+    try {
+      final viaRepo =
+          widget.vendaRepository.listarItensPorVenda(v.id) as List<ItemVenda>?;
+      if (viaRepo != null && viaRepo.isNotEmpty) return viaRepo;
+    } catch (_) {}
+    try {
+      final locais = v.itens.toList();
+      if (locais.isNotEmpty) return locais;
+    } catch (_) {}
+    return const [];
+  }
+
+  Future<List<ItemVenda>> _itensDaVendaAsync(Venda v) async {
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      try {
+        return await repo.carregarItensRemoto(v.id);
+      } catch (_) {
+        return _itensDaVendaSync(v);
+      }
+    }
+    return _itensDaVendaSync(v);
   }
 
   Future<void> _mostrarHistoricoRetirada(Venda v) async {
-    final atual = widget.vendaRepository.obterPorId(v.id) ?? v;
-    final linhas = <String>[];
-    if (atual.observacaoEntrega.trim().isNotEmpty) {
-      linhas.add(atual.observacaoEntrega.trim());
-    }
-    final comRetirada =
-        atual.itens.where((i) => i.quantidadeJaRetirada > 0).toList();
-    if (comRetirada.isNotEmpty) {
-      if (linhas.isNotEmpty) linhas.add('');
-      linhas.add('Resumo — ja retirado por item:');
-      for (final i in comRetirada) {
-        linhas.add('- ${i.nomeProduto}: ${i.quantidadeJaRetirada} un.');
+    try {
+      final atual = widget.vendaRepository.obterPorId(v.id) ?? v;
+      final itens = await _itensDaVendaAsync(atual);
+      final linhas = <String>[];
+      if (atual.observacaoEntrega.trim().isNotEmpty) {
+        linhas.add(atual.observacaoEntrega.trim());
       }
-    }
-    final texto = linhas.isEmpty
-        ? 'Nenhum registro de retirada ou texto de entrega nesta venda.'
-        : linhas.join('\n');
+      final comRetirada =
+          itens.where((i) => i.quantidadeJaRetirada > 0).toList();
+      if (comRetirada.isNotEmpty) {
+        if (linhas.isNotEmpty) linhas.add('');
+        linhas.add('Resumo — ja retirado por item:');
+        for (final i in comRetirada) {
+          linhas.add('- ${i.nomeProduto}: ${i.quantidadeJaRetirada} un.');
+        }
+      }
+      final texto = linhas.isEmpty
+          ? 'Nenhum registro de retirada ou texto de entrega nesta venda.'
+          : linhas.join('\n');
 
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Historico de retiradas e entrega'),
-        content: SizedBox(
-          width: 480,
-          child: SingleChildScrollView(
-            child: SelectableText(texto),
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Historico de retiradas e entrega'),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(child: SelectableText(texto)),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Fechar'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Fechar'),
-          ),
-        ],
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nao foi possivel abrir o historico: $e')),
+      );
+    }
   }
 
   Future<void> _segundaViaCupom(Venda vIn) async {
@@ -689,7 +868,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Segunda via disponivel apenas para vendas finalizadas.'),
+          content: Text(
+            'Segunda via disponivel apenas para vendas finalizadas.',
+          ),
         ),
       );
       return;
@@ -702,6 +883,21 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       exigirAutorizacao: config.exigirAutorizacaoSegundaViaCupom,
     );
     if (!mounted || !autorizado) return;
+
+    // Terminal Leve: carrega itens via API (ToMany detached quebra o PDF).
+    final itens = await _itensDaVendaAsync(v);
+    if (!mounted) return;
+    if (itens.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Nao foi possivel carregar os itens desta venda para o PDF.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final infer = CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(v);
     final nomeArquivo =
         'venda_${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}_2via.pdf';
@@ -720,6 +916,17 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         troco: infer.troco,
         segundaVia: true,
         dataCabecalhoVenda: v.data,
+        itens: itens,
+      ),
+      dadosEscPos: CupomBalcaoDados(
+        venda: v,
+        config: config,
+        itens: itens,
+        cliente: _clienteDaVenda(v),
+        vendedor: _vendedorDaVenda(v),
+        totalRecebido: infer.recebido,
+        troco: infer.troco,
+        segundaVia: true,
       ),
       suggestedFileName: nomeArquivo,
     );
@@ -728,6 +935,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   Future<void> _mostrarModalItensVenda(Venda v) async {
     if (!mounted) return;
     final venda = widget.vendaRepository.obterPorId(v.id) ?? v;
+    final itens = await _itensDaVendaAsync(venda);
+    if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) {
@@ -735,7 +944,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
           title: Text('Produtos — ${_rotuloVendaUsuario(venda)}'),
           content: SizedBox(
             width: 440,
-            child: venda.itens.isEmpty
+            child: itens.isEmpty
                 ? const Text('Nenhum item registrado nesta venda.')
                 : ConstrainedBox(
                     constraints: const BoxConstraints(maxHeight: 420),
@@ -743,7 +952,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          for (final item in venda.itens)
+                          for (final item in itens)
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 6),
                               child: Row(
@@ -757,7 +966,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                       ),
                                       style: TextStyle(
                                         fontWeight: FontWeight.w700,
-                                        color: Theme.of(ctx).colorScheme.primary,
+                                        color: Theme.of(
+                                          ctx,
+                                        ).colorScheme.primary,
                                       ),
                                     ),
                                   ),
@@ -792,46 +1003,94 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     );
   }
 
-  void _pesquisar() {
+  Future<ListagemVendasPagina> _obterPaginaListagem({
+    required int offset,
+  }) async {
     final filtros = _montarFiltroListagemAtual();
-    final pagina = widget.vendaRepository.listarListagemVendasPaginaComTotal(
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      return repo.hidratarListagemVendas(
+        filtros,
+        offset: offset,
+        limite: _tamPaginaListagem,
+      );
+    }
+    return repo.listarListagemVendasPaginaComTotal(
       filtros,
-      offset: 0,
+      offset: offset,
       limite: _tamPaginaListagem,
-    );
-    final distintosCancel = widget.vendaRepository.listarDistintosCanceladaPor();
-    _atualizarCachesFiltro();
-    final scheme = Theme.of(context).colorScheme;
-    final itensUi = _mapearVendasParaItensUi(pagina.vendas, scheme);
-    setState(() {
-      _resultados = pagina.vendas;
-      _itensUi = itensUi;
-      _totalListagemVendas = pagina.total;
-      _offsetListagem = pagina.vendas.length;
-      _distintosCanceladaPor = distintosCancel;
-      if (_canceladaPorFiltro != 'todos' &&
-          !_distintosCanceladaPor.contains(_canceladaPorFiltro)) {
-        _canceladaPorFiltro = 'todos';
-      }
-    });
+    ) as ListagemVendasPagina;
   }
 
-  void _carregarMaisVendas() {
+  Future<void> _pesquisar() async {
+    _debounceFiltros?.cancel();
+    final seq = ++_pesquisaSeq;
+    setState(() => _carregandoListagem = true);
+    try {
+      final pagina = await _obterPaginaListagem(offset: 0);
+      final distintosCancel = widget.vendaRepository
+          .listarDistintosCanceladaPor();
+      if (!mounted || seq != _pesquisaSeq) return;
+      final scheme = Theme.of(context).colorScheme;
+      final vendas = (pagina.vendas as List).whereType<Venda>().toList();
+      final itensUi = _mapearVendasParaItensUi(vendas, scheme);
+      setState(() {
+        _resultados = vendas;
+        _itensUi = itensUi;
+        _totalListagemVendas = pagina.total;
+        _valorTotalFiltro = pagina.totalValor;
+        _offsetListagem = vendas.length;
+        _carregandoListagem = false;
+        _distintosCanceladaPor =
+            (distintosCancel as List?)?.whereType<String>().toList() ??
+                const [];
+        if (_canceladaPorFiltro != 'todos' &&
+            !_distintosCanceladaPor.contains(_canceladaPorFiltro)) {
+          _canceladaPorFiltro = 'todos';
+        }
+      });
+    } catch (e, st) {
+      debugPrint('ListagemVendas._pesquisar: $e\n$st');
+      if (!mounted || seq != _pesquisaSeq) return;
+      setState(() {
+        _resultados = const [];
+        _itensUi = const [];
+        _totalListagemVendas = 0;
+        _valorTotalFiltro = 0;
+        _offsetListagem = 0;
+        _carregandoListagem = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao carregar vendas: $e')),
+      );
+    }
+  }
+
+  Future<void> _carregarMaisVendas() async {
+    if (_carregandoListagem) return;
     if (_resultados.length >= _totalListagemVendas) {
       return;
     }
-    final pagina = widget.vendaRepository.listarListagemVendasPaginaComTotal(
-      _montarFiltroListagemAtual(),
-      offset: _offsetListagem,
-      limite: _tamPaginaListagem,
-    );
-    final scheme = Theme.of(context).colorScheme;
-    setState(() {
-      _resultados.addAll(pagina.vendas);
-      _offsetListagem += pagina.vendas.length;
-      // Remonta a pagina inteira uma vez (batch), nao no build.
-      _itensUi = _mapearVendasParaItensUi(_resultados, scheme);
-    });
+    setState(() => _carregandoListagem = true);
+    try {
+      final pagina = await _obterPaginaListagem(offset: _offsetListagem);
+      if (!mounted) return;
+      final scheme = Theme.of(context).colorScheme;
+      setState(() {
+        _resultados.addAll(pagina.vendas);
+        _offsetListagem += (pagina.vendas as List).length;
+        _totalListagemVendas = pagina.total;
+        _valorTotalFiltro = pagina.totalValor;
+        _itensUi = _mapearVendasParaItensUi(_resultados, scheme);
+        _carregandoListagem = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _carregandoListagem = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao carregar mais vendas: $e')),
+      );
+    }
   }
 
   FiltroListagemVendas _montarFiltroListagemAtual() {
@@ -846,8 +1105,6 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       tipoEntrega: _tipoEntrega,
       entregaPendente: _entregaPendente,
       filtroFiscal: _filtroFiscal,
-      clienteId: _clienteIdFiltro,
-      vendedorId: _vendedorIdFiltro,
     );
   }
 
@@ -862,8 +1119,6 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       _filtroFiscal = 'todos';
       _filtroCancelamento = 'ativas';
       _canceladaPorFiltro = 'todos';
-      _clienteIdFiltro = null;
-      _vendedorIdFiltro = null;
       _buscaController.clear();
     });
     _pesquisar();
@@ -877,15 +1132,12 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     if (_tipoEntrega != 'todos') n++;
     if (_filtroFiscal != 'todos') n++;
     if (_entregaPendente != 'todos') n++;
-    if (_clienteIdFiltro != null) n++;
-    if (_vendedorIdFiltro != null) n++;
     if (_filtroCancelamento != 'ativas') n++;
     if (_buscaController.text.trim().isNotEmpty) n++;
     return n;
   }
 
-  double get _valorTotalExibido =>
-      _resultados.fold(0.0, (s, v) => s + v.total);
+  double get _valorTotalExibido => _valorTotalFiltro;
 
   /// Pre-carrega NFe / frete / devolucao em lote e monta o ViewModel.
   /// Chamado so apos pesquisa/pagina — nunca dentro de [build].
@@ -907,25 +1159,57 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     for (final v in vendas) {
       nfePorId[v.id] = _nfe55ResumoDeVenda(v);
       if (!v.cancelada && v.status == 'finalizada') {
-        final dev = widget.vendaRepository
-            .valorReferenciaDevolvidoAcumuladoVenda(v.id);
-        final troca =
-            widget.vendaRepository.valorSaidaTrocaAcumuladoVenda(v.id);
-        if (dev > 0.005 || troca > 0.005) {
-          devTrocaPorId[v.id] = (dev: dev, troca: troca);
+        final viaApi = LanApiClient.devolucaoListagem[v];
+        if (viaApi != null &&
+            (viaApi.dev > 0.005 || viaApi.troca > 0.005)) {
+          devTrocaPorId[v.id] = viaApi;
+          continue;
         }
+        try {
+          final dev = widget.vendaRepository
+              .valorReferenciaDevolvidoAcumuladoVenda(v.id) as double;
+          final troca = widget.vendaRepository.valorSaidaTrocaAcumuladoVenda(
+            v.id,
+          ) as double;
+          if (dev > 0.005 || troca > 0.005) {
+            devTrocaPorId[v.id] = (dev: dev, troca: troca);
+          }
+        } catch (_) {}
       }
     }
 
     return [
       for (final v in vendas)
-        _montarItemUi(
-          v,
-          scheme: scheme,
-          nfe55: nfePorId[v.id],
-          freteFilho: fretePorId[v.idOrcamentoFreteRetiradaAberto],
-          devTroca: devTrocaPorId[v.id],
-        ),
+        () {
+          try {
+            return _montarItemUi(
+              v,
+              scheme: scheme,
+              nfe55: nfePorId[v.id],
+              freteFilho: fretePorId[v.idOrcamentoFreteRetiradaAberto],
+              devTroca: devTrocaPorId[v.id],
+            );
+          } catch (e) {
+            debugPrint('ListagemVendas.item ${v.id}: $e');
+            return ListagemVendaItemUi(
+              venda: v,
+              titulo: 'Venda #${v.id}',
+              status: v.cancelada ? 'Cancelada' : 'Finalizada',
+              statusDetalhe: null,
+              statusCor: v.cancelada ? scheme.error : scheme.primary,
+              dataHora: _dataHora.format(v.data.toLocal()),
+              cliente: 'Sem cliente',
+              vendedor: 'Sem vendedor',
+              pagamento: v.formaPagamento,
+              entrega: v.tipoEntrega,
+              badgeNumero: '${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
+              totalFormatado: _formatarMoeda(v.total),
+              cancelada: v.cancelada,
+              alertas: const [],
+              temDevolucaoTroca: false,
+            );
+          }
+        }(),
     ];
   }
 
@@ -949,7 +1233,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     if (v.idOrcamentoFreteRetiradaAberto != 0) {
       final filho = freteFilho;
       final n = filho?.numeroOrcamento ?? 0;
-      final rot = n > 0 ? '#$n' : '(id ${filho?.id ?? v.idOrcamentoFreteRetiradaAberto})';
+      final rot = n > 0
+          ? '#$n'
+          : '(id ${filho?.id ?? v.idOrcamentoFreteRetiradaAberto})';
       alertas.add('Frete carreto pendente no caixa $rot');
     }
     if (_temRegistroRetiradaOuEntrega(v)) {
@@ -969,8 +1255,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       alertas.insert(0, _linhaRetiradaFutura(v));
     }
 
-    final statusCompleto =
-        v.cancelada ? 'Venda cancelada' : _statusOperacionalLista(v, nfe55: nfe55);
+    final statusCompleto = v.cancelada
+        ? 'Venda cancelada'
+        : _statusOperacionalLista(v, nfe55: nfe55);
     final statusResumido = v.cancelada
         ? 'Cancelada'
         : _statusOperacionalResumidoLista(v, nfe55: nfe55);
@@ -979,8 +1266,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       venda: v,
       titulo: _rotuloCupomFiscalLista(v, nfe55: nfe55),
       status: statusResumido,
-      statusDetalhe:
-          statusCompleto != statusResumido ? statusCompleto : null,
+      statusDetalhe: statusCompleto != statusResumido ? statusCompleto : null,
       statusCor: v.cancelada
           ? scheme.error
           : _corStatusOperacionalLista(v, scheme),
@@ -993,35 +1279,60 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       totalFormatado: _formatarMoeda(v.total),
       cancelada: v.cancelada,
       alertas: alertas,
+      temDevolucaoTroca: devTroca != null,
     );
   }
 
   void _executarAcaoMenu(String value, Venda v) {
     switch (value) {
       case 'historico':
-        _mostrarHistoricoRetirada(v);
+        unawaited(_mostrarHistoricoRetirada(v));
+        return;
       case 'retirada':
-        _abrirRegistrarRetirada(v);
+        unawaited(_abrirRegistrarRetirada(v));
+        return;
       case 'pagar_frete':
-        _abrirPagarFreteCarreto(v);
+        unawaited(_abrirPagarFreteCarreto(v));
+        return;
       case 'devolucao':
-        _abrirRegistrarDevolucaoTroca(v);
+        unawaited(_abrirRegistrarDevolucaoTroca(v));
+        return;
       case 'devolucao_fiscal':
-        _abrirDevolucoesFiscais(v);
+        unawaited(_abrirDevolucoesFiscais(v));
+        return;
       case 'emitir_nfce':
-        _emitirNfce(v);
+        unawaited(_emitirNfce(v));
+        return;
       case 'danfe_nfce':
-        _verDanfeNfce(v);
+        unawaited(_verDanfeNfce(v));
+        return;
       case 'danfe_nfe55':
-        _verNfe55(v);
+        unawaited(_verNfe55(v));
+        return;
       case 'segunda_via':
-        _segundaViaCupom(v);
+        unawaited(_segundaViaCupom(v));
+        return;
       case 'cancelar':
-        _cancelarVenda(v);
+        unawaited(_cancelarVenda(v));
+        return;
     }
   }
 
   List<PopupMenuEntry<String>> _menuItensVenda(Venda v) {
+    try {
+      return _menuItensVendaUnsafe(v);
+    } catch (e) {
+      debugPrint('ListagemVendas.menu ${v.id}: $e');
+      return const [
+        PopupMenuItem<String>(
+          value: 'historico',
+          child: Text('Historico de retiradas'),
+        ),
+      ];
+    }
+  }
+
+  List<PopupMenuEntry<String>> _menuItensVendaUnsafe(Venda v) {
     final temNfce = v.nfceEmitida;
     final clienteVenda = EmitirNfceVendaFlow.clienteDaVenda(
       v,
@@ -1031,8 +1342,11 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       v,
       cliente: clienteVenda,
     );
-    final temNfe55 =
-        widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null;
+    var temNfe55 = false;
+    try {
+      temNfe55 =
+          widget.vendaRepository.obterNfe55AutorizadaPorVenda(v.id) != null;
+    } catch (_) {}
 
     return [
       if (podeEmitirNfce)
@@ -1080,31 +1394,48 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
           value: 'devolucao_fiscal',
           child: Text('NF-e de devolucao (DANFE)'),
         ),
-      PopupMenuItem<String>(
-        value: 'cancelar',
-        enabled: !v.cancelada,
-        child: const Text('Cancelar venda'),
-      ),
+      if (!v.cancelada &&
+          v.status == 'finalizada' &&
+          widget.podeCancelarVendas)
+        const PopupMenuItem<String>(
+          value: 'cancelar',
+          child: Text('Cancelar venda'),
+        ),
     ];
   }
 
   String _csvEscape(String texto) => '"${texto.replaceAll('"', '""')}"';
 
+  Future<List<Venda>> _listarFiltroCompletoParaExport() async {
+    final filtros = _montarFiltroListagemAtual();
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      return repo.listarListagemVendasExportacao(filtros);
+    }
+    return (repo.listarListagemVendasCompleto(filtros) as List)
+        .whereType<Venda>()
+        .toList();
+  }
+
   Future<void> _exportarCancelamentosCsv() async {
-    final canceladas = widget.vendaRepository
-        .listarListagemVendasCompleto(_montarFiltroListagemAtual())
+    final canceladas = (await _listarFiltroCompletoParaExport())
         .where((v) => v.cancelada)
         .toList();
+    if (!mounted) return;
     if (canceladas.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nao ha vendas canceladas para exportar.')),
+        const SnackBar(
+          content: Text('Nao ha vendas canceladas para exportar.'),
+        ),
       );
       return;
     }
     final linhas = <String>[
       'venda_id,numero_venda,data_venda,cancelada_em,cancelada_por,motivo,total',
       ...canceladas.map((v) {
-        final dataVenda = DateFormat('dd/MM/yyyy HH:mm').format(v.data.toLocal());
+        final dataVenda = DateFormat(
+          'dd/MM/yyyy HH:mm',
+        ).format(v.data.toLocal());
         final canceladaEm = v.canceladaEm == null
             ? ''
             : DateFormat('dd/MM/yyyy HH:mm').format(v.canceladaEm!.toLocal());
@@ -1113,7 +1444,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
           v.numeroOrcamento.toString(),
           _csvEscape(dataVenda),
           _csvEscape(canceladaEm),
-          _csvEscape(v.canceladaPor.trim().isEmpty ? 'Nao informado' : v.canceladaPor),
+          _csvEscape(
+            v.canceladaPor.trim().isEmpty ? 'Nao informado' : v.canceladaPor,
+          ),
           _csvEscape(v.motivoCancelamento),
           v.total.toStringAsFixed(2).replaceAll('.', ','),
         ].join(',');
@@ -1121,7 +1454,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     ];
     final selectedPath = await FilePicker.platform.saveFile(
       dialogTitle: 'Salvar relatorio de cancelamentos',
-      fileName: 'cancelamentos_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.csv',
+      fileName:
+          'cancelamentos_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.csv',
       type: FileType.custom,
       allowedExtensions: const ['csv'],
     );
@@ -1140,7 +1474,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   Future<Uint8List> _gerarCancelamentosPdfBytes(List<Venda> canceladas) async {
     final doc = pw.Document();
     final fmt = DateFormat('dd/MM/yyyy HH:mm');
-    final totalCancelado = canceladas.fold<double>(0, (acc, v) => acc + v.total);
+    final totalCancelado = canceladas.fold<double>(
+      0,
+      (acc, v) => acc + v.total,
+    );
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -1202,13 +1539,15 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   Future<void> _exportarCancelamentosPdf() async {
-    final canceladas = widget.vendaRepository
-        .listarListagemVendasCompleto(_montarFiltroListagemAtual())
+    final canceladas = (await _listarFiltroCompletoParaExport())
         .where((v) => v.cancelada)
         .toList();
+    if (!mounted) return;
     if (canceladas.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nao ha vendas canceladas para exportar.')),
+        const SnackBar(
+          content: Text('Nao ha vendas canceladas para exportar.'),
+        ),
       );
       return;
     }
@@ -1279,10 +1618,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   @override
   Widget build(BuildContext context) {
-    final clientes = _clientesAtivosCache;
-    final vendedores = _vendedoresAtivosCache;
     final usarTabela =
-        MediaQuery.sizeOf(context).width >= ListagemVendasLayout.breakpointTabela;
+        MediaQuery.sizeOf(context).width >=
+        ListagemVendasLayout.breakpointTabela;
     final itensUiBrutos = _itensUi;
     final itensUi = usarTabela
         ? itensUiBrutos
@@ -1301,8 +1639,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
             totalRegistros: _totalListagemVendas,
             exibidos: _resultados.length,
             valorTotalExibido: _valorTotalExibido,
-            onAtualizar: _pesquisar,
+            onAtualizar: _carregandoListagem ? null : () => unawaited(_pesquisar()),
           ),
+          if (_carregandoListagem)
+            const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -1313,6 +1653,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                     buscaController: _buscaController,
                     filtrosAtivos: _contarFiltrosAtivos(),
                     onPesquisar: _pesquisar,
+                    onBuscaChanged: _agendarPesquisa,
                     onLimpar: _limparFiltros,
                     onExportarCsv: _exportarCancelamentosCsv,
                     onExportarPdf: _exportarCancelamentosPdf,
@@ -1324,7 +1665,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                             children: [
                               OutlinedButton.icon(
                                 onPressed: _escolherDataInicioPersonalizado,
-                                icon: const Icon(Icons.event_outlined, size: 18),
+                                icon: const Icon(
+                                  Icons.event_outlined,
+                                  size: 18,
+                                ),
                                 label: Text(
                                   _dataPersonalizadaInicio == null
                                       ? 'Data inicial'
@@ -1333,7 +1677,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                               ),
                               OutlinedButton.icon(
                                 onPressed: _escolherDataFimPersonalizado,
-                                icon: const Icon(Icons.event_outlined, size: 18),
+                                icon: const Icon(
+                                  Icons.event_outlined,
+                                  size: 18,
+                                ),
                                 label: Text(
                                   _dataPersonalizadaFim == null
                                       ? 'Data final'
@@ -1349,297 +1696,256 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                         : null,
                     filtrosAvancados: (ctx, constraints) =>
                         ListagemVendasFiltrosGrade(
-                      children: [
-                        DropdownButtonFormField<String>(
-                          initialValue: _periodoPreset,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Periodo',
-                            isDense: true,
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'hoje',
-                              child: Text('Hoje'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'ultimos_7',
-                              child: Text('Ultimos 7 dias'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'ultimos_30',
-                              child: Text('Ultimos 30 dias'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'mes_atual',
-                              child: Text('Mes atual'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'mes_anterior',
-                              child: Text('Mes anterior'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'ano_atual',
-                              child: Text('Ano atual'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'todo',
-                              child: Text('Todo o periodo'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'personalizado',
-                              child: Text('Datas escolhidas'),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() {
-                              _periodoPreset = v;
-                              if (v == 'personalizado' &&
-                                  (_dataPersonalizadaInicio == null ||
-                                      _dataPersonalizadaFim == null)) {
-                                final n = DateTime.now();
-                                _dataPersonalizadaInicio = DateTime(
-                                  n.year,
-                                  n.month,
-                                  n.day,
-                                ).subtract(const Duration(days: 29));
-                                _dataPersonalizadaFim = DateTime(
-                                  n.year,
-                                  n.month,
-                                  n.day,
-                                  23,
-                                  59,
-                                  59,
-                                  999,
-                                );
-                              }
-                            });
-                          },
-                        ),
-                        DropdownButtonFormField<String>(
-                          initialValue: _canceladaPorFiltro,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Cancelada por',
-                            isDense: true,
-                          ),
-                          items: [
-                            const DropdownMenuItem(
-                              value: 'todos',
-                              child: Text('Todos'),
-                            ),
-                            ..._distintosCanceladaPor.map(
-                              (u) => DropdownMenuItem(
-                                value: u,
-                                child: Text(
-                                  u,
-                                  overflow: TextOverflow.ellipsis,
+                          children: [
+                            DropdownButtonFormField<String>(
+                              initialValue: _periodoPreset,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Periodo',
+                                isDense: true,
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'hoje',
+                                  child: Text('Hoje'),
                                 ),
-                              ),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) {
-                              setState(() => _canceladaPorFiltro = v);
-                            }
-                          },
-                        ),
-                        DropdownButtonFormField<String>(
-                          initialValue: _formaPagamento,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Pagamento',
-                            isDense: true,
-                          ),
-                          items: [
-                            const DropdownMenuItem(
-                              value: 'todos',
-                              child: Text('Todos'),
-                            ),
-                            ...[
-                              'dinheiro',
-                              'pix',
-                              'cartao_credito',
-                              'cartao_debito',
-                              'fiado',
-                              'transferencia',
-                              'misto',
-                            ].map(
-                              (f) => DropdownMenuItem(
-                                value: f,
-                                child: Text(_rotuloFormaPagamento(f)),
-                              ),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) {
-                              setState(() => _formaPagamento = v);
-                            }
-                          },
-                        ),
-                        DropdownButtonFormField<String>(
-                          initialValue: _tipoEntrega,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Entrega',
-                            isDense: true,
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'todos',
-                              child: Text('Todos'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'retirada',
-                              child: Text('Leva Agora'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'retirada_futura',
-                              child: Text('Retirada futura'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'entrega_loja',
-                              child: Text('Carreto'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'misto',
-                              child: Text('Venda mista'),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) setState(() => _tipoEntrega = v);
-                          },
-                        ),
-                        DropdownButtonFormField<String>(
-                          initialValue: _filtroFiscal,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Documento fiscal',
-                            isDense: true,
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'todos',
-                              child: Text('Todos'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'sem_nfce_eletronico',
-                              child: Text('Sem NFC-e (PIX/cartao)'),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) setState(() => _filtroFiscal = v);
-                          },
-                        ),
-                        DropdownButtonFormField<String>(
-                          initialValue: _entregaPendente,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Retirada futura',
-                            isDense: true,
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'todos',
-                              child: Text('Todos'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'nao',
-                              child: Text('Entregue (normal)'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'sim',
-                              child: Text('Pendente'),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) {
-                              setState(() => _entregaPendente = v);
-                            }
-                          },
-                        ),
-                        DropdownButtonFormField<int?>(
-                          initialValue: _clienteIdFiltro,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Cliente',
-                            isDense: true,
-                          ),
-                          items: [
-                            const DropdownMenuItem<int?>(
-                              value: null,
-                              child: Text('Todos'),
-                            ),
-                            ...clientes.map(
-                              (c) => DropdownMenuItem<int?>(
-                                value: c.id,
-                                child: Text(
-                                  c.nomeRazao,
-                                  overflow: TextOverflow.ellipsis,
+                                DropdownMenuItem(
+                                  value: 'ultimos_7',
+                                  child: Text('Ultimos 7 dias'),
                                 ),
-                              ),
-                            ),
-                          ],
-                          onChanged: (v) =>
-                              setState(() => _clienteIdFiltro = v),
-                        ),
-                        DropdownButtonFormField<int?>(
-                          initialValue: _vendedorIdFiltro,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Vendedor',
-                            isDense: true,
-                          ),
-                          items: [
-                            const DropdownMenuItem<int?>(
-                              value: null,
-                              child: Text('Todos'),
-                            ),
-                            ...vendedores.map(
-                              (vd) => DropdownMenuItem<int?>(
-                                value: vd.id,
-                                child: Text(
-                                  vd.apelido.trim().isNotEmpty
-                                      ? vd.apelido
-                                      : vd.nomeCompleto,
-                                  overflow: TextOverflow.ellipsis,
+                                DropdownMenuItem(
+                                  value: 'ultimos_30',
+                                  child: Text('Ultimos 30 dias'),
                                 ),
+                                DropdownMenuItem(
+                                  value: 'mes_atual',
+                                  child: Text('Mes atual'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'mes_anterior',
+                                  child: Text('Mes anterior'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'ano_atual',
+                                  child: Text('Ano atual'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'todo',
+                                  child: Text('Todo o periodo'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'personalizado',
+                                  child: Text('Datas escolhidas'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                setState(() {
+                                  _periodoPreset = v;
+                                  if (v == 'personalizado' &&
+                                      (_dataPersonalizadaInicio == null ||
+                                          _dataPersonalizadaFim == null)) {
+                                    final n = DateTime.now();
+                                    _dataPersonalizadaInicio = DateTime(
+                                      n.year,
+                                      n.month,
+                                      n.day,
+                                    ).subtract(const Duration(days: 29));
+                                    _dataPersonalizadaFim = DateTime(
+                                      n.year,
+                                      n.month,
+                                      n.day,
+                                      23,
+                                      59,
+                                      59,
+                                      999,
+                                    );
+                                  }
+                                });
+                                _agendarPesquisa();
+                              },
+                            ),
+                            DropdownButtonFormField<String>(
+                              initialValue: _canceladaPorFiltro,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Cancelada por',
+                                isDense: true,
                               ),
+                              items: [
+                                const DropdownMenuItem(
+                                  value: 'todos',
+                                  child: Text('Todos'),
+                                ),
+                                ..._distintosCanceladaPor.map(
+                                  (u) => DropdownMenuItem(
+                                    value: u,
+                                    child: Text(
+                                      u,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(() => _canceladaPorFiltro = v);
+                                  _agendarPesquisa();
+                                }
+                              },
+                            ),
+                            DropdownButtonFormField<String>(
+                              initialValue: _formaPagamento,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Pagamento',
+                                isDense: true,
+                              ),
+                              items: [
+                                const DropdownMenuItem(
+                                  value: 'todos',
+                                  child: Text('Todos'),
+                                ),
+                                ...[
+                                  'dinheiro',
+                                  'pix',
+                                  'cartao_credito',
+                                  'cartao_debito',
+                                  'fiado',
+                                  'transferencia',
+                                  'misto',
+                                ].map(
+                                  (f) => DropdownMenuItem(
+                                    value: f,
+                                    child: Text(_rotuloFormaPagamento(f)),
+                                  ),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(() => _formaPagamento = v);
+                                  _agendarPesquisa();
+                                }
+                              },
+                            ),
+                            DropdownButtonFormField<String>(
+                              initialValue: _tipoEntrega,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Entrega',
+                                isDense: true,
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'todos',
+                                  child: Text('Todos'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'retirada',
+                                  child: Text('Leva Agora'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'retirada_futura',
+                                  child: Text('Retirada futura'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'entrega_loja',
+                                  child: Text('Carreto'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'misto',
+                                  child: Text('Venda mista'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(() => _tipoEntrega = v);
+                                  _agendarPesquisa();
+                                }
+                              },
+                            ),
+                            DropdownButtonFormField<String>(
+                              initialValue: _filtroFiscal,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Documento fiscal',
+                                isDense: true,
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'todos',
+                                  child: Text('Todos'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'sem_nfce_eletronico',
+                                  child: Text('Sem NFC-e (PIX/cartao)'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(() => _filtroFiscal = v);
+                                  _agendarPesquisa();
+                                }
+                              },
+                            ),
+                            DropdownButtonFormField<String>(
+                              initialValue: _entregaPendente,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Retirada futura',
+                                isDense: true,
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'todos',
+                                  child: Text('Todos'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'nao',
+                                  child: Text('Entregue (normal)'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'sim',
+                                  child: Text('Pendente'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(() => _entregaPendente = v);
+                                  _agendarPesquisa();
+                                }
+                              },
+                            ),
+                            DropdownButtonFormField<String>(
+                              initialValue: _filtroCancelamento,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Cancelamento',
+                                isDense: true,
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'ativas',
+                                  child: Text('Nao canceladas'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'canceladas',
+                                  child: Text('Somente canceladas'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'todas',
+                                  child: Text('Todas'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(() => _filtroCancelamento = v);
+                                  _agendarPesquisa();
+                                }
+                              },
                             ),
                           ],
-                          onChanged: (v) =>
-                              setState(() => _vendedorIdFiltro = v),
                         ),
-                        DropdownButtonFormField<String>(
-                          initialValue: _filtroCancelamento,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Cancelamento',
-                            isDense: true,
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'ativas',
-                              child: Text('Nao canceladas'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'canceladas',
-                              child: Text('Somente canceladas'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'todas',
-                              child: Text('Todas'),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) {
-                              setState(() => _filtroCancelamento = v);
-                            }
-                          },
-                        ),
-                      ],
-                    ),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -1649,7 +1955,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                           _totalListagemVendas == 0
                               ? 'Nenhuma venda encontrada com os filtros.'
                               : 'Exibindo ${_resultados.length} de $_totalListagemVendas · '
-                                  'lotes de $_tamPaginaListagem',
+                                    'lotes de $_tamPaginaListagem',
                           style: theme.textTheme.titleSmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
@@ -1713,7 +2019,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                       ],
                       if (_resultados.length < _totalListagemVendas)
                         FilledButton.tonal(
-                          onPressed: _carregarMaisVendas,
+                          onPressed: _carregandoListagem
+                              ? null
+                              : () => unawaited(_carregarMaisVendas()),
                           child: Text('Carregar mais $_tamPaginaListagem'),
                         ),
                     ],
@@ -1741,24 +2049,22 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                             ),
                           )
                         : usarTabela
-                            ? ListagemVendasTabela(
-                                itens: itensUiBrutos,
-                                onTapItem: (item) =>
-                                    _mostrarModalItensVenda(item.venda),
-                                onAcaoMenu: (acao, item) =>
-                                    _executarAcaoMenu(acao, item.venda),
-                                menuBuilder: (item) =>
-                                    _menuItensVenda(item.venda),
-                              )
-                            : ListagemVendasListaCards(
-                                itens: itensUi,
-                                onTapItem: (item) =>
-                                    _mostrarModalItensVenda(item.venda),
-                                onAcaoMenu: (acao, item) =>
-                                    _executarAcaoMenu(acao, item.venda),
-                                menuBuilder: (item) =>
-                                    _menuItensVenda(item.venda),
-                              ),
+                        ? ListagemVendasTabela(
+                            itens: itensUiBrutos,
+                            onTapItem: (item) =>
+                                _mostrarModalItensVenda(item.venda),
+                            onAcaoMenu: (acao, item) =>
+                                _executarAcaoMenu(acao, item.venda),
+                            menuBuilder: (item) => _menuItensVenda(item.venda),
+                          )
+                        : ListagemVendasListaCards(
+                            itens: itensUi,
+                            onTapItem: (item) =>
+                                _mostrarModalItensVenda(item.venda),
+                            onAcaoMenu: (acao, item) =>
+                                _executarAcaoMenu(acao, item.venda),
+                            menuBuilder: (item) => _menuItensVenda(item.venda),
+                          ),
                   ),
                 ],
               ),
@@ -1768,7 +2074,6 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       ),
     );
   }
-
 }
 
 class _DialogoFreteCarretoRetiradaFutura extends StatefulWidget {
@@ -1787,7 +2092,7 @@ class _DialogoFreteCarretoRetiradaFutura extends StatefulWidget {
   final Cliente cliente;
   final String enderecoInicial;
   final String observacaoInicial;
-  final VendaRepository vendaRepository;
+  final dynamic vendaRepository;
   final String Function(double) formatarMoeda;
   final double Function(String) parseValor;
   final VoidCallback onSucesso;
@@ -1877,20 +2182,38 @@ class _DialogoFreteCarretoRetiradaFuturaState
         formaPagamento: 'dinheiro',
         quantidadeParcelas: 1,
       );
-      final idFilho = widget.vendaRepository.registrarOrcamentoFreteRetiradaFutura(
-        vendaMaeId: widget.vendaMae.id,
-        valorFreteCobrado: vf,
-        pagamento: pagamento,
-        enderecoEntrega: _endereco.text.trim(),
-        observacaoEntrega: _obs.text.trim(),
-        prioridadeEntrega: _prioridade,
-        janelaEntrega: _janela,
-        dataEntregaMarcada: _dataEntrega!,
-        vendedorId: widget.vendaMae.vendedor.targetId == 0
-            ? null
-            : widget.vendaMae.vendedor.targetId,
-      );
-      await LanSyncScheduler.solicitarSyncPrioritario();
+      final repo = widget.vendaRepository;
+      final int idFilho;
+      if (repo is VendaApiRepository) {
+        idFilho = await repo.registrarOrcamentoFreteRetiradaFuturaRemoto(
+          vendaMaeId: widget.vendaMae.id,
+          valorFreteCobrado: vf,
+          pagamento: pagamento,
+          enderecoEntrega: _endereco.text.trim(),
+          observacaoEntrega: _obs.text.trim(),
+          prioridadeEntrega: _prioridade,
+          janelaEntrega: _janela,
+          dataEntregaMarcada: _dataEntrega!,
+          vendedorId: widget.vendaMae.vendedor.targetId == 0
+              ? null
+              : widget.vendaMae.vendedor.targetId,
+        );
+      } else {
+        idFilho = repo.registrarOrcamentoFreteRetiradaFutura(
+          vendaMaeId: widget.vendaMae.id,
+          valorFreteCobrado: vf,
+          pagamento: pagamento,
+          enderecoEntrega: _endereco.text.trim(),
+          observacaoEntrega: _obs.text.trim(),
+          prioridadeEntrega: _prioridade,
+          janelaEntrega: _janela,
+          dataEntregaMarcada: _dataEntrega!,
+          vendedorId: widget.vendaMae.vendedor.targetId == 0
+              ? null
+              : widget.vendaMae.vendedor.targetId,
+        );
+        await LanSyncScheduler.solicitarSyncPrioritario();
+      }
       if (!mounted) return;
       final filho = widget.vendaRepository.obterPorId(idFilho);
       final n = filho?.numeroOrcamento ?? 0;
@@ -1905,18 +2228,17 @@ class _DialogoFreteCarretoRetiradaFuturaState
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(LanApiFeedback.mensagem(e))));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final ref =
-        widget.vendaMae.numeroOrcamento > 0
-            ? '${widget.vendaMae.numeroOrcamento}'
-            : '${widget.vendaMae.id}';
+    final ref = widget.vendaMae.numeroOrcamento > 0
+        ? '${widget.vendaMae.numeroOrcamento}'
+        : '${widget.vendaMae.id}';
     return AlertDialog(
       title: Text('Frete carreto — ref. venda $ref'),
       content: SizedBox(
@@ -1967,7 +2289,10 @@ class _DialogoFreteCarretoRetiradaFuturaState
                     value: _prioridade,
                     items: const [
                       DropdownMenuItem(value: 'normal', child: Text('Normal')),
-                      DropdownMenuItem(value: 'urgente', child: Text('Urgente')),
+                      DropdownMenuItem(
+                        value: 'urgente',
+                        child: Text('Urgente'),
+                      ),
                       DropdownMenuItem(
                         value: 'agendada',
                         child: Text('Agendada'),
@@ -1989,25 +2314,16 @@ class _DialogoFreteCarretoRetiradaFuturaState
               if (_prioridade == 'agendada') ...[
                 const SizedBox(height: 8),
                 InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'Janela',
-                  ),
+                  decoration: const InputDecoration(labelText: 'Janela'),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       isExpanded: true,
                       value: _janela,
                       items: const [
-                        DropdownMenuItem(
-                          value: 'manha',
-                          child: Text('Manha'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'tarde',
-                          child: Text('Tarde'),
-                        ),
+                        DropdownMenuItem(value: 'manha', child: Text('Manha')),
+                        DropdownMenuItem(value: 'tarde', child: Text('Tarde')),
                       ],
-                      onChanged: (v) =>
-                          setState(() => _janela = v ?? 'manha'),
+                      onChanged: (v) => setState(() => _janela = v ?? 'manha'),
                     ),
                   ),
                 ),
@@ -2031,8 +2347,8 @@ class _DialogoFreteCarretoRetiradaFuturaState
                   _dataEntrega == null
                       ? 'Definir data da entrega'
                       : 'Data: ${_dataEntrega!.day.toString().padLeft(2, '0')}/'
-                          '${_dataEntrega!.month.toString().padLeft(2, '0')}/'
-                          '${_dataEntrega!.year}',
+                            '${_dataEntrega!.month.toString().padLeft(2, '0')}/'
+                            '${_dataEntrega!.year}',
                 ),
               ),
               const SizedBox(height: 8),
@@ -2076,15 +2392,17 @@ class _LinhaRetiradaCliente {
 class _DialogRegistrarRetiradaCliente extends StatefulWidget {
   const _DialogRegistrarRetiradaCliente({
     required this.venda,
+    required this.itens,
     required this.vendaRepository,
     required this.vendedorRepository,
     required this.usuarioRepository,
   });
 
   final Venda venda;
-  final VendaRepository vendaRepository;
-  final VendedorRepository vendedorRepository;
-  final UsuarioRepository usuarioRepository;
+  final List<ItemVenda> itens;
+  final dynamic vendaRepository;
+  final dynamic vendedorRepository;
+  final dynamic usuarioRepository;
 
   @override
   State<_DialogRegistrarRetiradaCliente> createState() =>
@@ -2099,9 +2417,12 @@ class _DialogRegistrarRetiradaClienteState
   List<_LinhaRetiradaCliente> get _linhasPendentes {
     final v = widget.venda;
     final carretoLoja =
-        EntregaVendaHelper.vendaPermiteRetiradaLojaCarretoAntesSaida(v);
+        EntregaVendaHelper.vendaPermiteRetiradaLojaCarretoAntesSaida(
+      v,
+      itens: widget.itens,
+    );
     final linhas = <_LinhaRetiradaCliente>[];
-    for (final it in v.itens) {
+    for (final it in widget.itens) {
       final qFut = it.quantidadePendenteRetirada;
       if (qFut > 0) {
         linhas.add(
@@ -2190,29 +2511,50 @@ class _DialogRegistrarRetiradaClienteState
     try {
       final quem = _quemRetirouController.text.trim();
       final retiradoPor = quem.isEmpty ? null : quem;
+      final api = widget.vendaRepository is VendaApiRepository
+          ? widget.vendaRepository as VendaApiRepository
+          : null;
       if (mapFutura.isNotEmpty) {
-        widget.vendaRepository.registrarRetiradaParcial(
-          widget.venda.id,
-          mapFutura,
-          usuario: operador,
-          retiradoPor: retiradoPor,
-        );
+        if (api != null) {
+          await api.registrarRetiradaParcialRemoto(
+            widget.venda.id,
+            mapFutura,
+            usuario: operador,
+            retiradoPor: retiradoPor,
+          );
+        } else {
+          widget.vendaRepository.registrarRetiradaParcial(
+            widget.venda.id,
+            mapFutura,
+            usuario: operador,
+            retiradoPor: retiradoPor,
+          );
+        }
       }
       if (mapCarretoLoja.isNotEmpty) {
-        widget.vendaRepository.registrarRetiradaParcialLojaCarretoAntesSaida(
-          widget.venda.id,
-          mapCarretoLoja,
-          usuario: operador,
-          retiradoPor: retiradoPor,
-        );
+        if (api != null) {
+          await api.registrarRetiradaParcialLojaCarretoAntesSaidaRemoto(
+            widget.venda.id,
+            mapCarretoLoja,
+            usuario: operador,
+            retiradoPor: retiradoPor,
+          );
+        } else {
+          widget.vendaRepository.registrarRetiradaParcialLojaCarretoAntesSaida(
+            widget.venda.id,
+            mapCarretoLoja,
+            usuario: operador,
+            retiradoPor: retiradoPor,
+          );
+        }
       }
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel registrar: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Nao foi possivel registrar: $e')));
     }
   }
 
@@ -2292,10 +2634,7 @@ class _DialogRegistrarRetiradaClienteState
           onPressed: _preencherTudo,
           child: const Text('Retirar tudo'),
         ),
-        FilledButton(
-          onPressed: _confirmar,
-          child: const Text('Confirmar'),
-        ),
+        FilledButton(onPressed: _confirmar, child: const Text('Confirmar')),
       ],
     );
   }

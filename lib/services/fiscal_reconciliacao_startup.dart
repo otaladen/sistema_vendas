@@ -2,10 +2,12 @@ import '../config/focus_nfe_runtime.dart';
 import '../data/nfe_saida_fiscal_store.dart';
 import '../data/nfe_saida_xml_store.dart';
 import '../data/objectbox.dart';
+import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
 import '../domain/fiscal/nfce_xml_local_service.dart';
 import '../domain/fiscal/nfe_cce_xml_local_service.dart';
 import '../domain/fiscal/nfe_xml_local_service.dart';
+import '../services/devolucao_fornecedor_fiscal_service.dart';
 import '../services/fiscal_config_store.dart';
 import '../services/focus_nfe_service.dart';
 import '../services/nfce_reconciliacao_service.dart';
@@ -39,6 +41,13 @@ abstract final class FiscalReconciliacaoStartup {
         focusNfe: focus,
         xmlLocal: xmlNfe,
       ).reconsultarProcessando();
+    } catch (_) {}
+
+    try {
+      await DevolucaoFornecedorFiscalService(
+        produtoRepository: ProdutoRepository(objectBox),
+        focusNfe: focus,
+      ).reconsultarPendentes();
     } catch (_) {}
 
     try {

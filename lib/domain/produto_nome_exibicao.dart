@@ -37,7 +37,12 @@ abstract final class ProdutoNomeExibicao {
 
   /// Linha da venda: usa produto vinculado; senao o snapshot [ItemVenda.nomeProduto].
   static String paraImpressaoItem(ItemVenda item) {
-    final p = item.produto.target;
+    Produto? p;
+    try {
+      p = item.produto.target;
+    } catch (_) {
+      p = null;
+    }
     if (p != null) return paraImpressao(p);
     final snap = item.nomeProduto.trim();
     return snap.isEmpty ? 'Produto' : snap;

@@ -10,21 +10,26 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import '../../main.dart';
+import '../../data/api/lan_api_client.dart';
+import '../../data/api/lan_api_event_hub.dart';
+import '../../data/api/caixa_sessao_api.dart';
+import '../../data/api/cliente_api_repository.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../data/app_config_repository.dart';
+import '../../data/objectbox.dart';
 import '../../data/caixa_sessao_repository.dart';
-import '../../data/cliente_repository.dart';
-import '../../data/mensageria_repository.dart';
-import '../../data/produto_repository.dart';
-import '../../data/usuario_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/sync/sync_refresh_hub.dart';
+import '../../data/sync/caixa_local_refresh_hub.dart';
+import '../../data/sync/caixa_status_hub.dart';
 import '../../data/venda_repository.dart';
-import '../../data/vendedor_repository.dart';
+import '../../model/recebimento_fiado.dart';
+import '../shell/main_menu_deps.dart';
+import '../shell/app_shell_aba_visibilidade.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/entrega_venda_helper.dart';
+import '../../domain/venda_relacao_safe.dart';
 import '../../domain/promocao_cadastro.dart';
 import '../../domain/promocao_preco_result.dart';
 import '../../domain/promocao_preco_service.dart';
@@ -63,8 +68,11 @@ import '../../services/gaveta_esc_pos_service.dart';
 import '../../services/print_service.dart';
 import '../clientes_page.dart';
 import '../cupom_venda_impressao_helper.dart';
+import '../../services/esc_pos_cupom_builder.dart';
 import '../segunda_via_cupom_autorizacao.dart';
 import '../widgets/conta_sessao_app_bar_actions.dart';
+import '../widgets/lan_api_feedback.dart';
+import '../widgets/pdv_tipo_entrega_item.dart';
 import '../widgets/receber_fiado_panel.dart';
 import '../../services/recibo_movimento_caixa_pdf.dart';
 import '../../services/recibo_recebimento_fiado_pdf.dart';
@@ -72,7 +80,6 @@ import '../fiscal/emitir_nfce_venda_flow.dart';
 import '../fiscal/nfe_gerenciamento_page.dart';
 import '../fiscal/pendencias_fiscais_page.dart';
 import '../pdv_consulta_produtos_page.dart';
-import '../pdv_pesquisa_comando.dart';
 import '../pdv_desconto_autorizacao.dart';
 import '../promocao_margem_autorizacao.dart';
 import '../../model/usuario_sistema.dart';
@@ -106,10 +113,10 @@ class CaixaPage extends StatefulWidget {
     required this.onLogout,
   });
 
-  final ClienteRepository clienteRepository;
-  final ProdutoRepository produtoRepository;
-  final VendaRepository vendaRepository;
-  final VendedorRepository vendedorRepository;
+  final dynamic clienteRepository;
+  final dynamic produtoRepository;
+  final dynamic vendaRepository;
+  final dynamic vendedorRepository;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
   final UsuarioSistema usuarioLogado;
@@ -127,10 +134,8 @@ class CaixaPage extends StatefulWidget {
 class _CaixaPageState extends State<CaixaPage> {
   static const String _kCaixaAuditoriaKey = 'caixa_auditoria_eventos_v1';
 
-  late final KitOrcamentoRepository _kitOrcamentoRepo =
-      KitOrcamentoRepository(widget.produtoRepository.objectBox);
-  late final ProdutoSugestaoVendaRepository _sugestaoVendaRepo =
-      ProdutoSugestaoVendaRepository(widget.produtoRepository.objectBox);
+  dynamic _kitOrcamentoRepo;
+  ProdutoSugestaoVendaRepository? _sugestaoVendaRepo;
 
   static String _prefsUltimoTrocoValor(String terminalId) =>
       'caixa_${terminalId}_ultimo_troco_valor_v1';
@@ -152,9 +157,8 @@ class _CaixaPageState extends State<CaixaPage> {
   final _valorRecebidoController = TextEditingController();
   final _valorRecebidoFocusNode = FocusNode();
   final ScrollController _itensScrollController = ScrollController();
-  late final MensageriaRepository _mensageriaRepository;
   VoidCallback? _syncHubListener;
-  final _usuarioRepository = UsuarioRepository();
+  late dynamic _usuarioRepository;
   PromocaoPrecoService? _promoPrecoCache;
   final _pesquisaProdutoConferenciaController = TextEditingController();
   final _pesquisaProdutoConferenciaFocus = FocusNode();
@@ -163,6 +167,8 @@ class _CaixaPageState extends State<CaixaPage> {
   GavetaEscPosService? _gavetaService;
   double? _valorRecebido;
   bool _posVendaProcessando = false;
+  /// Trava anti-duplicacao na finalizacao (clique duplo / Enter repetido).
+  bool _finalizandoVenda = false;
   CaixaPosVendaSessao? _posVenda;
   int _nfcePendenteEmissaoQtd = 0;
   double _nfcePendenteEmissaoTotal = 0;
@@ -185,6 +191,13 @@ class _CaixaPageState extends State<CaixaPage> {
   String _terminalId = '';
   Map<String, CaixaSessao> _sessoesRede = const {};
   bool _pesquisaOrcamentoDialogAberta = false;
+  /// Terminal leve: aderiu a sessao aberta em outro PC (um caixa por loja).
+  bool _caixaAderidoRemoto = false;
+  String _terminalSessaoAbertaId = '';
+  /// Evita loop: load → hub → load (travava ao abrir a aba Caixa).
+  bool _recarregandoSessaoCaixa = false;
+  bool _umCaixaPorLojaRemoto = true;
+  CaixaSessaoApi? _caixaApi;
   bool _documentoFiscalAutomaticoDisparado = false;
   bool _gestaoCaixaExpandida = false;
   bool _painelCobrancaAberto = false;
@@ -192,9 +205,11 @@ class _CaixaPageState extends State<CaixaPage> {
   int _ultimoTrocoNumeroOrcamento = 0;
   double _ultimoTrocoValor = 0;
   late final FocusNfeService _focusNfeService;
-  late final NfceReconciliacaoService _nfceReconciliacao;
+  NfceReconciliacaoService? _nfceReconciliacao;
   Timer? _timerReconciliacaoNfce;
   Timer? _debounceSyncOrcamentos;
+  bool _abaCaixaVisivel = true;
+  bool? _apiOnlineCaixa;
   UltimasVendasFinalizadasOrdenacao _ordenacaoUltimasVendas =
       UltimasVendasFinalizadasOrdenacao.padrao;
   bool _correcaoFinalizadaEmDisparada = false;
@@ -203,25 +218,100 @@ class _CaixaPageState extends State<CaixaPage> {
   final _importarOrcamentoController = TextEditingController();
   final _importarOrcamentoFocus = FocusNode(debugLabel: 'caixaImportarOrcamento');
 
-  PromocaoPrecoService get _promoPreco => _promoPrecoCache ??= PromocaoPrecoService(
-        PromocaoRepository(widget.produtoRepository.objectBox),
-      );
+  PromocaoPrecoService? get _promoPreco {
+    try {
+      final deps = MainMenuDeps.maybeOf(context);
+      final promoApi = deps?.promocaoRepository;
+      if (promoApi != null) {
+        return _promoPrecoCache ??= PromocaoPrecoService(promoApi);
+      }
+      final ob = widget.produtoRepository.objectBox;
+      if (ob is! ObjectBox) return null;
+      return _promoPrecoCache ??= PromocaoPrecoService(PromocaoRepository(ob));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Itens sem ToMany ObjectBox (terminal leve).
+  List<ItemVenda> _itensVenda(Venda v) {
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      return repo.itensDaVendaSafe(v);
+    }
+    try {
+      final via = repo.listarItensPorVenda(v.id);
+      if (via is List<ItemVenda> && via.isNotEmpty) return via;
+      if (via is List) {
+        final tipados = via.whereType<ItemVenda>().toList();
+        if (tipados.isNotEmpty) return tipados;
+      }
+    } catch (_) {}
+    try {
+      return List<ItemVenda>.from(v.itens);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  double _subtotalLinhaItem(ItemVenda item) {
+    final qtd = ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+      produto: _produtoDoItem(item),
+      quantidadeArmazenada: item.quantidade,
+    );
+    return qtd * item.precoUnitario;
+  }
+
+  Produto? _produtoDoItem(ItemVenda item) {
+    try {
+      final ligado = item.produto.target;
+      if (ligado != null) return ligado;
+    } catch (_) {}
+    final id = item.produto.targetId;
+    if (id <= 0) return null;
+    try {
+      return widget.produtoRepository.obterPorId(id) as Produto?;
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    try {
+      final deps = MainMenuDeps.maybeOf(context);
+      if (deps?.kitOrcamentoRepository != null) {
+        _kitOrcamentoRepo = deps!.kitOrcamentoRepository;
+      } else {
+        final ob = widget.produtoRepository.objectBox;
+        if (ob is ObjectBox) {
+          _kitOrcamentoRepo = KitOrcamentoRepository(ob);
+          _sugestaoVendaRepo = ProdutoSugestaoVendaRepository(ob);
+        }
+      }
+      if (_sugestaoVendaRepo == null) {
+        try {
+          final ob = widget.produtoRepository.objectBox;
+          if (ob is ObjectBox) {
+            _sugestaoVendaRepo = ProdutoSugestaoVendaRepository(ob);
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    _usuarioRepository = MainMenuDeps.resolverUsuarioRepository(context);
     _focusNfeService = FocusNfeService(config: criarFocusNfeConfigPadrao());
-    _nfceReconciliacao = NfceReconciliacaoService(
-      vendaRepository: widget.vendaRepository,
-      focusNfe: _focusNfeService,
-    );
-    _mensageriaRepository = MensageriaRepository();
+    if (widget.vendaRepository is VendaRepository) {
+      _nfceReconciliacao = NfceReconciliacaoService(
+        vendaRepository: widget.vendaRepository as VendaRepository,
+        focusNfe: _focusNfeService,
+      );
+    }
     _carregarLimiteDivergenciaCaixa();
     _carregarSessaoCaixa();
     _carregarOrcamentos();
     _syncHubListener = () {
       if (!mounted) return;
-      // Debounce: sync em rede dispara muitos eventos; evita rebuild em cascata.
       _debounceSyncOrcamentos?.cancel();
       _debounceSyncOrcamentos = Timer(const Duration(milliseconds: 160), () {
         if (!mounted) return;
@@ -229,10 +319,17 @@ class _CaixaPageState extends State<CaixaPage> {
       });
     };
     SyncRefreshHub.instance.addListener(_syncHubListener!);
+    LanApiEventHub.instance.addListener(_onApiEntityChanged);
+    CaixaLocalRefreshHub.instance.addListener(_onCaixaLocalRefresh);
     unawaited(_carregarOrdenacaoUltimasVendas());
-    unawaited(_reconciliarNfcePendentes(mostrarFeedback: false));
-    _atualizarResumoNfcePendenteEmissao();
-    _iniciarPollReconciliacaoNfce();
+    if (widget.vendaRepository is VendaRepository) {
+      unawaited(_reconciliarNfcePendentes(mostrarFeedback: false));
+      _atualizarResumoNfcePendenteEmissao();
+      _iniciarPollReconciliacaoNfce();
+    } else if (widget.vendaRepository is VendaApiRepository) {
+      unawaited(_hidratarPendenciasFiscaisTerminal());
+      unawaited(_hidratarUltimasVendasTerminal());
+    }
     HardwareKeyboard.instance.addHandler(_handlerTeclasHardwareCaixa);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -240,15 +337,97 @@ class _CaixaPageState extends State<CaixaPage> {
     });
   }
 
+  void _onApiEntityChanged() {
+    if (!mounted) return;
+    final online = LanApiEventHub.instance.online;
+    if (_apiOnlineCaixa != online) {
+      _apiOnlineCaixa = online;
+      setState(() {});
+    }
+    if (LanApiEventHub.instance.deveBloquearOperacoes) return;
+    final ent = LanApiEventHub.instance.ultimaEntidade;
+    if (ent == 'caixa_sessoes' || ent == 'caixa') {
+      unawaited(_carregarSessaoCaixa());
+      return;
+    }
+    if (ent != 'venda' && ent != 'nfe_saida' && ent != 'empresa_config') return;
+    _debounceSyncOrcamentos?.cancel();
+    _debounceSyncOrcamentos = Timer(const Duration(milliseconds: 120), () {
+      if (!mounted) return;
+      unawaited(_atualizarOrcamentosViaApi());
+      if (ent == 'venda' || ent == 'nfe_saida') {
+        unawaited(_hidratarPendenciasFiscaisTerminal());
+        unawaited(_hidratarUltimasVendasTerminal());
+      }
+    });
+  }
+
+  void _onCaixaLocalRefresh() {
+    if (!mounted || _recarregandoSessaoCaixa) return;
+    unawaited(_carregarSessaoCaixa());
+  }
+
+  Future<void> _atualizarOrcamentosViaApi() async {
+    if (LanApiEventHub.instance.deveBloquearOperacoes) return;
+    final api = widget.vendaRepository;
+    if (api is! VendaApiRepository) return;
+    try {
+      await api.hidratarOrcamentos(limit: _caixaLimiteOrcamentosPendentes);
+    } on LanApiException {
+      return;
+    }
+    if (!mounted) return;
+    _carregarOrcamentos();
+  }
+
   void _iniciarPollReconciliacaoNfce() {
+    if (!_abaCaixaVisivel) return;
     _timerReconciliacaoNfce?.cancel();
     _timerReconciliacaoNfce = Timer.periodic(
-      const Duration(seconds: 45),
+      const Duration(seconds: 90),
       (_) {
-        if (!mounted) return;
+        if (!mounted || !AppShellAbaVisibilidade.leituraSemDependencia(context)) {
+          return;
+        }
         unawaited(_reconciliarNfcePendentes(mostrarFeedback: true));
       },
     );
+  }
+
+  void _pararPollReconciliacaoNfce() {
+    _timerReconciliacaoNfce?.cancel();
+    _timerReconciliacaoNfce = null;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final deps = MainMenuDeps.maybeOf(context);
+    _usuarioRepository = MainMenuDeps.resolverUsuarioRepository(context);
+    final terminal = deps?.terminalLeve == true ||
+        widget.vendaRepository is VendaApiRepository;
+    final client = deps?.lanApiClient;
+    final apiNova = (terminal && client != null && client.configurado)
+        ? CaixaSessaoApi(client)
+        : null;
+    // initState carrega sessao antes da API existir — recarrega ao conectar.
+    final apiMudou = (_caixaApi == null) != (apiNova == null);
+    _caixaApi = apiNova;
+    if (apiMudou && apiNova != null) {
+      unawaited(_carregarSessaoCaixa());
+      unawaited(_hidratarUltimasVendasTerminal());
+    }
+
+    final visivel = AppShellAbaVisibilidade.estaAtiva(context);
+    if (visivel == _abaCaixaVisivel) return;
+    _abaCaixaVisivel = visivel;
+    if (visivel) {
+      unawaited(_carregarSessaoCaixa());
+      unawaited(_hidratarUltimasVendasTerminal());
+      _iniciarPollReconciliacaoNfce();
+    } else {
+      _pararPollReconciliacaoNfce();
+    }
   }
 
   Future<void> _reconciliarNfcePendentes({required bool mostrarFeedback}) async {
@@ -257,9 +436,11 @@ class _CaixaPageState extends State<CaixaPage> {
     } catch (_) {
       return;
     }
-    final lote = await _nfceReconciliacao.reconsultarTodasPendentes();
+    final lote = await _nfceReconciliacao?.reconsultarTodasPendentes();
     if (mounted) _atualizarResumoNfcePendenteEmissao();
-    if (!mounted || !mostrarFeedback || lote.autorizadas <= 0) return;
+    if (!mounted || !mostrarFeedback || lote == null || lote.autorizadas <= 0) {
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -278,6 +459,49 @@ class _CaixaPageState extends State<CaixaPage> {
       _nfcePendenteEmissaoQtd = lista.length;
       _nfcePendenteEmissaoTotal = VendaNfceObrigatoriaHelper.somaTotal(lista);
     });
+  }
+
+  Future<void> _hidratarUltimasVendasTerminal() async {
+    final repo = widget.vendaRepository;
+    if (repo is! VendaApiRepository) return;
+    try {
+      await repo.hidratarVendasFinalizadas(limit: 40);
+    } catch (e) {
+      debugPrint('Caixa: hidratar vendas finalizadas: $e');
+    }
+    if (!mounted) return;
+    _atualizarListaUltimasVendasFinalizadasCaixa();
+  }
+
+  Future<void> _hidratarPendenciasFiscaisTerminal() async {
+    final repo = widget.vendaRepository;
+    if (repo is! VendaApiRepository) return;
+    try {
+      await repo.hidratarPendenciasFiscais();
+    } catch (e) {
+      debugPrint('Caixa: pendencias fiscais terminal: $e');
+    }
+    if (!mounted) return;
+    _atualizarResumoNfcePendenteEmissao();
+    _atualizarListaUltimasVendasFinalizadasCaixa();
+  }
+
+  /// Apos cancelar/emitir NFC-e: atualiza lista, banner e cache local.
+  Future<void> _aposMutacaoFiscalOuCancelamentoCaixa({int? vendaId}) async {
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      if (vendaId != null && vendaId > 0) {
+        try {
+          await repo.atualizarVendaFinalizadaNoCache(vendaId);
+        } catch (_) {}
+      }
+      try {
+        await repo.hidratarPendenciasFiscais();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    _atualizarResumoNfcePendenteEmissao();
+    _atualizarListaUltimasVendasFinalizadasCaixa();
   }
 
   Future<void> _abrirPendenciasFiscaisCaixa() async {
@@ -575,15 +799,14 @@ class _CaixaPageState extends State<CaixaPage> {
 
   List<LinhaCalculoLimiteDescontoPdv> _linhasLimiteDescontoCaixa(Venda v) {
     final out = <LinhaCalculoLimiteDescontoPdv>[];
-    for (final item in v.itens) {
-      final produto = item.produto.target ??
-          widget.produtoRepository.obterPorId(item.produto.targetId);
+    for (final item in _itensVenda(v)) {
+      final produto = _produtoDoItem(item);
       if (produto == null) continue;
       out.add(
         LinhaCalculoLimiteDescontoPdv(
           produto: produto,
           precoTipo: item.precoTipo,
-          subtotal: item.subtotal,
+          subtotal: _subtotalLinhaItem(item),
           promocaoId: item.promocaoId,
         ),
       );
@@ -656,10 +879,11 @@ class _CaixaPageState extends State<CaixaPage> {
     if (pedido == null || !mounted) return;
 
     var valor = pedido.valorReais;
+    AutorizacaoDescontoResultado? authDesconto;
     if (valor > maxAdicional + 0.009) {
       final usuario = await _usuarioLogadoCaixa();
       if (!mounted) return;
-      final autorizado = await solicitarAutorizacaoDescontoAcimaTetoPdv(
+      authDesconto = await solicitarAutorizacaoDescontoAcimaTetoPdv(
         context,
         _usuarioRepository,
         usuarioLogado: usuario,
@@ -667,14 +891,25 @@ class _CaixaPageState extends State<CaixaPage> {
         descontoSolicitadoReais: valor,
         formatarMoeda: _formatarMoeda,
       );
-      if (autorizado == null || !mounted) return;
+      if (authDesconto == null || !mounted) return;
     }
 
     valor = valor.clamp(0, v.total).toDouble();
     if (valor <= 0.009) return;
 
     try {
-      widget.vendaRepository.aplicarDescontoNoOrcamento(v.id, valor);
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .aplicarDescontoNoOrcamentoRemoto(
+          v.id,
+          valor,
+          gerenteLogin: authDesconto?.login,
+          gerenteSenha: authDesconto?.senha,
+          exigeGerente: authDesconto != null,
+        );
+      } else {
+        widget.vendaRepository.aplicarDescontoNoOrcamento(v.id, valor);
+      }
       await _registrarAuditoriaCaixa(
         'desconto_caixa',
         detalhes: {
@@ -700,7 +935,10 @@ class _CaixaPageState extends State<CaixaPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      CaixaFeedback.erro(context, 'Nao foi possivel aplicar desconto: $e');
+      CaixaFeedback.erro(
+        context,
+        'Nao foi possivel aplicar desconto: ${LanApiFeedback.mensagem(e)}',
+      );
     }
   }
 
@@ -723,24 +961,86 @@ class _CaixaPageState extends State<CaixaPage> {
     _atualizarResumoNfcePendenteEmissao();
   }
 
-  void _selecionarOrcamentoParaConferencia(Venda venda) {
+  Future<void> _selecionarOrcamentoParaConferencia(Venda venda) async {
     _garantirBaseDescontoPdv(venda);
+    var alvo = venda;
+    // Aguarda itens da API antes de montar a conferencia (ToMany nao funciona detached).
+    if (widget.vendaRepository is VendaApiRepository) {
+      await _garantirItensOrcamentoApi(alvo.id);
+      if (!mounted) return;
+      alvo = widget.vendaRepository.obterPorId(alvo.id) ?? alvo;
+    }
     setState(() {
-      _selecionado = venda;
+      _selecionado = alvo;
       _painelCobrancaAberto = false;
       _etapaCaixa = CaixaEtapa.conferencia;
-      _prepararEdicaoMisto(venda);
+      _prepararEdicaoMisto(alvo);
       _sincronizarRecebidoPdVComOrcamento();
     });
   }
 
+  Future<void> _garantirItensOrcamentoApi(int vendaId) async {
+    final repo = widget.vendaRepository;
+    if (repo is! VendaApiRepository) return;
+    try {
+      final locais = repo.listarItensPorVenda(vendaId);
+      if (locais.isNotEmpty) return;
+      await repo.carregarItensRemoto(vendaId);
+      if (!mounted) return;
+      final atualizado = repo.obterPorId(vendaId);
+      if (atualizado == null) return;
+      if (_selecionado?.id == vendaId) {
+        setState(() {
+          _selecionado = atualizado;
+          _prepararEdicaoMisto(atualizado);
+          _sincronizarRecebidoPdVComOrcamento();
+        });
+      }
+    } catch (_) {}
+  }
+
   Future<void> _importarOrcamentoPorNumero(int numero) async {
+    if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
+    // Garante status fresco (evita F1 bloqueado com sessao ativa na rede).
+    await _carregarSessaoCaixa();
+    if (!mounted) return;
     if (!_caixaAberto) {
-      CaixaFeedback.erro(context, 'Abra o caixa antes de importar orcamentos.');
-      return;
+      final abrir = await _perguntarAbrirCaixaParaContinuar();
+      if (abrir != true) {
+        if (mounted) {
+          CaixaFeedback.erro(
+            context,
+            'Caixa fechado. Abra o caixa para importar orcamentos.',
+          );
+        }
+        return;
+      }
+      await _abrirCaixa();
+      if (!_caixaAberto || !mounted) {
+        if (mounted) {
+          CaixaFeedback.erro(
+            context,
+            'Nao foi possivel abrir o caixa. Verifique a sessao na rede.',
+          );
+        }
+        return;
+      }
     }
-    final venda =
+    Venda? venda =
         widget.vendaRepository.buscarOrcamentoPendentePorNumero(numero);
+    if (venda == null && widget.vendaRepository is VendaApiRepository) {
+      try {
+        venda = await (widget.vendaRepository as VendaApiRepository)
+            .buscarOrcamentoPendentePorNumeroRemoto(numero);
+      } catch (e) {
+        if (!mounted) return;
+        CaixaFeedback.erro(
+          context,
+          'Falha ao buscar orcamento: ${LanApiFeedback.mensagem(e)}',
+        );
+        return;
+      }
+    }
     if (venda == null) {
       if (!mounted) return;
       CaixaFeedback.erro(
@@ -752,7 +1052,7 @@ class _CaixaPageState extends State<CaixaPage> {
     _importarOrcamentoController.clear();
     final completo =
         widget.vendaRepository.obterPorId(venda.id) ?? venda;
-    _selecionarOrcamentoParaConferencia(completo);
+    unawaited(_selecionarOrcamentoParaConferencia(completo));
   }
 
   void _voltarParaFila() {
@@ -822,7 +1122,7 @@ class _CaixaPageState extends State<CaixaPage> {
 
   void _acaoPrincipalConferencia() {
     final v = _selecionado;
-    if (v == null) return;
+    if (v == null || _finalizandoVenda) return;
     if (_painelCobrancaAberto) {
       unawaited(_finalizarOrcamento(v));
       return;
@@ -1001,36 +1301,98 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _abrirPesquisaOrcamento() async {
+    // Trava imediatamente: F1 dispara no handler global e no Shortcuts, e o
+    // Windows ainda repete a tecla enquanto a sessao/API carrega. Sem isso
+    // abrem dois dialogos empilhados — o de baixo fica na tela apos a escolha.
     if (_pesquisaOrcamentoDialogAberta) return;
-    // Puxa da rede antes de abrir — orcamento do celular precisa estar no PC.
-    await LanSyncScheduler.solicitarSyncCompleto();
-    if (!mounted) return;
-    _carregarOrcamentos();
     _pesquisaOrcamentoDialogAberta = true;
     Venda? selecionado;
     try {
-      selecionado = await showDialog<Venda>(
-        context: context,
-        barrierDismissible: true,
-        builder: (dialogContext) => _DialogoPesquisaOrcamento(
-          orcamentos: List<Venda>.from(_orcamentos),
-          clienteDaVenda: _clienteDaVenda,
-          rotuloVendedor: _rotuloVendedorUmLinha,
-          formatarMoeda: _formatarMoeda,
-          buscarPorNumero: (n) =>
-              widget.vendaRepository.buscarOrcamentoPendentePorNumero(n),
-          recarregarLista: () => widget.vendaRepository.listarOrcamentosPendentes(
-            limit: _caixaLimiteOrcamentosPendentes,
-          ),
-        ),
-      );
+      selecionado = await _abrirPesquisaOrcamentoInterno();
     } finally {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _pesquisaOrcamentoDialogAberta = false;
       });
     }
     if (selecionado == null || !mounted) return;
-    _selecionarOrcamentoParaConferencia(selecionado);
+    unawaited(_selecionarOrcamentoParaConferencia(selecionado));
+  }
+
+  Future<Venda?> _abrirPesquisaOrcamentoInterno() async {
+    await _carregarSessaoCaixa();
+    if (!mounted) return null;
+    if (!_caixaAberto) {
+      final abrir = await _perguntarAbrirCaixaParaContinuar();
+      if (abrir != true) {
+        if (mounted) {
+          CaixaFeedback.erro(
+            context,
+            'Caixa fechado. Abra o caixa para importar orcamentos.',
+          );
+        }
+        return null;
+      }
+      await _abrirCaixa();
+      if (!_caixaAberto || !mounted) {
+        if (mounted) {
+          CaixaFeedback.erro(
+            context,
+            'Nao foi possivel abrir o caixa. Verifique a sessao na rede.',
+          );
+        }
+        return null;
+      }
+    }
+    // Terminal: rehidrata orcamentos via API. Celular: pull do hub.
+    if (widget.vendaRepository is VendaApiRepository) {
+      try {
+        await (widget.vendaRepository as VendaApiRepository).hidratarOrcamentos(
+          limit: _caixaLimiteOrcamentosPendentes,
+        );
+      } catch (e) {
+        if (!mounted) return null;
+        CaixaFeedback.erro(
+          context,
+          'Falha ao carregar orcamentos: ${LanApiFeedback.mensagem(e)}',
+        );
+      }
+    } else {
+      await LanSyncScheduler.solicitarSyncCompleto();
+    }
+    if (!mounted) return null;
+    _carregarOrcamentos();
+    return showDialog<Venda>(
+      context: context,
+      useRootNavigator: true,
+      barrierDismissible: true,
+      builder: (dialogContext) => _DialogoPesquisaOrcamento(
+        orcamentos: List<Venda>.from(_orcamentos),
+        clienteDaVenda: _clienteDaVenda,
+        rotuloVendedor: _rotuloVendedorUmLinha,
+        formatarMoeda: _formatarMoeda,
+        qtdItens: (orc) {
+          try {
+            final n = widget.vendaRepository.listarItensPorVenda(orc.id);
+            if (n is List && n.isNotEmpty) return n.length;
+          } catch (_) {}
+          try {
+            return orc.itens.length;
+          } catch (_) {
+            return 0;
+          }
+        },
+        buscarPorNumero: (n) =>
+            widget.vendaRepository.buscarOrcamentoPendentePorNumero(n),
+        buscarPorNumeroRemoto:
+            widget.vendaRepository is VendaApiRepository
+            ? (n) => (widget.vendaRepository as VendaApiRepository)
+                .buscarOrcamentoPendentePorNumeroRemoto(n)
+            : null,
+        recarregarLista: () => widget.vendaRepository.listarOrcamentosPendentes(
+          limit: _caixaLimiteOrcamentosPendentes,
+        ),
+      ),
+    );
   }
 
   /// No misto, foca o primeiro valor do painel de conferencia; em dinheiro puro, foca o campo de especie.
@@ -1066,19 +1428,203 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _carregarSessaoCaixa() async {
+    if (_recarregandoSessaoCaixa) return;
+    _recarregandoSessaoCaixa = true;
+    try {
+      await _carregarSessaoCaixaInterno();
+    } finally {
+      _recarregandoSessaoCaixa = false;
+    }
+  }
+
+  Future<void> _carregarSessaoCaixaInterno() async {
     _terminalId = await _sessaoRepo.obterTerminalId();
+    final api = _caixaApi;
+    if (api != null) {
+      try {
+        // Preferencia: sessao-ativa (libera operacao multi vs um-caixa).
+        final snap = await api.sessaoAtiva(terminalId: _terminalId);
+        if (!mounted) return;
+        _aplicarSnapshotCaixaRemoto(snap);
+        await _carregarUltimoTrocoRegistrado();
+        return;
+      } catch (e) {
+        debugPrint('Caixa sessao-ativa API: $e');
+        try {
+          final snap = await api.listar();
+          if (!mounted) return;
+          _aplicarSnapshotCaixaRemoto(snap);
+          await _carregarUltimoTrocoRegistrado();
+          return;
+        } catch (e2) {
+          debugPrint('Caixa sessao listar API: $e2');
+        }
+      }
+    }
     await _recarregarSessaoRede();
     final s = await _sessaoRepo.carregarSessaoLocal();
     if (!mounted) return;
-    setState(() {
-      _caixaAberto = s.aberto;
-      _operadorCaixa = s.operador;
-      _aberturaCaixaEm = s.aberturaEm;
-      _fundoTrocoAbertura = s.fundoTroco;
-      _totalSuprimentos = s.suprimentos;
-      _totalSangrias = s.sangrias;
-    });
+    // PC1 com um-caixa: se outro terminal abriu via API, SharedPreferences
+    // local ja foi atualizado — aderir a qualquer sessao aberta na loja.
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final todas = await _sessaoRepo.listarTodasSessoes();
+    CaixaSessao? abertaLoja;
+    for (final x in todas.values) {
+      if (x.aberto) {
+        abertaLoja = x;
+        break;
+      }
+    }
+    if (!mounted) return;
+    if (config.umCaixaAbertoPorLoja &&
+        abertaLoja != null &&
+        abertaLoja.terminalId != _terminalId) {
+      setState(() {
+        _sessoesRede = todas;
+        _umCaixaPorLojaRemoto = true;
+        _caixaAberto = true;
+        _caixaAderidoRemoto = true;
+        _terminalSessaoAbertaId = abertaLoja!.terminalId;
+        _operadorCaixa = abertaLoja.operador;
+        _aberturaCaixaEm = abertaLoja.aberturaEm;
+        _fundoTrocoAbertura = abertaLoja.fundoTroco;
+        _totalSuprimentos = abertaLoja.suprimentos;
+        _totalSangrias = abertaLoja.sangrias;
+      });
+    } else {
+      setState(() {
+        _sessoesRede = todas;
+        _umCaixaPorLojaRemoto = config.umCaixaAbertoPorLoja;
+        _caixaAberto = s.aberto;
+        _caixaAderidoRemoto = false;
+        _terminalSessaoAbertaId = s.aberto ? s.terminalId : '';
+        _operadorCaixa = s.operador;
+        _aberturaCaixaEm = s.aberturaEm;
+        _fundoTrocoAbertura = s.fundoTroco;
+        _totalSuprimentos = s.suprimentos;
+        _totalSangrias = s.sangrias;
+      });
+    }
+    // So atualiza KPI — nao notificar CaixaLocalRefreshHub (loop infinito).
+    CaixaStatusHub.instance.publicarDasSessoes(todas);
     await _carregarUltimoTrocoRegistrado();
+  }
+
+  void _aplicarSnapshotCaixaRemoto(CaixaSessoesSnapshot snap) {
+    CaixaSessao? aberta = snap.aberta;
+    if (aberta == null || !aberta.aberto) {
+      for (final s in snap.terminais.values) {
+        if (s.aberto) {
+          aberta = s;
+          break;
+        }
+      }
+    }
+    final meu = _terminalId.isNotEmpty &&
+        aberta != null &&
+        aberta.aberto &&
+        aberta.terminalId == _terminalId;
+    final aderirUmCaixa = aberta != null &&
+        aberta.aberto &&
+        snap.umCaixaAbertoPorLoja;
+    // sessao-ativa ja calcula operacaoLiberada; listar cai no meu/aderir.
+    final liberar = snap.operacaoLiberada || meu || aderirUmCaixa;
+    setState(() {
+      _sessoesRede = snap.terminais;
+      _umCaixaPorLojaRemoto = snap.umCaixaAbertoPorLoja;
+      if (liberar && aberta != null) {
+        _caixaAberto = true;
+        _caixaAderidoRemoto = !meu;
+        _terminalSessaoAbertaId = aberta.terminalId;
+        _operadorCaixa = aberta.operador;
+        _aberturaCaixaEm = aberta.aberturaEm;
+        _fundoTrocoAbertura = aberta.fundoTroco;
+        _totalSuprimentos = aberta.suprimentos;
+        _totalSangrias = aberta.sangrias;
+      } else {
+        _caixaAberto = false;
+        _caixaAderidoRemoto = false;
+        _terminalSessaoAbertaId = '';
+        _operadorCaixa = '';
+        _aberturaCaixaEm = null;
+        _fundoTrocoAbertura = 0;
+        _totalSuprimentos = 0;
+        _totalSangrias = 0;
+      }
+    });
+    // KPI do Inicio: status da loja (qualquer sessao), nao so operacao local.
+    final lojaAberta = snap.abertosCount > 0 ||
+        (snap.aberta?.aberto == true) ||
+        snap.terminais.values.any((s) => s.aberto);
+    CaixaStatusHub.instance.publicar(
+      aberto: lojaAberta,
+      operador: aberta?.operador ?? '',
+      terminalId: aberta?.terminalId ?? '',
+    );
+    // Nao chamar CaixaLocalRefreshHub aqui: este metodo e chamado pelo listener
+    // do hub (loop infinito e freeze ao abrir a aba).
+  }
+
+  Future<void> _recarregarSessaoRede() async {
+    final api = _caixaApi;
+    if (api != null) {
+      try {
+        final snap = await api.listar();
+        if (!mounted) return;
+        setState(() {
+          _sessoesRede = snap.terminais;
+          _umCaixaPorLojaRemoto = snap.umCaixaAbertoPorLoja;
+        });
+        return;
+      } catch (_) {}
+    }
+    final mapa = await _sessaoRepo.listarTodasSessoes();
+    if (!mounted) return;
+    setState(() => _sessoesRede = mapa);
+  }
+
+  Future<void> _salvarSessaoCaixa() async {
+    if (_terminalId.isEmpty) {
+      _terminalId = await _sessaoRepo.obterTerminalId();
+    }
+    final api = _caixaApi;
+    if (api != null && _caixaAberto) {
+      final tid = (_caixaAderidoRemoto && _terminalSessaoAbertaId.isNotEmpty)
+          ? _terminalSessaoAbertaId
+          : _terminalId;
+      try {
+        await api.atualizar(
+          terminalId: tid,
+          operador: _operadorCaixa,
+          fundoTroco: _fundoTrocoAbertura,
+        );
+        await _recarregarSessaoRede();
+        return;
+      } on LanApiException catch (e) {
+        debugPrint('Caixa atualizar API: $e');
+        if (mounted) {
+          LanApiFeedback.snackAviso(
+            context,
+            e,
+            prefixo: 'Sincronizacao do caixa',
+          );
+        }
+      } catch (e) {
+        debugPrint('Caixa atualizar API: $e');
+      }
+    }
+    await _sessaoRepo.salvarSessaoLocal(
+      CaixaSessao(
+        terminalId: _terminalId,
+        aberto: _caixaAberto,
+        operador: _operadorCaixa,
+        aberturaEm: _aberturaCaixaEm,
+        fundoTroco: _fundoTrocoAbertura,
+        suprimentos: _totalSuprimentos,
+        sangrias: _totalSangrias,
+      ),
+    );
+    await _recarregarSessaoRede();
   }
 
   Future<void> _carregarUltimoTrocoRegistrado() async {
@@ -1114,34 +1660,13 @@ class _CaixaPageState extends State<CaixaPage> {
     await prefs.setDouble(_prefsUltimoTrocoValor(_terminalId), troco);
   }
 
-  Future<void> _recarregarSessaoRede() async {
-    final mapa = await _sessaoRepo.listarTodasSessoes();
-    if (!mounted) return;
-    setState(() => _sessoesRede = mapa);
-  }
-
-  Future<void> _salvarSessaoCaixa() async {
-    if (_terminalId.isEmpty) {
-      _terminalId = await _sessaoRepo.obterTerminalId();
-    }
-    await _sessaoRepo.salvarSessaoLocal(
-      CaixaSessao(
-        terminalId: _terminalId,
-        aberto: _caixaAberto,
-        operador: _operadorCaixa,
-        aberturaEm: _aberturaCaixaEm,
-        fundoTroco: _fundoTrocoAbertura,
-        suprimentos: _totalSuprimentos,
-        sangrias: _totalSangrias,
-      ),
-    );
-    await _recarregarSessaoRede();
-  }
-
   Future<void> _registrarAuditoriaCaixa(
     String evento, {
     Map<String, dynamic>? detalhes,
   }) async {
+    final clientApi = mounted
+        ? MainMenuDeps.maybeOf(context)?.lanApiClient
+        : null;
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_kCaixaAuditoriaKey);
     List<dynamic> lista = [];
@@ -1164,8 +1689,25 @@ class _CaixaPageState extends State<CaixaPage> {
     if (lista.length > 300) {
       lista = lista.sublist(lista.length - 300);
     }
-    await prefs.setString(_kCaixaAuditoriaKey, jsonEncode(lista));
     _espelharAuditoriaNoLogCentral(evento, detalhes ?? <String, dynamic>{});
+    // Terminal: so o log unificado do PC1. PC1: prefs local (fonte da API).
+    if (clientApi != null &&
+        clientApi.configurado &&
+        widget.vendaRepository is VendaApiRepository) {
+      try {
+        await clientApi.registrarAuditoriaCaixa(
+          evento: evento,
+          usuario: widget.usuarioAtual,
+          operadorCaixa: _operadorCaixa,
+          detalhes: detalhes,
+          em: DateTime.tryParse(registro['em']?.toString() ?? ''),
+        );
+      } catch (e) {
+        debugPrint('Caixa: falha ao gravar auditoria no servidor: $e');
+      }
+      return;
+    }
+    await prefs.setString(_kCaixaAuditoriaKey, jsonEncode(lista));
   }
 
   void _espelharAuditoriaNoLogCentral(
@@ -1200,11 +1742,29 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _salvarAuditoriaCaixa(List<Map<String, dynamic>> registros) async {
+    if (_auditoriaViaServidor) {
+      final client = MainMenuDeps.maybeOf(context)!.lanApiClient!;
+      await client.substituirAuditoriaCaixa(registros);
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kCaixaAuditoriaKey, jsonEncode(registros));
   }
 
+  bool get _auditoriaViaServidor =>
+      widget.vendaRepository is VendaApiRepository &&
+      (MainMenuDeps.maybeOf(context)?.lanApiClient?.configurado ?? false);
+
   Future<List<Map<String, dynamic>>> _carregarAuditoriaCaixa() async {
+    if (_auditoriaViaServidor) {
+      final client = MainMenuDeps.maybeOf(context)!.lanApiClient!;
+      try {
+        return await client.listarAuditoriaCaixa(limit: 500);
+      } catch (e) {
+        debugPrint('Caixa: auditoria remota: $e');
+        return [];
+      }
+    }
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_kCaixaAuditoriaKey);
     if (raw == null || raw.trim().isEmpty) return [];
@@ -1557,49 +2117,6 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
-  Future<void> _abrirGestaoCaixaDialog() async {
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Gestao de Caixa'),
-          content: SizedBox(
-            width: 760,
-            child: _buildConteudoGestaoCaixaDialog(context),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Fechar'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildConteudoGestaoCaixaDialog(BuildContext context) {
-    final aberturaFmt = _aberturaCaixaEm == null
-        ? '-'
-        : DateFormat('dd/MM/yyyy HH:mm').format(_aberturaCaixaEm!.toLocal());
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(_caixaAberto ? 'Status: Aberto' : 'Status: Fechado'),
-        Text('Operador: ${_operadorCaixa.trim().isEmpty ? '-' : _operadorCaixa}'),
-        Text('Abertura: $aberturaFmt'),
-        const SizedBox(height: 4),
-        Text('Fundo inicial: ${_formatarMoeda(_fundoTrocoAbertura)}'),
-        Text('Suprimentos: ${_formatarMoeda(_totalSuprimentos)}'),
-        Text('Sangrias: ${_formatarMoeda(_totalSangrias)}'),
-        const SizedBox(height: 10),
-        _buildBotoesGestaoCaixa(),
-      ],
-    );
-  }
-
   List<Map<String, dynamic>> _filtrarRegistrosAuditoria({
     required List<Map<String, dynamic>> registros,
     required String operadorFiltro,
@@ -1724,32 +2241,68 @@ class _CaixaPageState extends State<CaixaPage> {
       ).showSnackBar(const SnackBar(content: Text('O caixa ja esta aberto.')));
       return;
     }
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
-    if (config.umCaixaAbertoPorLoja) {
-      final outra =
-          await CaixaSessaoRepository().obterSessaoAbertaEmOutroTerminal();
-      if (outra != null && mounted) {
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Caixa ja aberto na rede'),
-            content: Text(
-              'Somente um caixa pode ficar aberto por loja. '
-              'Terminal ${outra.terminalId} esta aberto '
-              '(operador: ${outra.operador}). '
-              'Feche o caixa na outra maquina ou desative a regra em Configuracoes.',
-            ),
-            actions: [
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Entendi'),
+    if (_terminalId.isEmpty) {
+      _terminalId = await _sessaoRepo.obterTerminalId();
+    }
+
+    // Terminal: consulta servidor antes de abrir.
+    final api = _caixaApi;
+    if (api != null) {
+      try {
+        final snap = await api.listar();
+        if (!mounted) return;
+        if (snap.aberta != null && snap.aberta!.aberto) {
+          if (snap.umCaixaAbertoPorLoja) {
+            _aplicarSnapshotCaixaRemoto(snap);
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Caixa ja aberto em ${snap.aberta!.terminalId}'
+                  '${snap.aberta!.operador.trim().isNotEmpty ? ' (${snap.aberta!.operador})' : ''}. '
+                  'Este terminal aderiu a sessao da loja.',
+                ),
               ),
-            ],
-          ),
-        );
-        return;
+            );
+            return;
+          }
+        }
+      } catch (_) {}
+    } else {
+      final config = await widget.appConfigRepository.carregarEmpresaConfig();
+      if (config.umCaixaAbertoPorLoja) {
+        final outra =
+            await CaixaSessaoRepository().obterSessaoAbertaEmOutroTerminal();
+        if (outra != null && mounted) {
+          final todas = await _sessaoRepo.listarTodasSessoes();
+          if (!mounted) return;
+          setState(() {
+            _sessoesRede = todas;
+            _umCaixaPorLojaRemoto = true;
+            _caixaAberto = true;
+            _caixaAderidoRemoto = true;
+            _terminalSessaoAbertaId = outra.terminalId;
+            _operadorCaixa = outra.operador;
+            _aberturaCaixaEm = outra.aberturaEm;
+            _fundoTrocoAbertura = outra.fundoTroco;
+            _totalSuprimentos = outra.suprimentos;
+            _totalSangrias = outra.sangrias;
+          });
+          CaixaStatusHub.instance.publicarDasSessoes(todas);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Caixa ja aberto em ${outra.terminalId}'
+                '${outra.operador.trim().isNotEmpty ? ' (${outra.operador})' : ''}. '
+                'Este terminal aderiu a sessao da loja.',
+              ),
+            ),
+          );
+          return;
+        }
       }
     }
+
     final operadorController = TextEditingController(text: widget.usuarioAtual);
     final fundoController = TextEditingController(text: '0,00');
     final confirmar = await showDialog<bool>(
@@ -1813,15 +2366,84 @@ class _CaixaPageState extends State<CaixaPage> {
       );
       return;
     }
-    setState(() {
-      _caixaAberto = true;
-      _operadorCaixa = operador;
-      _aberturaCaixaEm = DateTime.now();
-      _fundoTrocoAbertura = fundo;
-      _totalSuprimentos = 0;
-      _totalSangrias = 0;
-    });
-    await _salvarSessaoCaixa();
+
+    if (api != null) {
+      try {
+        final r = await api.abrir(
+          terminalId: _terminalId,
+          operador: operador,
+          fundoTroco: fundo,
+        );
+        if (!mounted) return;
+        if (!r.ok) {
+          if (r.errorCode == 'caixa_ja_aberto' && r.sessaoAbertaConflito != null) {
+            await _carregarSessaoCaixa();
+            if (!mounted) return;
+            CaixaLocalRefreshHub.instance.notificar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  r.message ??
+                      'Caixa ja aberto na loja. Sessao aderida automaticamente.',
+                ),
+              ),
+            );
+            return;
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(r.message ?? r.errorCode ?? 'Falha ao abrir caixa')),
+          );
+          return;
+        }
+        setState(() {
+          _caixaAberto = true;
+          _caixaAderidoRemoto = false;
+          _terminalSessaoAbertaId = _terminalId;
+          _operadorCaixa = operador;
+          _aberturaCaixaEm = DateTime.now();
+          _fundoTrocoAbertura = fundo;
+          _totalSuprimentos = 0;
+          _totalSangrias = 0;
+          if (r.terminais.isNotEmpty) _sessoesRede = r.terminais;
+        });
+        if (r.terminais.isNotEmpty) {
+          CaixaStatusHub.instance.publicarDasSessoes(r.terminais);
+        } else {
+          CaixaStatusHub.instance.publicar(
+            aberto: true,
+            operador: operador,
+            terminalId: _terminalId,
+          );
+        }
+        // Terminal: API grava no servidor; avisa o Inicio neste PC tambem.
+        CaixaLocalRefreshHub.instance.notificar();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Falha ao abrir caixa no servidor: $e')),
+        );
+        return;
+      }
+    } else {
+      setState(() {
+        _caixaAberto = true;
+        _caixaAderidoRemoto = false;
+        _terminalSessaoAbertaId = _terminalId;
+        _operadorCaixa = operador;
+        _aberturaCaixaEm = DateTime.now();
+        _fundoTrocoAbertura = fundo;
+        _totalSuprimentos = 0;
+        _totalSangrias = 0;
+      });
+      await _salvarSessaoCaixa();
+      CaixaStatusHub.instance.publicar(
+        aberto: true,
+        operador: operador,
+        terminalId: _terminalId,
+      );
+      CaixaLocalRefreshHub.instance.notificar();
+    }
+
     await _registrarAuditoriaCaixa(
       'abertura_caixa',
       detalhes: {
@@ -1836,6 +2458,43 @@ class _CaixaPageState extends State<CaixaPage> {
           'Caixa aberto por $operador com fundo ${_formatarMoeda(_fundoTrocoAbertura)}.',
         ),
       ),
+    );
+  }
+
+  String _terminalIdParaSessaoCaixa() {
+    if (_caixaAderidoRemoto && _terminalSessaoAbertaId.isNotEmpty) {
+      return _terminalSessaoAbertaId;
+    }
+    return _terminalId;
+  }
+
+  Future<CaixaSessao> _registrarMovimentacaoAtomica({
+    required bool suprimento,
+    required double valor,
+  }) async {
+    final api = _caixaApi;
+    if (api != null) {
+      final r = await api.registrarMovimentacao(
+        terminalId: _terminalIdParaSessaoCaixa(),
+        tipo: suprimento ? 'suprimento' : 'sangria',
+        valor: valor,
+      );
+      if (!r.ok || r.sessao == null) {
+        throw StateError(
+          r.message ?? r.errorCode ?? 'Falha ao registrar movimentacao.',
+        );
+      }
+      return r.sessao!;
+    }
+    if (_terminalId.isEmpty) {
+      _terminalId = await _sessaoRepo.obterTerminalId();
+    }
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    return _sessaoRepo.registrarMovimentacao(
+      terminalId: _terminalId,
+      deltaSuprimento: suprimento ? valor : 0,
+      deltaSangria: suprimento ? 0 : valor,
+      umCaixaAbertoPorLoja: config.umCaixaAbertoPorLoja,
     );
   }
 
@@ -1914,14 +2573,28 @@ class _CaixaPageState extends State<CaixaPage> {
       ).showSnackBar(const SnackBar(content: Text('Informe um valor valido.')));
       return;
     }
-    setState(() {
-      if (suprimento) {
-        _totalSuprimentos += valor;
-      } else {
-        _totalSangrias += valor;
-      }
-    });
-    await _salvarSessaoCaixa();
+    try {
+      final sessao = await _registrarMovimentacaoAtomica(
+        suprimento: suprimento,
+        valor: valor,
+      );
+      if (!mounted) return;
+      setState(() {
+        _totalSuprimentos = sessao.suprimentos;
+        _totalSangrias = sessao.sangrias;
+        if (sessao.fundoTroco > 0) {
+          _fundoTrocoAbertura = sessao.fundoTroco;
+        }
+      });
+      await _recarregarSessaoRede();
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(
+        context,
+        'Nao foi possivel registrar a movimentacao: ${LanApiFeedback.mensagem(e)}',
+      );
+      return;
+    }
     final dataHora = DateTime.now();
     await _registrarAuditoriaCaixa(
       suprimento ? 'suprimento' : 'sangria',
@@ -1991,10 +2664,10 @@ class _CaixaPageState extends State<CaixaPage> {
       inicio: abertura,
       fim: agora,
     );
-    var dinheiro = totais.dinheiro;
-    var pix = totais.pix;
-    var debito = totais.debito;
-    var credito = totais.credito;
+    var dinheiro = totais.dinheiro as num;
+    var pix = totais.pix as num;
+    var debito = totais.debito as num;
+    var credito = totais.credito as num;
     if (abertura != null) {
       for (final rec in widget.vendaRepository.recebimentos.listarNoPeriodo(
         inicio: abertura,
@@ -2011,19 +2684,72 @@ class _CaixaPageState extends State<CaixaPage> {
             credito += rec.valorTotal;
             break;
           case 'dinheiro':
-          default:
             dinheiro += rec.valorTotal;
+            break;
+          case 'fiado':
+          case 'transferencia':
+          case 'outros':
+          default:
+            // Quitacao por transferencia/outros nao infla a gaveta.
+            break;
         }
       }
     }
-    final dinheiroEsperado = (_fundoTrocoAbertura + dinheiro + _totalSuprimentos - _totalSangrias)
+    final dinheiroEsperado = (_fundoTrocoAbertura +
+            dinheiro.toDouble() +
+            _totalSuprimentos -
+            _totalSangrias)
         .clamp(0, double.infinity)
         .toDouble();
     return {
       'dinheiro': dinheiroEsperado,
-      'pix': pix,
-      'debito': debito,
-      'credito': credito,
+      'pix': pix.toDouble(),
+      'debito': debito.toDouble(),
+      'credito': credito.toDouble(),
+    };
+  }
+
+  /// Terminal leve: totais reais do PC1 via `/api/caixa/leitura-parcial`.
+  /// Nunca cai no stub local zerado quando o terminal usa a API.
+  Future<Map<String, double>> _totaisEsperadosFechamentoAsync() async {
+    if (_caixaApi != null || widget.vendaRepository is VendaApiRepository) {
+      return _lerTotaisFechamentoDaApi();
+    }
+    return _totaisEsperadosFechamento();
+  }
+
+  bool _leituraParcialValida(Map<String, dynamic> data) {
+    if (data.containsKey('error') &&
+        '${data['error']}'.trim().isNotEmpty) {
+      return false;
+    }
+    for (final k in const ['dinheiroGaveta', 'pix', 'debito', 'credito']) {
+      if (data[k] is! num) return false;
+    }
+    return true;
+  }
+
+  Future<Map<String, double>> _lerTotaisFechamentoDaApi() async {
+    final deps = MainMenuDeps.maybeOf(context);
+    final client = deps?.lanApiClient;
+    if (client == null || !client.configurado) {
+      throw StateError('sem_conexao_pc1');
+    }
+    final data = await client.leituraParcialCaixa(
+      terminalId: _terminalIdParaSessaoCaixa(),
+    );
+    if (!_leituraParcialValida(data)) {
+      throw StateError(
+        data['error']?.toString().trim().isNotEmpty == true
+            ? '${data['error']}'
+            : 'leitura_parcial_invalida',
+      );
+    }
+    return {
+      'dinheiro': (data['dinheiroGaveta'] as num).toDouble(),
+      'pix': (data['pix'] as num).toDouble(),
+      'debito': (data['debito'] as num).toDouble(),
+      'credito': (data['credito'] as num).toDouble(),
     };
   }
 
@@ -2035,8 +2761,8 @@ class _CaixaPageState extends State<CaixaPage> {
       fim: agora,
     );
     return (
-      totalVendas: resumo.totalVendas,
-      quantidadeVendas: resumo.quantidadeVendas,
+      totalVendas: (resumo.totalVendas as num).toDouble(),
+      quantidadeVendas: (resumo.quantidadeVendas as num).toInt(),
     );
   }
 
@@ -2120,13 +2846,43 @@ class _CaixaPageState extends State<CaixaPage> {
     );
     if (!mounted || acaoRecibo != 'recibo') return;
 
-    final rec = widget.vendaRepository.recebimentos.obterPorId(
-      resultado.recebimentoId,
-    );
-    if (rec == null) return;
+    RecebimentoFiado? rec;
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      try {
+        rec = await repo.obterRecebimentoRemoto(resultado.recebimentoId);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Falha ao carregar recibo: ${LanApiFeedback.mensagem(e)}',
+            ),
+          ),
+        );
+        return;
+      }
+    } else {
+      rec = repo.recebimentos.obterPorId(resultado.recebimentoId)
+          as RecebimentoFiado?;
+    }
+    if (rec == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recebimento nao encontrado para emitir o recibo.'),
+        ),
+      );
+      return;
+    }
+    final recebimento = rec;
 
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
+
+    final saldoOverride = repo is VendaApiRepository
+        ? repo.saldoRestanteAposRecebimento(resultado.recebimentoId)
+        : null;
 
     await mostrarFluxoImpressaoCupomVenda(
       context,
@@ -2135,15 +2891,16 @@ class _CaixaPageState extends State<CaixaPage> {
       title: 'Recibo de pagamento (fiado)',
       content: 'Deseja imprimir o recibo para o cliente?',
       suggestedFileName:
-          'recibo_fiado_${resultado.cliente.id}_${rec.id}.pdf',
+          'recibo_fiado_${resultado.cliente.id}_${recebimento.id}.pdf',
       gerarPdf: () async {
         final layout = config.layoutImpressao.cupom;
         final bytes = await ReciboRecebimentoFiadoPdf.gerarBytes(
-          recebimento: rec,
+          recebimento: recebimento,
           cliente: resultado.cliente,
           vendaRepository: widget.vendaRepository,
           config: config,
           operadorCaixa: _operadorCaixa,
+          saldoRestanteOverride: saldoOverride,
         );
         return cupomPdfLegado(
           bytes: bytes,
@@ -2156,9 +2913,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _mostrarLeituraParcial() async {
-    if (!widget.podeLeituraParcialCaixa) {
-      return;
-    }
+    if (!widget.podeLeituraParcialCaixa) return;
     if (!_caixaAberto) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2168,6 +2923,14 @@ class _CaixaPageState extends State<CaixaPage> {
       );
       return;
     }
+
+    // Terminal leve: busca dados via API do servidor.
+    final api = _caixaApi;
+    if (api != null) {
+      await _mostrarLeituraParcialRemota(api);
+      return;
+    }
+
     final esperados = _totaisEsperadosFechamento();
     final vendas = _totalVendasNoPeriodoCaixa();
     final recFiado = _resumoRecebimentosFiadoNoPeriodoCaixa();
@@ -2185,10 +2948,91 @@ class _CaixaPageState extends State<CaixaPage> {
       },
     );
     if (!mounted) return;
-    final aberturaFmt = _aberturaCaixaEm == null
-        ? '-'
-        : DateFormat('dd/MM/yyyy HH:mm').format(_aberturaCaixaEm!.toLocal());
-    await showDialog<void>(
+    _exibirDialogLeituraParcial(
+      aberturaFmt: _aberturaCaixaEm == null
+          ? '-'
+          : DateFormat('dd/MM/yyyy HH:mm').format(_aberturaCaixaEm!.toLocal()),
+      quantidadeVendas: vendas.quantidadeVendas,
+      totalVendas: vendas.totalVendas,
+      recFiadoQuantidade: recFiado.quantidade,
+      recFiadoTotal: recFiado.total,
+      dinheiroGaveta: esperados['dinheiro'] ?? 0,
+      pix: esperados['pix'] ?? 0,
+      debito: esperados['debito'] ?? 0,
+      credito: esperados['credito'] ?? 0,
+      fundoTroco: _fundoTrocoAbertura,
+      suprimentos: _totalSuprimentos,
+      sangrias: _totalSangrias,
+    );
+  }
+
+  Future<void> _mostrarLeituraParcialRemota(CaixaSessaoApi api) async {
+    try {
+      final deps = MainMenuDeps.maybeOf(context);
+      final client = deps?.lanApiClient;
+      if (client == null) {
+        throw StateError('sem_conexao_pc1');
+      }
+      final data = await client.leituraParcialCaixa(
+        terminalId: _terminalIdParaSessaoCaixa(),
+      );
+      if (!mounted) return;
+      if (!_leituraParcialValida(data)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              data['error']?.toString().trim().isNotEmpty == true
+                  ? '${data['error']}'
+                  : 'Conexao com o servidor (PC1) oscilou. Tente novamente.',
+            ),
+          ),
+        );
+        return;
+      }
+      final aberturaRaw = data['aberturaEm']?.toString();
+      final aberturaFmt = aberturaRaw != null
+          ? DateFormat('dd/MM/yyyy HH:mm')
+              .format(DateTime.parse(aberturaRaw).toLocal())
+          : '-';
+      _exibirDialogLeituraParcial(
+        aberturaFmt: aberturaFmt,
+        quantidadeVendas: (data['quantidadeVendas'] as num?)?.toInt() ?? 0,
+        totalVendas: (data['totalVendas'] as num?)?.toDouble() ?? 0,
+        recFiadoQuantidade:
+            (data['recebimentosFiadoQuantidade'] as num?)?.toInt() ?? 0,
+        recFiadoTotal:
+            (data['recebimentosFiadoTotal'] as num?)?.toDouble() ?? 0,
+        dinheiroGaveta: (data['dinheiroGaveta'] as num?)?.toDouble() ?? 0,
+        pix: (data['pix'] as num?)?.toDouble() ?? 0,
+        debito: (data['debito'] as num?)?.toDouble() ?? 0,
+        credito: (data['credito'] as num?)?.toDouble() ?? 0,
+        fundoTroco: (data['fundoTroco'] as num?)?.toDouble() ?? 0,
+        suprimentos: (data['suprimentos'] as num?)?.toDouble() ?? 0,
+        sangrias: (data['sangrias'] as num?)?.toDouble() ?? 0,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao consultar leitura parcial: $e')),
+      );
+    }
+  }
+
+  void _exibirDialogLeituraParcial({
+    required String aberturaFmt,
+    required int quantidadeVendas,
+    required double totalVendas,
+    required int recFiadoQuantidade,
+    required double recFiadoTotal,
+    required double dinheiroGaveta,
+    required double pix,
+    required double debito,
+    required double credito,
+    required double fundoTroco,
+    required double suprimentos,
+    required double sangrias,
+  }) {
+    showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -2210,12 +3054,12 @@ class _CaixaPageState extends State<CaixaPage> {
                     'Vendas finalizadas',
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
-                  Text('Quantidade: ${vendas.quantidadeVendas}'),
-                  Text('Total em vendas: ${_formatarMoeda(vendas.totalVendas)}'),
+                  Text('Quantidade: $quantidadeVendas'),
+                  Text('Total em vendas: ${_formatarMoeda(totalVendas)}'),
                   const SizedBox(height: 8),
                   Text(
-                    'Recebimentos de fiado: ${recFiado.quantidade} '
-                    '(${_formatarMoeda(recFiado.total)})',
+                    'Recebimentos de fiado: $recFiadoQuantidade '
+                    '(${_formatarMoeda(recFiadoTotal)})',
                   ),
                   const SizedBox(height: 12),
                   Text(
@@ -2229,20 +3073,16 @@ class _CaixaPageState extends State<CaixaPage> {
                   const SizedBox(height: 4),
                   Text(
                     'Dinheiro na gaveta (fundo + vendas em dinheiro + '
-                    'suprimentos - sangrias): ${_formatarMoeda(esperados['dinheiro'] ?? 0)}',
+                    'suprimentos - sangrias): ${_formatarMoeda(dinheiroGaveta)}',
                   ),
-                  Text('PIX: ${_formatarMoeda(esperados['pix'] ?? 0)}'),
-                  Text(
-                    'Cartao debito: ${_formatarMoeda(esperados['debito'] ?? 0)}',
-                  ),
-                  Text(
-                    'Cartao credito: ${_formatarMoeda(esperados['credito'] ?? 0)}',
-                  ),
+                  Text('PIX: ${_formatarMoeda(pix)}'),
+                  Text('Cartao debito: ${_formatarMoeda(debito)}'),
+                  Text('Cartao credito: ${_formatarMoeda(credito)}'),
                   const SizedBox(height: 8),
                   Text(
-                    'Fundo inicial: ${_formatarMoeda(_fundoTrocoAbertura)} | '
-                    'Suprimentos: ${_formatarMoeda(_totalSuprimentos)} | '
-                    'Sangrias: ${_formatarMoeda(_totalSangrias)}',
+                    'Fundo inicial: ${_formatarMoeda(fundoTroco)} | '
+                    'Suprimentos: ${_formatarMoeda(suprimentos)} | '
+                    'Sangrias: ${_formatarMoeda(sangrias)}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -2267,7 +3107,39 @@ class _CaixaPageState extends State<CaixaPage> {
       ).showSnackBar(const SnackBar(content: Text('O caixa ja esta fechado.')));
       return;
     }
-    final esperados = _totaisEsperadosFechamento();
+    late final Map<String, double> esperados;
+    try {
+      esperados = await _totaisEsperadosFechamentoAsync();
+    } catch (_) {
+      if (!mounted) return;
+      final tentar = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Conexao com o servidor oscilou'),
+          content: const Text(
+            'Nao foi possivel obter o saldo real do caixa no servidor (PC1). '
+            'O fechamento foi bloqueado para evitar conferencia com valores zerados '
+            'ou desatualizados.\n\n'
+            'Verifique a conexao e tente novamente.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Tentar novamente'),
+            ),
+          ],
+        ),
+      );
+      if (tentar == true && mounted) {
+        await _fecharCaixa();
+      }
+      return;
+    }
+    if (!mounted) return;
     final dinheiroController = TextEditingController(text: '0,00');
     final pixController = TextEditingController(text: '0,00');
     final debitoController = TextEditingController(text: '0,00');
@@ -2360,15 +3232,169 @@ class _CaixaPageState extends State<CaixaPage> {
     final suprimentos = _totalSuprimentos;
     final sangrias = _totalSangrias;
     final fechamentoEm = DateTime.now();
+    final api = _caixaApi;
+    // Capturar ANTES do setState — aderido limpa estes campos.
+    final sessaoDonaId = _terminalSessaoAbertaId.isNotEmpty
+        ? _terminalSessaoAbertaId
+        : _terminalId;
+    // Um-caixa ou aderido: sempre forca fechamento da sessao aberta na loja.
+    // Evita sessao orfa quando o terminal local nao e o dono da sessao.
+    final forcarRemoto = _caixaAderidoRemoto ||
+        _umCaixaPorLojaRemoto ||
+        (_terminalSessaoAbertaId.isNotEmpty &&
+            _terminalSessaoAbertaId != _terminalId);
+    if (forcarRemoto &&
+        sessaoDonaId.isNotEmpty &&
+        sessaoDonaId != _terminalId &&
+        mounted) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Fechar caixa de outro terminal?'),
+          content: Text(
+            'A sessao esta aberta em $sessaoDonaId'
+            '${_operadorCaixa.trim().isNotEmpty ? ' ($_operadorCaixa)' : ''}. '
+            'Fechar daqui encerra o caixa da loja inteira.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Fechar mesmo assim'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    if (api != null) {
+      try {
+        var r = await api.fechar(
+          terminalId: _terminalId,
+          forcar: forcarRemoto,
+        );
+        if (!mounted) return;
+        if (!r.ok && r.errorCode == 'caixa_outro_terminal') {
+          final ok2 = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Confirmar fechamento remoto'),
+              content: Text(r.message ?? 'Fechar caixa aberto em outro PC?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Fechar'),
+                ),
+              ],
+            ),
+          );
+          if (ok2 != true) return;
+          r = await api.fechar(terminalId: _terminalId, forcar: true);
+        }
+        if (!r.ok) {
+          // Ultimo recurso: reset de orfaos no servidor.
+          final resetar = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Desbloquear caixa?'),
+              content: Text(
+                '${r.message ?? 'Falha ao fechar a sessao.'}\n\n'
+                'Deseja forcar o reset de todas as sessoes abertas no servidor?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Resetar sessoes'),
+                ),
+              ],
+            ),
+          );
+          if (resetar == true) {
+            final rr = await api.reset(motivo: 'fechamento_ui');
+            if (!rr.ok && mounted) {
+              CaixaFeedback.erro(
+                context,
+                rr.message ?? 'Falha ao resetar sessoes de caixa',
+              );
+              return;
+            }
+          } else {
+            if (mounted) {
+              CaixaFeedback.erro(
+                context,
+                r.message ?? 'Falha ao fechar caixa',
+              );
+            }
+            return;
+          }
+        }
+      } catch (e) {
+        if (!mounted) return;
+        CaixaFeedback.erro(
+          context,
+          'Falha ao fechar caixa no servidor: ${LanApiFeedback.mensagem(e)}',
+        );
+        return;
+      }
+    } else if (forcarRemoto) {
+      // PC servidor aderido / um-caixa: fecha TODAS as sessoes (ex.: pc_localhost).
+      await _sessaoRepo.fecharTodasSessoesAbertas(propagarRede: true);
+    } else {
+      await _sessaoRepo.salvarSessaoLocal(
+        CaixaSessao(
+          terminalId: sessaoDonaId.isNotEmpty ? sessaoDonaId : _terminalId,
+          aberto: false,
+          operador: '',
+          fundoTroco: 0,
+          suprimentos: 0,
+          sangrias: 0,
+          atualizadoEm: DateTime.now(),
+        ),
+        propagarRede: true,
+      );
+    }
+    if (!mounted) return;
     setState(() {
       _caixaAberto = false;
+      _caixaAderidoRemoto = false;
+      _terminalSessaoAbertaId = '';
       _operadorCaixa = '';
       _aberturaCaixaEm = null;
       _fundoTrocoAbertura = 0;
       _totalSuprimentos = 0;
       _totalSangrias = 0;
     });
-    await _salvarSessaoCaixa();
+    CaixaStatusHub.instance.publicar(aberto: false);
+    // Evita o load imediato reabrir UI como "aderido" antes do persist.
+    if (api != null) {
+      await _carregarSessaoCaixa();
+      if (mounted && _caixaAberto) {
+        // API fechou mas snapshot ainda veio aberto: forca UI fechada.
+        setState(() {
+          _caixaAberto = false;
+          _caixaAderidoRemoto = false;
+          _terminalSessaoAbertaId = '';
+          _operadorCaixa = '';
+          _aberturaCaixaEm = null;
+          _fundoTrocoAbertura = 0;
+          _totalSuprimentos = 0;
+          _totalSangrias = 0;
+        });
+        CaixaStatusHub.instance.publicar(aberto: false);
+      }
+    }
+    CaixaLocalRefreshHub.instance.notificar();
     await _registrarAuditoriaCaixa(
       'fechamento_caixa',
       detalhes: {
@@ -2376,6 +3402,8 @@ class _CaixaPageState extends State<CaixaPage> {
         'fundoTroco': fundoAbertura,
         'suprimentos': suprimentos,
         'sangrias': sangrias,
+        'sessaoFechada': sessaoDonaId,
+        'forcarLoja': forcarRemoto,
         'esperadoDinheiro': esperados['dinheiro'] ?? 0,
         'esperadoPix': esperados['pix'] ?? 0,
         'esperadoDebito': esperados['debito'] ?? 0,
@@ -2796,7 +3824,7 @@ class _CaixaPageState extends State<CaixaPage> {
   ) async {
     if (_etapaCaixa != CaixaEtapa.conferencia) return;
     final passo = ProdutoEmbalagem.passoQuantidadeArmazenada(
-      produto: item.produto.target,
+      produto: _produtoDoItem(item),
       quantidadeArmazenada: item.quantidade,
     );
     final novaQtd = item.quantidade + delta * passo;
@@ -2805,12 +3833,22 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
     try {
-      widget.vendaRepository.atualizarQuantidadeItemOrcamento(
-        venda.id,
-        item.id,
-        novaQtd,
-        permitirVendaSemEstoque: _permitirVendaSemEstoque,
-      );
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .atualizarQuantidadeItemOrcamentoRemoto(
+          venda.id,
+          item.id,
+          (novaQtd as num).round(),
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      } else {
+        widget.vendaRepository.atualizarQuantidadeItemOrcamento(
+          venda.id,
+          item.id,
+          novaQtd,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      }
       await _registrarAuditoriaCaixa(
         'ajuste_quantidade_item_orcamento',
         detalhes: {
@@ -2827,17 +3865,20 @@ class _CaixaPageState extends State<CaixaPage> {
       CaixaFeedback.sucesso(
         context,
         'Quantidade atualizada: ${item.nomeProduto} '
-        '(${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: item.produto.target, quantidadeArmazenada: novaQtd)}).',
+        '(${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: _produtoDoItem(item), quantidadeArmazenada: novaQtd)}).',
       );
     } catch (e) {
       if (!mounted) return;
-      CaixaFeedback.erro(context, 'Nao foi possivel alterar quantidade: $e');
+      CaixaFeedback.erro(
+        context,
+        'Nao foi possivel alterar quantidade: ${LanApiFeedback.mensagem(e)}',
+      );
     }
   }
 
   Future<void> _removerItemConferencia(Venda venda, ItemVenda item) async {
     if (_etapaCaixa != CaixaEtapa.conferencia) return;
-    if (venda.itens.length <= 1) {
+    if (_itensVenda(venda).length <= 1) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('O orcamento precisa manter ao menos um item.'),
@@ -2852,8 +3893,8 @@ class _CaixaPageState extends State<CaixaPage> {
         title: const Text('Remover item do orcamento?'),
         content: Text(
           '${item.nomeProduto}\n\n'
-          'Quantidade: ${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: item.produto.target, quantidadeArmazenada: item.quantidade)}\n'
-          'Valor da linha: ${_formatarMoeda(item.subtotal)}\n\n'
+          'Quantidade: ${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: _produtoDoItem(item), quantidadeArmazenada: item.quantidade)}\n'
+          'Valor da linha: ${_formatarMoeda(_subtotalLinhaItem(item))}\n\n'
           'O total sera recalculado automaticamente.',
         ),
         actions: [
@@ -2870,14 +3911,24 @@ class _CaixaPageState extends State<CaixaPage> {
     );
     if (confirmar != true || !mounted) return;
 
-    final autorizado = await solicitarAutorizacaoGerenteCaixa(
+    final gerente = await solicitarCredenciaisGerenteCaixa(
       context,
       _usuarioRepository,
     );
-    if (!autorizado || !mounted) return;
+    if (gerente == null || !mounted) return;
 
     try {
-      widget.vendaRepository.removerItemOrcamento(venda.id, item.id);
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .removerItemOrcamentoRemoto(
+          venda.id,
+          item.id,
+          gerenteLogin: gerente.login,
+          gerenteSenha: gerente.senha,
+        );
+      } else {
+        widget.vendaRepository.removerItemOrcamento(venda.id, item.id);
+      }
       await _registrarAuditoriaCaixa(
         'remover_item_orcamento_caixa',
         detalhes: {
@@ -2897,7 +3948,10 @@ class _CaixaPageState extends State<CaixaPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      CaixaFeedback.erro(context, 'Nao foi possivel remover item: $e');
+      CaixaFeedback.erro(
+        context,
+        'Nao foi possivel remover item: ${LanApiFeedback.mensagem(e)}',
+      );
     }
   }
 
@@ -2908,30 +3962,36 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   String _precoListaPadraoConferencia(Venda venda) {
-    if (venda.itens.isEmpty) return 'preco1';
-    final t = venda.itens.first.precoTipo.trim();
+    final itens = _itensVenda(venda);
+    if (itens.isEmpty) return 'preco1';
+    final t = itens.first.precoTipo.trim();
     if (t == PromocaoCadastro.precoTipoPromo) return 'preco1';
     return t.isEmpty ? 'preco1' : t;
   }
 
   String _tipoEntregaPadraoConferencia(Venda venda) {
-    if (venda.itens.isEmpty) {
+    final itens = _itensVenda(venda);
+    if (itens.isEmpty) {
       return EntregaVendaHelper.tipoRetirada;
     }
     return EntregaVendaHelper.normalizarTipoItem(
-      venda.itens.first.tipoEntregaItem,
+      itens.first.tipoEntregaItem,
     );
   }
 
   String _rotuloPrecoConferencia(String precoTipo) => switch (precoTipo) {
         PromocaoCadastro.precoTipoPromo => 'Promocao',
         'preco2' => 'A Vista',
-        'preco3' => 'Atacado',
+        'preco3' => 'Especial',
         _ => 'A Prazo',
       };
 
   double _precoExibicaoConsultaConferencia(Produto produto, String precoTipo) {
-    return _promoPreco
+    final svc = _promoPreco;
+    if (svc == null) {
+      return PromocaoPrecoService.precoLista(produto, precoTipo);
+    }
+    return svc
         .resolver(
           produto,
           dataReferencia: DateTime.now(),
@@ -2945,7 +4005,7 @@ class _CaixaPageState extends State<CaixaPage> {
     final v = _selecionado;
     if (v == null) return 0;
     var soma = 0.0;
-    for (final item in v.itens) {
+    for (final item in _itensVenda(v)) {
       if (item.produto.targetId == produtoId) {
         soma += item.quantidadeVendaEfetiva;
       }
@@ -2987,17 +4047,29 @@ class _CaixaPageState extends State<CaixaPage> {
           formatarMoeda: _formatarMoeda,
           rotuloPreco: _rotuloPrecoConferencia,
           precoUnitarioDe: _precoExibicaoConsultaConferencia,
-          resolverPromocao: (p, t) => _promoPreco.resolver(
-            p,
-            dataReferencia: DateTime.now(),
-            precoTipoLista: t,
-            segmentoCliente: _segmentoClienteConferencia,
-          ),
-          campanhasVigentesDe: (p) => _promoPreco.listarCampanhasVigentesParaProduto(
-            p,
-            dataReferencia: DateTime.now(),
-            segmentoCliente: _segmentoClienteConferencia,
-          ),
+          resolverPromocao: (p, t) {
+            final svc = _promoPreco;
+            if (svc == null) {
+              return PromocaoPrecoResult.semPromocao(
+                precoFinal: PromocaoPrecoService.precoLista(p, t),
+                precoBasePreco1: PromocaoPrecoService.preco1Base(p),
+                precoTipo: t,
+              );
+            }
+            return svc.resolver(
+              p,
+              dataReferencia: DateTime.now(),
+              precoTipoLista: t,
+              segmentoCliente: _segmentoClienteConferencia,
+            );
+          },
+          campanhasVigentesDe: (p) =>
+              _promoPreco?.listarCampanhasVigentesParaProduto(
+                p,
+                dataReferencia: DateTime.now(),
+                segmentoCliente: _segmentoClienteConferencia,
+              ) ??
+              const [],
           quantidadeNoOrcamentoDe: _quantidadeProdutoNoOrcamentoSelecionado,
           kitOrcamentoRepository: _kitOrcamentoRepo,
           sugestaoVendaRepository: _sugestaoVendaRepo,
@@ -3084,8 +4156,10 @@ class _CaixaPageState extends State<CaixaPage> {
     int quantidadeKits, {
     required String precoLista,
   }) async {
+    final kitRepo = _kitOrcamentoRepo;
+    if (kitRepo == null) return;
     final montada = PdvKitOrcamentoInsercaoUtil.montar(
-      kitRepository: _kitOrcamentoRepo,
+      kitRepository: kitRepo,
       produtoRepository: widget.produtoRepository,
       kitId: kitId,
       quantidadeKits: quantidadeKits,
@@ -3171,15 +4245,23 @@ class _CaixaPageState extends State<CaixaPage> {
     int quantidade, {
     required String precoLista,
   }) async {
+    if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
     if (quantidade <= 0) return;
 
-    final resPreco = _promoPreco.resolver(
-      produto,
-      dataReferencia: DateTime.now(),
-      quantidade: quantidade,
-      precoTipoLista: precoLista,
-      segmentoCliente: _segmentoClienteConferencia,
-    );
+    final svc = _promoPreco;
+    final resPreco = svc == null
+        ? PromocaoPrecoResult.semPromocao(
+            precoFinal: PromocaoPrecoService.precoLista(produto, precoLista),
+            precoBasePreco1: PromocaoPrecoService.preco1Base(produto),
+            precoTipo: precoLista,
+          )
+        : svc.resolver(
+            produto,
+            dataReferencia: DateTime.now(),
+            quantidade: quantidade,
+            precoTipoLista: precoLista,
+            segmentoCliente: _segmentoClienteConferencia,
+          );
 
     if (resPreco.emPromocao) {
       if (resPreco.quantidadeMaximaPorVenda > 0 &&
@@ -3232,19 +4314,36 @@ class _CaixaPageState extends State<CaixaPage> {
     }
 
     try {
-      widget.vendaRepository.adicionarItemAoOrcamento(
-        venda.id,
-        ItemVendaInput(
-          produtoId: produto.id,
-          quantidade: quantidade,
-          precoUnitario: resPreco.precoFinal,
-          precoTipo: resPreco.precoTipo,
-          tipoEntregaItem: _tipoEntregaPadraoConferencia(venda),
-          promocaoId: resPreco.promocaoId,
-          promocaoNomeSnapshot: resPreco.promocaoNome,
-        ),
-        permitirVendaSemEstoque: _permitirVendaSemEstoque,
-      );
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .adicionarItemAoOrcamentoRemoto(
+          venda.id,
+          ItemVendaInput(
+            produtoId: produto.id,
+            quantidade: quantidade,
+            precoUnitario: resPreco.precoFinal,
+            precoTipo: resPreco.precoTipo,
+            tipoEntregaItem: _tipoEntregaPadraoConferencia(venda),
+            promocaoId: resPreco.promocaoId,
+            promocaoNomeSnapshot: resPreco.promocaoNome,
+          ),
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      } else {
+        widget.vendaRepository.adicionarItemAoOrcamento(
+          venda.id,
+          ItemVendaInput(
+            produtoId: produto.id,
+            quantidade: quantidade,
+            precoUnitario: resPreco.precoFinal,
+            precoTipo: resPreco.precoTipo,
+            tipoEntregaItem: _tipoEntregaPadraoConferencia(venda),
+            promocaoId: resPreco.promocaoId,
+            promocaoNomeSnapshot: resPreco.promocaoNome,
+          ),
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      }
       await _registrarAuditoriaCaixa(
         'adicionar_item_orcamento_caixa',
         detalhes: {
@@ -3265,16 +4364,19 @@ class _CaixaPageState extends State<CaixaPage> {
       _pesquisaProdutoConferenciaFocus.requestFocus();
     } catch (e) {
       if (!mounted) return;
-      CaixaFeedback.erro(context, 'Nao foi possivel adicionar produto: $e');
+      CaixaFeedback.erro(
+        context,
+        'Nao foi possivel adicionar produto: ${LanApiFeedback.mensagem(e)}',
+      );
     }
   }
 
   Future<void> _alterarFormaPagamentoCaixa(Venda venda) async {
-    final autorizado = await solicitarAutorizacaoGerenteCaixa(
+    final gerente = await solicitarCredenciaisGerenteCaixa(
       context,
       _usuarioRepository,
     );
-    if (!autorizado || !mounted) return;
+    if (gerente == null || !mounted) return;
 
     final totalExibido = _totalComDesconto(venda);
     final resultado = await showDialog<DadosPagamentoOrcamento>(
@@ -3291,7 +4393,17 @@ class _CaixaPageState extends State<CaixaPage> {
     if (resultado == null || !mounted) return;
 
     try {
-      widget.vendaRepository.alterarPagamentoOrcamento(venda.id, resultado);
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .alterarPagamentoOrcamentoRemoto(
+          venda.id,
+          resultado,
+          gerenteLogin: gerente.login,
+          gerenteSenha: gerente.senha,
+        );
+      } else {
+        widget.vendaRepository.alterarPagamentoOrcamento(venda.id, resultado);
+      }
       _carregarOrcamentos();
       if (!mounted) return;
       final atualizado = widget.vendaRepository.obterPorId(venda.id);
@@ -3308,7 +4420,10 @@ class _CaixaPageState extends State<CaixaPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      CaixaFeedback.erro(context, 'Nao foi possivel alterar pagamento: $e');
+      CaixaFeedback.erro(
+        context,
+        'Nao foi possivel alterar pagamento: ${LanApiFeedback.mensagem(e)}',
+      );
     }
   }
 
@@ -3484,54 +4599,29 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   String _textoEntregaCaixa(Venda v) =>
-      EntregaVendaHelper.textoEntregaCabecalhoVenda(v);
+      EntregaVendaHelper.textoEntregaCabecalhoVenda(
+        v,
+        itens: _itensVenda(v),
+      );
 
   bool _vendaExigeDadosCarreto(Venda v) =>
-      EntregaVendaHelper.vendaTemItensCarreto(v);
-
-  String _rotuloStatusEntrega(String status) {
-    switch (status) {
-      case 'pendente':
-        return 'Pendente';
-      case 'roteirizada':
-        return 'Roteirizada';
-      case 'saiu_entrega':
-        return 'Saiu para entrega';
-      case 'entregue_complemento_pendente':
-        return 'Complemento pendente';
-      case 'entregue':
-        return 'Entregue';
-      case 'reagendada':
-        return 'Reagendada';
-      case 'cancelada':
-        return 'Cancelada';
-      default:
-        return 'Nao aplicavel';
-    }
-  }
+      EntregaVendaHelper.vendaTemItensCarreto(
+        v,
+        itens: _itensVenda(v),
+      );
 
   Cliente? _clienteDaVenda(Venda venda) {
-    final clienteLigado = venda.cliente.target;
-    if (clienteLigado != null) {
-      return clienteLigado;
-    }
-    final clienteId = venda.cliente.targetId;
-    if (clienteId == 0) {
-      return null;
-    }
-    return widget.clienteRepository.obterPorId(clienteId);
+    return VendaRelacaoSafe.cliente(
+      venda,
+      clienteRepository: widget.clienteRepository,
+    );
   }
 
   Vendedor? _vendedorDaVenda(Venda venda) {
-    final ligado = venda.vendedor.target;
-    if (ligado != null) {
-      return ligado;
-    }
-    final vid = venda.vendedor.targetId;
-    if (vid == 0) {
-      return null;
-    }
-    return widget.vendedorRepository.obterPorId(vid);
+    return VendaRelacaoSafe.vendedor(
+      venda,
+      vendedorRepository: widget.vendedorRepository,
+    );
   }
 
   String _rotuloVendedorUmLinha(Venda venda) {
@@ -3590,6 +4680,8 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _finalizarOrcamento(Venda venda) async {
+    if (_finalizandoVenda) return;
+    if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
     if (!_caixaAberto) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -3650,10 +4742,28 @@ class _CaixaPageState extends State<CaixaPage> {
       }
     }
     if (valorFiado > 0.001 && clienteId > 0) {
-      final r = widget.vendaRepository.validarLimiteCredito(
-        clienteId: clienteId,
-        valorFiadoOperacao: valorFiado,
-      );
+      late final dynamic r;
+      try {
+        if (widget.vendaRepository is VendaApiRepository) {
+          r = await (widget.vendaRepository as VendaApiRepository)
+              .validarLimiteCreditoRemoto(
+            clienteId: clienteId,
+            valorFiadoOperacao: valorFiado,
+          );
+        } else {
+          r = widget.vendaRepository.validarLimiteCredito(
+            clienteId: clienteId,
+            valorFiadoOperacao: valorFiado,
+          );
+        }
+      } catch (e) {
+        if (!mounted) return;
+        CaixaFeedback.erro(
+          context,
+          'Falha ao validar limite de credito: ${LanApiFeedback.mensagem(e)}',
+        );
+        return;
+      }
       if (!r.permitido) {
         if (!mounted) return;
         await showDialog<void>(
@@ -3695,7 +4805,7 @@ class _CaixaPageState extends State<CaixaPage> {
               .toDouble()
           : 0.0;
     }
-    final itensCount = venda.itens.length;
+    final itensCount = _itensVenda(venda).length;
 
     if (venda.formaPagamento == 'misto') {
       final linhasBruto = _linhasMistoDoFormulario();
@@ -3813,37 +4923,51 @@ class _CaixaPageState extends State<CaixaPage> {
     if (confirmarFinalizacao != true) {
       return;
     }
+    if (!mounted) return;
+    setState(() => _finalizandoVenda = true);
     try {
       if (venda.formaPagamento == 'misto') {
         final linhasBruto = _linhasMistoDoFormulario();
         if (linhasBruto.isNotEmpty) {
           final linhasConf =
               _normalizarLinhasMistoGravacao(linhasBruto, totalVenda);
-          widget.vendaRepository.substituirPagamentosMistoOrcamento(
-            venda.id,
-            linhasConf,
-          );
+          if (widget.vendaRepository is VendaApiRepository) {
+            await (widget.vendaRepository as VendaApiRepository)
+                .substituirPagamentosMistoOrcamentoRemoto(
+              venda.id,
+              linhasConf,
+            );
+          } else {
+            widget.vendaRepository.substituirPagamentosMistoOrcamento(
+              venda.id,
+              linhasConf,
+            );
+          }
         }
       }
-      widget.vendaRepository.converterOrcamentoParaVenda(
-        venda.id,
-        permitirVendaSemEstoque: _permitirVendaSemEstoque,
-      );
-      await LanSyncScheduler.solicitarSyncPrioritario();
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .converterOrcamentoParaVendaRemoto(
+          venda.id,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      } else {
+        widget.vendaRepository.converterOrcamentoParaVenda(
+          venda.id,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+        await LanSyncScheduler.solicitarSyncPrioritario();
+      }
+      // KPI "Vendas hoje" no Inicio (PC servidor e terminais via WS).
+      SyncRefreshHub.instance.notificarDadosAtualizados();
       if (!mounted) return;
       final vendaFinalizada = widget.vendaRepository.obterPorId(venda.id) ?? venda;
-      final clienteId = vendaFinalizada.cliente.targetId;
-      if (clienteId != 0) {
-        final cliente = widget.clienteRepository.obterPorId(clienteId);
-        if (cliente != null) {
-          await _mensageriaRepository.enfileirarAgradecimentoVenda(
-            venda: vendaFinalizada,
-            cliente: cliente,
-          );
-          await _mensageriaRepository.processarFilaPendente(limite: 5);
-        }
-      }
+      // Forca UI do PC1/terminal a reler estoque apos reserva na finalizacao.
+      try {
+        widget.produtoRepository.atualizarCacheAposMovimentoEstoque();
+      } catch (_) {}
       _carregarOrcamentos();
+      _atualizarListaUltimasVendasFinalizadasCaixa();
       if (!mounted) return;
       final numCupom =
           vendaFinalizada.numeroOrcamento > 0
@@ -3881,11 +5005,49 @@ class _CaixaPageState extends State<CaixaPage> {
       _atualizarResumoNfcePendenteEmissao();
     } catch (e) {
       if (!mounted) return;
-      CaixaFeedback.erro(context, 'Nao foi possivel finalizar: $e');
+      if (_ehTimeoutFinalizacao(e)) {
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Aguardando servidor'),
+            content: const Text(
+              'Aguardando resposta do servidor. Nao feche a tela.\n\n'
+              'Se a venda ja aparecer na listagem, nao finalize de novo.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Entendi'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        CaixaFeedback.erro(
+          context,
+          'Nao foi possivel finalizar: ${LanApiFeedback.mensagem(e)}',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _finalizandoVenda = false);
+      } else {
+        _finalizandoVenda = false;
+      }
     }
   }
 
-  /// Dinheiro/fiado -> cupom; PIX/cartao -> NFC-e; CNPJ + eletronico -> NF-e 55.
+  bool _ehTimeoutFinalizacao(Object e) {
+    if (e is TimeoutException) return true;
+    final m = LanApiFeedback.mensagem(e).toLowerCase();
+    return m.contains('tempo esgotado') ||
+        m.contains('timeout') ||
+        m.contains('timed out');
+  }
+
+  /// NFC-e / NF-e 55 conforme pagamento. Comprovante (cupom) e oferecido
+  /// sempre, em fluxo separado — independente desta acao.
   String? _acaoFiscalAutomaticaPorPagamento(Venda venda) {
     return CaixaFiscalAcaoHelper.acaoAutomaticaPorPagamento(
       venda: venda,
@@ -3910,21 +5072,57 @@ class _CaixaPageState extends State<CaixaPage> {
     unawaited(_executarFiscalPosVendaEmSegundoPlano(sessao));
   }
 
+  /// Pergunta de comprovante para qualquer forma de pagamento.
+  Future<void> _oferecerComprovantePosVenda(CaixaPosVendaSessao sessao) async {
+    final venda =
+        widget.vendaRepository.obterPorId(sessao.venda.id) ?? sessao.venda;
+    await _imprimirCupomNaoFiscalPosVenda(
+      venda: venda,
+      totalRecebido: sessao.totalRecebido,
+      troco: sessao.troco,
+    );
+  }
+
   Future<void> _executarFiscalPosVendaEmSegundoPlano(
     CaixaPosVendaSessao sessao,
   ) async {
     final venda =
         widget.vendaRepository.obterPorId(sessao.venda.id) ?? sessao.venda;
-    final acao = _acaoFiscalAutomaticaPorPagamento(venda);
-    if (acao == null) return;
-    if (_documentoFiscalCaixaJaAtendido(venda, acao)) return;
+
+    // Sempre pergunta o comprovante (dinheiro, PIX, cartao, fiado, misto...).
+    try {
+      if (mounted) {
+        await _oferecerComprovantePosVenda(sessao);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Comprovante: ${LanApiFeedback.mensagem(e)}'),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+
+    final vendaAtual =
+        widget.vendaRepository.obterPorId(sessao.venda.id) ?? venda;
+    final acao = _acaoFiscalAutomaticaPorPagamento(vendaAtual);
+    if (acao == null || acao == 'cupom') {
+      _atualizarResumoNfcePendenteEmissao();
+      return;
+    }
+    if (_documentoFiscalCaixaJaAtendido(vendaAtual, acao)) {
+      _atualizarResumoNfcePendenteEmissao();
+      return;
+    }
 
     if (acao == 'nfe55') {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Venda ${venda.numeroOrcamento} exige NF-e 55. '
+            'Venda ${vendaAtual.numeroOrcamento} exige NF-e 55. '
             'Abra Notas fiscais quando puder.',
           ),
           duration: const Duration(seconds: 8),
@@ -3936,8 +5134,8 @@ class _CaixaPageState extends State<CaixaPage> {
     try {
       if (acao == 'nfce') {
         final bloqueioCnpj = CaixaFiscalAcaoHelper.mensagemBloqueioNfceClienteCnpj(
-          cliente: _clienteDaVenda(venda),
-          venda: venda,
+          cliente: _clienteDaVenda(vendaAtual),
+          venda: vendaAtual,
         );
         if (bloqueioCnpj != null) {
           if (mounted) {
@@ -3947,13 +5145,7 @@ class _CaixaPageState extends State<CaixaPage> {
           }
           return;
         }
-        await _emitirNfceParaVenda(venda);
-      } else if (acao == 'cupom') {
-        await _imprimirCupomNaoFiscalPosVenda(
-          venda: venda,
-          totalRecebido: sessao.totalRecebido,
-          troco: sessao.troco,
-        );
+        await _emitirNfceParaVenda(vendaAtual);
       }
       _atualizarResumoNfcePendenteEmissao();
     } catch (e) {
@@ -3975,16 +5167,33 @@ class _CaixaPageState extends State<CaixaPage> {
     }
     if (_etapaCaixa != CaixaEtapa.fiscal || _posVenda == null) return;
 
-    final venda = _vendaPosCaixaAtualizada() ?? _posVenda!.venda;
+    final sessao = _posVenda!;
+    _documentoFiscalAutomaticoDisparado = true;
+
+    // Sempre oferece o comprovante, independente do pagamento.
+    setState(() => _posVendaProcessando = true);
+    try {
+      await _oferecerComprovantePosVenda(sessao);
+      _atualizarPosVendaDoRepositorio();
+    } finally {
+      if (mounted) setState(() => _posVendaProcessando = false);
+    }
+    if (!mounted || _posVenda == null) return;
+
+    final venda = _vendaPosCaixaAtualizada() ?? sessao.venda;
     final acao = _acaoFiscalAutomaticaPorPagamento(venda);
-    if (acao == null) return;
+    if (acao == null || acao == 'cupom') {
+      if (_vendaComDocumentoPosCaixaObrigatorio(venda)) {
+        await _encerrarPosVendaFiscal();
+      }
+      return;
+    }
 
     if (_documentoFiscalCaixaJaAtendido(venda, acao)) {
       await _encerrarPosVendaFiscal();
       return;
     }
 
-    _documentoFiscalAutomaticoDisparado = true;
     await _executarAcaoPosVendaFiscal(acao);
   }
 
@@ -4056,10 +5265,10 @@ class _CaixaPageState extends State<CaixaPage> {
     if (!mounted) return;
     if (resultado != CancelarVendaUiResultado.sucesso) return;
     _carregarOrcamentos();
+    await _aposMutacaoFiscalOuCancelamentoCaixa(vendaId: venda.id);
+    if (!mounted) return;
     if (_posVenda?.venda.id == venda.id) {
       _prepararCaixaPosProximaVenda();
-    } else {
-      setState(() {});
     }
   }
 
@@ -4237,16 +5446,24 @@ class _CaixaPageState extends State<CaixaPage> {
     String origem = 'nota fiscal',
   }) async {
     try {
-      widget.vendaRepository.reprocessarBaixaEstoqueDocumentoVenda(
-        vendaId,
-        permitirVendaSemEstoque: _permitirVendaSemEstoque,
-      );
+      final repo = widget.vendaRepository;
+      if (repo is VendaApiRepository) {
+        await repo.reprocessarBaixaEstoqueDocumentoVendaRemoto(
+          vendaId,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      } else {
+        repo.reprocessarBaixaEstoqueDocumentoVenda(
+          vendaId,
+          permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+      }
       return true;
     } catch (e) {
       if (!mounted) return false;
       CaixaFeedback.erro(
         context,
-        'Falha ao reprocessar baixa de estoque: $e',
+        'Falha ao reprocessar baixa de estoque: ${LanApiFeedback.mensagem(e)}',
       );
       return false;
     }
@@ -4343,19 +5560,37 @@ class _CaixaPageState extends State<CaixaPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      CaixaFeedback.erro(context, 'Nao foi possivel baixar estoque: $e');
+      CaixaFeedback.erro(
+        context,
+        'Nao foi possivel baixar estoque: ${LanApiFeedback.mensagem(e)}',
+      );
       return;
     }
     final vendaAtualizada =
         widget.vendaRepository.obterPorId(venda.id) ?? venda;
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
+    List<ItemVenda> itensCupom = const [];
+    final repo = widget.vendaRepository;
+    try {
+      if (repo is VendaApiRepository) {
+        itensCupom = await repo.carregarItensRemoto(vendaAtualizada.id);
+      } else {
+        itensCupom = List<ItemVenda>.from(
+          repo.listarItensPorVenda(vendaAtualizada.id) as List,
+        );
+      }
+    } catch (_) {
+      itensCupom = _itensVenda(vendaAtualizada);
+    }
     final nomeArquivo =
         'venda_${venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id}.pdf';
     await mostrarFluxoImpressaoCupomVenda(
       context,
       printService: widget.printService,
       config: config,
+      title: 'Comprovante da venda',
+      content: 'Deseja imprimir o comprovante agora ou gerar PDF?',
       gerarPdf: () => CupomNaoFiscalVendaPdf.gerar(
         venda: vendaAtualizada,
         config: config,
@@ -4365,6 +5600,16 @@ class _CaixaPageState extends State<CaixaPage> {
         troco: troco,
         segundaVia: false,
         dataCabecalhoVenda: DateTime.now(),
+        itens: itensCupom,
+      ),
+      dadosEscPos: CupomBalcaoDados(
+        venda: vendaAtualizada,
+        config: config,
+        itens: itensCupom,
+        cliente: _clienteDaVenda(vendaAtualizada),
+        vendedor: _vendedorDaVenda(vendaAtualizada),
+        totalRecebido: totalRecebido,
+        troco: troco,
       ),
       suggestedFileName: nomeArquivo,
     );
@@ -4379,23 +5624,79 @@ class _CaixaPageState extends State<CaixaPage> {
         vendaRepository: widget.vendaRepository,
         clienteRepository: widget.clienteRepository,
         vendedorRepository: widget.vendedorRepository,
+        produtoRepository: widget.produtoRepository,
         appConfigRepository: widget.appConfigRepository,
         printService: widget.printService,
         focusNfeService: _focusNfeService,
       );
 
   Future<void> _emitirNfceParaVenda(Venda venda) async {
+    if (widget.vendaRepository is VendaApiRepository) {
+      final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+      if (client == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'API do servidor indisponivel para emitir NFC-e.',
+            ),
+          ),
+        );
+        return;
+      }
+      try {
+        final r = await client.emitirNfce(venda.id);
+        if (!mounted) return;
+        if (r['ok'] == true) {
+          await _aposMutacaoFiscalOuCancelamentoCaixa(vendaId: venda.id);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                r['autorizada'] == true
+                    ? 'NFC-e ${(r['numero'] ?? '').toString()} autorizada no servidor.'
+                    : 'NFC-e em processamento no servidor.',
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${r['error'] ?? 'Falha ao emitir NFC-e'}'),
+            ),
+          );
+        }
+      } catch (e) {
+        if (!mounted) return;
+        LanApiFeedback.snackErro(context, e, prefixo: 'Falha ao emitir NFC-e');
+      }
+      return;
+    }
     await EmitirNfceVendaFlow.executar(
       context,
       deps: _emitirNfceDeps,
       venda: venda,
       fluxoAutomaticoPosVenda: _documentoFiscalAutomaticoDisparado,
-      onConcluidoComSucesso: _atualizarListaUltimasVendasFinalizadasCaixa,
+      onConcluidoComSucesso: () {
+        _atualizarListaUltimasVendasFinalizadasCaixa();
+        _atualizarResumoNfcePendenteEmissao();
+      },
     );
   }
 
-  Venda? _buscarVendaFinalizadaParaSegundaVia(int numeroOuId) {
-    return widget.vendaRepository.buscarVendaFinalizadaPorNumeroOuId(numeroOuId);
+  Future<Venda?> _buscarVendaFinalizadaParaSegundaVia(int numeroOuId) async {
+    final repo = widget.vendaRepository;
+    final local = repo.buscarVendaFinalizadaPorNumeroOuId(numeroOuId);
+    if (local != null) return local;
+    if (repo is VendaApiRepository) {
+      try {
+        return await repo.buscarVendaFinalizadaPorNumeroOuIdRemoto(numeroOuId);
+      } catch (e) {
+        debugPrint('Caixa: busca 2a via remota: $e');
+        return null;
+      }
+    }
+    return null;
   }
 
   static const int _ultimasVendasFinalizadasLimite = 20;
@@ -4447,12 +5748,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _abrirAcoesVendaFinalizada(Venda vIn) async {
-    final autorizado = await autorizarSegundaViaCupomSeConfigurado(
-      context: context,
-      usuarioRepository: _usuarioRepository,
-      exigirAutorizacao: _exigirAutorizacaoSegundaViaCupom,
-    );
-    if (!mounted || !autorizado) return;
+    // Autorizacao de 2a via so na acao "cupom" (nao bloqueia cancelar/NFC-e/DANFE).
     await _aguardarEntreDialogos();
     if (!mounted) return;
     final v = widget.vendaRepository.obterPorId(vIn.id) ?? vIn;
@@ -4635,12 +5931,17 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
     if (acao == 'cupom') {
+      final autorizado = await autorizarSegundaViaCupomSeConfigurado(
+        context: context,
+        usuarioRepository: _usuarioRepository,
+        exigirAutorizacao: _exigirAutorizacaoSegundaViaCupom,
+      );
+      if (!mounted || !autorizado) return;
       await _emitirSegundaViaCupomParaVenda(v);
     } else if (acao == 'nfce') {
       await _aguardarEntreDialogos();
       if (!mounted) return;
       await _emitirNfceParaVenda(v);
-      _atualizarListaUltimasVendasFinalizadasCaixa();
     } else if (acao == 'danfe_nfce') {
       await _abrirDanfeNfceVenda(v);
     } else if (acao == 'danfe_nfe') {
@@ -4652,6 +5953,30 @@ class _CaixaPageState extends State<CaixaPage> {
     final vendaAtualizada = widget.vendaRepository.obterPorId(v.id) ?? v;
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
+    List<ItemVenda> itensCupom = const [];
+    final repo = widget.vendaRepository;
+    try {
+      if (repo is VendaApiRepository) {
+        itensCupom = await repo.carregarItensRemoto(vendaAtualizada.id);
+      } else {
+        itensCupom = List<ItemVenda>.from(
+          repo.listarItensPorVenda(vendaAtualizada.id) as List,
+        );
+      }
+    } catch (_) {
+      itensCupom = _itensVenda(vendaAtualizada);
+    }
+    if (itensCupom.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Nao foi possivel carregar os itens desta venda para o PDF.',
+          ),
+        ),
+      );
+      return;
+    }
     final infer =
         CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(vendaAtualizada);
     final nomeArquivo =
@@ -4671,6 +5996,17 @@ class _CaixaPageState extends State<CaixaPage> {
         troco: infer.troco,
         segundaVia: true,
         dataCabecalhoVenda: vendaAtualizada.data,
+        itens: itensCupom,
+      ),
+      dadosEscPos: CupomBalcaoDados(
+        venda: vendaAtualizada,
+        config: config,
+        itens: itensCupom,
+        cliente: _clienteDaVenda(vendaAtualizada),
+        vendedor: _vendedorDaVenda(vendaAtualizada),
+        totalRecebido: infer.recebido,
+        troco: infer.troco,
+        segundaVia: true,
       ),
       suggestedFileName: nomeArquivo,
     );
@@ -4699,6 +6035,32 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
+  Future<void> _confirmarSegundaViaPorNumero(
+    BuildContext dialogContext,
+    String texto,
+  ) async {
+    final n = int.tryParse(texto.replaceAll(RegExp(r'[^0-9]'), ''));
+    if (n == null) {
+      ScaffoldMessenger.of(dialogContext).showSnackBar(
+        const SnackBar(content: Text('Digite um numero valido.')),
+      );
+      return;
+    }
+    final v = await _buscarVendaFinalizadaParaSegundaVia(n);
+    if (!dialogContext.mounted) return;
+    if (v == null) {
+      ScaffoldMessenger.of(dialogContext).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Venda nao encontrada, cancelada ou ainda nao finalizada.',
+          ),
+        ),
+      );
+      return;
+    }
+    Navigator.pop(dialogContext, v);
+  }
+
   Future<void> _abrirSegundaViaCupom() async {
     final numeroController = TextEditingController();
     final encontrada = await showDialog<Venda>(
@@ -4724,24 +6086,10 @@ class _CaixaPageState extends State<CaixaPage> {
                     labelText: 'Numero da venda ou ID',
                     hintText: 'Ex.: 1042',
                   ),
-                  onSubmitted: (_) {
-                    final n = int.tryParse(
-                      numeroController.text.replaceAll(RegExp(r'[^0-9]'), ''),
-                    );
-                    if (n == null) return;
-                    final v = _buscarVendaFinalizadaParaSegundaVia(n);
-                    if (v == null) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Venda nao encontrada, cancelada ou ainda nao finalizada.',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-                    Navigator.pop(ctx, v);
-                  },
+                  onSubmitted: (_) => unawaited(_confirmarSegundaViaPorNumero(
+                    ctx,
+                    numeroController.text,
+                  )),
                 ),
               ],
             ),
@@ -4752,31 +6100,10 @@ class _CaixaPageState extends State<CaixaPage> {
               child: const Text('Cancelar'),
             ),
             ElevatedButton(
-              onPressed: () {
-                final n = int.tryParse(
-                  numeroController.text.replaceAll(RegExp(r'[^0-9]'), ''),
-                );
-                if (n == null) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(
-                      content: Text('Digite um numero valido.'),
-                    ),
-                  );
-                  return;
-                }
-                final v = _buscarVendaFinalizadaParaSegundaVia(n);
-                if (v == null) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Venda nao encontrada, cancelada ou ainda nao finalizada.',
-                      ),
-                    ),
-                  );
-                  return;
-                }
-                Navigator.pop(ctx, v);
-              },
+              onPressed: () => unawaited(_confirmarSegundaViaPorNumero(
+                ctx,
+                numeroController.text,
+              )),
               child: const Text('Continuar'),
             ),
           ],
@@ -4835,7 +6162,9 @@ class _CaixaPageState extends State<CaixaPage> {
   Future<void> _vincularClienteAgora() async {
     final venda = _selecionado;
     if (venda == null) return;
-    int? clienteSelecionadoId = venda.cliente.target?.id;
+    int? clienteSelecionadoId = venda.cliente.targetId > 0
+        ? venda.cliente.targetId
+        : null;
     final pesquisaClienteController = TextEditingController();
     final confirmar = await showDialog<bool>(
       context: context,
@@ -4844,6 +6173,7 @@ class _CaixaPageState extends State<CaixaPage> {
           limit: 60,
           somenteAtivos: true,
         );
+        Timer? debounceApi;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             void atualizarBusca(String termo) {
@@ -4859,6 +6189,19 @@ class _CaixaPageState extends State<CaixaPage> {
                         .where((c) => c.ativo)
                         .take(60)
                         .toList();
+              });
+              final repo = widget.clienteRepository;
+              if (repo is! ClienteApiRepository || t.isEmpty) return;
+              debounceApi?.cancel();
+              debounceApi = Timer(const Duration(milliseconds: 320), () async {
+                try {
+                  final remotos = await repo.pesquisarRemoto(t, limit: 60);
+                  if (!context.mounted) return;
+                  setDialogState(() {
+                    clientesExibidos =
+                        remotos.where((c) => c.ativo).take(60).toList();
+                  });
+                } catch (_) {}
               });
             }
 
@@ -4958,10 +6301,18 @@ class _CaixaPageState extends State<CaixaPage> {
     pesquisaClienteController.dispose();
     if (confirmar != true) return;
     try {
-      widget.vendaRepository.vincularClienteNoOrcamento(
-        venda.id,
-        clienteSelecionadoId,
-      );
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .vincularClienteNoOrcamentoRemoto(
+          venda.id,
+          clienteSelecionadoId,
+        );
+      } else {
+        widget.vendaRepository.vincularClienteNoOrcamento(
+          venda.id,
+          clienteSelecionadoId,
+        );
+      }
       _carregarOrcamentos();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -4969,8 +6320,10 @@ class _CaixaPageState extends State<CaixaPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel vincular cliente: $e')),
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Nao foi possivel vincular cliente',
       );
     }
   }
@@ -5091,10 +6444,15 @@ class _CaixaPageState extends State<CaixaPage> {
     if (confirmar != true || vendedorSelecionadoId == null) return;
     final vendedorId = vendedorSelecionadoId!;
     try {
-      widget.vendaRepository.vincularVendedorNoOrcamento(
-        venda.id,
-        vendedorId,
-      );
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .vincularVendedorNoOrcamentoRemoto(venda.id, vendedorId);
+      } else {
+        widget.vendaRepository.vincularVendedorNoOrcamento(
+          venda.id,
+          vendedorId,
+        );
+      }
       _carregarOrcamentos();
       if (!mounted) return;
       final v = widget.vendedorRepository.obterPorId(vendedorId);
@@ -5108,8 +6466,10 @@ class _CaixaPageState extends State<CaixaPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel vincular vendedor: $e')),
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Nao foi possivel vincular vendedor',
       );
     }
   }
@@ -5234,7 +6594,8 @@ class _CaixaPageState extends State<CaixaPage> {
     Venda selecionado,
   ) {
     final scheme = Theme.of(context).colorScheme;
-    final podeRemover = selecionado.itens.length > 1;
+    final itens = _itensVenda(selecionado);
+    final podeRemover = itens.length > 1;
 
     return Card(
       elevation: 0,
@@ -5292,10 +6653,10 @@ class _CaixaPageState extends State<CaixaPage> {
               child: ListView.builder(
                 controller: _itensScrollController,
                 padding: const EdgeInsets.only(right: 10),
-                itemCount: selecionado.itens.length,
+                itemCount: itens.length,
                 itemBuilder: (context, index) {
-                  final item = selecionado.itens[index];
-                  final produto = item.produto.target;
+                  final item = itens[index];
+                  final produto = _produtoDoItem(item);
                   final passoQtd = ProdutoEmbalagem.passoQuantidadeArmazenada(
                     produto: produto,
                     quantidadeArmazenada: item.quantidade,
@@ -5305,116 +6666,177 @@ class _CaixaPageState extends State<CaixaPage> {
                     quantidadeArmazenada: item.quantidade,
                   );
                   final noMinimo = item.quantidade <= passoQtd;
+                  final fundoTipo = PdvBotaoTipoEntregaItem.fundoPara(
+                    context,
+                    item.tipoEntregaItem,
+                  );
+                  final bordaTipo = PdvBotaoTipoEntregaItem.bordaPara(
+                    context,
+                    item.tipoEntregaItem,
+                  );
+                  final corTipo = PdvBotaoTipoEntregaItem.corPara(
+                    context,
+                    item.tipoEntregaItem,
+                  );
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                    child: Row(
-                      children: [
-                        SizedBox(width: 32, child: Text('${index + 1}')),
-                        Expanded(
-                          flex: 4,
-                          child: Text(
-                            '${item.nomeProduto} '
-                            '(${EntregaVendaHelper.abreviacaoTipoItem(item.tipoEntregaItem)})',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
+                    child: Material(
+                      color: fundoTipo,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(color: bordaTipo, width: 4),
+                            bottom: BorderSide(
+                              color: bordaTipo.withValues(alpha: 0.45),
+                            ),
                           ),
                         ),
-                        SizedBox(
-                          width: 168,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 4,
+                          ),
                           child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 36,
-                                  minHeight: 36,
-                                ),
-                                tooltip: noMinimo
-                                    ? 'Remover item'
-                                    : 'Diminuir quantidade',
-                                icon: const Icon(Icons.remove_circle_outline),
-                                onPressed: noMinimo
-                                    ? (podeRemover
-                                        ? () => unawaited(
-                                              _removerItemConferencia(
-                                                selecionado,
-                                                item,
-                                              ),
-                                            )
-                                        : null)
-                                    : () => unawaited(
-                                          _alterarQuantidadeItemConferencia(
-                                            selecionado,
-                                            item,
-                                            -1,
-                                          ),
-                                        ),
+                              SizedBox(
+                                width: 32,
+                                child: Text('${index + 1}'),
                               ),
-                              Flexible(
-                                child: Text(
-                                  qtdTexto,
-                                  textAlign: TextAlign.center,
+                              Expanded(
+                                flex: 4,
+                                child: Text.rich(
+                                  TextSpan(
+                                    children: [
+                                      TextSpan(text: item.nomeProduto),
+                                      TextSpan(
+                                        text:
+                                            ' (${EntregaVendaHelper.abreviacaoTipoItem(item.tipoEntregaItem)})',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          color: corTipo,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
-                                      ?.copyWith(fontWeight: FontWeight.w700),
                                 ),
                               ),
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 36,
-                                  minHeight: 36,
+                              SizedBox(
+                                width: 168,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                        minWidth: 36,
+                                        minHeight: 36,
+                                      ),
+                                      tooltip: noMinimo
+                                          ? 'Remover item'
+                                          : 'Diminuir quantidade',
+                                      icon: const Icon(
+                                        Icons.remove_circle_outline,
+                                      ),
+                                      onPressed: noMinimo
+                                          ? (podeRemover
+                                              ? () => unawaited(
+                                                    _removerItemConferencia(
+                                                      selecionado,
+                                                      item,
+                                                    ),
+                                                  )
+                                              : null)
+                                          : () => unawaited(
+                                                _alterarQuantidadeItemConferencia(
+                                                  selecionado,
+                                                  item,
+                                                  -1,
+                                                ),
+                                              ),
+                                    ),
+                                    Flexible(
+                                      child: Text(
+                                        qtdTexto,
+                                        textAlign: TextAlign.center,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                        minWidth: 36,
+                                        minHeight: 36,
+                                      ),
+                                      tooltip: 'Aumentar quantidade',
+                                      icon: const Icon(
+                                        Icons.add_circle_outline,
+                                      ),
+                                      onPressed: () => unawaited(
+                                        _alterarQuantidadeItemConferencia(
+                                          selecionado,
+                                          item,
+                                          1,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                tooltip: 'Aumentar quantidade',
-                                icon: const Icon(Icons.add_circle_outline),
-                                onPressed: () => unawaited(
-                                  _alterarQuantidadeItemConferencia(
-                                    selecionado,
-                                    item,
-                                    1,
+                              ),
+                              Expanded(
+                                child: Text(
+                                  _formatarMoeda(item.precoUnitario),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  _formatarMoeda(_subtotalLinhaItem(item)),
+                                  textAlign: TextAlign.right,
+                                ),
+                              ),
+                              SizedBox(
+                                width: 44,
+                                child: IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  tooltip: podeRemover
+                                      ? 'Remover item (gerente)'
+                                      : 'Ultimo item — nao pode remover',
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    color: podeRemover
+                                        ? scheme.error
+                                        : scheme.onSurface.withValues(
+                                            alpha: 0.3,
+                                          ),
                                   ),
+                                  onPressed: podeRemover
+                                      ? () => unawaited(
+                                            _removerItemConferencia(
+                                              selecionado,
+                                              item,
+                                            ),
+                                          )
+                                      : null,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        Expanded(
-                          child: Text(_formatarMoeda(item.precoUnitario)),
-                        ),
-                        Expanded(
-                          child: Text(
-                            _formatarMoeda(item.subtotal),
-                            textAlign: TextAlign.right,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 44,
-                          child: IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            tooltip: podeRemover
-                                ? 'Remover item (gerente)'
-                                : 'Ultimo item — nao pode remover',
-                            icon: Icon(
-                              Icons.delete_outline,
-                              color: podeRemover
-                                  ? scheme.error
-                                  : scheme.onSurface.withValues(alpha: 0.3),
-                            ),
-                            onPressed: podeRemover
-                                ? () => unawaited(
-                                      _removerItemConferencia(selecionado, item),
-                                    )
-                                : null,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   );
                 },
@@ -5577,8 +6999,10 @@ class _CaixaPageState extends State<CaixaPage> {
       onDesconto: _descontoCaixaDisponivel()
           ? () => unawaited(_abrirDescontoCaixa())
           : null,
-      onFechar: _fecharPainelCobranca,
-      onFinalizar: () => unawaited(_finalizarOrcamento(selecionado)),
+      onFechar: _finalizandoVenda ? null : _fecharPainelCobranca,
+      onFinalizar: _finalizandoVenda
+          ? null
+          : () => unawaited(_finalizarOrcamento(selecionado)),
     );
   }
 
@@ -5697,8 +7121,6 @@ class _CaixaPageState extends State<CaixaPage> {
     final clienteSelecionado = _clienteDaVenda(selecionado);
     final descontoSelecionado = _descontoAplicado(selecionado);
     final totalComDesconto = _totalComDesconto(selecionado);
-    final freteSelecionado = selecionado.valorFrete;
-    final subtotalProdutos = selecionado.somaSubtotalItens;
     final descontoPdvOrcamento = _descontoPdvOrcamentoExibicao(selecionado);
     final descontoCaixa = descontoSelecionado;
     final parteDinheiroResumo =
@@ -5751,6 +7173,8 @@ class _CaixaPageState extends State<CaixaPage> {
       SyncRefreshHub.instance.removeListener(_syncHubListener!);
       _syncHubListener = null;
     }
+    LanApiEventHub.instance.removeListener(_onApiEntityChanged);
+    CaixaLocalRefreshHub.instance.removeListener(_onCaixaLocalRefresh);
     _debounceSyncOrcamentos?.cancel();
     HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwareCaixa);
     _timerReconciliacaoNfce?.cancel();
@@ -5844,12 +7268,83 @@ class _CaixaPageState extends State<CaixaPage> {
                 ),
               ],
             ),
-            body: Container(
-              color: theme.colorScheme.surfaceContainerLowest,
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: _buildCorpoCaixa(context),
-              ),
+            body: Stack(
+              children: [
+                Container(
+                  color: theme.colorScheme.surfaceContainerLowest,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (LanApiEventHub.instance.deveBloquearOperacoes)
+                        Material(
+                          color: theme.colorScheme.errorContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.cloud_off_outlined,
+                                  color: theme.colorScheme.onErrorContainer,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    LanApiEventHub.msgServidorOffline,
+                                    style: TextStyle(
+                                      color: theme.colorScheme.onErrorContainer,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: _buildCorpoCaixa(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_finalizandoVenda)
+                  const ModalBarrier(
+                    dismissible: false,
+                    color: Color(0x66000000),
+                  ),
+                if (_finalizandoVenda)
+                  const Center(
+                    child: Card(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 22,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(),
+                            SizedBox(height: 16),
+                            Text(
+                              'Processando finalizacao...',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            SizedBox(height: 6),
+                            Text(
+                              'Aguardando resposta do servidor.\nNao feche a tela.',
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ),
@@ -5857,38 +7352,161 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
+  Future<bool?> _perguntarAbrirCaixaParaContinuar() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Caixa fechado'),
+        content: const Text(
+          'Nao ha caixa aberto na loja. Deseja abrir agora para importar '
+          'orcamentos e finalizar vendas?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Abrir caixa'),
+          ),
+        ],
+      ),
+    );
+  }
+
   List<Widget> _buildAvisosCaixasRemotos(BuildContext context) {
+    final theme = Theme.of(context);
+    final widgets = <Widget>[];
+
+    if (_caixaAberto) {
+      final origem = _caixaAderidoRemoto
+          ? (_terminalSessaoAbertaId.isNotEmpty
+              ? _terminalSessaoAbertaId
+              : 'outro terminal')
+          : 'neste PC';
+      final abertura = _aberturaCaixaEm == null
+          ? ''
+          : ' · desde ${DateFormat('HH:mm').format(_aberturaCaixaEm!.toLocal())}';
+      final abertos = _sessoesRede.values.where((s) => s.aberto).length;
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Material(
+            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.lock_open_outlined,
+                    size: 18,
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Caixa aberto'
+                      '${_operadorCaixa.trim().isNotEmpty ? ' · $_operadorCaixa' : ''}'
+                      ' · $origem$abertura'
+                      '${abertos > 0 ? ' · $abertos na loja' : ''}'
+                      '${_caixaAderidoRemoto ? ' (aderido)' : ''}'
+                      '${_umCaixaPorLojaRemoto && abertos <= 1 ? '' : (!_umCaixaPorLojaRemoto ? ' · multi-caixa' : '')}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onPrimaryContainer,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    } else if (_caixaApi != null) {
+      final abertosRede =
+          _sessoesRede.values.where((s) => s.aberto).toList(growable: false);
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Material(
+            color: abertosRede.isNotEmpty
+                ? theme.colorScheme.errorContainer.withValues(alpha: 0.45)
+                : theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    abertosRede.isNotEmpty
+                        ? Icons.warning_amber_outlined
+                        : Icons.lock_outline,
+                    size: 18,
+                    color: abertosRede.isNotEmpty
+                        ? theme.colorScheme.onErrorContainer
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      abertosRede.isNotEmpty
+                          ? 'Operacao bloqueada neste terminal, mas ha caixa '
+                              'aberto na rede (${abertosRede.map((s) => s.terminalId).join(', ')}). '
+                              'Com "um caixa por loja", recarregue a tela ou abra o Caixa novamente.'
+                          : 'Caixa fechado na loja. Abra o caixa para importar orcamentos.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: abertosRede.isNotEmpty
+                            ? theme.colorScheme.onErrorContainer
+                            : theme.colorScheme.onSurfaceVariant,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final outros = _sessoesRede.values
         .where((s) => s.aberto && s.terminalId != _terminalId)
         .toList();
-    if (outros.isEmpty) return const [];
-    return [
-      const SizedBox(height: 8),
-      ...outros.map(
-        (s) => Padding(
+    for (final s in outros) {
+      if (_caixaAderidoRemoto && s.terminalId == _terminalSessaoAbertaId) {
+        continue;
+      }
+      widgets.add(
+        Padding(
           padding: const EdgeInsets.only(bottom: 4),
           child: Row(
             children: [
               Icon(
                 Icons.cloud_sync_outlined,
                 size: 16,
-                color: Theme.of(context).colorScheme.primary,
+                color: theme.colorScheme.primary,
               ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   'Rede: caixa aberto em ${s.terminalId}'
                   '${s.operador.trim().isNotEmpty ? ' (${s.operador})' : ''}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
           ),
         ),
-      ),
-    ];
+      );
+    }
+    return widgets;
   }
 
   Widget _buildTituloAppBarCaixa(BuildContext context) {
@@ -5937,7 +7555,11 @@ class _CaixaPageState extends State<CaixaPage> {
         ElevatedButton.icon(
           onPressed: _caixaAberto ? null : _abrirCaixa,
           icon: const Icon(Icons.lock_open_outlined),
-          label: const Text('Abrir caixa'),
+          label: Text(
+            _caixaAberto && _caixaAderidoRemoto
+                ? 'Ja aberto na loja'
+                : 'Abrir caixa',
+          ),
           style: ElevatedButton.styleFrom(
             minimumSize: const Size(0, 34),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -5983,7 +7605,9 @@ class _CaixaPageState extends State<CaixaPage> {
           ),
         ),
         OutlinedButton.icon(
-          onPressed: widget.podeLeituraParcialCaixa ? _mostrarLeituraParcial : null,
+          onPressed: widget.podeLeituraParcialCaixa && _caixaAberto
+              ? _mostrarLeituraParcial
+              : null,
           icon: const Icon(Icons.analytics_outlined),
           label: const Text('Leitura parcial'),
           style: OutlinedButton.styleFrom(
@@ -6023,7 +7647,9 @@ class _CaixaPageState extends State<CaixaPage> {
 
   Widget _buildGestaoCaixaColapsavel(BuildContext context) {
     final theme = Theme.of(context);
-    final status = _caixaAberto ? 'Aberto' : 'Fechado';
+    final status = _caixaAberto
+        ? (_caixaAderidoRemoto ? 'Aberto (aderido)' : 'Aberto')
+        : 'Fechado';
     final operador = _operadorCaixa.trim().isEmpty ? '-' : _operadorCaixa;
     final avisosRede = _buildAvisosCaixasRemotos(context);
     final aberturaFmt = _aberturaCaixaEm == null
@@ -6208,200 +7834,32 @@ class _CaixaPageState extends State<CaixaPage> {
       formatarMoeda: _formatarMoeda,
       onVendaTap: _abrirAcoesVendaFinalizada,
       ordenacao: _ordenacaoUltimasVendas,
-    );
-  }
-
-  Widget _buildLinhaResumoCheckoutCaixa(
-    BuildContext context, {
-    required Venda selecionado,
-    required double subtotalProdutos,
-    required double freteSelecionado,
-    required double descontoPdvOrcamento,
-    required double descontoSelecionado,
-    required double totalComDesconto,
-    required double valorTotalRecebidoCard,
-    required double troco,
-    required bool compacto,
-  }) {
-    final cards = <Widget>[
-      _buildResumoCard(
-        context,
-        label: compacto ? 'SUBTOTAL' : 'SUBTOTAL PRODUTOS',
-        valor: _formatarMoeda(subtotalProdutos),
-      ),
-      _buildResumoCard(
-        context,
-        label: 'FRETE',
-        valor: _formatarMoeda(freteSelecionado),
-      ),
-      if (descontoPdvOrcamento > 0.001)
-        _buildResumoCard(
-          context,
-          label: compacto ? 'DESC. PDV' : 'DESCONTO PDV',
-          valor: '- ${_formatarMoeda(descontoPdvOrcamento)}',
-        ),
-      if (descontoSelecionado > 0.001)
-        _buildResumoCard(
-          context,
-          label: compacto ? 'DESC. CX' : 'DESCONTO CAIXA',
-          valor: '- ${_formatarMoeda(descontoSelecionado)}',
-        ),
-      _buildResumoCard(
-        context,
-        label: compacto ? 'A PAGAR' : 'TOTAL A PAGAR',
-        valor: _formatarMoeda(totalComDesconto),
-      ),
-      _buildResumoCard(
-        context,
-        label: selecionado.formaPagamento == 'misto'
-            ? (compacto ? 'SOMA' : 'SOMA DOS MEIOS')
-            : (compacto ? 'RECEBIDO' : 'TOTAL RECEBIDO'),
-        valor: _formatarMoeda(valorTotalRecebidoCard),
-      ),
-      _buildResumoCard(
-        context,
-        label: 'TROCO',
-        valor: _formatarMoeda(troco),
-        destaque: true,
-      ),
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final estreito = constraints.maxWidth < 720;
-        if (estreito) {
-          return SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (var i = 0; i < cards.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 8),
-                  SizedBox(width: compacto ? 108 : 128, child: cards[i]),
-                ],
-              ],
-            ),
-          );
+      quantidadeItens: (v) {
+        try {
+          final repo = widget.vendaRepository;
+          if (repo is VendaApiRepository) {
+            return repo.itensDaVendaSafe(v).length;
+          }
+          return (repo.listarItensPorVenda(v.id) as List).length;
+        } catch (_) {
+          try {
+            return v.itens.length;
+          } catch (_) {
+            return 0;
+          }
         }
-        return Row(
-          children: [
-            for (var i = 0; i < cards.length; i++) ...[
-              if (i > 0) const SizedBox(width: 8),
-              Expanded(child: cards[i]),
-            ],
-          ],
-        );
       },
     );
   }
 
-  Widget _buildRodapeCheckoutCaixa(
-    BuildContext context, {
-    required Venda selecionado,
-    required double subtotalProdutos,
-    required double freteSelecionado,
-    required double descontoPdvOrcamento,
-    required double descontoSelecionado,
-    required double totalComDesconto,
-    required double valorTotalRecebidoCard,
-    required double troco,
-    required bool isCompact,
-    required VoidCallback onFinalizar,
-    bool incluirCampoDinheiro = true,
-    String labelFinalizar = 'Finalizar venda (Enter)',
-  }) {
-    return Material(
-      elevation: 6,
-      shadowColor: Colors.black26,
-      color: Theme.of(context).colorScheme.surface,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildLinhaResumoCheckoutCaixa(
-              context,
-              selecionado: selecionado,
-              subtotalProdutos: subtotalProdutos,
-              freteSelecionado: freteSelecionado,
-              descontoPdvOrcamento: descontoPdvOrcamento,
-              descontoSelecionado: descontoSelecionado,
-              totalComDesconto: totalComDesconto,
-              valorTotalRecebidoCard: valorTotalRecebidoCard,
-              troco: troco,
-              compacto: isCompact,
-            ),
-            if (incluirCampoDinheiro &&
-                _caixaPrecisaValorRecebidoDinheiro(selecionado)) ...[
-              const SizedBox(height: 10),
-              TextField(
-                controller: _valorRecebidoController,
-                focusNode: _valorRecebidoFocusNode,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: const InputDecoration(
-                  isDense: true,
-                  labelText: 'Valor recebido (dinheiro)',
-                  hintText: 'Ex.: 100,00',
-                ),
-                onChanged: (value) {
-                  setState(() {
-                    _valorRecebido = _parseValor(value);
-                  });
-                },
-              ),
-            ],
-            SafeArea(
-              top: false,
-              minimum: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton.icon(
-                    onPressed: onFinalizar,
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: Text(labelFinalizar),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBotaoGestaoCaixa(BuildContext context) {
-    final status = _caixaAberto ? 'Aberto' : 'Fechado';
-    final operador = _operadorCaixa.trim().isEmpty ? '-' : _operadorCaixa;
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: _abrirGestaoCaixaDialog,
-        icon: const Icon(Icons.point_of_sale_outlined),
-        label: Text('Gestao de Caixa ($status) - Operador: $operador'),
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size(0, 34),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          visualDensity: VisualDensity.compact,
-          alignment: Alignment.centerLeft,
-        ),
-      ),
-    );
-  }
-
+  /// Conferencia cega: operador declara sem ver o esperado na digitacao.
   Widget _buildLinhaConferenciaFechamento({
     required String label,
     required TextEditingController controller,
   }) {
     return Row(
       children: [
-        Expanded(flex: 3, child: Text(label)),
-        const SizedBox(width: 8),
+        Expanded(child: Text(label)),
         SizedBox(
           width: 170,
           child: TextField(
@@ -6834,7 +8292,9 @@ class _DialogoPesquisaOrcamento extends StatefulWidget {
     required this.clienteDaVenda,
     required this.rotuloVendedor,
     required this.formatarMoeda,
+    required this.qtdItens,
     this.buscarPorNumero,
+    this.buscarPorNumeroRemoto,
     this.recarregarLista,
   });
 
@@ -6842,7 +8302,9 @@ class _DialogoPesquisaOrcamento extends StatefulWidget {
   final Cliente? Function(Venda venda) clienteDaVenda;
   final String Function(Venda venda) rotuloVendedor;
   final String Function(double valor) formatarMoeda;
+  final int Function(Venda venda) qtdItens;
   final Venda? Function(int numero)? buscarPorNumero;
+  final Future<Venda?> Function(int numero)? buscarPorNumeroRemoto;
   final List<Venda> Function()? recarregarLista;
 
   @override
@@ -6858,6 +8320,9 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
   late List<Venda> _resultados;
   final ValueNotifier<int> _indiceSelecionado = ValueNotifier(0);
   Timer? _debounceSyncDialog;
+  Timer? _debounceBuscaRemota;
+  bool _buscandoRemoto = false;
+  bool _fechando = false;
 
   @override
   void initState() {
@@ -6887,6 +8352,7 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
   void dispose() {
     SyncRefreshHub.instance.removeListener(_aoSyncRede);
     _debounceSyncDialog?.cancel();
+    _debounceBuscaRemota?.cancel();
     _indiceSelecionado.dispose();
     _pesquisaController.dispose();
     _pesquisaFocusNode.dispose();
@@ -6912,8 +8378,10 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
   }
 
   void _selecionarIndice(int indice) {
+    if (_fechando) return;
     if (indice < 0 || indice >= _resultados.length) return;
-    Navigator.pop(context, _resultados[indice]);
+    _fechando = true;
+    Navigator.of(context, rootNavigator: true).pop(_resultados[indice]);
   }
 
   void _definirIndiceSelecionado(int indice) {
@@ -6945,14 +8413,17 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
     }
 
     if (event.logicalKey == LogicalKeyboardKey.enter ||
-        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+        event.logicalKey == LogicalKeyboardKey.f1) {
       final indice = _indiceSelecionado.value >= 0 ? _indiceSelecionado.value : 0;
       _selecionarIndice(indice);
       return KeyEventResult.handled;
     }
 
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      Navigator.pop(context);
+      if (_fechando) return KeyEventResult.handled;
+      _fechando = true;
+      Navigator.of(context, rootNavigator: true).pop();
       return KeyEventResult.handled;
     }
 
@@ -6973,8 +8444,6 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
               vendedor.toLowerCase().contains(termo);
         }).toList();
 
-        // Busca direta no ObjectBox: cobre orcamento que acabou de chegar
-        // e nao estava na lista limitada em memoria.
         final numero = int.tryParse(termo);
         if (numero != null && numero > 0) {
           final direto = widget.buscarPorNumero?.call(numero);
@@ -6992,6 +8461,19 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
       }
       _indiceSelecionado.value = _resultados.isEmpty ? -1 : 0;
     });
+
+    // Terminal: se digitou numero e nao achou no cache, busca na API.
+    _debounceBuscaRemota?.cancel();
+    final numeroRemoto = int.tryParse(termo);
+    if (widget.buscarPorNumeroRemoto != null &&
+        numeroRemoto != null &&
+        numeroRemoto > 0 &&
+        !_resultados.any((o) => o.numeroOrcamento == numeroRemoto)) {
+      _debounceBuscaRemota = Timer(const Duration(milliseconds: 280), () {
+        unawaited(_buscarRemotoPorNumero(numeroRemoto));
+      });
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_listaScrollController.hasClients) {
         _listaScrollController.jumpTo(0);
@@ -7000,6 +8482,29 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
         _pesquisaFocusNode.requestFocus();
       }
     });
+  }
+
+  Future<void> _buscarRemotoPorNumero(int numero) async {
+    final fn = widget.buscarPorNumeroRemoto;
+    if (fn == null || !mounted) return;
+    setState(() => _buscandoRemoto = true);
+    try {
+      final v = await fn(numero);
+      if (!mounted || v == null) return;
+      setState(() {
+        if (!_base.any((o) => o.id == v.id)) {
+          _base = [v, ..._base];
+        }
+        if (!_resultados.any((o) => o.id == v.id)) {
+          _resultados = [v, ..._resultados];
+        }
+        _indiceSelecionado.value = 0;
+      });
+    } catch (_) {
+      // Mantem lista local; usuario ve "nenhum" se vazio.
+    } finally {
+      if (mounted) setState(() => _buscandoRemoto = false);
+    }
   }
 
   @override
@@ -7024,9 +8529,19 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
                 controller: _pesquisaController,
                 focusNode: _pesquisaFocusNode,
                 autofocus: true,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Numero, cliente, vendedor...',
-                  prefixIcon: Icon(Icons.search),
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _buscandoRemoto
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : null,
                 ),
                 onChanged: _filtrar,
                 onSubmitted: (_) {
@@ -7039,7 +8554,14 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
               const SizedBox(height: 10),
               Expanded(
                 child: _resultados.isEmpty
-                    ? const Center(child: Text('Nenhum orcamento pendente.'))
+                    ? Center(
+                        child: Text(
+                          _base.isEmpty
+                              ? 'Nenhum orcamento pendente no servidor.'
+                              : 'Nenhum orcamento encontrado para esta busca.',
+                          textAlign: TextAlign.center,
+                        ),
+                      )
                     : ListView.builder(
                         controller: _listaScrollController,
                         itemCount: _resultados.length,
@@ -7047,16 +8569,26 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
                         cacheExtent: 280,
                         itemBuilder: (context, index) {
                           final orc = _resultados[index];
-                          final cliente = widget.clienteDaVenda(orc)?.nomeRazao ??
-                              'Sem cliente';
-                          final descPdv = orc.descontoImplicitoTotal;
+                          String cliente;
+                          try {
+                            cliente =
+                                widget.clienteDaVenda(orc)?.nomeRazao ??
+                                'Sem cliente';
+                          } catch (_) {
+                            cliente = 'Sem cliente';
+                          }
+                          double descPdv = 0;
+                          try {
+                            descPdv = orc.descontoImplicitoTotal;
+                          } catch (_) {}
+                          final qtd = widget.qtdItens(orc);
                           return _OrcamentoPesquisaLinha(
                             indice: index,
                             indiceSelecionado: _indiceSelecionado,
                             corDestaque: corDestaque,
                             titulo: 'Orcamento ${orc.numeroOrcamento}',
                             subtitulo:
-                                '$cliente | Itens: ${orc.itens.length} | Total: ${widget.formatarMoeda(orc.total)}'
+                                '$cliente | Itens: $qtd | Total: ${widget.formatarMoeda(orc.total)}'
                                 '${descPdv > 0.001 ? ' | Desc. PDV: -${widget.formatarMoeda(descPdv)}' : ''}',
                             onHover: () => _definirIndiceSelecionado(index),
                             onTap: () => _selecionarIndice(index),
@@ -7069,7 +8601,11 @@ class _DialogoPesquisaOrcamentoState extends State<_DialogoPesquisaOrcamento> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              if (_fechando) return;
+              _fechando = true;
+              Navigator.of(context, rootNavigator: true).pop();
+            },
             child: const Text('Fechar (Esc)'),
           ),
         ],

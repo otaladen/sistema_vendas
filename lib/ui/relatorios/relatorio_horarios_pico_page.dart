@@ -1,7 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
-import '../../data/venda_repository.dart';
 import 'relatorio_export_util.dart';
 import 'relatorio_helpers.dart';
 import 'relatorio_horarios_pico_helper.dart';
@@ -15,7 +14,7 @@ class RelatorioHorariosPicoPage extends StatefulWidget {
     required this.vendaRepository,
   });
 
-  final VendaRepository vendaRepository;
+  final dynamic vendaRepository;
 
   @override
   State<RelatorioHorariosPicoPage> createState() =>
@@ -296,6 +295,7 @@ class _RelatorioHorariosPicoPageState extends State<RelatorioHorariosPicoPage> {
       body: Column(
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: _calcular,
             onAtualizar: lim != null ? () => _calcular(lim) : null,
             resumo: lim == null

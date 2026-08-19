@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../data/produto_repository.dart';
 import '../../domain/obra_calculadora.dart';
 import '../../domain/obra_calculadora_templates.dart';
 import '../../model/produto.dart';
@@ -30,7 +29,7 @@ class ObraCalculadoraConfigSection extends StatefulWidget {
     required this.onChanged,
   });
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
   final int tijoloProdutoId;
   final int cimentoProdutoId;
   final int areiaProdutoId;

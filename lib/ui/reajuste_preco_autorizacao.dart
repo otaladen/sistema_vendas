@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../domain/auditoria_catalogo.dart';
-import '../data/usuario_repository.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../services/auditoria_registrar.dart';
 import 'layout/app_layout.dart';
+import 'widgets/lan_api_feedback.dart';
 
 bool usuarioPodeReajustePrecoLote(UsuarioSistema u) {
   return UsuarioPermissaoHelper.podeReajustePrecoLote(u);
@@ -18,7 +18,7 @@ bool usuarioPodeAutorizarReajustePreco(UsuarioSistema u) {
 /// Login/senha de gerente para aplicar reajuste com alertas (margem, variacao, custo).
 Future<bool> solicitarAutorizacaoReajustePreco(
   BuildContext context,
-  UsuarioRepository usuarioRepository, {
+  dynamic usuarioRepository, {
   required int itensComAlerta,
   required String resumoRegra,
 }) async {
@@ -40,34 +40,42 @@ Future<bool> solicitarAutorizacaoReajustePreco(
     return false;
   }
 
-  final usuario = await usuarioRepository.autenticar(cred.login, cred.senha);
-  final ok = usuario != null && usuarioPodeAutorizarReajustePreco(usuario);
+  try {
+    final usuario =
+        await usuarioRepository.autenticar(cred.login, cred.senha)
+            as UsuarioSistema?;
+    final ok = usuario != null && usuarioPodeAutorizarReajustePreco(usuario);
 
-  if (!context.mounted) return false;
-  if (!ok) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Sem permissao. Use um usuario Gerente/Dono com '
-          '"Autorizar reajuste de precos" ou "Reajuste em lote".',
+    if (!context.mounted) return false;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Sem permissao. Use um usuario Gerente/Dono com '
+            '"Autorizar reajuste de precos" ou "Reajuste em lote".',
+          ),
         ),
-      ),
+      );
+      return false;
+    }
+    AuditoriaRegistrar.registrar(
+      modulo: AuditoriaModulo.estoque,
+      acao: AuditoriaAcao.autorizacaoReajustePreco,
+      usuarioLogin: usuario.login,
+      resumo:
+          'Autorizacao reajuste: $itensComAlerta item(ns) com alerta de precificacao',
+      detalhes: {
+        'resumoRegra': resumoRegra,
+        'itensComAlerta': itensComAlerta,
+        'autorizadoPor': usuario.login,
+      },
     );
+    return true;
+  } catch (e) {
+    if (!context.mounted) return false;
+    LanApiFeedback.snackErro(context, e, prefixo: 'Autorizacao');
     return false;
   }
-  AuditoriaRegistrar.registrar(
-    modulo: AuditoriaModulo.estoque,
-    acao: AuditoriaAcao.autorizacaoReajustePreco,
-    usuarioLogin: usuario.login,
-    resumo:
-        'Autorizacao reajuste: $itensComAlerta item(ns) com alerta de precificacao',
-    detalhes: {
-      'resumoRegra': resumoRegra,
-      'itensComAlerta': itensComAlerta,
-      'autorizadoPor': usuario.login,
-    },
-  );
-  return true;
 }
 
 class _CredenciaisReajuste {

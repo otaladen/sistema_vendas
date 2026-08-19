@@ -1,17 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../data/api/venda_api_repository.dart';
 import '../../data/venda_repository.dart';
-import '../../domain/entrega_venda_helper.dart';
 import '../../domain/relatorios/pendencia_entrega_relatorio.dart';
+import '../../model/item_venda.dart';
+import '../../model/venda.dart';
+import '../widgets/lan_api_feedback.dart';
 import 'relatorio_entregas_helper.dart';
 import 'relatorio_export_util.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
 
 class RelatorioPendenciasEntregaPage extends StatefulWidget {
-  const RelatorioPendenciasEntregaPage({super.key, required this.vendaRepository});
+  const RelatorioPendenciasEntregaPage({
+    super.key,
+    required this.vendaRepository,
+    this.clienteRepository,
+    this.vendedorRepository,
+  });
 
-  final VendaRepository vendaRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
+  final dynamic vendedorRepository;
 
   @override
   State<RelatorioPendenciasEntregaPage> createState() =>
@@ -26,6 +36,7 @@ class _RelatorioPendenciasEntregaPageState
   TipoPendenciaEntregaRelatorio _filtroTipo =
       TipoPendenciaEntregaRelatorio.todas;
   List<LinhaPendenciaEntregaRelatorio> _linhas = [];
+  bool _carregando = true;
 
   @override
   void initState() {
@@ -33,8 +44,58 @@ class _RelatorioPendenciasEntregaPageState
     _carregar();
   }
 
-  void _carregar() {
-    final vendas = widget.vendaRepository.listarListagemVendasCompleto(
+  Future<void> _carregar() async {
+    setState(() => _carregando = true);
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      try {
+        await repo.hidratarEntregas(limit: 500);
+      } on Exception catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackAviso(context, e, prefixo: 'Pendencias');
+        }
+      }
+    }
+    if (!mounted) return;
+
+    final vendas = _vendasPendentes(repo);
+    setState(() {
+      _linhas = montarLinhasPendenciaEntrega(
+        vendas,
+        filtroTipo: _filtroTipo,
+        clienteRepository: widget.clienteRepository,
+        vendedorRepository: widget.vendedorRepository,
+        itensDaVenda: (v) {
+          try {
+            final via = repo.listarItensPorVenda(v.id);
+            if (via is List && via.isNotEmpty) {
+              return List<ItemVenda>.from(via);
+            }
+          } catch (_) {}
+          return const <ItemVenda>[];
+        },
+      );
+      _carregando = false;
+    });
+  }
+
+  List<Venda> _vendasPendentes(dynamic repo) {
+    if (repo is VendaApiRepository) {
+      final mapa = <int, Venda>{};
+      void addAll(Iterable<Venda> lista) {
+        for (final v in lista) {
+          if (v.cancelada || v.status != 'finalizada' || !v.entregaPendente) {
+            continue;
+          }
+          mapa[v.id] = v;
+        }
+      }
+
+      addAll(repo.listarEntregas());
+      addAll(repo.listarTodas());
+      return mapa.values.toList();
+    }
+    return (repo.listarListagemVendasCompleto(
       const FiltroListagemVendas(
         textoBusca: '',
         filtroCancelamento: 'ativas',
@@ -43,13 +104,8 @@ class _RelatorioPendenciasEntregaPageState
         tipoEntrega: 'todos',
         entregaPendente: 'sim',
       ),
-    );
-    setState(
-      () => _linhas = montarLinhasPendenciaEntrega(
-        vendas,
-        filtroTipo: _filtroTipo,
-      ),
-    );
+    ) as List)
+        .cast<Venda>();
   }
 
   List<List<String>> _linhasCsv() => [
@@ -85,11 +141,17 @@ class _RelatorioPendenciasEntregaPageState
 
   List<String> _paginasPdf() => relatorioMontarPaginasTabela(
         titulo: 'PENDENCIAS DE RETIRADA E ENTREGA',
-        subtitulo:
-            '${_linhas.length} linha(s) · ${totalUnidadesPendencia(_linhas)} un.',
-        cabecalho: ['Nota', 'Cliente', 'Produto', 'Qtd', 'Tipo', 'Status'],
+        subtitulo: '${_linhas.length} linha(s)',
+        cabecalho: [
+          'Nota',
+          'Cliente',
+          'Produto',
+          'Qtd',
+          'Tipo',
+          'Status',
+        ],
         linhas: _linhas
-            .take(400)
+            .take(500)
             .map(
               (l) => [
                 '${l.numeroOrcamento}',
@@ -103,26 +165,10 @@ class _RelatorioPendenciasEntregaPageState
             .toList(),
       );
 
-  String _rotuloFiltro(TipoPendenciaEntregaRelatorio t) {
-    switch (t) {
-      case TipoPendenciaEntregaRelatorio.todas:
-        return 'Todas';
-      case TipoPendenciaEntregaRelatorio.retiradaFutura:
-        return 'Retirada futura';
-      case TipoPendenciaEntregaRelatorio.carreto:
-        return 'Carreto';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final totalUn = totalUnidadesPendencia(_linhas);
-    final retirada = _linhas
-        .where((l) => l.tipo == EntregaVendaHelper.tipoRetiradaFutura)
-        .length;
-    final carreto = _linhas
-        .where((l) => l.tipo == EntregaVendaHelper.tipoEntregaLoja)
-        .length;
+    final totalQtd =
+        _linhas.fold<int>(0, (s, l) => s + l.quantidadePendente);
 
     return Scaffold(
       appBar: AppBar(
@@ -133,81 +179,86 @@ class _RelatorioPendenciasEntregaPageState
             paginasPdf: _paginasPdf,
             linhasCsv: _linhasCsv,
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _carregar,
-          ),
         ],
       ),
       body: Column(
         children: [
-          Material(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  DropdownButtonFormField<TipoPendenciaEntregaRelatorio>(
-                    key: ValueKey(_filtroTipo),
-                    initialValue: _filtroTipo,
-                    decoration: const InputDecoration(
-                      labelText: 'Tipo de pendencia',
-                      isDense: true,
-                    ),
-                    items: TipoPendenciaEntregaRelatorio.values
-                        .map(
-                          (t) => DropdownMenuItem(
-                            value: t,
-                            child: Text(_rotuloFiltro(t)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setState(() => _filtroTipo = v);
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SegmentedButton<TipoPendenciaEntregaRelatorio>(
+                    segments: const [
+                      ButtonSegment(
+                        value: TipoPendenciaEntregaRelatorio.todas,
+                        label: Text('Todas'),
+                      ),
+                      ButtonSegment(
+                        value: TipoPendenciaEntregaRelatorio.retiradaFutura,
+                        label: Text('Retirada'),
+                      ),
+                      ButtonSegment(
+                        value: TipoPendenciaEntregaRelatorio.carreto,
+                        label: Text('Carreto'),
+                      ),
+                    ],
+                    selected: {_filtroTipo},
+                    onSelectionChanged: (s) {
+                      setState(() => _filtroTipo = s.first);
                       _carregar();
                     },
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${_linhas.length} linha(s) · '
-                    '${_nfInt.format(totalUn)} un. pendentes · '
-                    'Retirada futura: $retirada · Carreto: $carreto',
-                  ),
-                ],
+                ),
+                IconButton(
+                  tooltip: 'Atualizar',
+                  onPressed: _carregando ? null : _carregar,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _carregando
+                    ? 'Carregando…'
+                    : '${_linhas.length} linha(s) · '
+                        '${_nfInt.format(totalQtd)} un. pendente(s)',
               ),
             ),
           ),
+          const SizedBox(height: 8),
           const Divider(height: 1),
           Expanded(
-            child: _linhas.isEmpty
-                ? const Center(
-                    child: Text('Nenhuma pendencia de retirada ou entrega.'),
-                  )
-                : ListView.separated(
-                    itemCount: _linhas.length,
-                    separatorBuilder: (_, index) => const Divider(height: 1),
-                    itemBuilder: (context, i) {
-                      final l = _linhas[i];
-                      final dm = l.dataEntregaMarcada;
-                      return ListTile(
-                        title: Text(
-                          'Nota ${l.numeroOrcamento} · ${l.cliente}',
-                        ),
-                        subtitle: Text(
-                          '${l.codigoProduto.isNotEmpty ? "${l.codigoProduto} — " : ""}'
-                          '${l.produto} · '
-                          '${_nfInt.format(l.quantidadePendente)} un. · '
-                          '${rotuloTipoPendenciaEntrega(l.tipo)} · '
-                          '${relatorioRotuloStatusEntrega(l.statusEntrega)} · '
-                          'Venda ${_fmtData.format(l.dataVenda)}'
-                          '${dm != null ? " · Marcada ${_fmtData.format(dm)}" : ""}'
-                          '${l.vendedor.isNotEmpty ? " · ${l.vendedor}" : ""}',
-                        ),
-                      );
-                    },
-                  ),
+            child: _carregando
+                ? const Center(child: CircularProgressIndicator())
+                : _linhas.isEmpty
+                    ? const Center(
+                        child: Text('Nenhuma pendencia de entrega.'),
+                      )
+                    : ListView.separated(
+                        itemCount: _linhas.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (context, i) {
+                          final l = _linhas[i];
+                          return ListTile(
+                            title: Text(
+                              'Ped. ${l.numeroOrcamento} · ${l.cliente}',
+                            ),
+                            subtitle: Text(
+                              '${l.produto} · '
+                              '${rotuloTipoPendenciaEntrega(l.tipo)} · '
+                              '${_nfInt.format(l.quantidadePendente)} un.\n'
+                              '${_fmtData.format(l.dataVenda)}'
+                              '${l.vendedor.isEmpty ? '' : ' · ${l.vendedor}'}',
+                            ),
+                            isThreeLine: true,
+                          );
+                        },
+                      ),
           ),
         ],
       ),

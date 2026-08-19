@@ -138,9 +138,9 @@ enum MainMenuDestino {
       case MainMenuDestino.estoque:
         return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque);
       case MainMenuDestino.notasFiscais:
-        return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque);
+        return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.fiscal);
       case MainMenuDestino.entregas:
-        return UsuarioPermissaoHelper.podeVisualizarEntregas(u);
+        return UsuarioPermissaoHelper.podeAcessarModuloEntregas(u);
       case MainMenuDestino.financeiro:
         return UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro);
       case MainMenuDestino.cadastros:
@@ -190,5 +190,13 @@ enum MainMenuDestino {
       if (d.podeAcessar(u)) out.add(d);
     }
     return out;
+  }
+
+  /// Tela aberta logo apos o login (motorista de campo vai direto para a rota).
+  static MainMenuDestino inicialAposLogin(UsuarioSistema u) {
+    if (UsuarioPermissaoHelper.ehMotoristaCampoSomente(u)) {
+      return MainMenuDestino.motorista;
+    }
+    return MainMenuDestino.inicio;
   }
 }

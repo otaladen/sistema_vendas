@@ -71,4 +71,9 @@ class CaixaAuditoriaRepository {
   Future<List<CaixaAuditoriaRegistro>> listarFechamentos() async {
     return (await listarTodos()).where((r) => r.ehFechamento).toList();
   }
+
+  Future<void> substituirTodos(List<Map<String, dynamic>> registros) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(chavePrefs, jsonEncode(registros));
+  }
 }

@@ -11,8 +11,11 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'theme/app_semantic_helper.dart';
+import '../data/api/lan_api_client.dart';
+import '../data/api/lista_compra_api_repository.dart';
 import '../data/lista_compra_repository.dart';
 import '../data/local_backup_cadastro_produtos_service.dart';
+import '../data/api/produto_api_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/produto_sugestao_venda_repository.dart';
 import '../domain/permissao_usuario.dart';
@@ -45,7 +48,10 @@ import '../services/trusted_http_client.dart';
 import '../services/produto_imagem_service.dart';
 import '../services/produto_imagem_lan_service.dart';
 import 'layout/app_layout.dart';
+import 'shell/app_shell_aba_visibilidade.dart';
+import 'shell/main_menu_deps.dart';
 import 'widgets/abas_historico_produto_widget.dart';
+import 'estoque/estoque_lista_metricas.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'produtos/importar_chacal_backup_flow.dart';
@@ -59,6 +65,10 @@ import '../services/preco_mercado_service.dart';
 import 'widgets/pdv_barcode_scanner_page.dart';
 import 'widgets/pdv_barcode_scanner_support.dart';
 import 'widgets/operacao_feedback.dart';
+import 'widgets/lan_api_feedback.dart';
+import 'widgets/produto_foto_view.dart';
+import 'widgets/produto/produto_cadastro_header.dart';
+import 'widgets/produto/produto_cadastro_rodape.dart';
 
 class _CadastroProdutoSalvarIntent extends Intent {
   const _CadastroProdutoSalvarIntent();
@@ -80,7 +90,7 @@ class ProdutosPage extends StatefulWidget {
     this.usuarioLogado,
   });
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
   final PrintService printService;
   final UsuarioSistema? usuarioLogado;
 
@@ -118,18 +128,18 @@ class _ProdutosPageState extends State<ProdutosPage>
   static const double _erpFotoPreviewSide = 176;
 
   /// Foto compacta na faixa de resumo do produto.
-  static const double _erpResumoFotoSide = 64;
 
-  /// Largura mínima para alinhar a foto à direita do formulário (senão empilha).
-  static const double _erpFotoPreviewSideBySideBreakpoint = 680;
+  /// Largura mínima para alinhar a foto à direita do SKU (senão empilha).
+  static const double _erpFotoPreviewSideBySideBreakpoint = 420;
+
+  /// Largura mínima para Classificacao ao lado de Informacoes basicas.
+  static const double _erpBasicasClassificacaoSideBySideBreakpoint = 920;
 
   /// Rodapé fixo: empilha botões abaixo desta largura.
-  static const double _erpRodapeAcaoBreakpoint = 520;
 
   /// Escala de espacamento do cadastro ERP (compacto).
   static const double _erpGap8 = 6;
   static const double _erpGap16 = 10;
-  static const double _erpGap24 = 14;
 
   /// Folga a direita para a barra de rolagem nao cobrir bordas dos cards.
   static const double _erpScrollbarGutter = 18;
@@ -226,15 +236,19 @@ class _ProdutosPageState extends State<ProdutosPage>
   String _icmsOrigemSelecionado = kFiscalValorAutomatico;
   String _icmsCstSelecionado = kFiscalValorAutomatico;
   String _pisCofinsCstSelecionado = kFiscalValorAutomatico;
-  _BaseCalculoPrecoProduto _baseCalculoPreco = _BaseCalculoPrecoProduto.custoDigitado;
+  _BaseCalculoPrecoProduto _baseCalculoPreco =
+      _BaseCalculoPrecoProduto.custoDigitado;
   _ModoAlvoPrecificacao _modoAlvoPrecificacao = _ModoAlvoPrecificacao.markup;
   bool _embalagemMultiplica = true;
   bool _permiteQuantidadeFracionada = false;
+  bool _controlaLoteValidade = false;
+  final _percentualBotaForaController = TextEditingController();
   List<int> _substitutosIds = const [];
   List<SugestaoVendaCadastroDraft> _sugestoesVenda = const [];
   DateTime? _ultimaVendaEmCadastro;
   DateTime? _criadoEmCadastro;
   DateTime? _ultimaCompraEmCadastro;
+  DateTime? _precoAlteradoEmCadastro;
   String? _categoriaSelecionada;
   String? _subcategoriaSelecionada;
   int? _produtoEmEdicaoId;
@@ -246,21 +260,56 @@ class _ProdutosPageState extends State<ProdutosPage>
   final _formKey = GlobalKey<FormState>();
   bool _tentouSalvar = false;
   late final ProdutoImagemService _produtoImagemService;
-  late final ProdutoSugestaoVendaRepository _sugestaoVendaRepo;
+  ProdutoSugestaoVendaRepository? _sugestaoVendaRepo;
   String _fotoPathAtual = '';
   String? _fotoOrigemLocalPath;
   bool _fotoFoiRemovida = false;
   final ScrollController _scrollController = ScrollController();
   late final TabController _subAbaCadastroController;
-  final FocusNode _codigoBarrasFocus =
-      FocusNode(debugLabel: 'produtoCadastroBarras');
+  final FocusNode _codigoBarrasFocus = FocusNode(
+    debugLabel: 'produtoCadastroBarras',
+  );
   int _historicoVersao = 0;
-  final FocusNode _cadastroKeyboardFocusNode =
-      FocusNode(debugLabel: 'produtosCadastroTeclado');
+  final FocusNode _cadastroKeyboardFocusNode = FocusNode(
+    debugLabel: 'produtosCadastroTeclado',
+  );
 
   String _status = '';
   bool _statusEhErro = false;
   final NumberFormat _moedaBrFormatter = NumberFormat('#,##0.00', 'pt_BR');
+
+  bool get _terminalLeveApi =>
+      widget.produtoRepository is ProdutoApiRepository;
+
+  bool _carregandoCatalogoApi = false;
+
+  /// Cache async do custo medio derivado das NF-e (Terminal Leve).
+  double? _custoMedioNfeCache;
+
+  dynamic _objectBoxLocalOuNull() {
+    if (widget.produtoRepository is ProdutoApiRepository) return null;
+    try {
+      return widget.produtoRepository.objectBox;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  dynamic _listaCompraRepositoryOuNull() {
+    final deps = MainMenuDeps.maybeOf(context);
+    if (deps?.listaCompraRepository != null) {
+      return deps!.listaCompraRepository;
+    }
+    final client = deps?.lanApiClient;
+    if (client != null) {
+      return ListaCompraApiRepository(
+        client,
+        produtoRepository: widget.produtoRepository,
+      );
+    }
+    final objectBox = _objectBoxLocalOuNull();
+    return objectBox == null ? null : ListaCompraRepository(objectBox);
+  }
 
   @override
   void initState() {
@@ -270,11 +319,17 @@ class _ProdutosPageState extends State<ProdutosPage>
       vsync: this,
     );
     _produtoImagemService = ProdutoImagemService(
-      imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
+      imagesDirectoryPath: widget.produtoRepository.productImagesDirPath ?? '',
     );
-    _sugestaoVendaRepo = ProdutoSugestaoVendaRepository(
-      widget.produtoRepository.objectBox,
-    );
+    final ob = _objectBoxLocalOuNull();
+    if (ob != null) {
+      _sugestaoVendaRepo = ProdutoSugestaoVendaRepository(ob);
+    }
+    final apiRepo = widget.produtoRepository;
+    if (apiRepo is ProdutoApiRepository) {
+      apiRepo.addListener(_onProdutoApiChanged);
+      unawaited(_hidratarCatalogoAoAbrir());
+    }
     initSafeSyncRefresh(
       onReload: _atualizarAposSyncRede,
       bloquearAtualizacao: _bloquearSyncProdutos,
@@ -287,15 +342,62 @@ class _ProdutosPageState extends State<ProdutosPage>
       if (!mounted) return;
       _focarBarrasSeNovoCadastro();
       _consolidarFotosDuplicadasEmSegundoPlano();
+      unawaited(_sincronizarCatalogoAoFocarAba());
     });
+  }
+
+  bool? _abaProdutosAtivaAnterior;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ativa = AppShellAbaVisibilidade.estaAtiva(context);
+    if (_abaProdutosAtivaAnterior == false && ativa) {
+      unawaited(_sincronizarCatalogoAoFocarAba());
+    }
+    _abaProdutosAtivaAnterior = ativa;
+  }
+
+  Future<void> _sincronizarCatalogoAoFocarAba() async {
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoApiRepository) return;
+    try {
+      final mudou = await repo.sincronizarSeDesatualizado();
+      if (mudou && mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  void _onProdutoApiChanged() {
+    if (!mounted) return;
+    // Sempre reconstrói a lista a partir do cache da API. Campos do formulario
+    // usam controllers proprios e nao sao sobrescritos por este setState.
+    setState(() {});
+  }
+
+  Future<void> _hidratarCatalogoAoAbrir() async {
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoApiRepository) return;
+    if (_carregandoCatalogoApi) return;
+    setState(() => _carregandoCatalogoApi = true);
+    try {
+      await repo.garantirCacheImagens();
+      await repo.hidratar();
+      if (!mounted) return;
+      setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackAviso(context, e, prefixo: 'Produtos');
+    } finally {
+      if (mounted) setState(() => _carregandoCatalogoApi = false);
+    }
   }
 
   Future<void> _consolidarFotosDuplicadasEmSegundoPlano() async {
     try {
+      final objectBox = _objectBoxLocalOuNull();
+      if (objectBox == null) return;
       // Repara fotoPath relativo/de outra maquina apos restore antigo.
-      LocalBackupCadastroProdutosService.corrigirFotoPathsLocais(
-        widget.produtoRepository.objectBox,
-      );
+      LocalBackupCadastroProdutosService.corrigirFotoPathsLocais(objectBox);
       await widget.produtoRepository.consolidarFotosDuplicadas();
       if (mounted) setState(() {});
     } catch (_) {}
@@ -375,14 +477,33 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   Future<void> _puxarCadastroDaRede() async {
+    if (widget.produtoRepository is ProdutoApiRepository) {
+      try {
+        await (widget.produtoRepository as ProdutoApiRepository).hidratar();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('API: $e')),
+        );
+        return;
+      }
+      if (!mounted) return;
+      widget.produtoRepository.invalidarCacheBusca();
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Produtos atualizados do servidor')),
+      );
+      return;
+    }
+
     final erro = await LanSyncScheduler.solicitarSyncCompleto();
     if (!mounted) return;
     widget.produtoRepository.invalidarCacheBusca();
     setState(() {});
     if (erro != null && erro.trim().isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sync: $erro')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Sync: $erro')));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Produtos e precos atualizados da rede')),
@@ -392,6 +513,10 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   @override
   void dispose() {
+    final apiRepo = widget.produtoRepository;
+    if (apiRepo is ProdutoApiRepository) {
+      apiRepo.removeListener(_onProdutoApiChanged);
+    }
     disposeSafeSyncRefresh();
     _codigoInternoController.dispose();
     _nomeController.removeListener(_sincronizarNomeImpressaoSeVinculado);
@@ -427,6 +552,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     _limiteDescontoPreco1Controller.dispose();
     _limiteDescontoPreco2Controller.dispose();
     _limiteDescontoPreco3Controller.dispose();
+    _percentualBotaForaController.dispose();
     _quantidadeEmbalagemController.dispose();
     _unidadeCompraController.dispose();
     _scrollController.dispose();
@@ -558,6 +684,10 @@ class _ProdutosPageState extends State<ProdutosPage>
     return null;
   }
 
+  bool get _temFotoNoFormulario =>
+      (_fotoOrigemLocalPath?.trim().isNotEmpty ?? false) ||
+      _fotoPathAtual.trim().isNotEmpty;
+
   // --- Layout ERP (cadastro de produtos) ---
 
   TextStyle _erpLabelStyle(BuildContext context) {
@@ -577,36 +707,57 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   Widget _buildPainelPontoPedido(BuildContext context) {
-    final estoqueAtual = int.tryParse(_estoqueController.text) ?? 0;
+    final ctxEmb = _produtoEmbalagemContexto();
+    final estoqueRaw = _lerEstoqueDoFormulario();
+    final estoqueExibicao =
+        ProdutoEmbalagem.valorEstoqueExibicao(ctxEmb, estoqueRaw);
     final leadTime = int.tryParse(_leadTimeDiasController.text) ?? 7;
     final seguranca = int.tryParse(_estoqueSegurancaController.text) ?? 0;
     final minimo = int.tryParse(_quantidadeMinimaController.text) ?? 0;
     final produto = _produtoEmEdicaoId != null
         ? widget.produtoRepository.obterPorId(_produtoEmEdicaoId!)
         : null;
-    final comprasSvc = ComprasPreditivasService(
-      widget.produtoRepository.objectBox,
-    );
+    final objectBox = _objectBoxLocalOuNull();
+    final comprasSvc = objectBox == null
+        ? null
+        : ComprasPreditivasService(objectBox);
 
-    double media = 0;
     double pp;
     bool critico;
     bool semGiroConfiavel;
 
-    if (produto != null) {
+    if (produto != null && comprasSvc != null) {
       produto.leadTimeDias = leadTime > 0 ? leadTime : 7;
       produto.estoqueSeguranca = seguranca;
-      produto.estoqueAtual = estoqueAtual;
-      media = produto.vendaMediaDiaria;
       semGiroConfiavel = !comprasSvc.temGiroVendaConfiavel(produto);
       pp = comprasSvc.calcularPontoPedidoExibicao(produto);
-      critico = comprasSvc.verificarEstoqueCritico(produto);
+      critico = estoqueExibicao <= pp + 1e-9;
+    } else if (produto != null) {
+      produto.leadTimeDias = leadTime > 0 ? leadTime : 7;
+      produto.estoqueSeguranca = seguranca;
+      semGiroConfiavel = produto.vendaMediaDiaria <= 1e-9;
+      pp = ComprasPreditivasService.pontoPedidoExibicaoDeCadastro(produto);
+      critico = estoqueExibicao <= pp + 1e-9;
     } else {
-      media = 0;
       semGiroConfiavel = true;
       pp = (seguranca > 0 ? seguranca : minimo).toDouble();
-      critico = estoqueAtual <= pp;
+      critico = estoqueExibicao <= pp + 1e-9;
     }
+
+    final unidade = ProdutoEmbalagem.normalizarUnidade(ctxEmb.unidade);
+    final estoqueTxt = ProdutoEmbalagem.formatarEstoque(
+      ctxEmb,
+      estoqueRaw,
+      comUnidade: true,
+    );
+    final mediaTxt = produto == null
+        ? '—'
+        : ProdutoEmbalagem.formatarMediaDiaria(
+            produto,
+            produto.vendaMediaDiaria,
+            comUnidade: true,
+          );
+    final ppTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(ctxEmb, pp);
 
     final theme = Theme.of(context);
     final semantic = context.semanticColors;
@@ -638,7 +789,7 @@ class _ProdutosPageState extends State<ProdutosPage>
           Text(
             semGiroConfiavel
                 ? 'Produto novo ou sem giro: alerta pelo estoque de seguranca '
-                    '(min. ${comprasSvc.diasMinimosCadastroParaGiro} dias de cadastro + vendas).'
+                      '(min. ${comprasSvc?.diasMinimosCadastroParaGiro ?? 14} dias de cadastro + vendas).'
                 : 'PP = (media diaria x lead time) + estoque seguranca',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
@@ -647,10 +798,9 @@ class _ProdutosPageState extends State<ProdutosPage>
           const SizedBox(height: 8),
           Text(
             semGiroConfiavel
-                ? 'Limiar seguranca: ${pp.toStringAsFixed(0)} un · '
-                    'Atual: $estoqueAtual un'
-                : 'Media diaria: ${media.toStringAsFixed(2)} un/dia · '
-                    'PP: ${pp.toStringAsFixed(1)} un · Atual: $estoqueAtual un',
+                ? 'Limiar seguranca: $ppTxt $unidade · Atual: $estoqueTxt'
+                : 'Media diaria: $mediaTxt/dia · PP: $ppTxt $unidade · '
+                      'Atual: $estoqueTxt',
             style: theme.textTheme.bodyMedium,
           ),
           if (critico)
@@ -678,7 +828,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     Widget? suffixIcon,
   }) {
     final cs = Theme.of(context).colorScheme;
-    final subtle = cs.outline.withValues(alpha: 0.5);
+    const borderColor = Color(0xFFE2E8F0);
     return InputDecoration(
       isDense: true,
       hintText: hint,
@@ -686,24 +836,24 @@ class _ProdutosPageState extends State<ProdutosPage>
       helperMaxLines: 3,
       suffixIcon: suffixIcon,
       filled: true,
-      fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: BorderSide(color: subtle),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: borderColor),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: BorderSide(color: cs.primary, width: 1.5),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: cs.primary, width: 1.4),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide(color: cs.error),
       ),
       focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: BorderSide(color: cs.error, width: 1.5),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: cs.error, width: 1.4),
       ),
     );
   }
@@ -716,13 +866,14 @@ class _ProdutosPageState extends State<ProdutosPage>
   }) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    const cardBorder = Color(0xFFE2E8F0);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: _erpGap16),
       decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.75)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cardBorder),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.045),
@@ -916,19 +1067,14 @@ class _ProdutosPageState extends State<ProdutosPage>
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                icone,
-                size: 19,
-                color: selecionada ? Colors.white : cor,
-              ),
+              Icon(icone, size: 19, color: selecionada ? Colors.white : cor),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
                   rotulo,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight:
-                        selecionada ? FontWeight.w800 : FontWeight.w600,
+                    fontWeight: selecionada ? FontWeight.w800 : FontWeight.w600,
                     color: selecionada ? Colors.white : cs.onSurface,
                   ),
                 ),
@@ -945,9 +1091,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       decoration: BoxDecoration(
         color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: cs.outlineVariant.withValues(alpha: 0.5),
-        ),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -977,11 +1121,6 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
-  String _formatarDataResumo(DateTime? dt) {
-    if (dt == null) return '—';
-    return DateFormat('dd/MM/yy').format(dt.toLocal());
-  }
-
   double? _parsePercentualLimiteDesconto(String? value) {
     final texto = (value ?? '').trim().replaceAll(',', '.');
     if (texto.isEmpty) return null;
@@ -998,179 +1137,191 @@ class _ProdutosPageState extends State<ProdutosPage>
     return null;
   }
 
-  Widget _buildResumoProdutoCadastro(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final semantic = context.semanticColors;
-    final nome = _nomeController.text.trim();
-    final nomeExibir = nome.isEmpty ? 'Novo produto' : nome;
+  String _rotuloSkuHeaderCadastro() {
     final sku = _codigoInternoController.text.trim();
-    final skuRotulo = _gerarSkuAutomatico
-        ? 'SKU ${widget.produtoRepository.proximoSkuAutomatico(ignorarProdutoId: _produtoEmEdicaoId)} (auto)'
-        : (sku.isEmpty ? 'Sem SKU' : sku);
-    final ean = _codigoBarrasController.text.trim();
+    if (_gerarSkuAutomatico) {
+      return 'SKU ${widget.produtoRepository.proximoSkuAutomatico(ignorarProdutoId: _produtoEmEdicaoId)} (auto)';
+    }
+    return sku.isEmpty ? 'Sem SKU' : sku;
+  }
+
+  String _formatarDataResumo(DateTime? dt) {
+    if (dt == null) return '—';
+    return DateFormat('dd/MM/yy').format(dt.toLocal());
+  }
+
+  Widget _buildProdutoCadastroHeaderPanel(BuildContext context) {
     final preco1 = _parseValorMonetario(_preco1Controller.text);
     final estoque = _lerEstoqueDoFormulario();
-    final minimo = int.tryParse(_quantidadeMinimaController.text.trim()) ?? 0;
+    final embCtx = _produtoEmbalagemContexto();
     final estoqueExib = ProdutoEmbalagem.formatarEstoque(
-      _produtoEmbalagemContexto(),
+      embCtx,
       estoque,
       comUnidade: true,
     );
-    final ncmDigits = _ncmController.text.replaceAll(RegExp(r'\D'), '');
-    final semNcm = ncmDigits.length != 8;
-    final estoqueBaixo = minimo > 0
-        ? ProdutoEmbalagem.valorEstoqueExibicao(
-                _produtoEmbalagemContexto(),
-                estoque,
-              ) <=
-              minimo
-        : estoque <= 0 && _produtoEmEdicaoId != null;
+    final precoStr = preco1 != null && preco1 > 0
+        ? 'R\$ ${_formatarValorMonetario(preco1)}'
+        : null;
+    return ProdutoCadastroHeader(
+      emEdicao: _produtoEmEdicaoId != null,
+      produtoId: _produtoEmEdicaoId,
+      nome: _nomeController.text,
+      skuRotulo: _rotuloSkuHeaderCadastro(),
+      ativo: _produtoAtivo,
+      estoqueResumo: 'Est: $estoqueExib',
+      precoResumo: precoStr != null ? 'Preco 1: $precoStr' : null,
+      datasResumo:
+          'Cadastro: ${_produtoEmEdicaoId == null ? 'novo' : _formatarDataResumo(_criadoEmCadastro)}'
+          ' · Ult. compra: ${_formatarDataResumo(_ultimaCompraEmCadastro)}'
+          ' · Ult. venda: ${_formatarDataResumo(_ultimaVendaEmCadastro)}'
+          ' · Ult. preco: ${_formatarDataResumo(_precoAlteradoEmCadastro)}',
+    );
+  }
 
+  Widget _buildStatusBannerCadastro(BuildContext context) {
+    final semantic = context.semanticColors;
     return Container(
-      margin: const EdgeInsets.only(bottom: _erpGap8),
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: cs.surface,
+        color: _statusEhErro ? semantic.errorBg : semantic.successBg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        border: Border.all(
+          color: _statusEhErro ? semantic.errorBorder : semantic.successBorder,
+        ),
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final empilhar = constraints.maxWidth < 640;
-          final foto = _erpProdutoFotoPreviewSquare(
-            context,
-            side: _erpResumoFotoSide,
-          );
-          final identidade = Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  nomeExibir,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    Chip(
-                      visualDensity: VisualDensity.compact,
-                      label: Text(skuRotulo),
-                    ),
-                    if (ean.isNotEmpty)
-                      Chip(
-                        visualDensity: VisualDensity.compact,
-                        label: Text('EAN $ean'),
-                      ),
-                    Chip(
-                      visualDensity: VisualDensity.compact,
-                      label: Text(
-                        _produtoAtivo ? 'Ativo no PDV' : 'Inativo no PDV',
-                      ),
-                      backgroundColor: _produtoAtivo
-                          ? cs.primaryContainer.withValues(alpha: 0.55)
-                          : cs.errorContainer.withValues(alpha: 0.4),
-                    ),
-                    if (_produtoEmEdicaoId != null)
-                      Chip(
-                        visualDensity: VisualDensity.compact,
-                        label: Text('#${_produtoEmEdicaoId!}'),
-                      ),
-                    if (semNcm)
-                      Chip(
-                        visualDensity: VisualDensity.compact,
-                        label: const Text('Sem NCM'),
-                        backgroundColor: semantic.warningBg.withValues(
-                          alpha: 0.55,
-                        ),
-                      ),
-                    if (estoqueBaixo)
-                      Chip(
-                        visualDensity: VisualDensity.compact,
-                        label: const Text('Estoque baixo'),
-                        backgroundColor: semantic.errorBg.withValues(
-                          alpha: 0.45,
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Cadastro: ${_produtoEmEdicaoId == null ? 'novo' : _formatarDataResumo(_criadoEmCadastro)}'
-                  ' · Ult. compra: ${_formatarDataResumo(_ultimaCompraEmCadastro)}'
-                  ' · Ult. venda: ${_formatarDataResumo(_ultimaVendaEmCadastro)}',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          );
-          final metricas = Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                'A prazo (Preco 1)',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-              Text(
-                preco1 != null && preco1 > 0
-                    ? 'R\$ ${_formatarValorMonetario(preco1)}'
-                    : '—',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: cs.primary,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Estoque: $estoqueExib',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          );
-
-          if (empilhar) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    foto,
-                    const SizedBox(width: _erpGap16),
-                    identidade,
-                  ],
-                ),
-                const SizedBox(height: _erpGap8),
-                Align(alignment: Alignment.centerLeft, child: metricas),
-              ],
-            );
-          }
-
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              foto,
-              const SizedBox(width: _erpGap16),
-              identidade,
-              const SizedBox(width: _erpGap16),
-              metricas,
-            ],
-          );
-        },
+      child: Text(
+        _status,
+        style: TextStyle(
+          color: _statusEhErro ? semantic.errorFg : semantic.successFg,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
+  }
+
+  Widget _buildBarraFerramentasCadastroProduto(BuildContext context) {
+    if (context.isCompactLayout) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(
+                horizontal: _erpGap16,
+                vertical: 12,
+              ),
+            ),
+            onPressed: _abrirPesquisaProduto,
+            icon: const Icon(Icons.search, size: 20),
+            label: const Text('Pesquisar produto'),
+          ),
+          const SizedBox(height: _erpGap8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                tooltip: 'Primeiro',
+                onPressed: _irParaPrimeiroProduto,
+                icon: const Icon(Icons.first_page_outlined),
+              ),
+              IconButton(
+                tooltip: 'Anterior',
+                onPressed: _irParaProdutoAnterior,
+                icon: const Icon(Icons.navigate_before_outlined),
+              ),
+              IconButton(
+                tooltip: 'Proximo',
+                onPressed: _irParaProximoProduto,
+                icon: const Icon(Icons.navigate_next_outlined),
+              ),
+              IconButton(
+                tooltip: 'Ultimo',
+                onPressed: _irParaUltimoProduto,
+                icon: const Icon(Icons.last_page_outlined),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(
+                horizontal: _erpGap16,
+                vertical: 12,
+              ),
+            ),
+            onPressed: _abrirPesquisaProduto,
+            icon: const Icon(Icons.search, size: 20),
+            label: const Text('Pesquisar produto'),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Primeiro',
+          onPressed: _irParaPrimeiroProduto,
+          icon: const Icon(Icons.first_page_outlined),
+        ),
+        IconButton(
+          tooltip: 'Anterior',
+          onPressed: _irParaProdutoAnterior,
+          icon: const Icon(Icons.navigate_before_outlined),
+        ),
+        IconButton(
+          tooltip: 'Proximo',
+          onPressed: _irParaProximoProduto,
+          icon: const Icon(Icons.navigate_next_outlined),
+        ),
+        IconButton(
+          tooltip: 'Ultimo',
+          onPressed: _irParaUltimoProduto,
+          icon: const Icon(Icons.last_page_outlined),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildRodapeExtraActionsProduto(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final etiquetaStyle = OutlinedButton.styleFrom(
+      foregroundColor: cs.onSurfaceVariant,
+      side: BorderSide(color: cs.outline.withValues(alpha: 0.55)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    );
+    return [
+      Tooltip(
+        message: 'Imprimir etiqueta de teste (F11)',
+        child: OutlinedButton.icon(
+          style: etiquetaStyle,
+          onPressed: _imprimirEtiquetaProduto,
+          icon: const Icon(Icons.print_rounded),
+          label: const Text('Imprimir Etiqueta (F11)'),
+        ),
+      ),
+      Tooltip(
+        message: 'Copia classificacao, precos e fiscal para um novo cadastro',
+        child: OutlinedButton.icon(
+          style: etiquetaStyle,
+          onPressed: _espelharProdutoComoNovo,
+          icon: const Icon(Icons.copy_all_outlined),
+          label: const Text('Espelhar como novo'),
+        ),
+      ),
+      Tooltip(
+        message: 'Anotar este produto na lista de compras',
+        child: OutlinedButton.icon(
+          style: etiquetaStyle,
+          onPressed: _anotarParaListaCompra,
+          icon: const Icon(Icons.playlist_add_outlined),
+          label: const Text('Anotar compra'),
+        ),
+      ),
+    ];
   }
 
   Widget _buildCabecalhoFixoCadastro(BuildContext context) {
@@ -1195,8 +1346,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                       hint: 'Leia ou digite o GTIN',
                       suffixIcon: _suffixCodigoBarrasComCamera(
                         carregandoGtin: _consultandoGtin,
-                        onConsultarGtin:
-                            _consultandoGtin ? null : _consultarGtinBrasilApi,
+                        onConsultarGtin: _consultandoGtin
+                            ? null
+                            : _consultarGtinBrasilApi,
                       ),
                     ),
                   ),
@@ -1325,8 +1477,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                     suffixIcon: _suffixConsultaBrasilApi(
                       carregando: _consultandoNcm,
                       tooltip: 'Conferir descricao oficial do NCM',
-                      onPressed:
-                          _consultandoNcm ? null : _consultarNcmBrasilApi,
+                      onPressed: _consultandoNcm
+                          ? null
+                          : _consultarNcmBrasilApi,
                     ),
                   ),
                 ),
@@ -1343,14 +1496,15 @@ class _ProdutosPageState extends State<ProdutosPage>
             doCatalogo != null
                 ? doCatalogo.descricao
                 : 'Pode digitar qualquer NCM ou escolher na tabela de materiais '
-                    'de construcao (como no sistema antigo).',
+                      'de construcao (como no sistema antigo).',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: doCatalogo != null
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                  fontWeight:
-                      doCatalogo != null ? FontWeight.w600 : FontWeight.w400,
-                ),
+              color: doCatalogo != null
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
+              fontWeight: doCatalogo != null
+                  ? FontWeight.w600
+                  : FontWeight.w400,
+            ),
           ),
           if (_infoNcmBrasilApi.isNotEmpty)
             Padding(
@@ -1358,9 +1512,9 @@ class _ProdutosPageState extends State<ProdutosPage>
               child: Text(
                 _infoNcmBrasilApi,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.w500,
-                    ),
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
         ],
@@ -1389,191 +1543,23 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
   }
 
-  Widget _erpRodapeAcaoCadastroProduto(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    final saveStyle = ElevatedButton.styleFrom(
-      backgroundColor: cs.primary,
-      foregroundColor: cs.onPrimary,
-      elevation: 1,
-      shadowColor: Colors.black.withValues(alpha: 0.14),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-    );
-
-    final cancelStyle = OutlinedButton.styleFrom(
-      foregroundColor: Color.lerp(cs.onSurface, cs.error, 0.35)!,
-      side: BorderSide(color: cs.outline.withValues(alpha: 0.42)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    );
-
-    final etiquetaStyle = OutlinedButton.styleFrom(
-      foregroundColor: cs.onSurfaceVariant,
-      side: BorderSide(color: cs.outline.withValues(alpha: 0.55)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final narrow = constraints.maxWidth < _erpRodapeAcaoBreakpoint;
-
-        Widget salvar = Tooltip(
-          message: 'Salvar cadastro (F5 ou F10)',
-          child: ElevatedButton.icon(
-            style: saveStyle,
-            onPressed: _salvarProduto,
-            icon: const Icon(Icons.save_rounded),
-            label: const Text(
-              'Salvar (F5 · F10)',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-        );
-
-        Widget cancelar = Tooltip(
-          message: 'Cancelar / limpar (Esc)',
-          child: OutlinedButton(
-            style: cancelStyle,
-            onPressed: _limparFormularioComConfirmacao,
-            child: const Text('Cancelar (Esc)'),
-          ),
-        );
-
-        Widget etiqueta = Tooltip(
-          message: 'Imprimir etiqueta de teste (F11)',
-          child: OutlinedButton.icon(
-            style: etiquetaStyle,
-            onPressed: _imprimirEtiquetaProduto,
-            icon: const Icon(Icons.print_rounded),
-            label: const Text('Imprimir Etiqueta (F11)'),
-          ),
-        );
-
-        Widget espelhar = Tooltip(
-          message:
-              'Copia classificacao, precos e fiscal para um novo cadastro',
-          child: OutlinedButton.icon(
-            style: etiquetaStyle,
-            onPressed: _espelharProdutoComoNovo,
-            icon: const Icon(Icons.copy_all_outlined),
-            label: const Text('Espelhar como novo'),
-          ),
-        );
-
-        Widget anotarCompra = Tooltip(
-          message: 'Anotar este produto na lista de compras',
-          child: OutlinedButton.icon(
-            style: etiquetaStyle,
-            onPressed: _anotarParaListaCompra,
-            icon: const Icon(Icons.playlist_add_outlined),
-            label: const Text('Anotar compra'),
-          ),
-        );
-
-        Widget? excluir;
-        if (_produtoEmEdicaoId != null) {
-          final excluirStyle = OutlinedButton.styleFrom(
-            foregroundColor: cs.error,
-            side: BorderSide(color: cs.error.withValues(alpha: 0.55)),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          );
-          excluir = Tooltip(
-            message: 'Excluir produto do cadastro',
-            child: OutlinedButton.icon(
-              style: excluirStyle,
-              onPressed: _excluirProdutoEmEdicao,
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Excluir'),
-            ),
-          );
-        }
-
-        if (narrow) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_produtoEmEdicaoId != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: _erpGap8),
-                  child: Text(
-                    'Edicao #${_produtoEmEdicaoId!} · F5 ou F10 salva',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.65),
-                        ),
-                  ),
-                ),
-              SizedBox(width: double.infinity, child: cancelar),
-              if (excluir != null) ...[
-                const SizedBox(height: _erpGap8),
-                SizedBox(width: double.infinity, child: excluir),
-              ],
-              const SizedBox(height: _erpGap8),
-              SizedBox(width: double.infinity, child: espelhar),
-              const SizedBox(height: _erpGap8),
-              SizedBox(width: double.infinity, child: anotarCompra),
-              const SizedBox(height: _erpGap8),
-              SizedBox(width: double.infinity, child: etiqueta),
-              const SizedBox(height: _erpGap8),
-              SizedBox(width: double.infinity, child: salvar),
-            ],
-          );
-        }
-
-        return Row(
-          children: [
-            if (_produtoEmEdicaoId != null)
-              Expanded(
-                child: Text(
-                  'Edicao #${_produtoEmEdicaoId!} · F5 ou F10 salva',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.65),
-                      ),
-                ),
-              ),
-            cancelar,
-            if (excluir != null) ...[
-              const SizedBox(width: _erpGap16),
-              excluir,
-            ],
-            const SizedBox(width: _erpGap16),
-            espelhar,
-            const SizedBox(width: _erpGap16),
-            anotarCompra,
-            const SizedBox(width: _erpGap16),
-            etiqueta,
-            const SizedBox(width: _erpGap16),
-            salvar,
-          ],
-        );
-      },
-    );
-  }
-
   /// Quadrado dedicado à pré-visualização (sempre visível; estado vazio elegante).
   Widget _erpProdutoFotoPreviewSquare(
     BuildContext context, {
     double side = _erpFotoPreviewSide,
   }) {
     final cs = Theme.of(context).colorScheme;
-    final path = _fotoPreviewPath();
+    final pathLocal = _fotoPreviewPath();
+    final temArquivoLocal =
+        pathLocal != null && File(pathLocal).existsSync();
+    final fotoRemota = _fotoPathAtual.trim();
 
     Widget child;
-    if (path != null) {
+    if (temArquivoLocal) {
       child = ColoredBox(
         color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
         child: Image.file(
-          File(path),
+          File(pathLocal),
           fit: BoxFit.contain,
           width: side,
           height: side,
@@ -1601,6 +1587,20 @@ class _ProdutosPageState extends State<ProdutosPage>
               ),
             );
           },
+        ),
+      );
+    } else if (fotoRemota.isNotEmpty) {
+      child = ColoredBox(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
+        child: ProdutoFotoView(
+          fotoPath: fotoRemota,
+          imagesDirectoryPath:
+              widget.produtoRepository.productImagesDirPath ?? '',
+          width: side,
+          height: side,
+          fit: BoxFit.contain,
+          placeholderLabel: 'Sem foto',
+          errorLabel: 'Foto indisponivel',
         ),
       );
     } else {
@@ -1664,9 +1664,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(mensagem),
-        backgroundColor: erro
-            ? semantic.errorFg
-            : semantic.successFg,
+        backgroundColor: erro ? semantic.errorFg : semantic.successFg,
       ),
     );
   }
@@ -1730,9 +1728,12 @@ class _ProdutosPageState extends State<ProdutosPage>
       _baseCalculoPreco = _BaseCalculoPrecoProduto.custoDigitado;
       _embalagemMultiplica = true;
       _permiteQuantidadeFracionada = false;
+      _controlaLoteValidade = false;
+      _percentualBotaForaController.clear();
       _ultimaVendaEmCadastro = null;
       _criadoEmCadastro = null;
       _ultimaCompraEmCadastro = null;
+      _precoAlteradoEmCadastro = null;
       _margemAlvoPreco1Controller.clear();
       _margemAlvoPreco2Controller.clear();
       _margemAlvoPreco3Controller.clear();
@@ -1850,9 +1851,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                 _abrirUrlExterna('https://aistudio.google.com/apikey');
               },
               child: Text(
-                erro.chaveVazada
-                    ? 'Gerar chave nova'
-                    : 'Criar chave Gemini',
+                erro.chaveVazada ? 'Gerar chave nova' : 'Criar chave Gemini',
               ),
             ),
         ],
@@ -2021,7 +2020,10 @@ class _ProdutosPageState extends State<ProdutosPage>
           return;
         }
       } else {
-        opcoes = await _produtoImagemBuscaService.buscarImagens(termo, limite: 8);
+        opcoes = await _produtoImagemBuscaService.buscarImagens(
+          termo,
+          limite: 8,
+        );
       }
 
       final fotoEscolhida = await _baixarOpcaoFotoBuscada(
@@ -2121,6 +2123,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       _criadoEmCadastro = null;
       _ultimaVendaEmCadastro = null;
       _ultimaCompraEmCadastro = null;
+      _precoAlteradoEmCadastro = null;
       _tentouSalvar = false;
 
       final pathFoto = (_fotoOrigemLocalPath?.trim().isNotEmpty ?? false)
@@ -2154,7 +2157,11 @@ class _ProdutosPageState extends State<ProdutosPage>
       );
       return;
     }
-    final repo = ListaCompraRepository(widget.produtoRepository.objectBox);
+    final repo = _listaCompraRepositoryOuNull();
+    if (repo == null) {
+      _definirStatus('Use o PC servidor para anotar compras.', erro: true);
+      return;
+    }
     Produto? produto;
     if (_produtoEmEdicaoId != null) {
       produto = widget.produtoRepository.obterPorId(_produtoEmEdicaoId!);
@@ -2164,9 +2171,8 @@ class _ProdutosPageState extends State<ProdutosPage>
       repository: repo,
       produto: produto,
       descricaoLivre: produto == null ? nome : '',
-      quantidadeInicial: produto != null &&
-              produto.quantidadeMinima > produto.estoqueAtual
-          ? (produto.quantidadeMinima - produto.estoqueAtual).clamp(1, 99999)
+      quantidadeInicial: produto != null
+          ? EstoqueListaMetricas.quantidadeSugeridaAnotarCompra(produto)
           : 1,
       criadoPor: widget.usuarioLogado?.login ?? '',
     );
@@ -2241,7 +2247,21 @@ class _ProdutosPageState extends State<ProdutosPage>
     if (confirmar != true) return;
 
     final fotoPath = produto.fotoPath.trim();
-    final removido = widget.produtoRepository.remover(produtoId);
+    final bool removido;
+    final repo = widget.produtoRepository;
+    if (repo is ProdutoApiRepository) {
+      try {
+        removido = await repo.removerRemoto(produtoId);
+      } on LanApiException catch (e) {
+        _definirStatus(e.message, erro: true);
+        return;
+      } catch (e) {
+        _definirStatus('Nao foi possivel excluir o produto: $e', erro: true);
+        return;
+      }
+    } else {
+      removido = repo.remover(produtoId) as bool;
+    }
     if (!removido) {
       _definirStatus('Nao foi possivel excluir o produto.', erro: true);
       return;
@@ -2273,6 +2293,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   bool _custoMedioDerivadoDeHistoricoNfe() {
     final id = _produtoEmEdicaoId;
     if (id == null || id <= 0) return false;
+    if (_custoMedioNfeCache != null) return true;
     return widget.produtoRepository.calcularCustoMedioPonderadoPorEntradasNfe(
           id,
         ) !=
@@ -2299,7 +2320,10 @@ class _ProdutosPageState extends State<ProdutosPage>
   double _markupCalculadoPorController(TextEditingController precoController) {
     final custo = _custoBaseParaCalculoPrecos();
     final venda = _parseValorMonetario(precoController.text) ?? 0;
-    return ProdutoPrecificacao.markupSobreCusto(custo: custo, precoVenda: venda);
+    return ProdutoPrecificacao.markupSobreCusto(
+      custo: custo,
+      precoVenda: venda,
+    );
   }
 
   TextEditingController _markupAlvoControllerPreco(int indice) {
@@ -2339,18 +2363,24 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   void _sincronizarAlvosPrecificacaoComPrecosAtuais() {
-    _markupAlvoPreco1Controller.text =
-        _markupCalculadoPorController(_preco1Controller).toStringAsFixed(1);
-    _markupAlvoPreco2Controller.text =
-        _markupCalculadoPorController(_preco2Controller).toStringAsFixed(1);
-    _markupAlvoPreco3Controller.text =
-        _markupCalculadoPorController(_preco3Controller).toStringAsFixed(1);
-    _margemAlvoPreco1Controller.text =
-        _margemCalculadaPorController(_preco1Controller).toStringAsFixed(1);
-    _margemAlvoPreco2Controller.text =
-        _margemCalculadaPorController(_preco2Controller).toStringAsFixed(1);
-    _margemAlvoPreco3Controller.text =
-        _margemCalculadaPorController(_preco3Controller).toStringAsFixed(1);
+    _markupAlvoPreco1Controller.text = _markupCalculadoPorController(
+      _preco1Controller,
+    ).toStringAsFixed(1);
+    _markupAlvoPreco2Controller.text = _markupCalculadoPorController(
+      _preco2Controller,
+    ).toStringAsFixed(1);
+    _markupAlvoPreco3Controller.text = _markupCalculadoPorController(
+      _preco3Controller,
+    ).toStringAsFixed(1);
+    _margemAlvoPreco1Controller.text = _margemCalculadaPorController(
+      _preco1Controller,
+    ).toStringAsFixed(1);
+    _margemAlvoPreco2Controller.text = _margemCalculadaPorController(
+      _preco2Controller,
+    ).toStringAsFixed(1);
+    _margemAlvoPreco3Controller.text = _margemCalculadaPorController(
+      _preco3Controller,
+    ).toStringAsFixed(1);
   }
 
   double _markupAlvoOuAtual(int indicePreco) {
@@ -2403,11 +2433,13 @@ class _ProdutosPageState extends State<ProdutosPage>
         final valor = _precoCalculadoParaIndice(i, custo);
         _precoControllerIndice(i).text = _formatarValorMonetario(valor);
         if (_modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup) {
-          _markupAlvoControllerPreco(i).text =
-              _markupAlvoOuAtual(i).toStringAsFixed(1);
+          _markupAlvoControllerPreco(i).text = _markupAlvoOuAtual(
+            i,
+          ).toStringAsFixed(1);
         } else {
-          _margemAlvoControllerPreco(i).text =
-              _margemAlvoOuAtual(i).toStringAsFixed(1);
+          _margemAlvoControllerPreco(i).text = _margemAlvoOuAtual(
+            i,
+          ).toStringAsFixed(1);
         }
       }
       _sincronizarAlvosPrecificacaoComPrecosAtuais();
@@ -2456,7 +2488,8 @@ class _ProdutosPageState extends State<ProdutosPage>
       required double markup,
       bool destaque = false,
     }) {
-      final alvoController = _modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup
+      final alvoController =
+          _modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup
           ? _markupAlvoControllerPreco(precoIndice)
           : _margemAlvoControllerPreco(precoIndice);
       final alvoLabel = _modoAlvoPrecificacao == _ModoAlvoPrecificacao.markup
@@ -2685,7 +2718,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                 colunaPreco(
                   precoIndice: 3,
                   titulo: 'Preco 3',
-                  subtitulo: 'Atacado',
+                  subtitulo: 'Especial',
                   controller: _preco3Controller,
                   limiteDescontoController: _limiteDescontoPreco3Controller,
                   margem: margem3,
@@ -2832,7 +2865,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     final escolha = await mostrarBuscaPrecoMercadoDialog(
       context: context,
       service: PrecoMercadoService(
-        objectBox: widget.produtoRepository.objectBox,
+        objectBox: _objectBoxLocalOuNull(),
         geminiService: _geminiService,
       ),
       nomeProduto: nome,
@@ -2883,8 +2916,8 @@ class _ProdutosPageState extends State<ProdutosPage>
           'o app abre Ferreira Costa, Leroy e Mercado Livre para voce '
           'informar os precos e calcular a media.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: _erpGap16),
         _buildTabelaPrecosVendaCadastro(
@@ -2908,8 +2941,8 @@ class _ProdutosPageState extends State<ProdutosPage>
     final preview = fator <= 1 || (fator - 1).abs() < 0.0001
         ? 'Sem conversao (1:1).'
         : (_embalagemMultiplica
-            ? '1 $uCompra = ${fator == fator.roundToDouble() ? fator.toInt() : fator} $uVenda no estoque.'
-            : '1 $uCompra entra como 1 $uVenda (estoque ÷ $fator).');
+              ? '1 $uCompra = ${fator == fator.roundToDouble() ? fator.toInt() : fator} $uVenda no estoque.'
+              : '1 $uCompra entra como 1 $uVenda (estoque ÷ $fator).');
     final opcoesCompra = _opcoesDropdownUnidadeCompra(uVenda);
     final valorCompraDropdown = opcoesCompra.contains(uCompraCodigo)
         ? uCompraCodigo
@@ -2967,8 +3000,9 @@ class _ProdutosPageState extends State<ProdutosPage>
               _erpFieldLabel('Qtd. por embalagem', context),
               TextField(
                 controller: _quantidadeEmbalagemController,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 decoration: _erpInputDecoration(
                   context,
                   helper: helperEmbalagem,
@@ -3039,10 +3073,10 @@ class _ProdutosPageState extends State<ProdutosPage>
         Text(
           preview,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-                height: 1.25,
-              ),
+            fontWeight: FontWeight.w600,
+            fontSize: 12,
+            height: 1.25,
+          ),
         ),
       ],
     );
@@ -3106,6 +3140,37 @@ class _ProdutosPageState extends State<ProdutosPage>
         0;
   }
 
+  /// Helper do campo fisico: reservado vem do produto persistido (retirada futura).
+  String? _helperEstoqueFisicoCadastro() {
+    final partes = <String>[];
+    if (_estoqueFormularioAceitaDecimal) {
+      partes.add('Ex.: 144,62 m² (valor exato)');
+    }
+    final id = _produtoEmEdicaoId;
+    if (id != null) {
+      final p = widget.produtoRepository.obterPorId(id);
+      if (p != null) {
+        final emb = _produtoEmbalagemContexto();
+        final fisico = _lerEstoqueDoFormulario();
+        final int res = p.estoqueReservado;
+        final int livre = fisico - res;
+        final resTxt = ProdutoEmbalagem.formatarEstoque(
+          emb,
+          res,
+          comUnidade: true,
+        );
+        final livreTxt = ProdutoEmbalagem.formatarEstoque(
+          emb,
+          livre,
+          comUnidade: true,
+        );
+        partes.add('Reservado: $resTxt · Disponivel (fisico - reservado): $livreTxt');
+      }
+    }
+    if (partes.isEmpty) return null;
+    return partes.join(' · ');
+  }
+
   List<String> _opcoesDropdownUnidadeCompra(String uVenda) {
     final out = <String>[''];
     for (final u in _unidadesCompraSugeridas) {
@@ -3148,11 +3213,7 @@ class _ProdutosPageState extends State<ProdutosPage>
         ),
       );
     }
-    return IconButton(
-      tooltip: tooltip,
-      icon: Icon(icon),
-      onPressed: onPressed,
-    );
+    return IconButton(tooltip: tooltip, icon: Icon(icon), onPressed: onPressed);
   }
 
   Widget? _suffixCodigoBarrasComCamera({
@@ -3212,6 +3273,17 @@ class _ProdutosPageState extends State<ProdutosPage>
               normalizado,
               somenteAtivos: false,
             );
+            if (produtoExistente == null &&
+                widget.produtoRepository is ProdutoApiRepository) {
+              try {
+                produtoExistente =
+                    await (widget.produtoRepository as ProdutoApiRepository)
+                        .buscarPorCodigoBarrasRemoto(
+                  normalizado,
+                  somenteAtivos: false,
+                );
+              } catch (_) {}
+            }
             _codigoBarrasController.text = normalizado;
             if (produtoExistente != null) {
               return PdvBarcodeScanFeedback(
@@ -3255,7 +3327,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       );
       if (!mounted) return;
       if (abrir == true) {
-        _editarProdutoNoCabecalho(existente);
+        await _abrirProdutoParaEdicao(existente);
         return;
       }
     }
@@ -3264,10 +3336,7 @@ class _ProdutosPageState extends State<ProdutosPage>
         _nomeController.text.trim().isEmpty) {
       await _consultarGtinBrasilApi();
     } else if (_codigoBarrasController.text.trim().isNotEmpty) {
-      OperacaoFeedback.sucesso(
-        context,
-        'Codigo de barras preenchido.',
-      );
+      OperacaoFeedback.sucesso(context, 'Codigo de barras preenchido.');
     }
   }
 
@@ -3275,13 +3344,12 @@ class _ProdutosPageState extends State<ProdutosPage>
     required bool carregando,
     required VoidCallback? onPressed,
     required String tooltip,
-  }) =>
-      _suffixAcaoCampo(
-        carregando: carregando,
-        onPressed: onPressed,
-        tooltip: tooltip,
-        icon: Icons.cloud_download_outlined,
-      );
+  }) => _suffixAcaoCampo(
+    carregando: carregando,
+    onPressed: onPressed,
+    tooltip: tooltip,
+    icon: Icons.cloud_download_outlined,
+  );
 
   String? _mapearCategoriaGeminiParaSistema(String categoriaGemini) {
     const mapa = <String, String>{
@@ -3316,9 +3384,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       if (categoriaSistema == _categoriaOutros) continue;
       final subs = _categoriasMateriaisConstrucao[categoriaSistema] ?? [];
       if (subs.isEmpty) continue;
-      buf.writeln(
-        '- ${entry.key} ($categoriaSistema): ${subs.join(' | ')}',
-      );
+      buf.writeln('- ${entry.key} ($categoriaSistema): ${subs.join(' | ')}');
     }
     return buf.toString();
   }
@@ -3390,10 +3456,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   String _extrairCodigoBarrasDoTexto(String texto) {
     for (final match in RegExp(r'\b\d{8,14}\b').allMatches(texto)) {
       final d = match.group(0)!;
-      if (d.length == 8 ||
-          d.length == 12 ||
-          d.length == 13 ||
-          d.length == 14) {
+      if (d.length == 8 || d.length == 12 || d.length == 13 || d.length == 14) {
         return d;
       }
     }
@@ -3506,7 +3569,8 @@ class _ProdutosPageState extends State<ProdutosPage>
         if (categoriaSistema == _categoriaOutros) {
           _subcategoriaSelecionada = null;
           if (model.subcategoriaSugerida.trim().isNotEmpty) {
-            _subcategoriaLivreController.text = model.subcategoriaSugerida.trim();
+            _subcategoriaLivreController.text = model.subcategoriaSugerida
+                .trim();
           }
         } else if (subcategoriaSistema != null) {
           _subcategoriaSelecionada = subcategoriaSistema;
@@ -3537,8 +3601,7 @@ class _ProdutosPageState extends State<ProdutosPage>
 
       if (!mounted) return;
       final semantic = context.semanticColors;
-      final cestFinal =
-          NcmCestSugestao.normalizarCest(_cestController.text);
+      final cestFinal = NcmCestSugestao.normalizarCest(_cestController.text);
       final extras = <String>[
         if (codigoBarras.isNotEmpty) 'cod. barras',
         if (model.ncm.length == 8) 'NCM',
@@ -3578,9 +3641,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       SnackBar(
         content: Text(mensagem),
         duration: Duration(seconds: erro ? 8 : 5),
-        backgroundColor: erro
-            ? semantic.errorFg
-            : null,
+        backgroundColor: erro ? semantic.errorFg : null,
       ),
     );
   }
@@ -3588,7 +3649,10 @@ class _ProdutosPageState extends State<ProdutosPage>
   Future<void> _consultarGtinBrasilApi() async {
     final codigo = _codigoBarrasController.text.trim();
     if (codigo.isEmpty) {
-      _snackbarBrasilApi('Informe o codigo de barras ou GTIN para consultar.', erro: true);
+      _snackbarBrasilApi(
+        'Informe o codigo de barras ou GTIN para consultar.',
+        erro: true,
+      );
       return;
     }
 
@@ -3672,10 +3736,7 @@ class _ProdutosPageState extends State<ProdutosPage>
 
       if (dados == null) {
         setState(() => _infoNcmBrasilApi = '');
-        _snackbarBrasilApi(
-          'NCM nao encontrado na tabela oficial.',
-          erro: true,
-        );
+        _snackbarBrasilApi('NCM nao encontrado na tabela oficial.', erro: true);
         return;
       }
 
@@ -4003,8 +4064,16 @@ class _ProdutosPageState extends State<ProdutosPage>
     return _moedaBrFormatter.format(valor);
   }
 
-  String _resolverCodigoInternoAoSalvar() {
+  Future<String> _resolverCodigoInternoAoSalvar() async {
     if (_gerarSkuAutomatico) {
+      if (_terminalLeveApi) {
+        try {
+          return await (widget.produtoRepository as ProdutoApiRepository)
+              .proximoSkuAutomaticoRemoto(
+            ignorarProdutoId: _produtoEmEdicaoId,
+          );
+        } catch (_) {}
+      }
       return widget.produtoRepository.proximoSkuAutomatico(
         ignorarProdutoId: _produtoEmEdicaoId,
       );
@@ -4022,7 +4091,9 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
     final conflito = _outroProdutoComMesmoSku(sku);
     if (conflito != null) {
-      final nome = conflito.nome.trim().isEmpty ? 'sem nome' : conflito.nome.trim();
+      final nome = conflito.nome.trim().isEmpty
+          ? 'sem nome'
+          : conflito.nome.trim();
       return 'SKU ja cadastrado em "$nome" (#${conflito.id}).';
     }
     return null;
@@ -4128,96 +4199,16 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   Future<void> _adicionarSubstitutoCadastro() async {
-    final buscaCtrl = TextEditingController();
-    var resultados = <Produto>[];
-
-    final escolhido = await showDialog<Produto>(
+    final escolhido = await showProdutoPesquisaDialog(
       context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDlg) {
-            void buscar() {
-              final termo = buscaCtrl.text.trim();
-              setDlg(() {
-                resultados = termo.isEmpty
-                    ? const []
-                    : widget.produtoRepository
-                        .pesquisarPadraoPdv(termo)
-                        .where((p) => p.ativo)
-                        .take(12)
-                        .toList();
-              });
-            }
-
-            return AlertDialog(
-              title: const Text('Adicionar substituto'),
-              content: SizedBox(
-                width: 420,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TextField(
-                      controller: buscaCtrl,
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Buscar produto',
-                        hintText: 'Nome, SKU ou codigo de barras',
-                      ),
-                      onSubmitted: (_) => buscar(),
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: FilledButton.tonal(
-                        onPressed: buscar,
-                        child: const Text('Buscar'),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 220,
-                      child: resultados.isEmpty
-                          ? const Center(
-                              child: Text('Digite e busque um produto.'),
-                            )
-                          : ListView.builder(
-                              itemCount: resultados.length,
-                              itemBuilder: (_, i) {
-                                final p = resultados[i];
-                                return ListTile(
-                                  dense: true,
-                                  title: Text(p.nome, maxLines: 1),
-                                  subtitle: Text(
-                                    p.codigoInterno.trim().isNotEmpty
-                                        ? 'SKU ${p.codigoInterno}'
-                                        : 'Sem SKU',
-                                  ),
-                                  onTap: () => Navigator.pop(ctx, p),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancelar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      produtoRepository: widget.produtoRepository,
     );
-    buscaCtrl.dispose();
-
     if (escolhido == null || !mounted) return;
     if (escolhido.id == _produtoEmEdicaoId) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('O produto nao pode ser substituto de si mesmo.')),
+        const SnackBar(
+          content: Text('O produto nao pode ser substituto de si mesmo.'),
+        ),
       );
       return;
     }
@@ -4248,8 +4239,9 @@ class _ProdutosPageState extends State<ProdutosPage>
     final formValido = _formKey.currentState?.validate() ?? false;
     if (!formValido) {
       final sku = _codigoInternoController.text.trim();
-      final conflito =
-          !_gerarSkuAutomatico ? _outroProdutoComMesmoSku(sku) : null;
+      final conflito = !_gerarSkuAutomatico
+          ? _outroProdutoComMesmoSku(sku)
+          : null;
       if (conflito != null) {
         await _tratarConflitoSku(sku: sku, conflito: conflito);
         return;
@@ -4281,14 +4273,13 @@ class _ProdutosPageState extends State<ProdutosPage>
         : widget.produtoRepository.obterPorId(_produtoEmEdicaoId!);
     final pc = precoCusto!;
     final temHistoricoNfe = produtoExistente != null &&
-        widget.produtoRepository.calcularCustoMedioPonderadoPorEntradasNfe(
-              produtoExistente.id,
-            ) !=
-            null;
+        (_custoMedioNfeCache != null ||
+            widget.produtoRepository.calcularCustoMedioPonderadoPorEntradasNfe(
+                  produtoExistente.id,
+                ) !=
+                null);
     final double custoMedioPersistido = produtoExistente != null
-        ? (temHistoricoNfe
-            ? produtoExistente.custoMedio
-            : (pc < 0 ? 0.0 : pc))
+        ? (temHistoricoNfe ? produtoExistente.custoMedio : (pc < 0 ? 0.0 : pc))
         : (pc < 0 ? 0.0 : pc);
     final preco1 = _parseValorMonetario(_preco1Controller.text);
     final preco2 = _parseValorMonetario(_preco2Controller.text);
@@ -4299,7 +4290,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     final leadTimeDias = int.tryParse(_leadTimeDiasController.text) ?? 7;
     final estoqueSeguranca =
         int.tryParse(_estoqueSegurancaController.text) ?? 0;
-    final codigoInternoFinal = _resolverCodigoInternoAoSalvar();
+    final codigoInternoFinal = await _resolverCodigoInternoAoSalvar();
 
     _nomeController.text = nomePadrao;
 
@@ -4307,8 +4298,8 @@ class _ProdutosPageState extends State<ProdutosPage>
     final identificadorFoto = nomePadrao.isNotEmpty
         ? nomePadrao
         : (codigoInternoFinal.isNotEmpty
-            ? codigoInternoFinal
-            : 'produto_${DateTime.now().millisecondsSinceEpoch}');
+              ? codigoInternoFinal
+              : 'produto_${DateTime.now().millisecondsSinceEpoch}');
     var fotoPathFinal = fotoPathExistente;
 
     if (_fotoOrigemLocalPath != null &&
@@ -4331,9 +4322,9 @@ class _ProdutosPageState extends State<ProdutosPage>
           fotoPathExistente,
           contarReferencias: (path) =>
               widget.produtoRepository.contarProdutosComFotoPath(
-            path,
-            excluirProdutoId: produtoExistente?.id,
-          ),
+                path,
+                excluirProdutoId: produtoExistente?.id,
+              ),
         );
       }
       fotoPathFinal = fotoProcessada;
@@ -4342,9 +4333,9 @@ class _ProdutosPageState extends State<ProdutosPage>
         fotoPathExistente,
         contarReferencias: (path) =>
             widget.produtoRepository.contarProdutosComFotoPath(
-          path,
-          excluirProdutoId: produtoExistente?.id,
-        ),
+              path,
+              excluirProdutoId: produtoExistente?.id,
+            ),
       );
       fotoPathFinal = '';
     }
@@ -4358,11 +4349,12 @@ class _ProdutosPageState extends State<ProdutosPage>
     if (produtoExistente == null &&
         !_gerarSkuAutomatico &&
         codigoInternoFinal.isNotEmpty) {
-      final mesmosSku =
-          widget.produtoRepository.listarPorCodigoInterno(codigoInternoFinal);
+      final mesmosSku = widget.produtoRepository.listarPorCodigoInterno(
+        codigoInternoFinal,
+      );
       if (mesmosSku.length == 1) {
         produtoExistente = mesmosSku.first;
-        _produtoEmEdicaoId = produtoExistente.id;
+        _produtoEmEdicaoId = produtoExistente!.id;
       } else if (mesmosSku.length > 1) {
         await _tratarConflitoSku(
           sku: codigoInternoFinal,
@@ -4420,31 +4412,51 @@ class _ProdutosPageState extends State<ProdutosPage>
       preco3: preco3!,
       precoVenda: preco1,
       limiteDescontoPreco1:
-          _parsePercentualLimiteDesconto(_limiteDescontoPreco1Controller.text) ??
-              0,
+          _parsePercentualLimiteDesconto(
+            _limiteDescontoPreco1Controller.text,
+          ) ??
+          0,
       limiteDescontoPreco2:
-          _parsePercentualLimiteDesconto(_limiteDescontoPreco2Controller.text) ??
-              0,
+          _parsePercentualLimiteDesconto(
+            _limiteDescontoPreco2Controller.text,
+          ) ??
+          0,
       limiteDescontoPreco3:
-          _parsePercentualLimiteDesconto(_limiteDescontoPreco3Controller.text) ??
-              0,
+          _parsePercentualLimiteDesconto(
+            _limiteDescontoPreco3Controller.text,
+          ) ??
+          0,
       unidadeCompra: _unidadeCompraNoFormulario(),
       quantidadePorEmbalagem: _lerQuantidadeEmbalagem(),
       embalagemMultiplica: _embalagemMultiplica,
       permiteQuantidadeFracionada: _permiteQuantidadeFracionada,
+      controlaLoteValidade: _controlaLoteValidade,
+      percentualBotaFora:
+          double.tryParse(
+            _percentualBotaForaController.text.trim().replaceAll(',', '.'),
+          ) ??
+          0,
       ultimaVendaEm: produtoExistente?.ultimaVendaEm,
+      precoAlteradoEm: produtoExistente?.precoAlteradoEm,
       criadoEm: produtoExistente?.criadoEm,
     );
     final estavaEditando = _produtoEmEdicaoId != null;
     try {
-      final idSalvo = widget.produtoRepository.salvar(produto);
+      final idSalvo = await _persistirProduto(produto);
       if (fotoPathFinal.trim().isNotEmpty) {
-        unawaited(
-          ProdutoImagemLanService(
-            imagesDirectoryPath:
-                widget.produtoRepository.productImagesDirPath,
-          ).enviarSeRedeAtiva(fotoPathFinal),
-        );
+        final enviou = await ProdutoImagemLanService(
+          imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
+        ).enviarSeRedeAtiva(fotoPathFinal);
+        if (!enviou && mounted && _terminalLeveApi) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Produto salvo, mas a foto nao foi enviada ao servidor. '
+                'Verifique a rede e salve novamente.',
+              ),
+            ),
+          );
+        }
       }
       await _finalizarSalvarProduto(
         produto: produto,
@@ -4457,10 +4469,67 @@ class _ProdutosPageState extends State<ProdutosPage>
           : widget.produtoRepository.obterPorCodigoInterno(e.sku);
       if (conflito != null) {
         await _tratarConflitoSku(sku: e.sku, conflito: conflito);
+      } else if (e.produtoExistenteId != null && _terminalLeveApi) {
+        try {
+          final remoto =
+              await (widget.produtoRepository as ProdutoApiRepository)
+                  .obterPorIdRemoto(e.produtoExistenteId!);
+          if (remoto != null) {
+            await _tratarConflitoSku(sku: e.sku, conflito: remoto);
+            return;
+          }
+        } catch (_) {}
+        _definirStatus(e.toString(), erro: true);
       } else {
         _definirStatus(e.toString(), erro: true);
       }
+    } on LanApiException catch (e) {
+      if (e.code == 'sku_duplicado') {
+        final sku = (e.details?['sku'] ?? '').toString();
+        final idExistente =
+            (e.details?['produtoExistenteId'] as num?)?.toInt();
+        Produto? conflito;
+        if (idExistente != null && idExistente > 0) {
+          conflito = widget.produtoRepository.obterPorId(idExistente);
+          if (conflito == null && _terminalLeveApi) {
+            try {
+              conflito = await (widget.produtoRepository as ProdutoApiRepository)
+                  .obterPorIdRemoto(idExistente);
+            } catch (_) {}
+          }
+        }
+        conflito ??= sku.isNotEmpty
+            ? widget.produtoRepository.obterPorCodigoInterno(sku)
+            : null;
+        if (conflito != null) {
+          await _tratarConflitoSku(sku: sku, conflito: conflito);
+        } else {
+          _definirStatus(e.message, erro: true);
+        }
+      } else {
+        _definirStatus(e.message, erro: true);
+        if (mounted) {
+          LanApiFeedback.snackErro(
+            context,
+            e,
+            prefixo: 'Nao foi possivel salvar',
+          );
+        }
+      }
+    } catch (e) {
+      _definirStatus(LanApiFeedback.mensagem(e), erro: true);
+      if (mounted) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Nao foi possivel salvar');
+      }
     }
+  }
+
+  Future<int> _persistirProduto(dynamic produto) async {
+    final repo = widget.produtoRepository;
+    if (repo is ProdutoApiRepository) {
+      return repo.salvarRemoto(produto as Produto);
+    }
+    return repo.salvar(produto) as int;
   }
 
   Future<void> _finalizarSalvarProduto({
@@ -4469,31 +4538,61 @@ class _ProdutosPageState extends State<ProdutosPage>
     required bool estavaEditando,
   }) async {
     try {
-      _sugestaoVendaRepo.substituirDoProduto(
-        idSalvo,
-        _sugestoesVenda
-            .map(
-              (d) => ProdutoSugestaoVenda(
-                produtoOrigemId: idSalvo,
-                produtoSugeridoId: d.produtoSugeridoId,
-                tipo: d.tipo.codigo,
-                quantidadeSugerida: d.quantidadeSugerida,
-                prioridade: d.prioridade,
-                observacao: d.observacao,
-                ativo: d.ativo,
-              ),
-            )
-            .toList(),
-      );
+      if (_terminalLeveApi) {
+        final repo = widget.produtoRepository as ProdutoApiRepository;
+        await repo.substituirSugestoesVendaRemoto(
+          idSalvo,
+          _sugestoesVenda
+              .map(
+                (d) => ProdutoSugestaoVenda(
+                  produtoOrigemId: idSalvo,
+                  produtoSugeridoId: d.produtoSugeridoId,
+                  tipo: d.tipo.codigo,
+                  quantidadeSugerida: d.quantidadeSugerida,
+                  prioridade: d.prioridade,
+                  observacao: d.observacao,
+                  ativo: d.ativo,
+                ),
+              )
+              .toList(),
+        );
+      } else {
+        _sugestaoVendaRepo?.substituirDoProduto(
+          idSalvo,
+          _sugestoesVenda
+              .map(
+                (d) => ProdutoSugestaoVenda(
+                  produtoOrigemId: idSalvo,
+                  produtoSugeridoId: d.produtoSugeridoId,
+                  tipo: d.tipo.codigo,
+                  quantidadeSugerida: d.quantidadeSugerida,
+                  prioridade: d.prioridade,
+                  observacao: d.observacao,
+                  ativo: d.ativo,
+                ),
+              )
+              .toList(),
+        );
+      }
     } catch (e) {
       _definirStatus(e.toString(), erro: true);
       return;
     }
+    // Garante ID na tela para edicoes subsequentes (evita criar duplicado).
+    if (idSalvo > 0) {
+      setState(() => _produtoEmEdicaoId = idSalvo);
+    }
     final salvoPosGravacao = widget.produtoRepository.obterPorId(idSalvo);
     if (salvoPosGravacao != null) {
-      ComprasPreditivasService(widget.produtoRepository.objectBox)
-          .atualizarVendaMediaDiaria(salvoPosGravacao);
-      widget.produtoRepository.salvar(salvoPosGravacao);
+      final objectBox = _objectBoxLocalOuNull();
+      if (objectBox != null) {
+        try {
+          ComprasPreditivasService(
+            objectBox,
+          ).atualizarVendaMediaDiaria(salvoPosGravacao);
+          await _persistirProduto(salvoPosGravacao);
+        } catch (_) {}
+      }
     }
     if (!estavaEditando) {
       final salvo = widget.produtoRepository.obterPorId(idSalvo);
@@ -4564,20 +4663,27 @@ class _ProdutosPageState extends State<ProdutosPage>
       _ncmController.text = produto.ncm;
       _cestController.text = produto.cest;
       _cfopVendaController.text = produto.cfopVenda;
-      _grupoTributarioSelecionado =
-          grupoTributarioProdutoDeString(produto.grupoTributario).codigo;
+      _grupoTributarioSelecionado = grupoTributarioProdutoDeString(
+        produto.grupoTributario,
+      ).codigo;
       _icmsOrigemSelecionado = produto.icmsOrigem;
       _icmsCstSelecionado = produto.icmsSituacaoTributaria;
       _pisCofinsCstSelecionado = produto.pisCofinsSituacaoTributaria;
       _localizacaoController.text = produto.localizacao;
-      _estoqueCdController.text =
-          produto.estoqueCd > 0 ? produto.estoqueCd.toString() : '';
-      _substitutosIds =
-          List<int>.from(ProdutoSubstitutosUtil.parseIds(produto.substitutosIds));
-      _sugestoesVenda = _sugestaoVendaRepo
-          .listarPorProdutoOrigem(produto.id, somenteAtivas: false)
-          .map(SugestaoVendaCadastroDraft.fromEntity)
-          .toList();
+      _estoqueCdController.text = produto.estoqueCd > 0
+          ? produto.estoqueCd.toString()
+          : '';
+      _substitutosIds = List<int>.from(
+        ProdutoSubstitutosUtil.parseIds(produto.substitutosIds),
+      );
+      _sugestoesVenda =
+          _sugestaoVendaRepo
+              ?.listarPorProdutoOrigem(produto.id, somenteAtivas: false)
+              .map(SugestaoVendaCadastroDraft.fromEntity)
+              .toList() ??
+          [];
+      _custoMedioNfeCache = widget.produtoRepository
+          .calcularCustoMedioPonderadoPorEntradasNfe(produto.id) as double?;
       _precoCustoController.text = _formatarValorMonetario(produto.precoCusto);
       _preco1Controller.text = _formatarValorMonetario(
         produto.preco1 > 0 ? produto.preco1 : produto.precoVenda,
@@ -4593,32 +4699,40 @@ class _ProdutosPageState extends State<ProdutosPage>
         produto.estoque,
       );
       _quantidadeMinimaController.text = produto.quantidadeMinima.toString();
-      _leadTimeDiasController.text =
-          produto.leadTimeDias > 0 ? produto.leadTimeDias.toString() : '7';
+      _leadTimeDiasController.text = produto.leadTimeDias > 0
+          ? produto.leadTimeDias.toString()
+          : '7';
       _estoqueSegurancaController.text = produto.estoqueSeguranca.toString();
       _unidadeSelecionada = _normalizarUnidade(produto.unidade);
       _unidadeCompraController.text =
           _normalizarUnidadeCompraOpcional(produto.unidadeCompra) ?? '';
-      _quantidadeEmbalagemController.text =
-          produto.quantidadePorEmbalagem.toString();
+      _quantidadeEmbalagemController.text = produto.quantidadePorEmbalagem
+          .toString();
       _embalagemMultiplica = produto.embalagemMultiplica;
       _permiteQuantidadeFracionada = produto.permiteQuantidadeFracionada;
+      _controlaLoteValidade = produto.controlaLoteValidade;
+      _percentualBotaForaController.text = produto.percentualBotaFora > 0
+          ? produto.percentualBotaFora.toStringAsFixed(
+              produto.percentualBotaFora ==
+                      produto.percentualBotaFora.roundToDouble()
+                  ? 0
+                  : 1,
+            )
+          : '';
       _ultimaVendaEmCadastro = produto.ultimaVendaEm;
       _criadoEmCadastro = produto.criadoEm;
-      _ultimaCompraEmCadastro =
-          widget.produtoRepository.obterDataUltimaCompraProduto(produto.id);
-      _limiteDescontoPreco1Controller.text =
-          produto.limiteDescontoPreco1 > 0
-              ? produto.limiteDescontoPreco1.toStringAsFixed(1)
-              : '';
-      _limiteDescontoPreco2Controller.text =
-          produto.limiteDescontoPreco2 > 0
-              ? produto.limiteDescontoPreco2.toStringAsFixed(1)
-              : '';
-      _limiteDescontoPreco3Controller.text =
-          produto.limiteDescontoPreco3 > 0
-              ? produto.limiteDescontoPreco3.toStringAsFixed(1)
-              : '';
+      _precoAlteradoEmCadastro = produto.precoAlteradoEm;
+      _ultimaCompraEmCadastro = widget.produtoRepository
+          .obterDataUltimaCompraProduto(produto.id);
+      _limiteDescontoPreco1Controller.text = produto.limiteDescontoPreco1 > 0
+          ? produto.limiteDescontoPreco1.toStringAsFixed(1)
+          : '';
+      _limiteDescontoPreco2Controller.text = produto.limiteDescontoPreco2 > 0
+          ? produto.limiteDescontoPreco2.toStringAsFixed(1)
+          : '';
+      _limiteDescontoPreco3Controller.text = produto.limiteDescontoPreco3 > 0
+          ? produto.limiteDescontoPreco3.toStringAsFixed(1)
+          : '';
       _sincronizarAlvosPrecificacaoComPrecosAtuais();
       _produtoAtivo = produto.ativo;
       _mostrarNomeImpressao = !_nomeImpressaoVinculadoAoNome;
@@ -4627,10 +4741,44 @@ class _ProdutosPageState extends State<ProdutosPage>
       _statusEhErro = false;
       _gerarSkuAutomatico = false;
     });
+    if (_terminalLeveApi && produto.id > 0) {
+      unawaited(_carregarApoioRemotoProduto(produto.id));
+    }
+  }
+
+  Future<void> _carregarApoioRemotoProduto(int produtoId) async {
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoApiRepository) return;
+    try {
+      final fresco = await repo.obterPorIdRemoto(produtoId);
+      final sugestoes = await repo.listarSugestoesVendaRemoto(
+        produtoId,
+        somenteAtivas: false,
+      );
+      final ultimaCompra = await repo.obterDataUltimaCompraProdutoRemoto(
+        produtoId,
+      );
+      final custoNfe = await repo.calcularCustoMedioPonderadoPorEntradasNfeRemoto(
+        produtoId,
+      );
+      if (!mounted || _produtoEmEdicaoId != produtoId) return;
+      setState(() {
+        if (fresco != null) {
+          // Mantem campos ja editados; so atualiza cache de custo/historico.
+        }
+        _sugestoesVenda =
+            sugestoes.map(SugestaoVendaCadastroDraft.fromEntity).toList();
+        _ultimaCompraEmCadastro = ultimaCompra;
+        _custoMedioNfeCache = custoNfe;
+      });
+    } catch (_) {}
   }
 
   List<Produto> _produtosOrdenadosPorCadastro() {
-    final produtos = widget.produtoRepository.listarTodos();
+    // API devolve List.unmodifiable — copia antes de ordenar.
+    final produtos = List<Produto>.from(
+      widget.produtoRepository.listarTodos() as Iterable,
+    );
     produtos.sort((a, b) => a.id.compareTo(b.id));
     return produtos;
   }
@@ -4641,18 +4789,27 @@ class _ProdutosPageState extends State<ProdutosPage>
     return produtos.indexWhere((p) => p.id == atualId);
   }
 
-  void _abrirProdutoPorIndice(int indice) {
+  Future<void> _abrirProdutoPorIndice(int indice) async {
     final produtos = _produtosOrdenadosPorCadastro();
     if (produtos.isEmpty) {
       _definirStatus('Nao ha produtos cadastrados para navegar.', erro: true);
       return;
     }
     final indexValido = indice.clamp(0, produtos.length - 1);
-    _editarProdutoNoCabecalho(produtos[indexValido]);
+    var alvo = produtos[indexValido];
+    if (_terminalLeveApi) {
+      try {
+        final fresco = await (widget.produtoRepository as ProdutoApiRepository)
+            .obterPorIdRemoto(alvo.id);
+        if (fresco != null) alvo = fresco;
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    _editarProdutoNoCabecalho(alvo);
   }
 
   void _irParaPrimeiroProduto() {
-    _abrirProdutoPorIndice(0);
+    unawaited(_abrirProdutoPorIndice(0));
   }
 
   void _irParaUltimoProduto() {
@@ -4661,7 +4818,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       _definirStatus('Nao ha produtos cadastrados para navegar.', erro: true);
       return;
     }
-    _abrirProdutoPorIndice(produtos.length - 1);
+    unawaited(_abrirProdutoPorIndice(produtos.length - 1));
   }
 
   void _irParaProdutoAnterior() {
@@ -4672,10 +4829,10 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
     final indiceAtual = _indiceProdutoAtual(produtos);
     if (indiceAtual <= 0) {
-      _abrirProdutoPorIndice(0);
+      unawaited(_abrirProdutoPorIndice(0));
       return;
     }
-    _abrirProdutoPorIndice(indiceAtual - 1);
+    unawaited(_abrirProdutoPorIndice(indiceAtual - 1));
   }
 
   void _irParaProximoProduto() {
@@ -4686,14 +4843,14 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
     final indiceAtual = _indiceProdutoAtual(produtos);
     if (indiceAtual < 0) {
-      _abrirProdutoPorIndice(0);
+      unawaited(_abrirProdutoPorIndice(0));
       return;
     }
     if (indiceAtual >= produtos.length - 1) {
-      _abrirProdutoPorIndice(produtos.length - 1);
+      unawaited(_abrirProdutoPorIndice(produtos.length - 1));
       return;
     }
-    _abrirProdutoPorIndice(indiceAtual + 1);
+    unawaited(_abrirProdutoPorIndice(indiceAtual + 1));
   }
 
   String _lerTextoArquivoUtf8OuLatin1(List<int> bytes) {
@@ -4852,9 +5009,9 @@ class _ProdutosPageState extends State<ProdutosPage>
     _definirStatus(
       r.alterados > 0
           ? 'Nomes padronizados: ${r.alterados} alterado(s), '
-              '${r.inalterados} ja estavam ok.'
+                '${r.inalterados} ja estavam ok.'
           : 'Nenhum nome precisou de alteracao '
-              '(${r.inalterados} produto(s)).',
+                '(${r.inalterados} produto(s)).',
       erro: false,
     );
   }
@@ -5014,9 +5171,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       'quantidade minima',
       'qtd minima',
     ]);
-    final idxFabricante = _indiceColunaPorAliases(headers, [
-      'fabricante',
-    ]);
+    final idxFabricante = _indiceColunaPorAliases(headers, ['fabricante']);
     final idxMarca = _indiceColunaPorAliases(headers, ['marca']);
     final idxNcm = _indiceColunaPorAliases(headers, ['ncm']);
     final idxGtin = _indiceColunaPorAliases(headers, [
@@ -5029,10 +5184,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       'cod barras',
     ]);
     final idxFamilia = _indiceColunaPorAliases(headers, ['familia']);
-    final idxGrupo = _indiceColunaPorAliases(headers, [
-      'grupo',
-      'categoria',
-    ]);
+    final idxGrupo = _indiceColunaPorAliases(headers, ['grupo', 'categoria']);
     final idxSubgrupo = _indiceColunaPorAliases(headers, [
       'subgrupo',
       'sub grupo',
@@ -5341,17 +5493,21 @@ class _ProdutosPageState extends State<ProdutosPage>
       );
       final produto = linhaImport.paraProduto(existente: existente);
       try {
-        final idSalvo = widget.produtoRepository.salvar(produto);
-        widget.produtoRepository.sincronizarCustoMedioInteligenteParaProduto(
-          idSalvo,
-          legadoImportacao: custoMedioVal > 0 ? custoMedioVal : null,
-        );
+        final idSalvo = await _persistirProduto(produto);
+        try {
+          widget.produtoRepository.sincronizarCustoMedioInteligenteParaProduto(
+            idSalvo,
+            legadoImportacao: custoMedioVal > 0 ? custoMedioVal : null,
+          );
+        } catch (_) {}
         if (existente != null) {
           atualizados++;
         } else {
           inseridos++;
         }
       } on ProdutoSkuDuplicadoException catch (e) {
+        erros.add('Linha ${r + 1}: $e');
+      } catch (e) {
         erros.add('Linha ${r + 1}: $e');
       }
     }
@@ -5405,7 +5561,21 @@ class _ProdutosPageState extends State<ProdutosPage>
       produtoRepository: widget.produtoRepository,
     );
     if (!mounted || produtoSelecionado == null) return;
-    _editarProdutoNoCabecalho(produtoSelecionado);
+    await _abrirProdutoParaEdicao(produtoSelecionado);
+  }
+
+  /// Abre produto fresco do servidor quando em terminal leve.
+  Future<void> _abrirProdutoParaEdicao(Produto produto) async {
+    var alvo = produto;
+    if (_terminalLeveApi && produto.id > 0) {
+      try {
+        final fresco = await (widget.produtoRepository as ProdutoApiRepository)
+            .obterPorIdRemoto(produto.id);
+        if (fresco != null) alvo = fresco;
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    _editarProdutoNoCabecalho(alvo);
   }
 
   @override
@@ -5417,39 +5587,51 @@ class _ProdutosPageState extends State<ProdutosPage>
     final markup1 = _markupCalculadoPorController(_preco1Controller);
     final markup2 = _markupCalculadoPorController(_preco2Controller);
     final markup3 = _markupCalculadoPorController(_preco3Controller);
-    final semantic = context.semanticColors;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cadastro de Produtos'),
         actions: [
+          if (_terminalLeveApi && _carregandoCatalogoApi)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
           IconButton(
             tooltip: 'Atualizar produtos da rede (pull completo)',
             icon: const Icon(Icons.cloud_download_outlined),
-            onPressed: _puxarCadastroDaRede,
+            onPressed: _carregandoCatalogoApi ? null : _puxarCadastroDaRede,
           ),
-          IconButton(
-            tooltip: 'Importar backup Chacal (.s3db / .sql / .txt)',
-            icon: const Icon(Icons.archive_outlined),
-            onPressed: _importarBackupChacal,
-          ),
-          IconButton(
-            tooltip: 'Importar produtos (CSV)',
-            icon: const Icon(Icons.upload_file_outlined),
-            onPressed: _importarProdutosCsv,
-          ),
-          IconButton(
-            tooltip: 'Padronizar nomes (titulo, nao MAIUSCULO)',
-            icon: const Icon(Icons.text_fields_outlined),
-            onPressed: _padronizarNomesTituloEmLote,
-          ),
-          IconButton(
-            tooltip: 'Zerar cadastro de produtos',
-            icon: Icon(
-              Icons.delete_forever_outlined,
-              color: theme.colorScheme.error,
+          if (!_terminalLeveApi) ...[
+            IconButton(
+              tooltip: 'Importar backup Chacal (.s3db / .sql / .txt)',
+              icon: const Icon(Icons.archive_outlined),
+              onPressed: _importarBackupChacal,
             ),
-            onPressed: _zerarCadastroProdutos,
-          ),
+            IconButton(
+              tooltip: 'Importar produtos (CSV)',
+              icon: const Icon(Icons.upload_file_outlined),
+              onPressed: _importarProdutosCsv,
+            ),
+            IconButton(
+              tooltip: 'Padronizar nomes (titulo, nao MAIUSCULO)',
+              icon: const Icon(Icons.text_fields_outlined),
+              onPressed: _padronizarNomesTituloEmLote,
+            ),
+            IconButton(
+              tooltip: 'Zerar cadastro de produtos',
+              icon: Icon(
+                Icons.delete_forever_outlined,
+                color: theme.colorScheme.error,
+              ),
+              onPressed: _zerarCadastroProdutos,
+            ),
+          ],
         ],
       ),
       body: DefaultTabController(
@@ -5491,1515 +5673,1442 @@ class _ProdutosPageState extends State<ProdutosPage>
                   canRequestFocus: false,
                   skipTraversal: true,
                   child: KeyboardListener(
-                  focusNode: _cadastroKeyboardFocusNode,
-                  onKeyEvent: (KeyEvent event) {
-                    if (event is! KeyDownEvent) {
-                      return;
-                    }
-                    if (event.logicalKey != LogicalKeyboardKey.f11) {
-                      return;
-                    }
-                    final tc = DefaultTabController.maybeOf(tabCtx);
-                    if (tc != null && tc.index != 0) {
-                      return;
-                    }
-                    _imprimirEtiquetaProduto();
-                  },
-                  child: Column(
-                    children: [
-                      Material(
-                        color: theme.colorScheme.surface,
-                        child: TabBar(
-                          labelColor: theme.colorScheme.primary,
-                          tabs: const [
-                            Tab(text: 'Dados do produto'),
-                            Tab(text: 'Historico de compras'),
-                            Tab(text: 'Movimentacoes estoque'),
-                          ],
+                    focusNode: _cadastroKeyboardFocusNode,
+                    onKeyEvent: (KeyEvent event) {
+                      if (event is! KeyDownEvent) {
+                        return;
+                      }
+                      if (event.logicalKey != LogicalKeyboardKey.f11) {
+                        return;
+                      }
+                      final tc = DefaultTabController.maybeOf(tabCtx);
+                      if (tc != null && tc.index != 0) {
+                        return;
+                      }
+                      _imprimirEtiquetaProduto();
+                    },
+                    child: Column(
+                      children: [
+                        Material(
+                          color: Colors.white,
+                          child: TabBar(
+                            labelColor: theme.colorScheme.primary,
+                            tabs: const [
+                              Tab(text: 'Dados do produto'),
+                              Tab(text: 'Historico de compras'),
+                              Tab(text: 'Movimentacoes estoque'),
+                            ],
+                          ),
                         ),
-                      ),
-                      Expanded(
-                        child: TabBarView(
-                          children: [
-                            Form(
-                              key: _formKey,
-                              autovalidateMode: _tentouSalvar
-                                  ? AutovalidateMode.always
-                                  : AutovalidateMode.disabled,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  Expanded(
-                                    child: Padding(
+                        Expanded(
+                          child: TabBarView(
+                            children: [
+                              Form(
+                                key: _formKey,
+                                autovalidateMode: _tentouSalvar
+                                    ? AutovalidateMode.always
+                                    : AutovalidateMode.disabled,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Padding(
                                       padding: const EdgeInsets.fromLTRB(
                                         _erpGap16,
                                         _erpGap8,
-                                        _erpGap8,
+                                        _erpGap16,
                                         0,
                                       ),
-                                      child: Scrollbar(
-                                        controller: _scrollController,
-                                        thumbVisibility: true,
-                                        trackVisibility: true,
-                                        thickness: 10,
-                                        radius: const Radius.circular(6),
-                                        child: RefreshIndicator(
-                                          onRefresh: _puxarCadastroDaRede,
-                                          child: SingleChildScrollView(
-                                          primary: false,
-                                          controller: _scrollController,
-                                          physics:
-                                              const AlwaysScrollableScrollPhysics(),
-                                          padding: const EdgeInsets.only(
-                                            right: _erpScrollbarGutter,
-                                            bottom: _erpGap16,
+                                      child:
+                                          _buildBarraFerramentasCadastroProduto(
+                                        context,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _buildProdutoCadastroHeaderPanel(context),
+                                    if (_status.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: _erpGap16,
+                                        ),
+                                        child: _buildStatusBannerCadastro(
+                                          context,
+                                        ),
+                                      ),
+                                    ],
+                                    Expanded(
+                                      child: ColoredBox(
+                                        color: const Color(0xFFF8FAFC),
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            _erpGap16,
+                                            _erpGap8,
+                                            _erpGap8,
+                                            0,
                                           ),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.stretch,
-                                            children: [
-                                              Material(
-                                                color: Colors.transparent,
-                                                child: context.isCompactLayout
-                                                    ? Column(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .stretch,
-                                                        children: [
-                                                          OutlinedButton.icon(
-                                                            style: OutlinedButton
-                                                                .styleFrom(
-                                                              padding:
-                                                                  const EdgeInsets
-                                                                      .symmetric(
-                                                                horizontal:
-                                                                    _erpGap16,
-                                                                vertical: 12,
-                                                              ),
-                                                            ),
-                                                            onPressed:
-                                                                _abrirPesquisaProduto,
-                                                            icon: const Icon(
-                                                              Icons.search,
-                                                              size: 20,
-                                                            ),
-                                                            label: const Text(
-                                                              'Pesquisar produto',
-                                                            ),
-                                                          ),
-                                                          const SizedBox(
-                                                            height: _erpGap8,
-                                                          ),
-                                                          Row(
-                                                            mainAxisAlignment:
-                                                                MainAxisAlignment
-                                                                    .center,
-                                                            children: [
-                                                              IconButton(
-                                                                tooltip:
-                                                                    'Primeiro',
-                                                                onPressed:
-                                                                    _irParaPrimeiroProduto,
-                                                                icon: const Icon(
-                                                                  Icons
-                                                                      .first_page_outlined,
-                                                                ),
-                                                              ),
-                                                              IconButton(
-                                                                tooltip:
-                                                                    'Anterior',
-                                                                onPressed:
-                                                                    _irParaProdutoAnterior,
-                                                                icon: const Icon(
-                                                                  Icons
-                                                                      .navigate_before_outlined,
-                                                                ),
-                                                              ),
-                                                              IconButton(
-                                                                tooltip:
-                                                                    'Proximo',
-                                                                onPressed:
-                                                                    _irParaProximoProduto,
-                                                                icon: const Icon(
-                                                                  Icons
-                                                                      .navigate_next_outlined,
-                                                                ),
-                                                              ),
-                                                              IconButton(
-                                                                tooltip: 'Ultimo',
-                                                                onPressed:
-                                                                    _irParaUltimoProduto,
-                                                                icon: const Icon(
-                                                                  Icons
-                                                                      .last_page_outlined,
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ],
-                                                      )
-                                                    : Row(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .center,
-                                                        children: [
-                                                          Expanded(
-                                                            child: OutlinedButton
-                                                                .icon(
-                                                              style: OutlinedButton
-                                                                  .styleFrom(
-                                                                padding:
-                                                                    const EdgeInsets
-                                                                        .symmetric(
-                                                                  horizontal:
-                                                                      _erpGap16,
-                                                                  vertical: 12,
-                                                                ),
-                                                              ),
-                                                              onPressed:
-                                                                  _abrirPesquisaProduto,
-                                                              icon: const Icon(
-                                                                Icons.search,
-                                                                size: 20,
-                                                              ),
-                                                              label: const Text(
-                                                                'Pesquisar produto',
-                                                              ),
-                                                            ),
-                                                          ),
-                                                          IconButton(
-                                                            tooltip: 'Primeiro',
-                                                            onPressed:
-                                                                _irParaPrimeiroProduto,
-                                                            icon: const Icon(
-                                                              Icons
-                                                                  .first_page_outlined,
-                                                            ),
-                                                          ),
-                                                          IconButton(
-                                                            tooltip: 'Anterior',
-                                                            onPressed:
-                                                                _irParaProdutoAnterior,
-                                                            icon: const Icon(
-                                                              Icons
-                                                                  .navigate_before_outlined,
-                                                            ),
-                                                          ),
-                                                          IconButton(
-                                                            tooltip: 'Proximo',
-                                                            onPressed:
-                                                                _irParaProximoProduto,
-                                                            icon: const Icon(
-                                                              Icons
-                                                                  .navigate_next_outlined,
-                                                            ),
-                                                          ),
-                                                          IconButton(
-                                                            tooltip: 'Ultimo',
-                                                            onPressed:
-                                                                _irParaUltimoProduto,
-                                                            icon: const Icon(
-                                                              Icons
-                                                                  .last_page_outlined,
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
+                                          child: RawScrollbar(
+                                          controller: _scrollController,
+                                          thumbVisibility: true,
+                                          trackVisibility: true,
+                                          thickness: 10,
+                                          radius: const Radius.circular(8),
+                                          child: RefreshIndicator(
+                                            onRefresh: _puxarCadastroDaRede,
+                                            child: SingleChildScrollView(
+                                              primary: false,
+                                              controller: _scrollController,
+                                              physics:
+                                                  const AlwaysScrollableScrollPhysics(),
+                                              padding: const EdgeInsets.only(
+                                                right: _erpScrollbarGutter,
+                                                bottom: _erpGap16,
                                               ),
-                                              const SizedBox(height: _erpGap16),
-                                              _buildResumoProdutoCadastro(
-                                                context,
-                                              ),
-                                              _buildCabecalhoFixoCadastro(
-                                                context,
-                                              ),
-                                              _buildNavegacaoAbasCadastro(
-                                                context,
-                                              ),
-                                              if (_subAbaCadastroController
-                                                      .index ==
-                                                  0) ...[
-                                              _erpSurfaceCard(
-                                                context: context,
-                                                title: 'Informacoes basicas',
-                                                icon:
-                                                    Icons.inventory_2_outlined,
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.stretch,
                                                 children: [
-                                                  LayoutBuilder(
-                                                    builder: (context, constraints) {
-                                                      final sideBySide =
-                                                          constraints
-                                                              .maxWidth >=
-                                                          _erpFotoPreviewSideBySideBreakpoint;
-                                                      final preview =
-                                                          _erpProdutoFotoPreviewSquare(
-                                                            context,
-                                                          );
+                                                  _buildCabecalhoFixoCadastro(
+                                                    context,
+                                                  ),
+                                                  _buildNavegacaoAbasCadastro(
+                                                    context,
+                                                  ),
+                                                  if (_subAbaCadastroController
+                                                          .index ==
+                                                      0) ...[
+                                                    LayoutBuilder(
+                                                      builder: (context, box) {
+                                                        final ladoALado = box.maxWidth >=
+                                                            _erpBasicasClassificacaoSideBySideBreakpoint;
+                                                        final cardBasicas = _erpSurfaceCard(
+                                                      context: context,
+                                                      title:
+                                                          'Informacoes basicas',
+                                                      icon: Icons
+                                                          .inventory_2_outlined,
+                                                      children: [
+                                                        LayoutBuilder(
+                                                          builder: (context, constraints) {
+                                                            final sideBySide =
+                                                                constraints
+                                                                    .maxWidth >=
+                                                                _erpFotoPreviewSideBySideBreakpoint;
+                                                            final preview =
+                                                                _erpProdutoFotoPreviewSquare(
+                                                                  context,
+                                                                );
 
-                                                      final camposEBotoesFoto = Column(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .stretch,
-                                                        children: [
-                                                          _erpResponsiveGrid(context, [
-                                                            Column(
+                                                            final camposEBotoesFoto = Column(
                                                               crossAxisAlignment:
                                                                   CrossAxisAlignment
-                                                                      .start,
+                                                                      .stretch,
                                                               children: [
-                                                                _erpFieldLabel(
-                                                                  'Codigo interno (SKU)',
-                                                                  context,
-                                                                ),
-                                                                TextFormField(
-                                                                  controller:
-                                                                      _codigoInternoController,
-                                                                  enabled:
-                                                                      !_gerarSkuAutomatico,
-                                                                  validator:
-                                                                      _validarSku,
-                                                                  decoration:
-                                                                      _erpInputDecoration(
+                                                                _erpResponsiveGrid(context, [
+                                                                  Column(
+                                                                    crossAxisAlignment:
+                                                                        CrossAxisAlignment
+                                                                            .start,
+                                                                    children: [
+                                                                      _erpFieldLabel(
+                                                                        'Codigo interno (SKU)',
                                                                         context,
-                                                                        helper: _gerarSkuAutomatico
-                                                                            ? (_produtoEmEdicaoId ==
-                                                                                    null
-                                                                                ? 'Proximo: ${widget.produtoRepository.proximoSkuAutomatico()} (numerico curto para o PDV)'
-                                                                                : 'Proximo: ${widget.produtoRepository.proximoSkuAutomatico(ignorarProdutoId: _produtoEmEdicaoId)} — substitui o SKU atual ao salvar')
-                                                                            : 'Manual ou geracao automatica ao salvar',
                                                                       ),
-                                                                ),
-                                                                CheckboxListTile(
-                                                                  dense: true,
-                                                                  visualDensity: const VisualDensity(
-                                                                    horizontal:
-                                                                        VisualDensity
-                                                                            .minimumDensity,
-                                                                    vertical:
-                                                                        VisualDensity
-                                                                            .minimumDensity,
-                                                                  ),
-                                                                  value:
-                                                                      _gerarSkuAutomatico,
-                                                                  onChanged: (value) {
-                                                                    setState(() {
-                                                                      _gerarSkuAutomatico =
-                                                                          value ??
-                                                                          true;
-                                                                      if (_gerarSkuAutomatico) {
-                                                                        _codigoInternoController
-                                                                            .clear();
-                                                                      }
-                                                                    });
-                                                                  },
-                                                                  contentPadding:
-                                                                      EdgeInsets
-                                                                          .zero,
-                                                                  title: Text(
-                                                                    'Gerar SKU automaticamente',
-                                                                    style: TextStyle(
-                                                                      fontSize:
-                                                                          12,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w400,
-                                                                      height:
-                                                                          1.2,
-                                                                      color: Theme.of(context)
-                                                                          .colorScheme
-                                                                          .onSurface
-                                                                          .withValues(
-                                                                            alpha:
-                                                                                0.62,
+                                                                      TextFormField(
+                                                                        controller:
+                                                                            _codigoInternoController,
+                                                                        enabled:
+                                                                            !_gerarSkuAutomatico,
+                                                                        validator:
+                                                                            _validarSku,
+                                                                        decoration: _erpInputDecoration(
+                                                                          context,
+                                                                          helper:
+                                                                              _gerarSkuAutomatico
+                                                                              ? (_produtoEmEdicaoId ==
+                                                                                        null
+                                                                                    ? 'Proximo: ${widget.produtoRepository.proximoSkuAutomatico()} (numerico curto para o PDV)'
+                                                                                    : 'Proximo: ${widget.produtoRepository.proximoSkuAutomatico(ignorarProdutoId: _produtoEmEdicaoId)} — substitui o SKU atual ao salvar')
+                                                                              : 'Manual ou geracao automatica ao salvar',
+                                                                        ),
+                                                                      ),
+                                                                      CheckboxListTile(
+                                                                        dense:
+                                                                            true,
+                                                                        visualDensity: const VisualDensity(
+                                                                          horizontal:
+                                                                              VisualDensity.minimumDensity,
+                                                                          vertical:
+                                                                              VisualDensity.minimumDensity,
+                                                                        ),
+                                                                        value:
+                                                                            _gerarSkuAutomatico,
+                                                                        onChanged: (value) {
+                                                                          setState(() {
+                                                                            _gerarSkuAutomatico =
+                                                                                value ??
+                                                                                true;
+                                                                            if (_gerarSkuAutomatico) {
+                                                                              _codigoInternoController.clear();
+                                                                            }
+                                                                          });
+                                                                        },
+                                                                        contentPadding:
+                                                                            EdgeInsets.zero,
+                                                                        title: Text(
+                                                                          'Gerar SKU automaticamente',
+                                                                          style: TextStyle(
+                                                                            fontSize:
+                                                                                12,
+                                                                            fontWeight:
+                                                                                FontWeight.w400,
+                                                                            height:
+                                                                                1.2,
+                                                                            color:
+                                                                                Theme.of(
+                                                                                  context,
+                                                                                ).colorScheme.onSurface.withValues(
+                                                                                  alpha: 0.62,
+                                                                                ),
                                                                           ),
-                                                                    ),
+                                                                        ),
+                                                                        controlAffinity:
+                                                                            ListTileControlAffinity.leading,
+                                                                      ),
+                                                                    ],
                                                                   ),
-                                                                  controlAffinity:
-                                                                      ListTileControlAffinity
-                                                                          .leading,
+                                                                ]),
+                                                                const SizedBox(
+                                                                  height:
+                                                                      _erpGap16,
+                                                                ),
+                                                                Wrap(
+                                                                  spacing:
+                                                                      _erpGap8,
+                                                                  runSpacing:
+                                                                      _erpGap8,
+                                                                  children: [
+                                                                    if (ProdutoImagemService
+                                                                        .cameraDisponivel)
+                                                                      OutlinedButton.icon(
+                                                                        style:
+                                                                            _estiloBotaoContornoCompacto,
+                                                                        onPressed:
+                                                                            _buscandoFoto
+                                                                            ? null
+                                                                            : _tirarFotoProduto,
+                                                                        icon: const Icon(
+                                                                          Icons
+                                                                              .photo_camera_outlined,
+                                                                          size:
+                                                                              18,
+                                                                        ),
+                                                                        label: const Text(
+                                                                          'Tirar foto',
+                                                                        ),
+                                                                      ),
+                                                                    OutlinedButton.icon(
+                                                                      style:
+                                                                          _estiloBotaoContornoCompacto,
+                                                                      onPressed:
+                                                                          _buscandoFoto
+                                                                          ? null
+                                                                          : _importarFotoProduto,
+                                                                      icon: Icon(
+                                                                        ProdutoImagemService.cameraDisponivel
+                                                                            ? Icons.photo_library_outlined
+                                                                            : Icons.add_a_photo_outlined,
+                                                                        size:
+                                                                            18,
+                                                                      ),
+                                                                      label: Text(
+                                                                        !_temFotoNoFormulario
+                                                                            ? (ProdutoImagemService.cameraDisponivel
+                                                                                  ? 'Galeria'
+                                                                                  : 'Importar foto')
+                                                                            : (ProdutoImagemService.cameraDisponivel
+                                                                                  ? 'Trocar da galeria'
+                                                                                  : 'Trocar foto'),
+                                                                      ),
+                                                                    ),
+                                                                    OutlinedButton.icon(
+                                                                      style:
+                                                                          _estiloBotaoContornoCompacto,
+                                                                      onPressed:
+                                                                          _buscandoFoto
+                                                                          ? null
+                                                                          : _buscarFotoProdutoNaWeb,
+                                                                      icon:
+                                                                          _buscandoFoto
+                                                                          ? const SizedBox(
+                                                                              width: 18,
+                                                                              height: 18,
+                                                                              child: CircularProgressIndicator(
+                                                                                strokeWidth: 2,
+                                                                              ),
+                                                                            )
+                                                                          : const Icon(
+                                                                              Icons.image_search_outlined,
+                                                                              size: 18,
+                                                                            ),
+                                                                      label: const Text(
+                                                                        'Buscar foto',
+                                                                      ),
+                                                                    ),
+                                                                    if (_termoUltimaBuscaFoto
+                                                                        .isNotEmpty)
+                                                                      OutlinedButton.icon(
+                                                                        style:
+                                                                            _estiloBotaoContornoCompacto,
+                                                                        onPressed:
+                                                                            _buscandoFoto
+                                                                            ? null
+                                                                            : _buscarOutraFotoProdutoNaWeb,
+                                                                        icon: const Icon(
+                                                                          Icons
+                                                                              .refresh_outlined,
+                                                                          size:
+                                                                              18,
+                                                                        ),
+                                                                        label: const Text(
+                                                                          'Outra foto',
+                                                                        ),
+                                                                      ),
+                                                                    if (_fotoPreviewPath() !=
+                                                                        null)
+                                                                      OutlinedButton.icon(
+                                                                        style:
+                                                                            _estiloBotaoContornoCompacto,
+                                                                        onPressed:
+                                                                            _removerFotoProduto,
+                                                                        icon: const Icon(
+                                                                          Icons
+                                                                              .delete_outline,
+                                                                          size:
+                                                                              18,
+                                                                        ),
+                                                                        label: const Text(
+                                                                          'Remover',
+                                                                        ),
+                                                                      ),
+                                                                  ],
                                                                 ),
                                                               ],
-                                                            ),
-                                                          ]),
-                                                          const SizedBox(
-                                                            height: _erpGap16,
-                                                          ),
-                                                          Wrap(
-                                                            spacing: _erpGap8,
-                                                            runSpacing: _erpGap8,
-                                                            children: [
-                                                              if (ProdutoImagemService
-                                                                  .cameraDisponivel)
-                                                                OutlinedButton.icon(
-                                                                  style:
-                                                                      _estiloBotaoContornoCompacto,
-                                                                  onPressed:
-                                                                      _buscandoFoto
-                                                                          ? null
-                                                                          : _tirarFotoProduto,
-                                                                  icon: const Icon(
-                                                                    Icons
-                                                                        .photo_camera_outlined,
-                                                                    size: 18,
-                                                                  ),
-                                                                  label: const Text(
-                                                                    'Tirar foto',
-                                                                  ),
-                                                                ),
-                                                              OutlinedButton.icon(
-                                                                style:
-                                                                    _estiloBotaoContornoCompacto,
-                                                                onPressed:
-                                                                    _buscandoFoto
-                                                                        ? null
-                                                                        : _importarFotoProduto,
-                                                                icon: Icon(
-                                                                  ProdutoImagemService
-                                                                          .cameraDisponivel
-                                                                      ? Icons
-                                                                          .photo_library_outlined
-                                                                      : Icons
-                                                                          .add_a_photo_outlined,
-                                                                  size: 18,
-                                                                ),
-                                                                label: Text(
-                                                                  _fotoPreviewPath() ==
-                                                                          null
-                                                                      ? (ProdutoImagemService
-                                                                              .cameraDisponivel
-                                                                          ? 'Galeria'
-                                                                          : 'Importar foto')
-                                                                      : (ProdutoImagemService
-                                                                              .cameraDisponivel
-                                                                          ? 'Trocar da galeria'
-                                                                          : 'Trocar foto'),
-                                                                ),
-                                                              ),
-                                                              OutlinedButton.icon(
-                                                                style:
-                                                                    _estiloBotaoContornoCompacto,
-                                                                onPressed:
-                                                                    _buscandoFoto
-                                                                        ? null
-                                                                        : _buscarFotoProdutoNaWeb,
-                                                                icon: _buscandoFoto
-                                                                    ? const SizedBox(
-                                                                        width: 18,
-                                                                        height: 18,
-                                                                        child: CircularProgressIndicator(
-                                                                          strokeWidth: 2,
-                                                                        ),
-                                                                      )
-                                                                    : const Icon(
-                                                                        Icons
-                                                                            .image_search_outlined,
-                                                                        size: 18,
-                                                                      ),
-                                                                label: const Text(
-                                                                  'Buscar foto',
-                                                                ),
-                                                              ),
-                                                              if (_termoUltimaBuscaFoto
-                                                                  .isNotEmpty)
-                                                                OutlinedButton.icon(
-                                                                  style:
-                                                                      _estiloBotaoContornoCompacto,
-                                                                  onPressed:
-                                                                      _buscandoFoto
-                                                                          ? null
-                                                                          : _buscarOutraFotoProdutoNaWeb,
-                                                                  icon: const Icon(
-                                                                    Icons
-                                                                        .refresh_outlined,
-                                                                    size: 18,
-                                                                  ),
-                                                                  label: const Text(
-                                                                    'Outra foto',
-                                                                  ),
-                                                                ),
-                                                              if (_fotoPreviewPath() !=
-                                                                  null)
-                                                                OutlinedButton.icon(
-                                                                  style:
-                                                                      _estiloBotaoContornoCompacto,
-                                                                  onPressed:
-                                                                      _removerFotoProduto,
-                                                                  icon: const Icon(
-                                                                    Icons
-                                                                        .delete_outline,
-                                                                    size: 18,
-                                                                  ),
-                                                                  label:
-                                                                      const Text(
-                                                                        'Remover',
-                                                                      ),
-                                                                ),
-                                                            ],
-                                                          ),
-                                                        ],
-                                                      );
+                                                            );
 
-                                                      if (sideBySide) {
-                                                        return Row(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Expanded(
-                                                              child:
-                                                                  camposEBotoesFoto,
-                                                            ),
-                                                            const SizedBox(
-                                                              width: _erpGap16,
-                                                            ),
-                                                            preview,
-                                                          ],
-                                                        );
-                                                      }
+                                                            if (sideBySide) {
+                                                              return Row(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                                  Expanded(
+                                                                    child:
+                                                                        camposEBotoesFoto,
+                                                                  ),
+                                                                  const SizedBox(
+                                                                    width:
+                                                                        _erpGap16,
+                                                                  ),
+                                                                  preview,
+                                                                ],
+                                                              );
+                                                            }
 
-                                                      return Column(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .stretch,
-                                                        children: [
-                                                          camposEBotoesFoto,
-                                                          const SizedBox(
-                                                            height: _erpGap16,
-                                                          ),
-                                                          Center(
-                                                            child: preview,
-                                                          ),
-                                                        ],
-                                                      );
-                                                    },
-                                                  ),
-                                                ],
-                                              ),
-                                              _erpSurfaceCard(
-                                                context: context,
-                                                title: 'Classificacao',
-                                                icon: Icons.category_outlined,
-                                                children: [
-                                                  _erpResponsiveGrid(context, [
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'Categoria',
-                                                          context,
-                                                        ),
-                                                        DropdownButtonFormField<
-                                                          String
-                                                        >(
-                                                          isDense: true,
-                                                          isExpanded: true,
-                                                          initialValue:
-                                                              _categoriaSelecionada,
-                                                          validator:
-                                                              _validarCategoria,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                                hint:
-                                                                    'Selecione',
-                                                              ),
-                                                          items: _categoriasMateriaisConstrucao
-                                                              .keys
-                                                              .map(
-                                                                (categoria) =>
-                                                                    DropdownMenuItem<
-                                                                      String
-                                                                    >(
-                                                                      value:
-                                                                          categoria,
-                                                                      child: Text(
-                                                                        categoria,
-                                                                      ),
-                                                                    ),
-                                                              )
-                                                              .toList(),
-                                                          onChanged: (value) {
-                                                            setState(() {
-                                                              _categoriaSelecionada =
-                                                                  value;
-                                                              _subcategoriaSelecionada =
-                                                                  null;
-                                                              _subcategoriaLivreController
-                                                                  .clear();
-                                                            });
+                                                            return Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .stretch,
+                                                              children: [
+                                                                camposEBotoesFoto,
+                                                                const SizedBox(
+                                                                  height:
+                                                                      _erpGap16,
+                                                                ),
+                                                                Center(
+                                                                  child:
+                                                                      preview,
+                                                                ),
+                                                              ],
+                                                            );
                                                           },
                                                         ),
                                                       ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
+                                                    );
+                                                        final cardClassificacao = _erpSurfaceCard(
+                                                      context: context,
+                                                      title: 'Classificacao',
+                                                      icon: Icons
+                                                          .category_outlined,
                                                       children: [
-                                                        _erpFieldLabel(
-                                                          'Subcategoria',
-                                                          context,
-                                                        ),
-                                                        DropdownButtonFormField<
-                                                          String
-                                                        >(
-                                                          key: ValueKey(
-                                                            'subcategoria_${_categoriaSelecionada ?? 'vazio'}_${_subcategoriaSelecionada ?? 'vazio'}',
-                                                          ),
-                                                          isDense: true,
-                                                          isExpanded: true,
-                                                          initialValue:
-                                                              _subcategoriaSelecionada,
-                                                          validator:
-                                                              _validarSubcategoria,
-                                                          decoration:
-                                                              _erpInputDecoration(
+                                                        _erpResponsiveGrid(context, [
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Categoria',
                                                                 context,
-                                                                hint:
-                                                                    'Selecione',
                                                               ),
-                                                          items:
-                                                              (_categoriasMateriaisConstrucao[_categoriaSelecionada] ??
-                                                                      [])
-                                                                  .map(
-                                                                    (
-                                                                      subcategoria,
-                                                                    ) => DropdownMenuItem<String>(
-                                                                      value:
-                                                                          subcategoria,
-                                                                      child: Text(
-                                                                        subcategoria,
-                                                                      ),
+                                                              DropdownButtonFormField<
+                                                                String
+                                                              >(
+                                                                isDense: true,
+                                                                isExpanded:
+                                                                    true,
+                                                                initialValue:
+                                                                    _categoriaSelecionada,
+                                                                validator:
+                                                                    _validarCategoria,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                      hint:
+                                                                          'Selecione',
                                                                     ),
-                                                                  )
-                                                                  .toList(),
-                                                          onChanged:
-                                                              _categoriaSelecionada ==
-                                                                      null ||
-                                                                  _categoriaSelecionada ==
-                                                                      _categoriaOutros
-                                                              ? null
-                                                              : (value) {
+                                                                items: _categoriasMateriaisConstrucao
+                                                                    .keys
+                                                                    .map(
+                                                                      (
+                                                                        categoria,
+                                                                      ) => DropdownMenuItem<String>(
+                                                                        value:
+                                                                            categoria,
+                                                                        child: Text(
+                                                                          categoria,
+                                                                        ),
+                                                                      ),
+                                                                    )
+                                                                    .toList(),
+                                                                onChanged: (value) {
                                                                   setState(() {
-                                                                    _subcategoriaSelecionada =
+                                                                    _categoriaSelecionada =
                                                                         value;
+                                                                    _subcategoriaSelecionada =
+                                                                        null;
+                                                                    _subcategoriaLivreController
+                                                                        .clear();
                                                                   });
                                                                 },
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Subcategoria',
+                                                                context,
+                                                              ),
+                                                              DropdownButtonFormField<
+                                                                String
+                                                              >(
+                                                                key: ValueKey(
+                                                                  'subcategoria_${_categoriaSelecionada ?? 'vazio'}_${_subcategoriaSelecionada ?? 'vazio'}',
+                                                                ),
+                                                                isDense: true,
+                                                                isExpanded:
+                                                                    true,
+                                                                initialValue:
+                                                                    _subcategoriaSelecionada,
+                                                                validator:
+                                                                    _validarSubcategoria,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                      hint:
+                                                                          'Selecione',
+                                                                    ),
+                                                                items:
+                                                                    (_categoriasMateriaisConstrucao[_categoriaSelecionada] ??
+                                                                            [])
+                                                                        .map(
+                                                                          (
+                                                                            subcategoria,
+                                                                          ) =>
+                                                                              DropdownMenuItem<
+                                                                                String
+                                                                              >(
+                                                                                value: subcategoria,
+                                                                                child: Text(
+                                                                                  subcategoria,
+                                                                                ),
+                                                                              ),
+                                                                        )
+                                                                        .toList(),
+                                                                onChanged:
+                                                                    _categoriaSelecionada ==
+                                                                            null ||
+                                                                        _categoriaSelecionada ==
+                                                                            _categoriaOutros
+                                                                    ? null
+                                                                    : (value) {
+                                                                        setState(() {
+                                                                          _subcategoriaSelecionada =
+                                                                              value;
+                                                                        });
+                                                                      },
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ]),
+                                                        if (_categoriaSelecionada ==
+                                                            _categoriaOutros) ...[
+                                                          const SizedBox(
+                                                            height: _erpGap16,
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Subcategoria personalizada',
+                                                                context,
+                                                              ),
+                                                              TextFormField(
+                                                                controller:
+                                                                    _subcategoriaLivreController,
+                                                                validator:
+                                                                    _validarSubcategoria,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                      helper:
+                                                                          'Para itens fora do padrao',
+                                                                    ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ],
+                                                        const SizedBox(
+                                                          height: _erpGap8,
                                                         ),
+                                                        _erpResponsiveGrid(context, [
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Marca',
+                                                                context,
+                                                              ),
+                                                              TextField(
+                                                                controller:
+                                                                    _marcaController,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                    ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Fornecedor',
+                                                                context,
+                                                              ),
+                                                              TextField(
+                                                                controller:
+                                                                    _fornecedorController,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                    ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Unidade',
+                                                                context,
+                                                              ),
+                                                              DropdownButtonFormField<
+                                                                String
+                                                              >(
+                                                                isDense: true,
+                                                                isExpanded:
+                                                                    true,
+                                                                initialValue:
+                                                                    _unidadeSelecionada,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                    ),
+                                                                items: const [
+                                                                  DropdownMenuItem(
+                                                                    value: 'UN',
+                                                                    child: Text(
+                                                                      'UN - Unidade',
+                                                                    ),
+                                                                  ),
+                                                                  DropdownMenuItem(
+                                                                    value: 'M',
+                                                                    child: Text(
+                                                                      'M - Metro',
+                                                                    ),
+                                                                  ),
+                                                                  DropdownMenuItem(
+                                                                    value:
+                                                                        'MTS',
+                                                                    child: Text(
+                                                                      'MTS - Metros',
+                                                                    ),
+                                                                  ),
+                                                                  DropdownMenuItem(
+                                                                    value: 'M2',
+                                                                    child: Text(
+                                                                      'M2 - Metro quadrado',
+                                                                    ),
+                                                                  ),
+                                                                  DropdownMenuItem(
+                                                                    value: 'M3',
+                                                                    child: Text(
+                                                                      'M3 - Metro cubico',
+                                                                    ),
+                                                                  ),
+                                                                  DropdownMenuItem(
+                                                                    value: 'KG',
+                                                                    child: Text(
+                                                                      'KG - Quilograma',
+                                                                    ),
+                                                                  ),
+                                                                  DropdownMenuItem(
+                                                                    value: 'SC',
+                                                                    child: Text(
+                                                                      'SC - Saco',
+                                                                    ),
+                                                                  ),
+                                                                  DropdownMenuItem(
+                                                                    value: 'CX',
+                                                                    child: Text(
+                                                                      'CX - Caixa',
+                                                                    ),
+                                                                  ),
+                                                                  DropdownMenuItem(
+                                                                    value: 'LT',
+                                                                    child: Text(
+                                                                      'LT - Litro',
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                                onChanged: (value) {
+                                                                  if (value !=
+                                                                      null) {
+                                                                    setState(() {
+                                                                      _unidadeSelecionada =
+                                                                          _normalizarUnidade(
+                                                                            value,
+                                                                          );
+                                                                    });
+                                                                  }
+                                                                },
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Fabricante',
+                                                                context,
+                                                              ),
+                                                              TextField(
+                                                                controller:
+                                                                    _fabricanteController,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                    ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ]),
                                                       ],
+                                                    );
+                                                        if (!ladoALado) {
+                                                          return Column(
+                                                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                                                            children: [
+                                                              cardBasicas,
+                                                              cardClassificacao,
+                                                            ],
+                                                          );
+                                                        }
+                                                        return Row(
+                                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                                          children: [
+                                                            Expanded(flex: 5, child: cardBasicas),
+                                                            const SizedBox(width: _erpGap16),
+                                                            Expanded(flex: 6, child: cardClassificacao),
+                                                          ],
+                                                        );
+                                                      },
                                                     ),
-                                                  ]),
-                                                  if (_categoriaSelecionada ==
-                                                      _categoriaOutros) ...[
+                                                    _buildCardEmbalagemUnidade(
+                                                      context,
+                                                    ),
                                                     const SizedBox(
                                                       height: _erpGap16,
                                                     ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
+                                                  ],
+                                                  if (_subAbaCadastroController
+                                                          .index ==
+                                                      1)
+                                                    _buildAbaPrecosCadastro(
+                                                      context,
+                                                      margem1: margem1,
+                                                      margem2: margem2,
+                                                      margem3: margem3,
+                                                      markup1: markup1,
+                                                      markup2: markup2,
+                                                      markup3: markup3,
+                                                    ),
+                                                  if (_subAbaCadastroController
+                                                          .index ==
+                                                      3) ...[
+                                                    _erpSurfaceCard(
+                                                      context: context,
+                                                      title: 'NCM (NFC-e)',
+                                                      icon: Icons
+                                                          .numbers_outlined,
+                                                      children:
+                                                          _buildCamposNcmCadastro(
+                                                            context,
+                                                          ),
+                                                    ),
+                                                    _erpSurfaceCard(
+                                                      context: context,
+                                                      title:
+                                                          'Dados fiscais (NFC-e)',
+                                                      icon: Icons
+                                                          .receipt_long_outlined,
                                                       children: [
-                                                        _erpFieldLabel(
-                                                          'Subcategoria personalizada',
-                                                          context,
-                                                        ),
-                                                        TextFormField(
-                                                          controller:
-                                                              _subcategoriaLivreController,
-                                                          validator:
-                                                              _validarSubcategoria,
-                                                          decoration:
-                                                              _erpInputDecoration(
+                                                        _erpResponsiveGrid(context, [
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'CEST',
                                                                 context,
-                                                                helper:
-                                                                    'Para itens fora do padrao',
                                                               ),
+                                                              TextFormField(
+                                                                controller:
+                                                                    _cestController,
+                                                                keyboardType:
+                                                                    TextInputType
+                                                                        .number,
+                                                                maxLength: 9,
+                                                                validator:
+                                                                    _validarCest,
+                                                                decoration: _erpInputDecoration(
+                                                                  context,
+                                                                  helper:
+                                                                      grupoTributarioProdutoDeString(
+                                                                            _grupoTributarioSelecionado,
+                                                                          ) ==
+                                                                          GrupoTributarioProduto
+                                                                              .substituicaoTributaria
+                                                                      ? 'Obrigatorio para ST (7 digitos)'
+                                                                      : '7 digitos — ST / construcao',
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Grupo tributario',
+                                                                context,
+                                                              ),
+                                                              DropdownButtonFormField<
+                                                                String
+                                                              >(
+                                                                isDense: true,
+                                                                isExpanded:
+                                                                    true,
+                                                                initialValue:
+                                                                    _grupoTributarioSelecionado,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                    ),
+                                                                items: todosGruposTributariosProduto
+                                                                    .map(
+                                                                      (
+                                                                        g,
+                                                                      ) => DropdownMenuItem(
+                                                                        value: g
+                                                                            .codigo,
+                                                                        child: Text(
+                                                                          g.rotulo,
+                                                                        ),
+                                                                      ),
+                                                                    )
+                                                                    .toList(),
+                                                                onChanged: (value) {
+                                                                  if (value !=
+                                                                      null) {
+                                                                    setState(() {
+                                                                      _grupoTributarioSelecionado =
+                                                                          value;
+                                                                    });
+                                                                    _formKey
+                                                                        .currentState
+                                                                        ?.validate();
+                                                                  }
+                                                                },
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'Origem da mercadoria',
+                                                                context,
+                                                              ),
+                                                              DropdownButtonFormField<
+                                                                String
+                                                              >(
+                                                                isDense: true,
+                                                                isExpanded:
+                                                                    true,
+                                                                initialValue:
+                                                                    _icmsOrigemSelecionado,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                      helper:
+                                                                          'Vazio = nacional (0)',
+                                                                    ),
+                                                                items: ProdutoFiscalCatalog
+                                                                    .icmsOrigens
+                                                                    .map(
+                                                                      (
+                                                                        o,
+                                                                      ) => DropdownMenuItem(
+                                                                        value: o
+                                                                            .codigo,
+                                                                        child: Text(
+                                                                          o.rotulo,
+                                                                          overflow:
+                                                                              TextOverflow.ellipsis,
+                                                                        ),
+                                                                      ),
+                                                                    )
+                                                                    .toList(),
+                                                                onChanged: (value) {
+                                                                  if (value !=
+                                                                      null) {
+                                                                    setState(() {
+                                                                      _icmsOrigemSelecionado =
+                                                                          value;
+                                                                    });
+                                                                  }
+                                                                },
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                FiscalRegimePadrao.rotuloIcmsCampo(),
+                                                                context,
+                                                              ),
+                                                              DropdownButtonFormField<
+                                                                String
+                                                              >(
+                                                                isDense: true,
+                                                                isExpanded:
+                                                                    true,
+                                                                initialValue:
+                                                                    _icmsCstSelecionado,
+                                                                decoration: _erpInputDecoration(
+                                                                  context,
+                                                                  helper:
+                                                                      FiscalRegimePadrao.ehSimplesNacional()
+                                                                      ? 'Automatico: CSOSN pelo grupo (102/400/500)'
+                                                                      : 'Automatico: CST 00 / 40 / 60 pelo grupo',
+                                                                ),
+                                                                items:
+                                                                    ProdutoFiscalCatalog.icmsOpcoesCadastro(
+                                                                          ehSimplesNacional:
+                                                                              FiscalRegimePadrao.ehSimplesNacional(),
+                                                                        )
+                                                                        .map(
+                                                                          (
+                                                                            o,
+                                                                          ) => DropdownMenuItem(
+                                                                            value:
+                                                                                o.codigo,
+                                                                            child: Text(
+                                                                              o.rotulo,
+                                                                              overflow: TextOverflow.ellipsis,
+                                                                            ),
+                                                                          ),
+                                                                        )
+                                                                        .toList(),
+                                                                onChanged: (value) {
+                                                                  if (value !=
+                                                                      null) {
+                                                                    setState(() {
+                                                                      _icmsCstSelecionado =
+                                                                          value;
+                                                                    });
+                                                                  }
+                                                                },
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'CST PIS/COFINS',
+                                                                context,
+                                                              ),
+                                                              DropdownButtonFormField<
+                                                                String
+                                                              >(
+                                                                isDense: true,
+                                                                isExpanded:
+                                                                    true,
+                                                                initialValue:
+                                                                    _pisCofinsCstSelecionado,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                      helper:
+                                                                          'Vazio = ${FiscalRegimePadrao.pisCofinsSituacaoTributariaPadrao()} (padrao loja)',
+                                                                    ),
+                                                                items: ProdutoFiscalCatalog
+                                                                    .pisCofinsCst
+                                                                    .map(
+                                                                      (
+                                                                        o,
+                                                                      ) => DropdownMenuItem(
+                                                                        value: o
+                                                                            .codigo,
+                                                                        child: Text(
+                                                                          o.rotulo,
+                                                                          overflow:
+                                                                              TextOverflow.ellipsis,
+                                                                        ),
+                                                                      ),
+                                                                    )
+                                                                    .toList(),
+                                                                onChanged: (value) {
+                                                                  if (value !=
+                                                                      null) {
+                                                                    setState(() {
+                                                                      _pisCofinsCstSelecionado =
+                                                                          value;
+                                                                    });
+                                                                  }
+                                                                },
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              _erpFieldLabel(
+                                                                'CFOP na venda (opcional)',
+                                                                context,
+                                                              ),
+                                                              TextFormField(
+                                                                controller:
+                                                                    _cfopVendaController,
+                                                                keyboardType:
+                                                                    TextInputType
+                                                                        .number,
+                                                                maxLength: 4,
+                                                                validator:
+                                                                    _validarCfopVenda,
+                                                                decoration:
+                                                                    _erpInputDecoration(
+                                                                      context,
+                                                                      helper:
+                                                                          'Vazio = automatico (ex.: 5102 / 5405 na BA)',
+                                                                    ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ]),
+                                                        Text(
+                                                          'CFOP automatico na BA: Tributado/Isento 5102, ST 5405. '
+                                                          'CST ICMS automatico pelo grupo se nao escolher acima.',
+                                                          style: Theme.of(
+                                                            context,
+                                                          ).textTheme.bodySmall,
                                                         ),
                                                       ],
                                                     ),
                                                   ],
-                                                  const SizedBox(
-                                                    height: _erpGap8,
-                                                  ),
-                                                  _erpResponsiveGrid(context, [
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
+                                                  if (_subAbaCadastroController
+                                                          .index ==
+                                                      2) ...[
+                                                    _erpSurfaceCard(
+                                                      context: context,
+                                                      title:
+                                                          'Logistica e descricao',
+                                                      icon: Icons
+                                                          .local_shipping_outlined,
                                                       children: [
-                                                        _erpFieldLabel(
-                                                          'Marca',
-                                                          context,
+                                                        Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            _erpFieldLabel(
+                                                              'Localizacao no deposito',
+                                                              context,
+                                                            ),
+                                                            TextField(
+                                                              controller:
+                                                                  _localizacaoController,
+                                                              decoration:
+                                                                  _erpInputDecoration(
+                                                                    context,
+                                                                    hint:
+                                                                        'Corredor, prateleira, nivel',
+                                                                  ),
+                                                            ),
+                                                          ],
                                                         ),
-                                                        TextField(
-                                                          controller:
-                                                              _marcaController,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                              ),
+                                                        const SizedBox(
+                                                          height: _erpGap16,
                                                         ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'Fornecedor',
-                                                          context,
+                                                        Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            _erpFieldLabel(
+                                                              'Estoque no CD (deposito secundario)',
+                                                              context,
+                                                            ),
+                                                            TextField(
+                                                              controller:
+                                                                  _estoqueCdController,
+                                                              keyboardType:
+                                                                  TextInputType
+                                                                      .number,
+                                                              decoration:
+                                                                  _erpInputDecoration(
+                                                                    context,
+                                                                    hint:
+                                                                        '0 = nao exibir na consulta',
+                                                                  ),
+                                                            ),
+                                                          ],
                                                         ),
-                                                        TextField(
-                                                          controller:
-                                                              _fornecedorController,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                              ),
+                                                        const SizedBox(
+                                                          height: _erpGap16,
                                                         ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'Unidade',
-                                                          context,
-                                                        ),
-                                                        DropdownButtonFormField<
-                                                          String
-                                                        >(
-                                                          isDense: true,
-                                                          isExpanded: true,
-                                                          initialValue:
-                                                              _unidadeSelecionada,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                              ),
-                                                          items: const [
-                                                            DropdownMenuItem(
-                                                              value: 'UN',
-                                                              child: Text(
-                                                                'UN - Unidade',
-                                                              ),
+                                                        Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            _erpFieldLabel(
+                                                              'Substitutos cadastrados',
+                                                              context,
                                                             ),
-                                                            DropdownMenuItem(
-                                                              value: 'M',
-                                                              child: Text(
-                                                                'M - Metro',
-                                                              ),
+                                                            Text(
+                                                              'Aparecem na consulta PDV (badge Cad.), com ou sem estoque.',
+                                                              style:
+                                                                  Theme.of(
+                                                                        context,
+                                                                      )
+                                                                      .textTheme
+                                                                      .bodySmall,
                                                             ),
-                                                            DropdownMenuItem(
-                                                              value: 'MTS',
-                                                              child: Text(
-                                                                'MTS - Metros',
-                                                              ),
+                                                            const SizedBox(
+                                                              height: 8,
                                                             ),
-                                                            DropdownMenuItem(
-                                                              value: 'M2',
-                                                              child: Text(
-                                                                'M2 - Metro quadrado',
-                                                              ),
+                                                            Wrap(
+                                                              spacing: 6,
+                                                              runSpacing: 6,
+                                                              children: [
+                                                                for (final sid
+                                                                    in _substitutosIds)
+                                                                  InputChip(
+                                                                    label: Text(
+                                                                      widget.produtoRepository
+                                                                              .obterPorId(
+                                                                                sid,
+                                                                              )
+                                                                              ?.nome ??
+                                                                          '#$sid',
+                                                                      maxLines:
+                                                                          1,
+                                                                      overflow:
+                                                                          TextOverflow
+                                                                              .ellipsis,
+                                                                    ),
+                                                                    onDeleted: () => setState(() {
+                                                                      _substitutosIds = _substitutosIds
+                                                                          .where(
+                                                                            (
+                                                                              id,
+                                                                            ) =>
+                                                                                id !=
+                                                                                sid,
+                                                                          )
+                                                                          .toList();
+                                                                    }),
+                                                                  ),
+                                                              ],
                                                             ),
-                                                            DropdownMenuItem(
-                                                              value: 'M3',
-                                                              child: Text(
-                                                                'M3 - Metro cubico',
-                                                              ),
-                                                            ),
-                                                            DropdownMenuItem(
-                                                              value: 'KG',
-                                                              child: Text(
-                                                                'KG - Quilograma',
-                                                              ),
-                                                            ),
-                                                            DropdownMenuItem(
-                                                              value: 'SC',
-                                                              child: Text(
-                                                                'SC - Saco',
-                                                              ),
-                                                            ),
-                                                            DropdownMenuItem(
-                                                              value: 'CX',
-                                                              child: Text(
-                                                                'CX - Caixa',
-                                                              ),
-                                                            ),
-                                                            DropdownMenuItem(
-                                                              value: 'LT',
-                                                              child: Text(
-                                                                'LT - Litro',
+                                                            Align(
+                                                              alignment: Alignment
+                                                                  .centerLeft,
+                                                              child: TextButton.icon(
+                                                                onPressed:
+                                                                    _adicionarSubstitutoCadastro,
+                                                                icon: const Icon(
+                                                                  Icons
+                                                                      .playlist_add_outlined,
+                                                                ),
+                                                                label: const Text(
+                                                                  'Adicionar substituto',
+                                                                ),
                                                               ),
                                                             ),
                                                           ],
-                                                          onChanged: (value) {
-                                                            if (value != null) {
+                                                        ),
+                                                        const SizedBox(
+                                                          height: _erpGap16,
+                                                        ),
+                                                        ProdutosSugestoesVendaSection(
+                                                          produtoRepository: widget
+                                                              .produtoRepository,
+                                                          sugestoes:
+                                                              _sugestoesVenda,
+                                                          produtoEmEdicaoId:
+                                                              _produtoEmEdicaoId,
+                                                          onChanged: (lista) =>
                                                               setState(() {
-                                                                _unidadeSelecionada =
-                                                                    _normalizarUnidade(
-                                                                      value,
-                                                                    );
-                                                              });
-                                                            }
-                                                          },
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'Fabricante',
-                                                          context,
-                                                        ),
-                                                        TextField(
-                                                          controller:
-                                                              _fabricanteController,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ]),
-                                                ],
-                                              ),
-                                              _buildCardEmbalagemUnidade(
-                                                context,
-                                              ),
-                                              const SizedBox(
-                                                height: _erpGap16,
-                                              ),
-                                              ],
-                                              if (_subAbaCadastroController
-                                                      .index ==
-                                                  1)
-                                                _buildAbaPrecosCadastro(
-                                                  context,
-                                                  margem1: margem1,
-                                                  margem2: margem2,
-                                                  margem3: margem3,
-                                                  markup1: markup1,
-                                                  markup2: markup2,
-                                                  markup3: markup3,
-                                                ),
-                                              if (_subAbaCadastroController
-                                                      .index ==
-                                                  3) ...[
-                                              _erpSurfaceCard(
-                                                context: context,
-                                                title: 'NCM (NFC-e)',
-                                                icon: Icons.numbers_outlined,
-                                                children: _buildCamposNcmCadastro(
-                                                  context,
-                                                ),
-                                              ),
-                                              _erpSurfaceCard(
-                                                context: context,
-                                                title: 'Dados fiscais (NFC-e)',
-                                                icon: Icons.receipt_long_outlined,
-                                                children: [
-                                                  _erpResponsiveGrid(context, [
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'CEST',
-                                                          context,
-                                                        ),
-                                                        TextFormField(
-                                                          controller:
-                                                              _cestController,
-                                                          keyboardType:
-                                                              TextInputType
-                                                                  .number,
-                                                          maxLength: 9,
-                                                          validator:
-                                                              _validarCest,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                                helper:
-                                                                    grupoTributarioProdutoDeString(
-                                                                          _grupoTributarioSelecionado,
-                                                                        ) ==
-                                                                        GrupoTributarioProduto
-                                                                            .substituicaoTributaria
-                                                                    ? 'Obrigatorio para ST (7 digitos)'
-                                                                    : '7 digitos — ST / construcao',
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'Grupo tributario',
-                                                          context,
-                                                        ),
-                                                        DropdownButtonFormField<
-                                                          String
-                                                        >(
-                                                          isDense: true,
-                                                          isExpanded: true,
-                                                          initialValue:
-                                                              _grupoTributarioSelecionado,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                              ),
-                                                          items: todosGruposTributariosProduto
-                                                              .map(
-                                                                (g) =>
-                                                                    DropdownMenuItem(
-                                                                  value: g.codigo,
-                                                                  child: Text(
-                                                                    g.rotulo,
-                                                                  ),
-                                                                ),
-                                                              )
-                                                              .toList(),
-                                                          onChanged: (value) {
-                                                            if (value != null) {
-                                                              setState(() {
-                                                                _grupoTributarioSelecionado =
-                                                                    value;
-                                                              });
-                                                              _formKey
-                                                                  .currentState
-                                                                  ?.validate();
-                                                            }
-                                                          },
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'Origem da mercadoria',
-                                                          context,
-                                                        ),
-                                                        DropdownButtonFormField<
-                                                          String
-                                                        >(
-                                                          isDense: true,
-                                                          isExpanded: true,
-                                                          initialValue:
-                                                              _icmsOrigemSelecionado,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                                helper:
-                                                                    'Vazio = nacional (0)',
-                                                              ),
-                                                          items: ProdutoFiscalCatalog
-                                                              .icmsOrigens
-                                                              .map(
-                                                                (o) =>
-                                                                    DropdownMenuItem(
-                                                                  value: o.codigo,
-                                                                  child: Text(
-                                                                    o.rotulo,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                  ),
-                                                                ),
-                                                              )
-                                                              .toList(),
-                                                          onChanged: (value) {
-                                                            if (value != null) {
-                                                              setState(() {
-                                                                _icmsOrigemSelecionado =
-                                                                    value;
-                                                              });
-                                                            }
-                                                          },
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          FiscalRegimePadrao
-                                                              .rotuloIcmsCampo(),
-                                                          context,
-                                                        ),
-                                                        DropdownButtonFormField<
-                                                          String
-                                                        >(
-                                                          isDense: true,
-                                                          isExpanded: true,
-                                                          initialValue:
-                                                              _icmsCstSelecionado,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                                helper: FiscalRegimePadrao
-                                                                        .ehSimplesNacional()
-                                                                    ? 'Automatico: CSOSN pelo grupo (102/400/500)'
-                                                                    : 'Automatico: CST 00 / 40 / 60 pelo grupo',
-                                                              ),
-                                                          items: ProdutoFiscalCatalog
-                                                              .icmsOpcoesCadastro(
-                                                                ehSimplesNacional:
-                                                                    FiscalRegimePadrao
-                                                                        .ehSimplesNacional(),
-                                                              )
-                                                              .map(
-                                                                (o) =>
-                                                                    DropdownMenuItem(
-                                                                  value: o.codigo,
-                                                                  child: Text(
-                                                                    o.rotulo,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                  ),
-                                                                ),
-                                                              )
-                                                              .toList(),
-                                                          onChanged: (value) {
-                                                            if (value != null) {
-                                                              setState(() {
-                                                                _icmsCstSelecionado =
-                                                                    value;
-                                                              });
-                                                            }
-                                                          },
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'CST PIS/COFINS',
-                                                          context,
-                                                        ),
-                                                        DropdownButtonFormField<
-                                                          String
-                                                        >(
-                                                          isDense: true,
-                                                          isExpanded: true,
-                                                          initialValue:
-                                                              _pisCofinsCstSelecionado,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                                helper:
-                                                                    'Vazio = ${FiscalRegimePadrao.pisCofinsSituacaoTributariaPadrao()} (padrao loja)',
-                                                              ),
-                                                          items: ProdutoFiscalCatalog
-                                                              .pisCofinsCst
-                                                              .map(
-                                                                (o) =>
-                                                                    DropdownMenuItem(
-                                                                  value: o.codigo,
-                                                                  child: Text(
-                                                                    o.rotulo,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                  ),
-                                                                ),
-                                                              )
-                                                              .toList(),
-                                                          onChanged: (value) {
-                                                            if (value != null) {
-                                                              setState(() {
-                                                                _pisCofinsCstSelecionado =
-                                                                    value;
-                                                              });
-                                                            }
-                                                          },
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        _erpFieldLabel(
-                                                          'CFOP na venda (opcional)',
-                                                          context,
-                                                        ),
-                                                        TextFormField(
-                                                          controller:
-                                                              _cfopVendaController,
-                                                          keyboardType:
-                                                              TextInputType
-                                                                  .number,
-                                                          maxLength: 4,
-                                                          validator:
-                                                              _validarCfopVenda,
-                                                          decoration:
-                                                              _erpInputDecoration(
-                                                                context,
-                                                                helper:
-                                                                    'Vazio = automatico (ex.: 5102 / 5405 na BA)',
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ]),
-                                                  Text(
-                                                    'CFOP automatico na BA: Tributado/Isento 5102, ST 5405. '
-                                                    'CST ICMS automatico pelo grupo se nao escolher acima.',
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .bodySmall,
-                                                  ),
-                                                ],
-                                              ),
-                                              ],
-                                              if (_subAbaCadastroController
-                                                      .index ==
-                                                  2) ...[
-                                              _erpSurfaceCard(
-                                                context: context,
-                                                title: 'Logistica e descricao',
-                                                icon: Icons
-                                                    .local_shipping_outlined,
-                                                children: [
-                                                  Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      _erpFieldLabel(
-                                                        'Localizacao no deposito',
-                                                        context,
-                                                      ),
-                                                      TextField(
-                                                        controller:
-                                                            _localizacaoController,
-                                                        decoration:
-                                                            _erpInputDecoration(
-                                                              context,
-                                                              hint:
-                                                                  'Corredor, prateleira, nivel',
-                                                            ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(
-                                                    height: _erpGap16,
-                                                  ),
-                                                  Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      _erpFieldLabel(
-                                                        'Estoque no CD (deposito secundario)',
-                                                        context,
-                                                      ),
-                                                      TextField(
-                                                        controller:
-                                                            _estoqueCdController,
-                                                        keyboardType:
-                                                            TextInputType
-                                                                .number,
-                                                        decoration:
-                                                            _erpInputDecoration(
-                                                          context,
-                                                          hint:
-                                                              '0 = nao exibir na consulta',
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(
-                                                    height: _erpGap16,
-                                                  ),
-                                                  Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      _erpFieldLabel(
-                                                        'Substitutos cadastrados',
-                                                        context,
-                                                      ),
-                                                      Text(
-                                                        'Aparecem na consulta PDV (badge Cad.), com ou sem estoque.',
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .bodySmall,
-                                                      ),
-                                                      const SizedBox(height: 8),
-                                                      Wrap(
-                                                        spacing: 6,
-                                                        runSpacing: 6,
-                                                        children: [
-                                                          for (final sid
-                                                              in _substitutosIds)
-                                                            InputChip(
-                                                              label: Text(
-                                                                widget
-                                                                        .produtoRepository
-                                                                        .obterPorId(
-                                                                            sid)
-                                                                        ?.nome ??
-                                                                    '#$sid',
-                                                                maxLines: 1,
-                                                                overflow:
-                                                                    TextOverflow
-                                                                        .ellipsis,
-                                                              ),
-                                                              onDeleted: () =>
-                                                                  setState(() {
-                                                                _substitutosIds =
-                                                                    _substitutosIds
-                                                                        .where((id) =>
-                                                                            id !=
-                                                                            sid)
-                                                                        .toList();
+                                                                _sugestoesVenda =
+                                                                    lista;
                                                               }),
-                                                            ),
-                                                        ],
-                                                      ),
-                                                      Align(
-                                                        alignment:
-                                                            Alignment.centerLeft,
-                                                        child: TextButton.icon(
-                                                          onPressed:
-                                                              _adicionarSubstitutoCadastro,
-                                                          icon: const Icon(
-                                                            Icons
-                                                                .playlist_add_outlined,
-                                                          ),
-                                                          label: const Text(
-                                                            'Adicionar substituto',
-                                                          ),
                                                         ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(
-                                                    height: _erpGap16,
-                                                  ),
-                                                  ProdutosSugestoesVendaSection(
-                                                    produtoRepository:
-                                                        widget.produtoRepository,
-                                                    sugestoes: _sugestoesVenda,
-                                                    produtoEmEdicaoId:
-                                                        _produtoEmEdicaoId,
-                                                    onChanged: (lista) =>
-                                                        setState(() {
-                                                      _sugestoesVenda = lista;
-                                                    }),
-                                                  ),
-                                                  const SizedBox(
-                                                    height: _erpGap16,
-                                                  ),
-                                                  Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      _erpFieldLabel(
-                                                        'Descricao tecnica',
-                                                        context,
-                                                      ),
-                                                      TextField(
-                                                        controller:
-                                                            _descricaoController,
-                                                        maxLines: 4,
-                                                        decoration:
-                                                            _erpInputDecoration(
-                                                              context,
-                                                              helper:
-                                                                  'Beneficios, aplicacao e diferenciais para o vendedor',
-                                                            ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ],
-                                              ),
-                                              _erpSurfaceCard(
-                                                context: context,
-                                                title:
-                                                    'Estoque e disponibilidade',
-                                                icon: Icons.warehouse_outlined,
-                                                children: [
-                                                  Wrap(
-                                                    spacing: _erpGap16,
-                                                    runSpacing: _erpGap16,
-                                                    crossAxisAlignment:
-                                                        WrapCrossAlignment
-                                                            .start,
-                                                    children: [
-                                                      SizedBox(
-                                                        width: _wQtdInteira,
-                                                        child: Column(
+                                                        const SizedBox(
+                                                          height: _erpGap16,
+                                                        ),
+                                                        Column(
                                                           crossAxisAlignment:
                                                               CrossAxisAlignment
                                                                   .start,
                                                           children: [
                                                             _erpFieldLabel(
-                                                              'Quantidade em estoque',
+                                                              'Descricao tecnica',
                                                               context,
                                                             ),
                                                             TextField(
                                                               controller:
-                                                                  _estoqueController,
-                                                              keyboardType:
-                                                                  TextInputType
-                                                                      .numberWithOptions(
-                                                                decimal:
-                                                                    _estoqueFormularioAceitaDecimal,
+                                                                  _descricaoController,
+                                                              maxLines: 4,
+                                                              decoration:
+                                                                  _erpInputDecoration(
+                                                                    context,
+                                                                    helper:
+                                                                        'Beneficios, aplicacao e diferenciais para o vendedor',
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    _erpSurfaceCard(
+                                                      context: context,
+                                                      title:
+                                                          'Estoque e disponibilidade',
+                                                      icon: Icons
+                                                          .warehouse_outlined,
+                                                      children: [
+                                                        Wrap(
+                                                          spacing: _erpGap16,
+                                                          runSpacing: _erpGap16,
+                                                          crossAxisAlignment:
+                                                              WrapCrossAlignment
+                                                                  .start,
+                                                          children: [
+                                                            SizedBox(
+                                                              width:
+                                                                  _wQtdInteira,
+                                                              child: Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                                  _erpFieldLabel(
+                                                                    'Estoque fisico',
+                                                                    context,
+                                                                  ),
+                                                                  TextField(
+                                                                    controller:
+                                                                        _estoqueController,
+                                                                    keyboardType:
+                                                                        TextInputType.numberWithOptions(
+                                                                          decimal:
+                                                                              _estoqueFormularioAceitaDecimal,
+                                                                        ),
+                                                                    onChanged: (_) =>
+                                                                        setState(
+                                                                          () {},
+                                                                        ),
+                                                                    decoration: _erpInputDecoration(
+                                                                      context,
+                                                                      helper:
+                                                                          _helperEstoqueFisicoCadastro(),
+                                                                    ),
+                                                                  ),
+                                                                ],
                                                               ),
-                                                              onChanged: (_) =>
-                                                                  setState(() {}),
-                                                              decoration:
-                                                                  _erpInputDecoration(
+                                                            ),
+                                                            SizedBox(
+                                                              width:
+                                                                  _wQtdInteira,
+                                                              child: Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                                  _erpFieldLabel(
+                                                                    'Quantidade minima',
                                                                     context,
-                                                                    helper: _estoqueFormularioAceitaDecimal
-                                                                        ? 'Ex.: 144,62 m² (valor exato)'
-                                                                        : null,
                                                                   ),
+                                                                  TextField(
+                                                                    controller:
+                                                                        _quantidadeMinimaController,
+                                                                    keyboardType:
+                                                                        TextInputType
+                                                                            .number,
+                                                                    decoration:
+                                                                        _erpInputDecoration(
+                                                                          context,
+                                                                        ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                            SizedBox(
+                                                              width:
+                                                                  _wQtdInteira,
+                                                              child: Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                                  _erpFieldLabel(
+                                                                    'Lead time (dias)',
+                                                                    context,
+                                                                  ),
+                                                                  TextField(
+                                                                    controller:
+                                                                        _leadTimeDiasController,
+                                                                    keyboardType:
+                                                                        TextInputType
+                                                                            .number,
+                                                                    onChanged: (_) =>
+                                                                        setState(
+                                                                          () {},
+                                                                        ),
+                                                                    decoration:
+                                                                        _erpInputDecoration(
+                                                                          context,
+                                                                          hint:
+                                                                              '7',
+                                                                        ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                            SizedBox(
+                                                              width:
+                                                                  _wQtdInteira,
+                                                              child: Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                                  _erpFieldLabel(
+                                                                    'Estoque seguranca',
+                                                                    context,
+                                                                  ),
+                                                                  TextField(
+                                                                    controller:
+                                                                        _estoqueSegurancaController,
+                                                                    keyboardType:
+                                                                        TextInputType
+                                                                            .number,
+                                                                    onChanged: (_) =>
+                                                                        setState(
+                                                                          () {},
+                                                                        ),
+                                                                    decoration:
+                                                                        _erpInputDecoration(
+                                                                          context,
+                                                                          hint:
+                                                                              '0',
+                                                                        ),
+                                                                  ),
+                                                                ],
+                                                              ),
                                                             ),
                                                           ],
                                                         ),
-                                                      ),
-                                                      SizedBox(
-                                                        width: _wQtdInteira,
-                                                        child: Column(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            _erpFieldLabel(
-                                                              'Quantidade minima',
-                                                              context,
+                                                        const SizedBox(
+                                                          height: _erpGap8,
+                                                        ),
+                                                        _buildPainelPontoPedido(
+                                                          context,
+                                                        ),
+                                                        const SizedBox(
+                                                          height: _erpGap16,
+                                                        ),
+                                                        SwitchListTile(
+                                                          dense: true,
+                                                          contentPadding:
+                                                              EdgeInsets.zero,
+                                                          title: const Text(
+                                                            'Produto ativo na venda',
+                                                          ),
+                                                          subtitle: const Text(
+                                                            'Inativo permanece no cadastro e no historico, mas nao aparece no PDV.',
+                                                          ),
+                                                          value: _produtoAtivo,
+                                                          onChanged: (v) =>
+                                                              setState(
+                                                                () =>
+                                                                    _produtoAtivo =
+                                                                        v,
+                                                              ),
+                                                        ),
+                                                        SwitchListTile(
+                                                          dense: true,
+                                                          contentPadding:
+                                                              EdgeInsets.zero,
+                                                          title: const Text(
+                                                            'Controla lote e validade',
+                                                          ),
+                                                          subtitle: const Text(
+                                                            'FEFO na baixa, Bota-Fora no PDV e rastreio no patio.',
+                                                          ),
+                                                          value:
+                                                              _controlaLoteValidade,
+                                                          onChanged: (v) =>
+                                                              setState(
+                                                                () =>
+                                                                    _controlaLoteValidade =
+                                                                        v,
+                                                              ),
+                                                        ),
+                                                        if (_controlaLoteValidade)
+                                                          Padding(
+                                                            padding:
+                                                                const EdgeInsets.only(
+                                                              top: _erpGap8,
                                                             ),
-                                                            TextField(
+                                                            child:
+                                                                TextFormField(
                                                               controller:
-                                                                  _quantidadeMinimaController,
-                                                              keyboardType:
-                                                                  TextInputType
-                                                                      .number,
+                                                                  _percentualBotaForaController,
                                                               decoration:
-                                                                  _erpInputDecoration(
-                                                                    context,
-                                                                  ),
-                                                            ),
-                                                          ],
-                                                        ),
-                                                      ),
-                                                      SizedBox(
-                                                        width: _wQtdInteira,
-                                                        child: Column(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            _erpFieldLabel(
-                                                              'Lead time (dias)',
-                                                              context,
-                                                            ),
-                                                            TextField(
-                                                              controller:
-                                                                  _leadTimeDiasController,
+                                                                  const InputDecoration(
+                                                                labelText:
+                                                                    '% Bota-Fora (0 = padrao global)',
+                                                                hintText: '20',
+                                                                isDense: true,
+                                                              ),
                                                               keyboardType:
-                                                                  TextInputType
-                                                                      .number,
-                                                              onChanged: (_) =>
-                                                                  setState(() {}),
-                                                              decoration:
-                                                                  _erpInputDecoration(
-                                                                    context,
-                                                                    hint:
-                                                                        '7',
-                                                                  ),
+                                                                  const TextInputType
+                                                                      .numberWithOptions(
+                                                                decimal: true,
+                                                              ),
                                                             ),
-                                                          ],
-                                                        ),
-                                                      ),
-                                                      SizedBox(
-                                                        width: _wQtdInteira,
-                                                        child: Column(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            _erpFieldLabel(
-                                                              'Estoque seguranca',
-                                                              context,
-                                                            ),
-                                                            TextField(
-                                                              controller:
-                                                                  _estoqueSegurancaController,
-                                                              keyboardType:
-                                                                  TextInputType
-                                                                      .number,
-                                                              onChanged: (_) =>
-                                                                  setState(() {}),
-                                                              decoration:
-                                                                  _erpInputDecoration(
-                                                                    context,
-                                                                    hint:
-                                                                        '0',
-                                                                  ),
-                                                            ),
-                                                          ],
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(
-                                                    height: _erpGap8,
-                                                  ),
-                                                  _buildPainelPontoPedido(
-                                                    context,
-                                                  ),
-                                                  const SizedBox(
-                                                    height: _erpGap16,
-                                                  ),
-                                                  SwitchListTile(
-                                                    dense: true,
-                                                    contentPadding:
-                                                        EdgeInsets.zero,
-                                                    title: const Text(
-                                                      'Produto ativo na venda',
+                                                          ),
+                                                      ],
                                                     ),
-                                                    subtitle: const Text(
-                                                      'Inativo permanece no cadastro e no historico, mas nao aparece no PDV.',
-                                                    ),
-                                                    value: _produtoAtivo,
-                                                    onChanged: (v) => setState(
-                                                      () => _produtoAtivo = v,
-                                                    ),
-                                                  ),
+                                                  ],
                                                 ],
                                               ),
-                                              ],
-                                            ],
-                                          ),
-                                        ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  if (_status.isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        _erpGap24,
-                                        _erpGap8,
-                                        _erpGap24,
-                                        _erpGap8,
-                                      ),
-                                      child: Container(
-                                        width: double.infinity,
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: _erpGap16,
-                                          vertical: _erpGap16,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: _statusEhErro
-                                              ? semantic.errorBg
-                                              : semantic.successBg,
-                                          borderRadius: BorderRadius.circular(
-                                            10,
-                                          ),
-                                          border: Border.all(
-                                            color: _statusEhErro
-                                                ? semantic.errorBorder
-                                                : semantic.successBorder,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          _status,
-                                          style: TextStyle(
-                                            color: _statusEhErro
-                                                ? semantic.errorFg
-                                                : semantic.successFg,
-                                            fontWeight: FontWeight.w600,
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                  Container(
-                                    width: double.infinity,
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.surface,
-                                      border: Border(
-                                        top: BorderSide(
-                                          color: theme
-                                              .colorScheme
-                                              .outlineVariant
-                                              .withValues(alpha: 0.42),
-                                          width: 1,
-                                        ),
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.07,
-                                          ),
-                                          offset: const Offset(0, -3),
-                                          blurRadius: 10,
-                                        ),
-                                      ],
                                     ),
-                                    padding: const EdgeInsets.fromLTRB(
-                                      _erpGap16,
-                                      _erpGap8,
-                                      _erpGap24,
-                                      _erpGap8,
-                                    ),
-                                    child: SafeArea(
-                                      top: false,
-                                      maintainBottomViewPadding: true,
-                                      child: _erpRodapeAcaoCadastroProduto(
+                                    ProdutoCadastroRodape(
+                                      emEdicao: _produtoEmEdicaoId != null,
+                                      onSalvar: _salvarProduto,
+                                      onNovo: _resetarFormulario,
+                                      onCancelar: _limparFormularioComConfirmacao,
+                                      podeExcluir: _produtoEmEdicaoId != null,
+                                      onExcluir: _excluirProdutoEmEdicao,
+                                      extraActions:
+                                          _buildRodapeExtraActionsProduto(
                                         context,
                                       ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            ),
-                            AbasHistoricoProdutoWidget(
-                              key: ValueKey(_historicoVersao),
-                              produtoRepository: widget.produtoRepository,
-                              produtoId: _produtoEmEdicaoId,
-                            ),
-                            ExtratoMovimentoEstoquePanel(
-                              key: ValueKey('mov_${_historicoVersao}_$_produtoEmEdicaoId'),
-                              produtoRepository: widget.produtoRepository,
-                              produtoId: _produtoEmEdicaoId,
-                            ),
-                          ],
+                              ColoredBox(
+                                color: const Color(0xFFF8FAFC),
+                                child: AbasHistoricoProdutoWidget(
+                                key: ValueKey(_historicoVersao),
+                                produtoRepository: widget.produtoRepository,
+                                produtoId: _produtoEmEdicaoId,
+                              ),
+                              ),
+                              ColoredBox(
+                                color: const Color(0xFFF8FAFC),
+                                child: ExtratoMovimentoEstoquePanel(
+                                key: ValueKey(
+                                  'mov_${_historicoVersao}_$_produtoEmEdicaoId',
+                                ),
+                                produtoRepository: widget.produtoRepository,
+                                produtoId: _produtoEmEdicaoId,
+                              ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
                 ),
               ),
             );

@@ -3,29 +3,33 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../data/app_config_repository.dart';
-import '../../data/cliente_repository.dart';
-import '../../data/funcionario_repository.dart';
+import '../../data/api/lan_api_client.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../data/menu_favoritos_repository.dart';
-import '../../data/motorista_repository.dart';
 import '../../data/objectbox.dart';
-import '../../data/produto_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/venda_repository.dart';
-import '../../data/vendedor_repository.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
 import '../../domain/main_menu_destino.dart';
 import '../../domain/main_menu_sub_destino.dart';
+import '../../domain/modo_terminal_leve.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../model/usuario_sistema.dart';
-import '../../services/lan_sync_server_manager.dart';
+import '../../services/lan_servidor_bootstrap.dart';
 import '../../services/print_service.dart';
 import '../layout/app_layout.dart';
+import '../listagem_vendas_page.dart';
 import '../main_menu_dashboard.dart';
 import '../widgets/app_rodape_status_bar.dart';
+import '../widgets/chat/chat_interno_drawer.dart';
+import '../widgets/chat/chat_interno_hub.dart';
+import '../../data/api/chat_api_repository.dart';
+import '../../data/mensagem_interna_repository.dart';
 import 'app_menu_drawer.dart';
 import 'app_menu_lateral.dart';
 import 'app_shell_aba_visibilidade.dart';
@@ -42,6 +46,7 @@ class MainAppShellPage extends StatefulWidget {
   const MainAppShellPage({
     super.key,
     required this.objectBox,
+    this.terminalLeve = false,
     required this.produtoRepository,
     required this.clienteRepository,
     required this.vendaRepository,
@@ -53,27 +58,48 @@ class MainAppShellPage extends StatefulWidget {
     required this.lanSyncScheduler,
     required this.appConfigRepository,
     required this.printService,
+    this.vendaApiRepository,
+    this.lanApiClient,
+    this.usuarioRepository,
+    this.contaPagarRepository,
+    this.kitOrcamentoRepository,
+    this.promocaoRepository,
+    this.listaCompraRepository,
+    this.nfeImportadaRepository,
+    this.recadoLojaRepository,
+    this.fornecedorRepository,
   });
 
-  final ObjectBox objectBox;
-  final ProdutoRepository produtoRepository;
-  final ClienteRepository clienteRepository;
-  final VendaRepository vendaRepository;
-  final VendedorRepository vendedorRepository;
-  final FuncionarioRepository funcionarioRepository;
-  final MotoristaRepository motoristaRepository;
+  final ObjectBox? objectBox;
+  final bool terminalLeve;
+  final dynamic produtoRepository;
+  final dynamic clienteRepository;
+  final dynamic vendaRepository;
+  final dynamic vendedorRepository;
+  final dynamic funcionarioRepository;
+  final dynamic motoristaRepository;
   final UsuarioSistema usuarioLogado;
   final VoidCallback onLogout;
-  final LanSyncScheduler lanSyncScheduler;
+  final LanSyncScheduler? lanSyncScheduler;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
+  final dynamic vendaApiRepository;
+  final LanApiClient? lanApiClient;
+  final dynamic usuarioRepository;
+  final dynamic contaPagarRepository;
+  final dynamic kitOrcamentoRepository;
+  final dynamic promocaoRepository;
+  final dynamic listaCompraRepository;
+  final dynamic nfeImportadaRepository;
+  final dynamic recadoLojaRepository;
+  final dynamic fornecedorRepository;
 
   @override
   State<MainAppShellPage> createState() => _MainAppShellPageState();
 }
 
 class _MainAppShellPageState extends State<MainAppShellPage> {
-  MainMenuDestino _destino = MainMenuDestino.inicio;
+  late MainMenuDestino _destino;
   MainMenuSubDestino? _subDestino;
   final Set<MainMenuDestino> _gruposExpandidos = {};
   List<MainMenuDestino> _favoritos = const [];
@@ -85,7 +111,6 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
 
   final List<AppShellTab> _abas = [];
   int _indiceAbaAtiva = 0;
-  int _seqAba = 0;
 
   /// Shell mobile: gaveta + navigator (sem abas desktop).
   final GlobalKey<ScaffoldState> _mobileScaffoldKey = GlobalKey<ScaffoldState>();
@@ -94,10 +119,13 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   @override
   void initState() {
     super.initState();
-    _abas.add(_criarAba(
-      destino: MainMenuDestino.inicio,
-      forcarNovaInstancia: true,
-    ));
+    final inicial = MainMenuDestino.inicialAposLogin(widget.usuarioLogado);
+    _destino = inicial;
+    // Singleton: id estavel dest:inicio (evita aba duplicada ao clicar Inicio).
+    _abas.add(_criarAba(destino: inicial));
+    if (inicial != MainMenuDestino.inicio) {
+      _paginaModuloMobile = _conteudoAba(destino: inicial);
+    }
     _carregarFavoritos();
     // Badge fiscal no celular: nao na entrada (congela). So no timer de 60s+.
     if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
@@ -109,7 +137,26 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _iniciarSyncSeNecessario();
+      _configurarChatInterno();
     });
+  }
+
+  void _configurarChatInterno() {
+    final autor = widget.usuarioLogado.nome.trim().isNotEmpty
+        ? widget.usuarioLogado.nome.trim()
+        : widget.usuarioLogado.login;
+    ChatInternoHub.instance.configurar(
+      localRepo: widget.objectBox != null
+          ? MensagemInternaRepository(
+              storeDirectoryPath: widget.objectBox!.storeDirectoryPath,
+            )
+          : null,
+      apiRepo: widget.lanApiClient != null
+          ? ChatApiRepository(widget.lanApiClient!)
+          : null,
+      autorPadrao: autor,
+      perfilUsuario: widget.usuarioLogado.perfil,
+    );
   }
 
   @override
@@ -119,11 +166,39 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   }
 
   Future<void> _atualizarBadgesMenu() async {
+    if (widget.terminalLeve) {
+      var fiscal = 0;
+      if (UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(
+        widget.usuarioLogado,
+      )) {
+        final api = widget.vendaApiRepository is VendaApiRepository
+            ? widget.vendaApiRepository as VendaApiRepository
+            : (widget.vendaRepository is VendaApiRepository
+                ? widget.vendaRepository as VendaApiRepository
+                : null);
+        if (api != null) {
+          try {
+            await api.hidratarPendenciasFiscais();
+            fiscal = api.metaPendenciasFiscaisTotal;
+          } catch (_) {
+            fiscal = api.metaPendenciasFiscaisTotal;
+          }
+        }
+      }
+      if (!mounted) return;
+      if (fiscal == _fiscalPendencias && !_backupAlerta) return;
+      setState(() {
+        _fiscalPendencias = fiscal;
+        _backupAlerta = false;
+      });
+      return;
+    }
     final fiscal = UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(
-          widget.usuarioLogado,
-        )
+              widget.usuarioLogado,
+            ) &&
+            widget.vendaRepository is VendaRepository
         ? FiscalPendenciasResumoService.contar(
-            vendaRepository: widget.vendaRepository,
+            vendaRepository: widget.vendaRepository as VendaRepository,
           ).total
         : 0;
     var backupAlerta = false;
@@ -150,23 +225,23 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   Future<void> _iniciarSyncSeNecessario() async {
     if (_syncIniciado) return;
     _syncIniciado = true;
+    if (widget.terminalLeve) return;
+
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (Platform.isWindows &&
         config.redeModoServidor &&
-        config.redeSincronizacaoAtiva) {
-      await LanSyncServerManager.iniciarServidor(
-        porta: config.redePortaServidor,
-        syncToken: config.redeSyncToken,
-        productImagesPath: widget.produtoRepository.productImagesDirPath,
+        config.redeSincronizacaoAtiva &&
+        widget.objectBox != null) {
+      // PC1: so hub (8787 mobile) + LanApi (8788 terminais). Sem scheduler P2P.
+      await LanServidorBootstrap.garantirAtivo(
+        objectBox: widget.objectBox!,
+        configRepository: widget.appConfigRepository,
       );
+      return;
     }
-    await widget.lanSyncScheduler.iniciar();
-    // Garante que o servidor LAN (mesmo processo) tem os JPEGs que o PC ja exibe.
-    if (Platform.isWindows &&
-        config.redeModoServidor &&
-        config.redeSincronizacaoAtiva) {
-      unawaited(widget.lanSyncScheduler.enviarFotosProdutosAgora());
-    }
+
+    // Celular / cliente legado: pull/push do hub.
+    await widget.lanSyncScheduler?.iniciar();
   }
 
   Future<void> _carregarFavoritos() async {
@@ -203,11 +278,22 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   }
 
   void _irPara(MainMenuDestino destino, {String? configSecaoInicialId}) {
+    if (widget.terminalLeve && !destinoPermitidoNoTerminalLeve(destino.name)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Modulo disponivel apenas no PC servidor (terminal leve).',
+          ),
+        ),
+      );
+      return;
+    }
     if (!destino.podeAcessar(widget.usuarioLogado)) return;
     if (MainMenuSubDestinoHelper.moduloTemSubmenu(destino)) {
       final sub = MainMenuSubDestinoHelper.primeiroPermitido(
         destino,
         widget.usuarioLogado,
+        terminalLeve: widget.terminalLeve,
       );
       if (sub != null) {
         _irParaSub(destino, sub);
@@ -244,6 +330,8 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       return;
     }
 
+    if (!_podeAbrirNovaAba()) return;
+
     setState(() {
       _abas.add(_criarAba(
         destino: destino,
@@ -260,47 +348,115 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     _abrirOuAtivarAba(destino: pai, sub: sub);
   }
 
+  /// Modulos gerais: uma aba por destino/sub (singleton). Reclique foca a existente.
   void _abrirOuAtivarAba({
     required MainMenuDestino destino,
     MainMenuSubDestino? sub,
-    bool forcarNovaInstancia = false,
   }) {
-    final id = forcarNovaInstancia
-        ? 'inst:${_seqAba++}'
-        : AppShellTab.idDe(destino: destino, sub: sub);
-
-    if (!forcarNovaInstancia) {
-      final existente = _abas.indexWhere((a) => a.id == id);
-      if (existente >= 0) {
-        _ativarAba(existente);
+    final id = AppShellTab.idDe(destino: destino, sub: sub);
+    final existente = _abas.indexWhere((a) => a.id == id);
+    if (existente >= 0) {
+      // KPI "Vendas hoje": recria a listagem com periodo "hoje".
+      if (sub == MainMenuSubDestino.vendasListagem &&
+          ListagemVendasAbertura.temPeriodoPendente) {
+        setState(() {
+          _abas[existente] = _criarAba(destino: destino, sub: sub, id: id);
+          _ativarAba(existente, notificar: false);
+        });
+        unawaited(_atualizarBadgesMenu());
         return;
       }
+      _ativarAba(existente);
+      return;
     }
+    if (!_podeAbrirNovaAba()) return;
 
     setState(() {
-      _abas.add(_criarAba(
-        destino: destino,
-        sub: sub,
-        id: id,
-      ));
+      _abas.add(_criarAba(destino: destino, sub: sub, id: id));
       _ativarAba(_abas.length - 1, notificar: false);
     });
     unawaited(_atualizarBadgesMenu());
+  }
+
+  /// Documentos/orcamentos: varias abas com IDs distintos (`doc:tipo:id`).
+  void _abrirAbaDocumento({
+    required String tipo,
+    required Object documentoId,
+    required String titulo,
+    required MainMenuDestino destino,
+    MainMenuSubDestino? sub,
+    required Widget pagina,
+  }) {
+    final id = AppShellTab.idDocumento(tipo: tipo, documentoId: documentoId);
+    final existente = _abas.indexWhere((a) => a.id == id);
+    if (existente >= 0) {
+      _ativarAba(existente);
+      return;
+    }
+    if (!_podeAbrirNovaAba()) return;
+
+    setState(() {
+      _abas.add(
+        AppShellTab(
+          id: id,
+          titulo: titulo,
+          destino: destino,
+          subDestino: sub,
+          ehDocumento: true,
+          navigatorKey: GlobalKey<NavigatorState>(),
+          paginaInicial: pagina,
+        ),
+      );
+      _ativarAba(_abas.length - 1, notificar: false);
+    });
+    unawaited(_atualizarBadgesMenu());
+  }
+
+  /// Mobile: abre documento como modulo unico (sem multi-aba).
+  void _abrirAbaDocumentoMobile({
+    required String tipo,
+    required Object documentoId,
+    required String titulo,
+    required MainMenuDestino destino,
+    MainMenuSubDestino? sub,
+    required Widget pagina,
+  }) {
+    _fecharDrawerMobile();
+    setState(() {
+      _destino = destino;
+      _subDestino = sub;
+      _paginaModuloMobile = pagina;
+    });
+    unawaited(_atualizarBadgesMenu());
+  }
+
+  bool _podeAbrirNovaAba() {
+    if (_abas.length < AppShellTab.maxAbasAbertas) return true;
+    _avisarLimiteAbas();
+    return false;
+  }
+
+  void _avisarLimiteAbas() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Limite de ${AppShellTab.maxAbasAbertas} abas atingido. '
+          'Feche alguma aba para abrir outra.',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   AppShellTab _criarAba({
     required MainMenuDestino destino,
     MainMenuSubDestino? sub,
     String? id,
-    bool forcarNovaInstancia = false,
     String? configSecaoInicialId,
   }) {
-    final tabId = id ??
-        (forcarNovaInstancia
-            ? 'inst:${_seqAba++}'
-            : AppShellTab.idDe(destino: destino, sub: sub));
     return AppShellTab(
-      id: tabId,
+      id: id ?? AppShellTab.idDe(destino: destino, sub: sub),
       titulo: AppShellTab.tituloDe(destino: destino, sub: sub),
       destino: destino,
       subDestino: sub,
@@ -333,6 +489,11 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
 
   void _selecionarAba(int indice) => _ativarAba(indice);
 
+  void _proximaAba() {
+    if (_abas.length <= 1) return;
+    _ativarAba((_indiceAbaAtiva + 1) % _abas.length);
+  }
+
   void _fecharAba(int indice) {
     if (_abas.length <= 1) return;
     setState(() {
@@ -350,6 +511,46 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   }
 
   void _fecharAbaAtual() => _fecharAba(_indiceAbaAtiva);
+
+  void _fecharOutras(int manter) {
+    if (_abas.length <= 1) return;
+    if (manter < 0 || manter >= _abas.length) return;
+    setState(() {
+      final keep = _abas[manter];
+      _abas
+        ..clear()
+        ..add(keep);
+      _indiceAbaAtiva = 0;
+      _destino = keep.destino;
+      _subDestino = keep.subDestino;
+      _sincronizarGrupoExpandidoComDestino(keep.destino);
+    });
+  }
+
+  void _fecharTodas() {
+    if (_abas.length <= 1) {
+      final unica = _abas.isEmpty
+          ? null
+          : _abas.first;
+      if (unica != null &&
+          unica.id == AppShellTab.idDe(destino: MainMenuDestino.inicio)) {
+        return;
+      }
+    }
+    setState(() {
+      final inicioId = AppShellTab.idDe(destino: MainMenuDestino.inicio);
+      final idx = _abas.indexWhere((a) => a.id == inicioId);
+      final inicio =
+          idx >= 0 ? _abas[idx] : _criarAba(destino: MainMenuDestino.inicio);
+      _abas
+        ..clear()
+        ..add(inicio);
+      _indiceAbaAtiva = 0;
+      _destino = MainMenuDestino.inicio;
+      _subDestino = null;
+      _sincronizarGrupoExpandidoComDestino(MainMenuDestino.inicio);
+    });
+  }
 
   Widget _conteudoAba({
     required MainMenuDestino destino,
@@ -391,6 +592,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   MainMenuDeps _valoresDeps({Widget child = const SizedBox.shrink()}) {
     return MainMenuDeps(
       objectBox: widget.objectBox,
+      terminalLeve: widget.terminalLeve,
       produtoRepository: widget.produtoRepository,
       clienteRepository: widget.clienteRepository,
       vendaRepository: widget.vendaRepository,
@@ -402,6 +604,18 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       lanSyncScheduler: widget.lanSyncScheduler,
       appConfigRepository: widget.appConfigRepository,
       printService: widget.printService,
+      vendaApiRepository: widget.vendaApiRepository is VendaApiRepository
+          ? widget.vendaApiRepository as VendaApiRepository
+          : null,
+      lanApiClient: widget.lanApiClient,
+      usuarioRepository: widget.usuarioRepository,
+      contaPagarRepository: widget.contaPagarRepository,
+      kitOrcamentoRepository: widget.kitOrcamentoRepository,
+      promocaoRepository: widget.promocaoRepository,
+      listaCompraRepository: widget.listaCompraRepository,
+      nfeImportadaRepository: widget.nfeImportadaRepository,
+      recadoLojaRepository: widget.recadoLojaRepository,
+      fornecedorRepository: widget.fornecedorRepository,
       child: child,
     );
   }
@@ -428,10 +642,16 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     );
   }
 
-  List<MainMenuDestino> get _itensRail => MainMenuDestino.itensRail(
-        usuario: widget.usuarioLogado,
-        favoritos: _favoritos,
-      );
+  List<MainMenuDestino> get _itensRail {
+    final base = MainMenuDestino.itensRail(
+      usuario: widget.usuarioLogado,
+      favoritos: _favoritos,
+    );
+    if (!widget.terminalLeve) return base;
+    return base
+        .where((d) => destinoPermitidoNoTerminalLeve(d.name))
+        .toList();
+  }
 
   void _fecharDrawerMobile() {
     final state = _mobileScaffoldKey.currentState;
@@ -441,11 +661,22 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   }
 
   void _irParaMobile(MainMenuDestino destino, {String? configSecaoInicialId}) {
+    if (widget.terminalLeve && !destinoPermitidoNoTerminalLeve(destino.name)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Modulo disponivel apenas no PC servidor (terminal leve).',
+          ),
+        ),
+      );
+      return;
+    }
     if (!destino.podeAcessar(widget.usuarioLogado)) return;
     if (MainMenuSubDestinoHelper.moduloTemSubmenu(destino)) {
       final sub = MainMenuSubDestinoHelper.primeiroPermitido(
         destino,
         widget.usuarioLogado,
+        terminalLeve: widget.terminalLeve,
       );
       if (sub != null) {
         _irParaSubMobile(destino, sub);
@@ -503,6 +734,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       irParaSub: _irParaSubMobile,
       alternarFavorito: _alternarFavorito,
       fecharAbaAtual: _fecharModuloMobile,
+      abrirAbaDocumento: _abrirAbaDocumentoMobile,
       child: Scaffold(
         key: _mobileScaffoldKey,
         drawer: AppMenuDrawer(
@@ -514,6 +746,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
           onSelecionarSub: _irParaSubMobile,
           badgeDe: _badgeRail,
           badgeSubDe: _badgeSub,
+          terminalLeve: widget.terminalLeve,
         ),
         body: Navigator(
           pages: [
@@ -566,75 +799,91 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
         if (!context.isDesktopLayout) {
           return _valoresDeps(child: _buildShellMobile(context));
         }
-        return AppShellScope(
-          destinoAtual: _destino,
-          subDestinoAtual: _subDestino,
-          favoritos: _favoritos,
-          irPara: _irPara,
-          irParaSub: _irParaSub,
-          alternarFavorito: _alternarFavorito,
-          fecharAbaAtual: _fecharAbaAtual,
-          child: Scaffold(
-            body: Column(
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      AppMenuLateral(
-                        itens: _itensRail,
-                        destinoAtual: _destino,
-                        subDestinoAtual: _subDestino,
-                        usuarioLogado: widget.usuarioLogado,
-                        onSelecionar: _irPara,
-                        onSelecionarSub: _irParaSub,
-                        gruposExpandidos: _gruposExpandidos,
-                        onAlternarGrupo: _alternarGrupoMenu,
-                        estendido: _railEstendido,
-                        onAlternarEstendido: () =>
-                            setState(() => _railEstendido = !_railEstendido),
-                        badgeDe: _badgeRail,
-                        badgeSubDe: _badgeSub,
-                        quantidadeFavoritos: _favoritos.length,
-                        larguraTela: constraints.maxWidth,
-                      ),
-                      const VerticalDivider(width: 1, thickness: 1),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            AppShellTabBar(
-                              tabs: _abas,
-                              indiceAtivo: _indiceAbaAtiva,
-                              onSelecionar: _selecionarAba,
-                              onFecharAtiva: _fecharAbaAtual,
+        return CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
+            const SingleActivator(LogicalKeyboardKey.keyW, control: true):
+                _fecharAbaAtual,
+            const SingleActivator(LogicalKeyboardKey.tab, control: true):
+                _proximaAba,
+          },
+          child: Focus(
+            autofocus: true,
+            child: AppShellScope(
+              destinoAtual: _destino,
+              subDestinoAtual: _subDestino,
+              favoritos: _favoritos,
+              irPara: _irPara,
+              irParaSub: _irParaSub,
+              alternarFavorito: _alternarFavorito,
+              fecharAbaAtual: _fecharAbaAtual,
+              abrirAbaDocumento: _abrirAbaDocumento,
+              child: Scaffold(
+                body: Column(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          AppMenuLateral(
+                            itens: _itensRail,
+                            destinoAtual: _destino,
+                            subDestinoAtual: _subDestino,
+                            usuarioLogado: widget.usuarioLogado,
+                            onSelecionar: _irPara,
+                            onSelecionarSub: _irParaSub,
+                            gruposExpandidos: _gruposExpandidos,
+                            onAlternarGrupo: _alternarGrupoMenu,
+                            estendido: _railEstendido,
+                            onAlternarEstendido: () =>
+                                setState(() => _railEstendido = !_railEstendido),
+                            badgeDe: _badgeRail,
+                            badgeSubDe: _badgeSub,
+                            quantidadeFavoritos: _favoritos.length,
+                            larguraTela: constraints.maxWidth,
+                            terminalLeve: widget.terminalLeve,
+                          ),
+                          const VerticalDivider(width: 1, thickness: 1),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                AppShellTabBar(
+                                  tabs: _abas,
+                                  indiceAtivo: _indiceAbaAtiva,
+                                  onSelecionar: _selecionarAba,
+                                  onFechar: _fecharAba,
+                                  onFecharOutras: _fecharOutras,
+                                  onFecharTodas: _fecharTodas,
+                                  trailing: const ChatInternoTopBarButton(),
+                                ),
+                                Expanded(
+                                  child: IndexedStack(
+                                    index: _indiceAbaAtiva,
+                                    children: [
+                                      for (var i = 0; i < _abas.length; i++)
+                                        AppShellAbaVisibilidade(
+                                          ativa: i == _indiceAbaAtiva,
+                                          child: AppShellTabNavigator(
+                                            key: ValueKey<String>(_abas[i].id),
+                                            navigatorKey: _abas[i].navigatorKey,
+                                            paginaInicial: _abas[i].paginaInicial,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
-                            Expanded(
-                              child: IndexedStack(
-                                index: _indiceAbaAtiva,
-                                children: [
-                                  for (var i = 0; i < _abas.length; i++)
-                                    AppShellAbaVisibilidade(
-                                      ativa: i == _indiceAbaAtiva,
-                                      child: AppShellTabNavigator(
-                                        key: ValueKey<String>(_abas[i].id),
-                                        navigatorKey: _abas[i].navigatorKey,
-                                        paginaInicial: _abas[i].paginaInicial,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    AppRodapeStatusBar(
+                      usuarioLogin: widget.usuarioLogado.login,
+                      usuarioNome: widget.usuarioLogado.nome,
+                    ),
+                  ],
                 ),
-                AppRodapeStatusBar(
-                  usuarioLogin: widget.usuarioLogado.login,
-                  usuarioNome: widget.usuarioLogado.nome,
-                ),
-              ],
+              ),
             ),
           ),
         );

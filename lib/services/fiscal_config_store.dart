@@ -13,6 +13,13 @@ class FiscalConfigDados {
     required this.ufEmitente,
     required this.ambiente,
     this.razaoSocialEmitente = FiscalConfig.razaoSocialEmitente,
+    this.emailContador = '',
+    this.smtpHost = '',
+    this.smtpPort = 587,
+    this.smtpUser = '',
+    this.smtpPassword = '',
+    this.smtpFromEmail = '',
+    this.smtpSsl = false,
   });
 
   factory FiscalConfigDados.fromConstantes() {
@@ -35,8 +42,35 @@ class FiscalConfigDados {
   final String ufEmitente;
   final String ambiente;
   final String razaoSocialEmitente;
+  final String emailContador;
+  final String smtpHost;
+  final int smtpPort;
+  final String smtpUser;
+  final String smtpPassword;
+  final String smtpFromEmail;
+  final bool smtpSsl;
 
   bool get homologacao => ambiente.trim().toLowerCase() != 'producao';
+
+  bool get emailContadorConfigurado {
+    final e = emailContador.trim();
+    return e.contains('@') && e.length >= 5;
+  }
+
+  bool get smtpConfigurado {
+    final host = smtpHost.trim();
+    final from = smtpFromEmail.trim().isNotEmpty
+        ? smtpFromEmail.trim()
+        : smtpUser.trim();
+    return host.isNotEmpty &&
+        smtpPort > 0 &&
+        smtpUser.trim().isNotEmpty &&
+        smtpPassword.isNotEmpty &&
+        from.contains('@');
+  }
+
+  bool get podeEnviarFechamentoEmail =>
+      emailContadorConfigurado && smtpConfigurado;
 
   bool get configurado {
     final cnpj = cnpjEmitente.replaceAll(RegExp(r'\D'), '');
@@ -59,10 +93,18 @@ abstract final class FiscalConfigStore {
   static const _kCnpj = 'fiscal_focus_cnpj_v1';
   static const _kIe = 'fiscal_focus_ie_v1';
   static const _kRegime = 'fiscal_focus_regime_v1';
+  static const _kEmailContador = 'fiscal_email_contador_v1';
+  static const _kSmtpHost = 'fiscal_smtp_host_v1';
+  static const _kSmtpPort = 'fiscal_smtp_port_v1';
+  static const _kSmtpUser = 'fiscal_smtp_user_v1';
+  static const _kSmtpPassword = 'fiscal_smtp_password_v1';
+  static const _kSmtpFrom = 'fiscal_smtp_from_v1';
+  static const _kSmtpSsl = 'fiscal_smtp_ssl_v1';
 
   static FiscalConfigDados? _cache;
 
-  static FiscalConfigDados get efetivo => _cache ?? FiscalConfigDados.fromConstantes();
+  static FiscalConfigDados get efetivo =>
+      _cache ?? FiscalConfigDados.fromConstantes();
 
   static Future<FiscalConfigDados> carregar() async {
     final prefs = await SharedPreferences.getInstance();
@@ -72,11 +114,13 @@ abstract final class FiscalConfigStore {
     final cnpj = prefs.getString(_kCnpj)?.replaceAll(RegExp(r'\D'), '');
     final ie = prefs.getString(_kIe)?.replaceAll(RegExp(r'\D'), '');
     final regimeSalvo = prefs.getInt(_kRegime);
+    final port = prefs.getInt(_kSmtpPort) ?? 587;
 
     _cache = FiscalConfigDados(
       apiBaseUrl: padrao.apiBaseUrl,
       apiToken: (token != null && token.isNotEmpty) ? token : '',
-      cnpjEmitente: (cnpj != null && cnpj.length == 14) ? cnpj : padrao.cnpjEmitente,
+      cnpjEmitente:
+          (cnpj != null && cnpj.length == 14) ? cnpj : padrao.cnpjEmitente,
       inscricaoEstadualEmitente:
           (ie != null && ie.isNotEmpty) ? ie : padrao.inscricaoEstadualEmitente,
       regimeTributarioEmitente:
@@ -87,6 +131,13 @@ abstract final class FiscalConfigStore {
       ambiente: (ambiente == 'producao' || ambiente == 'homologacao')
           ? ambiente!
           : padrao.ambiente,
+      emailContador: prefs.getString(_kEmailContador)?.trim() ?? '',
+      smtpHost: prefs.getString(_kSmtpHost)?.trim() ?? '',
+      smtpPort: port > 0 ? port : 587,
+      smtpUser: prefs.getString(_kSmtpUser)?.trim() ?? '',
+      smtpPassword: prefs.getString(_kSmtpPassword) ?? '',
+      smtpFromEmail: prefs.getString(_kSmtpFrom)?.trim() ?? '',
+      smtpSsl: prefs.getBool(_kSmtpSsl) ?? false,
     );
     return _cache!;
   }
@@ -97,6 +148,13 @@ abstract final class FiscalConfigStore {
     String? cnpjEmitente,
     String? inscricaoEstadualEmitente,
     int? regimeTributarioEmitente,
+    String? emailContador,
+    String? smtpHost,
+    int? smtpPort,
+    String? smtpUser,
+    String? smtpPassword,
+    String? smtpFromEmail,
+    bool? smtpSsl,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final token = apiToken.trim();
@@ -127,6 +185,52 @@ abstract final class FiscalConfigStore {
         _kRegime,
         regimeTributarioEmitente.clamp(1, 3),
       );
+    }
+
+    if (emailContador != null) {
+      final e = emailContador.trim();
+      if (e.isEmpty) {
+        await prefs.remove(_kEmailContador);
+      } else {
+        await prefs.setString(_kEmailContador, e);
+      }
+    }
+    if (smtpHost != null) {
+      final h = smtpHost.trim();
+      if (h.isEmpty) {
+        await prefs.remove(_kSmtpHost);
+      } else {
+        await prefs.setString(_kSmtpHost, h);
+      }
+    }
+    if (smtpPort != null && smtpPort > 0) {
+      await prefs.setInt(_kSmtpPort, smtpPort);
+    }
+    if (smtpUser != null) {
+      final u = smtpUser.trim();
+      if (u.isEmpty) {
+        await prefs.remove(_kSmtpUser);
+      } else {
+        await prefs.setString(_kSmtpUser, u);
+      }
+    }
+    if (smtpPassword != null) {
+      if (smtpPassword.isEmpty) {
+        await prefs.remove(_kSmtpPassword);
+      } else {
+        await prefs.setString(_kSmtpPassword, smtpPassword);
+      }
+    }
+    if (smtpFromEmail != null) {
+      final f = smtpFromEmail.trim();
+      if (f.isEmpty) {
+        await prefs.remove(_kSmtpFrom);
+      } else {
+        await prefs.setString(_kSmtpFrom, f);
+      }
+    }
+    if (smtpSsl != null) {
+      await prefs.setBool(_kSmtpSsl, smtpSsl);
     }
 
     await carregar();

@@ -1,21 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/venda_repository.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../model/venda.dart';
 import 'relatorio_drill_down.dart';
 import 'relatorio_entregas_helper.dart';
 import 'relatorio_export_util.dart';
+import 'relatorio_helpers.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
 
 class RelatorioEntregasResumoPage extends StatefulWidget {
   const RelatorioEntregasResumoPage({
     super.key,
     required this.vendaRepository,
+    this.clienteRepository,
     this.onAbrirModuloEntregas,
   });
 
-  final VendaRepository vendaRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
   final VoidCallback? onAbrirModuloEntregas;
 
   @override
@@ -34,16 +37,28 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
     _carregar();
   }
 
-  void _carregar() {
-    final lista = widget.vendaRepository.listarEntregas();
+  Future<void> _carregar() async {
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      try {
+        await repo.hidratarEntregas(limit: 500);
+      } catch (_) {}
+    }
+    final lista = (repo.listarEntregas() as List).cast<Venda>();
     lista.sort((a, b) {
       final aa = relatorioEntregaEhAtrasada(a);
       final ab = relatorioEntregaEhAtrasada(b);
       if (aa != ab) return aa ? -1 : 1;
       return b.data.compareTo(a.data);
     });
+    if (!mounted) return;
     setState(() => _entregas = lista);
   }
+
+  String _nomeCliente(Venda v) => relatorioNomeCliente(
+        v,
+        clienteRepository: widget.clienteRepository,
+      );
 
   Map<String, int> _porStatus() {
     final m = <String, int>{};
@@ -57,7 +72,7 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
   List<List<String>> _linhasCsv() => [
         ['Nota', 'Cliente', 'Status', 'Data marcada', 'Total'],
         ..._entregas.map((v) {
-          final cli = v.cliente.target?.nomeRazao ?? 'Sem cliente';
+          final cli = _nomeCliente(v);
           final dm = v.dataEntregaMarcada;
           return [
             '${v.numeroOrcamento}',
@@ -83,7 +98,7 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
               v.dataEntregaMarcada != null
                   ? _fmtData.format(v.dataEntregaMarcada!.toLocal())
                   : '-',
-              v.cliente.target?.nomeRazao ?? '-',
+              _nomeCliente(v),
             ],
           )
           .toList(),
@@ -194,8 +209,7 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
                               : null,
                         ),
                         title: Text(
-                          'Ped. ${v.numeroOrcamento} · '
-                          '${v.cliente.target?.nomeRazao ?? 'Sem cliente'}',
+                          'Ped. ${v.numeroOrcamento} · ${_nomeCliente(v)}',
                         ),
                         subtitle: Text(
                           '${relatorioRotuloStatusEntrega(v.statusEntrega)} · '
@@ -206,6 +220,7 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
                           context,
                           vendaRepository: widget.vendaRepository,
                           vendaId: v.id,
+                          clienteRepository: widget.clienteRepository,
                         ),
                       );
                     },

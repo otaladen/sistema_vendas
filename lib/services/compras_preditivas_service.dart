@@ -1,8 +1,8 @@
 import 'package:objectbox/objectbox.dart';
 
 import '../data/objectbox.dart';
+import '../data/ponto_pedido_api_dto.dart';
 import '../domain/produto_embalagem.dart';
-import '../domain/quantidade_venda_util.dart';
 import '../domain/produto_estoque_sync.dart';
 import '../model/produto.dart';
 
@@ -62,6 +62,7 @@ class ComprasPreditivasService {
   }
 
   /// Valor exibido como "ponto de pedido" (PP ou limiar de seguranca).
+  /// Sempre na unidade de venda ([Produto.estoqueExibicao]), nunca em raw.
   double calcularPontoPedidoExibicao(
     Produto produto, {
     int? consumoNoPeriodo,
@@ -70,9 +71,47 @@ class ComprasPreditivasService {
       produto,
       consumoNoPeriodo: consumoNoPeriodo,
     )) {
-      return calcularPontoPedido(produto);
+      final media = _mediaDiariaExibicao(
+        produto,
+        consumoNoPeriodo: consumoNoPeriodo,
+      );
+      return media * produto.leadTimeDias + produto.estoqueSeguranca;
     }
     return limiarEstoqueNovoProduto(produto).toDouble();
+  }
+
+  /// PP a partir do cadastro (sem consultar historico). Usado no terminal.
+  static double pontoPedidoExibicaoDeCadastro(Produto produto) {
+    if (produto.vendaMediaDiaria > _epsilonMedia) {
+      final media = ProdutoEmbalagem.valorMediaDiariaExibicao(
+        produto,
+        produto.vendaMediaDiaria,
+      );
+      return media * produto.leadTimeDias + produto.estoqueSeguranca;
+    }
+    if (produto.estoqueSeguranca > 0) {
+      return produto.estoqueSeguranca.toDouble();
+    }
+    if (produto.quantidadeMinima > 0) {
+      return produto.quantidadeMinima.toDouble();
+    }
+    return 0;
+  }
+
+  /// Media diaria na unidade de venda (m²/CX/UN).
+  double _mediaDiariaExibicao(
+    Produto produto, {
+    int? consumoNoPeriodo,
+  }) {
+    if (consumoNoPeriodo != null && consumoNoPeriodo > 0) {
+      final dias = diasHistoricoVendas <= 0 ? 1 : diasHistoricoVendas;
+      return ProdutoEmbalagem.valorEstoqueExibicao(produto, consumoNoPeriodo) /
+          dias;
+    }
+    return ProdutoEmbalagem.valorMediaDiariaExibicao(
+      produto,
+      produto.vendaMediaDiaria,
+    );
   }
 
   /// `true` se estoque atual (unidade de venda) atingiu ou ficou abaixo do limiar.
@@ -81,39 +120,11 @@ class ComprasPreditivasService {
     int? consumoNoPeriodo,
   }) {
     final estoque = produto.estoqueExibicao;
-    final limiarRaw = calcularPontoPedidoExibicao(
+    final limiar = calcularPontoPedidoExibicao(
       produto,
       consumoNoPeriodo: consumoNoPeriodo,
     );
-    final limiar = _limiarPpNaUnidadeDeVenda(
-      produto,
-      limiarRaw,
-      comGiro: temGiroVendaConfiavel(
-        produto,
-        consumoNoPeriodo: consumoNoPeriodo,
-      ),
-    );
     return estoque <= limiar + 1e-9;
-  }
-
-  /// Alinha PP/minimo com [Produto.estoqueExibicao].
-  ///
-  /// Cadastro (mínimo/segurança) e media ja na unidade de venda: usa o limiar.
-  /// Se a media ainda estiver em milésimos (legado do consumo), normaliza.
-  static double _limiarPpNaUnidadeDeVenda(
-    Produto produto,
-    double limiarRaw, {
-    required bool comGiro,
-  }) {
-    if (!limiarRaw.isFinite || limiarRaw < 0) return 0;
-    if (!ProdutoEmbalagem.estoqueUsaEscalaFracionada(produto)) {
-      return limiarRaw;
-    }
-    if (!comGiro) return limiarRaw;
-    if (limiarRaw >= QuantidadeVendaUtil.escalaFracionada) {
-      return limiarRaw / QuantidadeVendaUtil.escalaFracionada;
-    }
-    return limiarRaw;
   }
 
   /// Monta consumo por produto em uma unica passagem (60 dias).
@@ -132,10 +143,12 @@ class ComprasPreditivasService {
       if (venda.status != 'finalizada' || venda.cancelada) continue;
       final dataVenda = venda.data.toUtc();
       if (dataVenda.isBefore(inicio) || dataVenda.isAfter(fim)) continue;
+      final qtd = item.quantidade - item.quantidadeDevolvida;
+      if (qtd <= 0) continue;
       consumo.update(
         produtoId,
-        (x) => x + item.quantidade,
-        ifAbsent: () => item.quantidade,
+        (x) => x + qtd,
+        ifAbsent: () => qtd,
       );
     }
     return consumo;
@@ -240,5 +253,34 @@ class ComprasPreditivasService {
   /// Executa [recalcularTodosProdutosAtivos] fora da UI thread.
   Future<int> recalcularTodosProdutosAtivosAsync() {
     return Future<int>(recalcularTodosProdutosAtivos);
+  }
+
+  /// Snapshot de PP/critico para o terminal (GET /api/estoque/ponto-pedido).
+  List<PontoPedidoApiItem> montarItensPontoPedidoApi({int dias = 60}) {
+    final consumo = montarConsumoPorProdutoNoPeriodo(dias: dias);
+    final items = <PontoPedidoApiItem>[];
+    for (final produto in _db.produtoBox.getAll()) {
+      if (!produto.ativo || produto.id <= 0) continue;
+      final bruto = consumo[produto.id] ?? 0;
+      items.add(
+        PontoPedidoApiItem(
+          produtoId: produto.id,
+          critico: verificarEstoqueCritico(
+            produto,
+            consumoNoPeriodo: bruto,
+          ),
+          pontoPedido: calcularPontoPedidoExibicao(
+            produto,
+            consumoNoPeriodo: bruto,
+          ),
+          consumo60d: bruto,
+          vendaMediaDiariaExibicao: _mediaDiariaExibicao(
+            produto,
+            consumoNoPeriodo: bruto > 0 ? bruto : null,
+          ),
+        ),
+      );
+    }
+    return items;
   }
 }

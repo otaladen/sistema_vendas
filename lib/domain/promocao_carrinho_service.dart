@@ -1,4 +1,3 @@
-import '../data/promocao_repository.dart';
 import '../model/produto.dart';
 import '../model/promocao.dart';
 import 'promocao_cadastro.dart';
@@ -19,10 +18,11 @@ abstract class PromocaoCarrinhoLinha {
 }
 
 /// Ajusta precos de combo A+B e leve/pague no carrinho.
+/// Aceita [PromocaoRepository] ou [PromocaoApiRepository].
 class PromocaoCarrinhoService {
   PromocaoCarrinhoService(this._repo);
 
-  final PromocaoRepository _repo;
+  final dynamic _repo;
 
   void aplicarRegrasCarrinho(
     List<PromocaoCarrinhoLinha> linhas, {
@@ -61,11 +61,11 @@ class PromocaoCarrinhoService {
   }
 
   void _aplicarComboAb(List<PromocaoCarrinhoLinha> linhas, Promocao promo) {
-    promo.comboItens.length;
-    if (promo.comboItens.isEmpty || promo.precoCombo <= 0) return;
+    final combo = _comboDe(promo);
+    if (combo.isEmpty || promo.precoCombo <= 0) return;
 
     final requisitos = <int, int>{};
-    for (final c in promo.comboItens) {
+    for (final c in combo) {
       if (c.produtoAlvoId <= 0) return;
       requisitos[c.produtoAlvoId] = c.quantidade;
     }
@@ -93,6 +93,18 @@ class PromocaoCarrinhoService {
       l.promocaoId = promo.id;
       l.promocaoNome = promo.nome;
       l.precoTipo = PromocaoCadastro.precoTipoPromo;
+    }
+  }
+
+  List<dynamic> _comboDe(Promocao promo) {
+    try {
+      final r = _repo.comboItensDaPromocao(promo);
+      if (r is Iterable) return r.toList();
+    } catch (_) {}
+    try {
+      return List<dynamic>.from(promo.comboItens);
+    } catch (_) {
+      return const [];
     }
   }
 }

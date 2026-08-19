@@ -29,7 +29,7 @@ String relatorioRotuloStatusEntrega(String status) {
     case 'pendente':
       return 'Pendente';
     case 'roteirizada':
-      return 'Roteirizada';
+      return 'No patio';
     case 'saiu_entrega':
       return 'Saiu para entrega';
     case 'entregue_complemento_pendente':

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../domain/auditoria_catalogo.dart';
-import '../data/usuario_repository.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../services/auditoria_registrar.dart';
@@ -20,7 +19,7 @@ bool usuarioPodeAutorizarMargemPromocao(UsuarioSistema u) {
 /// Login/senha de gerente para venda abaixo da margem minima da promocao.
 Future<bool> solicitarAutorizacaoMargemPromocao(
   BuildContext context,
-  UsuarioRepository usuarioRepository, {
+  dynamic usuarioRepository, {
   required double margemAtual,
   required double margemMinima,
   required String nomeProduto,

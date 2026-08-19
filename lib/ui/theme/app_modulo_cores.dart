@@ -13,6 +13,7 @@ enum AppModuloId {
   funcionariosCadastro,
   clientesCadastro,
   vendedoresCadastro,
+  fornecedoresCadastro,
   usuariosCadastro,
   listagemVendas,
   orcamentos,
@@ -84,6 +85,8 @@ abstract final class AppModuloCores {
         return harmonizar(scheme, 210);
       case AppModuloId.vendedoresCadastro:
         return scheme.primary;
+      case AppModuloId.fornecedoresCadastro:
+        return harmonizar(scheme, 25);
       case AppModuloId.usuariosCadastro:
         return harmonizar(scheme, 275);
       case AppModuloId.listagemVendas:

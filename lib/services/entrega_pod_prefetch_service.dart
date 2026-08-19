@@ -5,17 +5,14 @@ import 'entrega_pod_lan_service.dart';
 /// Baixa fotos POD para cache apos sync ou ao abrir entregas.
 class EntregaPodPrefetchService {
   EntregaPodPrefetchService({
-    required AppConfigRepository configRepository,
+    AppConfigRepository? configRepository,
     EntregaPodLanService? lanService,
-  })  : _configRepository = configRepository,
-        _lanService = lanService;
+  }) : _lanService = lanService;
 
-  final AppConfigRepository _configRepository;
   final EntregaPodLanService? _lanService;
 
   Future<int> prefetchLista(Iterable<Venda> entregas) async {
-    final lan = _lanService ??
-        EntregaPodLanService(configRepository: _configRepository);
+    final lan = _lanService ?? EntregaPodLanService();
     var baixadas = 0;
     for (final v in entregas) {
       final servidor = v.podFotoPathServidor.trim();

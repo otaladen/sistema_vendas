@@ -9,7 +9,6 @@ class ClienteCadastroRodape extends StatelessWidget {
     required this.emEdicao,
     required this.onSalvar,
     required this.onNovo,
-    required this.onLimpar,
     this.onExcluir,
     this.podeExcluir = false,
   });
@@ -17,7 +16,6 @@ class ClienteCadastroRodape extends StatelessWidget {
   final bool emEdicao;
   final VoidCallback onSalvar;
   final VoidCallback onNovo;
-  final VoidCallback onLimpar;
   final VoidCallback? onExcluir;
   final bool podeExcluir;
 
@@ -26,12 +24,13 @@ class ClienteCadastroRodape extends StatelessWidget {
     final theme = Theme.of(context);
     final corSalvar = context.semanticColors.successFg;
     return Material(
-      elevation: 4,
-      color: theme.colorScheme.surface,
+      elevation: 6,
+      shadowColor: Colors.black.withValues(alpha: 0.12),
+      color: Colors.white,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
         child: Wrap(
-          spacing: 8,
+          spacing: 10,
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
@@ -40,18 +39,27 @@ class ClienteCadastroRodape extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: corSalvar,
                 foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
               ),
               icon: const Icon(Icons.save_outlined, size: 20),
               label: Text(emEdicao ? 'Salvar (F5)' : 'Salvar cliente (F5)'),
             ),
             OutlinedButton.icon(
               onPressed: onNovo,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: theme.colorScheme.primary,
+                side: BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.45)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
               icon: const Icon(Icons.person_add_outlined, size: 18),
               label: const Text('Novo'),
             ),
             if (podeExcluir && onExcluir != null)
               OutlinedButton.icon(
                 onPressed: onExcluir,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
                 icon: Icon(
                   Icons.delete_outline,
                   size: 18,
@@ -62,14 +70,6 @@ class ClienteCadastroRodape extends StatelessWidget {
                   style: TextStyle(color: theme.colorScheme.error),
                 ),
               ),
-            OutlinedButton.icon(
-              onPressed: onLimpar,
-              icon: Icon(
-                emEdicao ? Icons.close : Icons.cleaning_services_outlined,
-                size: 18,
-              ),
-              label: Text(emEdicao ? 'Cancelar (Esc)' : 'Limpar'),
-            ),
           ],
         ),
       ),

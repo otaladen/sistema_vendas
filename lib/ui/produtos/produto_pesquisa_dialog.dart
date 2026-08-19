@@ -1,15 +1,19 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../data/api/produto_api_repository.dart';
 import '../../data/produto_busca_util.dart';
-import '../../data/produto_repository.dart';
 import '../../domain/produto_unidade_exibicao.dart';
 import '../../model/produto.dart';
+import '../../services/produto_imagem_lan_service.dart';
 import '../../services/produto_imagem_service.dart';
 import '../layout/app_layout.dart';
+import '../widgets/lan_api_feedback.dart';
 import '../widgets/produto_busca_input.dart';
 import '../widgets/produto_foto_view.dart';
 
@@ -24,7 +28,7 @@ const double _kMiniaturaPx = 40.0;
 /// Dialogo de pesquisa de produto no cadastro (debounce + scroll progressivo).
 Future<Produto?> showProdutoPesquisaDialog({
   required BuildContext context,
-  required ProdutoRepository produtoRepository,
+  required dynamic produtoRepository,
 }) {
   return showDialog<Produto>(
     context: context,
@@ -37,7 +41,7 @@ Future<Produto?> showProdutoPesquisaDialog({
 class _ProdutoPesquisaDialog extends StatefulWidget {
   const _ProdutoPesquisaDialog({required this.produtoRepository});
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
 
   @override
   State<_ProdutoPesquisaDialog> createState() => _ProdutoPesquisaDialogState();
@@ -91,8 +95,12 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   bool get _termoVazio => _pesquisaController.text.trim().isEmpty;
 
   void _carregarInicial() {
-    _reiniciarLista();
-    _carregarProximaPaginaRepo();
+    unawaited(() async {
+      await _garantirCacheApiSeVazio();
+      if (!mounted) return;
+      _reiniciarLista();
+      await _carregarProximaPaginaRepo();
+    }());
   }
 
   void _reiniciarLista() {
@@ -171,11 +179,27 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
         return;
       }
 
+      // Terminal: sobe bytes uma vez antes de gravar o path nos produtos.
+      final enviou = await ProdutoImagemLanService(
+        imagesDirectoryPath: widget.produtoRepository.productImagesDirPath,
+      ).enviarSeRedeAtiva(processada);
+      if (!enviou && widget.produtoRepository is ProdutoApiRepository) {
+        if (!mounted) return;
+        LanApiFeedback.snackAviso(
+          context,
+          'Foto processada localmente, mas o envio ao servidor falhou.',
+          prefixo: 'Foto em lote',
+        );
+      }
+
       final ids = _idsMarcados.toList();
-      final alterados = widget.produtoRepository.aplicarFotoEmVarios(
+      final alteradosRaw = widget.produtoRepository.aplicarFotoEmVarios(
         ids: ids,
         fotoPath: processada,
       );
+      final alterados = alteradosRaw is Future
+          ? await alteradosRaw as int
+          : alteradosRaw as int;
       if (!mounted) return;
 
       final idsSet = ids.toSet();
@@ -198,6 +222,10 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
           ),
         ),
       );
+    } catch (e) {
+      if (mounted) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Foto em lote');
+      }
     } finally {
       if (mounted) setState(() => _aplicandoFoto = false);
     }
@@ -238,56 +266,80 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
     if (confirmar != true || !mounted) return;
 
     setState(() => _excluindo = true);
-    final removidos = widget.produtoRepository.removerVarios(ids);
-    if (!mounted) return;
-    setState(() {
-      _excluindo = false;
-      if (removidos > 0) {
-        final removidosSet = ids.toSet();
-        _carregados =
-            _carregados.where((p) => !removidosSet.contains(p.id)).toList();
-        _idsMarcados.removeAll(removidosSet);
-        _exibidos = math.min(_exibidos, _carregados.length);
-        if (_indiceSelecionado.value >= _carregados.length) {
-          _indiceSelecionado.value =
-              _carregados.isEmpty ? -1 : _carregados.length - 1;
+    try {
+      final removidosRaw = widget.produtoRepository.removerVarios(ids);
+      final removidos = removidosRaw is Future
+          ? await removidosRaw as int
+          : removidosRaw as int;
+      if (!mounted) return;
+      setState(() {
+        if (removidos > 0) {
+          final removidosSet = ids.toSet();
+          _carregados =
+              _carregados.where((p) => !removidosSet.contains(p.id)).toList();
+          _idsMarcados.removeAll(removidosSet);
+          _exibidos = math.min(_exibidos, _carregados.length);
+          if (_indiceSelecionado.value >= _carregados.length) {
+            _indiceSelecionado.value =
+                _carregados.isEmpty ? -1 : _carregados.length - 1;
+          }
         }
-      }
-    });
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          removidos == 0
-              ? 'Nenhum produto foi excluido.'
-              : '$removidos produto(s) excluido(s).',
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            removidos == 0
+                ? 'Nenhum produto foi excluido.'
+                : '$removidos produto(s) excluido(s).',
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (mounted) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Excluir produtos');
+      }
+    } finally {
+      if (mounted) setState(() => _excluindo = false);
+    }
   }
 
   Future<void> _carregarProximaPaginaRepo() async {
     if (_carregando || !_temMaisNoRepo || _buscaComTexto) return;
     setState(() => _carregando = true);
-
-    final pagina = widget.produtoRepository.pesquisarPaginaCadastro(
-      _pesquisaController.text,
-      offset: _carregados.length,
-      limite: _kLoteRepoVazio,
-      somenteAtivos: !_somenteInativos,
-      somenteInativos: _somenteInativos,
-    );
-
-    if (!mounted) return;
-    setState(() {
-      _carregados = [..._carregados, ...pagina];
-      _exibidos = _carregados.length;
-      _temMaisNoRepo = pagina.length >= _kLoteRepoVazio;
-      if (_indiceSelecionado.value < 0 && _carregados.isNotEmpty) {
-        _indiceSelecionado.value = 0;
-      }
-      _carregando = false;
-    });
+    try {
+      await _garantirCacheApiSeVazio();
+      if (!mounted) return;
+      final raw = await Future.value(
+        widget.produtoRepository.pesquisarPaginaCadastro(
+          _pesquisaController.text,
+          offset: _carregados.length,
+          limite: _kLoteRepoVazio,
+          somenteAtivos: !_somenteInativos,
+          somenteInativos: _somenteInativos,
+        ),
+      );
+      final pagina = (raw as List).whereType<Produto>().toList();
+      if (!mounted) return;
+      setState(() {
+        _carregados = [..._carregados, ...pagina];
+        _exibidos = _carregados.length;
+        _temMaisNoRepo = pagina.length >= _kLoteRepoVazio;
+        if (_indiceSelecionado.value < 0 && _carregados.isNotEmpty) {
+          _indiceSelecionado.value = 0;
+        }
+        _carregando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _carregando = false;
+        _temMaisNoRepo = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao buscar produtos: $e')),
+      );
+    }
   }
 
   Future<void> _executarBuscaTexto() async {
@@ -306,23 +358,48 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
       _temMaisNoRepo = false;
     });
 
-    final lista = widget.produtoRepository.pesquisarPaginaCadastro(
-      _pesquisaController.text,
-      limite: _kLimiteBuscaTexto,
-      somenteAtivos: !_somenteInativos,
-      somenteInativos: _somenteInativos,
-    );
-
-    if (!mounted) return;
-    setState(() {
-      _carregados = lista;
-      _exibidos = math.min(_kLoteInicialExibicao, lista.length);
-      _indiceSelecionado.value = lista.isEmpty ? -1 : 0;
-      _carregando = false;
-    });
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(0);
+    try {
+      await _garantirCacheApiSeVazio();
+      if (!mounted) return;
+      final raw = await Future.value(
+        widget.produtoRepository.pesquisarPaginaCadastro(
+          _pesquisaController.text,
+          limite: _kLimiteBuscaTexto,
+          somenteAtivos: !_somenteInativos,
+          somenteInativos: _somenteInativos,
+        ),
+      );
+      final lista = (raw as List).whereType<Produto>().toList();
+      if (!mounted) return;
+      setState(() {
+        _carregados = lista;
+        _exibidos = math.min(_kLoteInicialExibicao, lista.length);
+        _indiceSelecionado.value = lista.isEmpty ? -1 : 0;
+        _carregando = false;
+      });
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _carregando = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao buscar produtos: $e')),
+      );
     }
+  }
+
+  /// Terminal leve: pasta de fotos + catalogo se ainda vazio.
+  Future<void> _garantirCacheApiSeVazio() async {
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoApiRepository) return;
+    try {
+      await repo.garantirCacheImagens();
+    } catch (_) {}
+    if (repo.listarTodos().isNotEmpty) return;
+    try {
+      await repo.hidratar();
+    } catch (_) {}
   }
 
   void _agendarBusca() {
@@ -365,6 +442,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
       });
     }
     if (!_scrollController.hasClients) return;
+    if (context.isCompactLayout) return;
     final alvo = (indice * _kAlturaLinha).clamp(
       0.0,
       _scrollController.position.maxScrollExtent,
@@ -420,10 +498,181 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
     return partes.join(' · ');
   }
 
+  Widget _filtroCheckbox({
+    required bool? value,
+    required String rotulo,
+    required ValueChanged<bool?> onChanged,
+    bool tristate = false,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: 28,
+          width: 28,
+          child: Checkbox(
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+            tristate: tristate,
+            value: value,
+            onChanged: onChanged,
+          ),
+        ),
+        Text(
+          rotulo,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildListaProdutos({
+    required int itemCount,
+    required bool compacto,
+  }) {
+    if (itemCount == 0) {
+      return Center(child: Text(_rodapeLista()));
+    }
+    return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: !compacto,
+      child: ListView.builder(
+        controller: _scrollController,
+        itemCount: itemCount + (_carregando ? 1 : 0),
+        itemExtent: compacto ? null : _kAlturaLinha,
+        addRepaintBoundaries: true,
+        cacheExtent: compacto ? 160 : 280,
+        itemBuilder: (context, index) {
+          if (index >= itemCount) {
+            return const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            );
+          }
+          final produto = _carregados[index];
+          return _ProdutoPesquisaLinha(
+            produto: produto,
+            consulta: _pesquisaController.text.trim(),
+            indice: index,
+            indiceSelecionado: _indiceSelecionado,
+            marcado: _idsMarcados.contains(produto.id),
+            compacto: compacto,
+            imagesDirectoryPath:
+                widget.produtoRepository.productImagesDirPath,
+            onToggleMarca: () => _alternarMarca(produto.id),
+            onTap: () => _fechar(produto),
+            onHover: () => _definirIndiceSelecionado(index),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final alturaLista = adaptiveDialogListMaxHeight(context);
+    final compacto = context.isCompactLayout;
+    final mq = MediaQuery.of(context);
     final itemCount = math.min(_exibidos, _carregados.length);
+    final alturaListaDesktop = adaptiveDialogListMaxHeight(context);
+    final alturaPainelCelular = (mq.size.height -
+            mq.viewInsets.bottom -
+            mq.padding.vertical -
+            148)
+        .clamp(240.0, mq.size.height);
+
+    final filtros = Wrap(
+      spacing: 12,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        _filtroCheckbox(
+          value: _somenteInativos,
+          rotulo: 'Somente inativos',
+          onChanged: (v) {
+            if (v == null) return;
+            setState(() => _somenteInativos = v);
+            _debounce?.cancel();
+            unawaited(_executarBuscaTexto());
+          },
+        ),
+        if (_visiveis.isNotEmpty)
+          _filtroCheckbox(
+            tristate: true,
+            value: _todosVisiveisMarcados
+                ? true
+                : (_algunsVisiveisMarcados ? null : false),
+            rotulo: 'Marcar exibidos',
+            onChanged: (_) => _alternarMarcarTodosVisiveis(),
+          ),
+      ],
+    );
+
+    final campoBusca = TextField(
+      controller: _pesquisaController,
+      focusNode: _pesquisaFocusNode,
+      autofocus: !compacto,
+      decoration: produtoBuscaInputDecoration(
+        helperText: compacto ? null : _helperBusca(),
+      ),
+      onChanged: (_) => _agendarBusca(),
+      onSubmitted: (_) => _confirmarSelecionado(),
+    );
+
+    final rodape = Text(
+      _idsMarcados.isEmpty
+          ? _rodapeLista()
+          : '${_rodapeLista()} · ${_idsMarcados.length} marcado(s)',
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+    );
+
+    final corpo = compacto
+        ? SizedBox(
+            height: alturaPainelCelular,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                filtros,
+                const SizedBox(height: 6),
+                campoBusca,
+                const SizedBox(height: 8),
+                Expanded(
+                  child: _buildListaProdutos(
+                    itemCount: itemCount,
+                    compacto: true,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                rodape,
+              ],
+            ),
+          )
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              filtros,
+              const SizedBox(height: 6),
+              campoBusca,
+              const SizedBox(height: 8),
+              SizedBox(
+                height: alturaListaDesktop,
+                child: _buildListaProdutos(
+                  itemCount: itemCount,
+                  compacto: false,
+                ),
+              ),
+              const SizedBox(height: 6),
+              rodape,
+            ],
+          );
 
     return Focus(
       onKeyEvent: (node, event) {
@@ -455,127 +704,24 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
         return KeyEventResult.ignored;
       },
       child: AlertDialog(
+        insetPadding: compacto
+            ? const EdgeInsets.fromLTRB(8, 12, 8, 12)
+            : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        titlePadding: compacto
+            ? const EdgeInsets.fromLTRB(16, 14, 16, 8)
+            : null,
+        contentPadding: compacto
+            ? const EdgeInsets.fromLTRB(12, 0, 12, 8)
+            : null,
         title: const Text('Pesquisar produto'),
         content: AdaptiveDialogPane(
           desktopWidth: 760,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  SizedBox(
-                    height: 28,
-                    width: 28,
-                    child: Checkbox(
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                      value: _somenteInativos,
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() => _somenteInativos = v);
-                        _debounce?.cancel();
-                        unawaited(_executarBuscaTexto());
-                      },
-                    ),
-                  ),
-                  Flexible(
-                    child: Text(
-                      'Somente inativos',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (_visiveis.isNotEmpty) ...[
-                    SizedBox(
-                      height: 28,
-                      width: 28,
-                      child: Checkbox(
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                        tristate: true,
-                        value: _todosVisiveisMarcados
-                            ? true
-                            : (_algunsVisiveisMarcados ? null : false),
-                        onChanged: (_) => _alternarMarcarTodosVisiveis(),
-                      ),
-                    ),
-                    Text(
-                      'Marcar exibidos',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _pesquisaController,
-                focusNode: _pesquisaFocusNode,
-                autofocus: true,
-                decoration: produtoBuscaInputDecoration(
-                  helperText: _helperBusca(),
-                ),
-                onChanged: (_) => _agendarBusca(),
-                onSubmitted: (_) => _confirmarSelecionado(),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: alturaLista,
-                child: itemCount == 0
-                    ? Center(child: Text(_rodapeLista()))
-                    : Scrollbar(
-                        controller: _scrollController,
-                        thumbVisibility: true,
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          itemCount: itemCount + (_carregando ? 1 : 0),
-                          itemExtent: _kAlturaLinha,
-                          addRepaintBoundaries: true,
-                          cacheExtent: 280,
-                          itemBuilder: (context, index) {
-                            if (index >= itemCount) {
-                              return const Padding(
-                                padding: EdgeInsets.all(16),
-                                child: Center(
-                                  child: SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }
-                            final produto = _carregados[index];
-                            return _ProdutoPesquisaLinha(
-                              produto: produto,
-                              consulta: _pesquisaController.text.trim(),
-                              indice: index,
-                              indiceSelecionado: _indiceSelecionado,
-                              marcado: _idsMarcados.contains(produto.id),
-                              imagesDirectoryPath:
-                                  widget.produtoRepository.productImagesDirPath,
-                              onToggleMarca: () => _alternarMarca(produto.id),
-                              onTap: () => _fechar(produto),
-                              onHover: () => _definirIndiceSelecionado(index),
-                            );
-                          },
-                        ),
-                      ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _idsMarcados.isEmpty
-                    ? _rodapeLista()
-                    : '${_rodapeLista()} · ${_idsMarcados.length} marcado(s)',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-            ],
-          ),
+          horizontalMargin: compacto ? 8 : 24,
+          child: corpo,
         ),
+        actionsPadding: compacto
+            ? const EdgeInsets.fromLTRB(12, 0, 12, 10)
+            : null,
         actions: [
           if (_idsMarcados.isNotEmpty) ...[
             Tooltip(
@@ -630,6 +776,7 @@ class _ProdutoPesquisaLinha extends StatefulWidget {
     required this.indice,
     required this.indiceSelecionado,
     required this.marcado,
+    this.compacto = false,
     required this.imagesDirectoryPath,
     required this.onToggleMarca,
     required this.onTap,
@@ -641,6 +788,7 @@ class _ProdutoPesquisaLinha extends StatefulWidget {
   final int indice;
   final ValueNotifier<int> indiceSelecionado;
   final bool marcado;
+  final bool compacto;
   final String imagesDirectoryPath;
   final VoidCallback onToggleMarca;
   final VoidCallback onTap;
@@ -688,17 +836,24 @@ class _ProdutoPesquisaLinhaState extends State<_ProdutoPesquisaLinha> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final estiloTitulo = Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ) ??
+    final compacto = widget.compacto;
+    final estiloTitulo = (compacto
+                ? Theme.of(context).textTheme.titleSmall
+                : Theme.of(context).textTheme.titleMedium)
+            ?.copyWith(fontWeight: FontWeight.w600) ??
         const TextStyle(fontWeight: FontWeight.w600);
-    final estiloSubtitulo =
-        Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
-    final subtitulo =
-        'SKU: ${widget.produto.codigoInterno} | '
-        'Un: ${rotuloUnidadeProdutoLista(widget.produto)} | '
-        'Categoria: ${widget.produto.categoria.isEmpty ? '-' : widget.produto.categoria}'
-        '${widget.produto.ativo ? '' : ' · Inativo'}';
+    final estiloSubtitulo = compacto
+        ? (Theme.of(context).textTheme.bodySmall ?? const TextStyle())
+        : (Theme.of(context).textTheme.bodyMedium ?? const TextStyle());
+    final subtitulo = compacto
+        ? '${widget.produto.codigoInterno} · '
+            '${rotuloUnidadeProdutoLista(widget.produto)}'
+            '${widget.produto.categoria.isEmpty ? '' : ' · ${widget.produto.categoria}'}'
+            '${widget.produto.ativo ? '' : ' · Inativo'}'
+        : 'SKU: ${widget.produto.codigoInterno} | '
+            'Un: ${rotuloUnidadeProdutoLista(widget.produto)} | '
+            'Categoria: ${widget.produto.categoria.isEmpty ? '-' : widget.produto.categoria}'
+            '${widget.produto.ativo ? '' : ' · Inativo'}';
 
     return RepaintBoundary(
       child: MouseRegion(
@@ -706,7 +861,11 @@ class _ProdutoPesquisaLinhaState extends State<_ProdutoPesquisaLinha> {
         child: ListTile(
           dense: true,
           visualDensity: VisualDensity.compact,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          minVerticalPadding: compacto ? 6 : 4,
+          contentPadding: EdgeInsets.symmetric(
+            horizontal: compacto ? 4 : 6,
+            vertical: compacto ? 4 : 2,
+          ),
           selected: _selecionado || widget.marcado,
           selectedTileColor: widget.marcado
               ? scheme.error.withValues(alpha: 0.08)
@@ -719,11 +878,13 @@ class _ProdutoPesquisaLinhaState extends State<_ProdutoPesquisaLinha> {
             texto: widget.produto.nome,
             termo: widget.consulta,
             estilo: estiloTitulo,
+            maxLinhas: compacto ? 2 : 2,
           ),
           subtitle: _TextoComDestaque(
             texto: subtitulo,
             termo: widget.consulta,
             estilo: estiloSubtitulo,
+            maxLinhas: compacto ? 2 : 2,
           ),
           trailing: Checkbox(
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -739,7 +900,7 @@ class _ProdutoPesquisaLinhaState extends State<_ProdutoPesquisaLinha> {
   }
 }
 
-/// Miniatura 40px: so arquivo local (nunca baixa na lista — evita travar o celular).
+/// Miniatura 40px: no celular so local (evita HTTP em massa); no PC/terminal baixa da API.
 class _ProdutoFotoMiniatura extends StatelessWidget {
   const _ProdutoFotoMiniatura({
     required this.fotoPath,
@@ -753,6 +914,7 @@ class _ProdutoFotoMiniatura extends StatelessWidget {
   Widget build(BuildContext context) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final cachePx = (_kMiniaturaPx * dpr).round().clamp(40, 96);
+    final celular = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
     return SizedBox(
       width: _kMiniaturaPx,
       height: _kMiniaturaPx,
@@ -768,7 +930,9 @@ class _ProdutoFotoMiniatura extends StatelessWidget {
         cacheWidth: cachePx,
         cacheHeight: cachePx,
         filterQuality: FilterQuality.low,
-        modo: ProdutoFotoModo.somenteLocal,
+        modo: celular
+            ? ProdutoFotoModo.somenteLocal
+            : ProdutoFotoModo.automatico,
       ),
     );
   }
@@ -779,17 +943,24 @@ class _TextoComDestaque extends StatelessWidget {
     required this.texto,
     required this.termo,
     required this.estilo,
+    this.maxLinhas = 2,
   });
 
   final String texto;
   final String termo;
   final TextStyle estilo;
+  final int maxLinhas;
 
   @override
   Widget build(BuildContext context) {
     final busca = termo.trim().toLowerCase();
     if (busca.isEmpty) {
-      return Text(texto, style: estilo, maxLines: 2, overflow: TextOverflow.ellipsis);
+      return Text(
+        texto,
+        style: estilo,
+        maxLines: maxLinhas,
+        overflow: TextOverflow.ellipsis,
+      );
     }
 
     final textoMinusculo = texto.toLowerCase();
@@ -819,7 +990,7 @@ class _TextoComDestaque extends StatelessWidget {
     }
 
     return RichText(
-      maxLines: 2,
+      maxLines: maxLinhas,
       overflow: TextOverflow.ellipsis,
       text: TextSpan(style: estilo, children: spans),
     );

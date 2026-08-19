@@ -8,12 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../data/conta_pagar_repository.dart';
-import '../data/funcionario_repository.dart';
-import '../data/lancamento_funcionario_repository.dart';
-import '../data/motorista_repository.dart';
-import '../data/usuario_repository.dart';
-import '../data/venda_repository.dart';
-import '../data/vendedor_repository.dart';
+import '../data/api/funcionario_api_repository.dart';
+import '../data/api/vendedor_api_repository.dart';
 import '../domain/funcionario_cadastro_catalogo.dart';
 import '../domain/funcionario_folha_resumo.dart';
 import '../domain/funcionario_folha_service.dart';
@@ -27,6 +23,7 @@ import '../model/usuario_sistema.dart';
 import '../services/funcionario_extrato_pdf.dart';
 import '../services/funcionario_folha_csv_export.dart';
 import '../services/funcionario_imagem_service.dart';
+import 'widgets/lan_api_feedback.dart';
 import '../services/brasil_api_cep_service.dart';
 import 'funcionarios/funcionario_layout.dart';
 import 'funcionarios/widgets/funcionario_atalhos_bar.dart';
@@ -36,6 +33,7 @@ import 'funcionarios/widgets/funcionario_resumo_header.dart';
 import 'layout/app_layout.dart';
 import 'theme/app_semantic_helper.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
+import 'widgets/funcionario/funcionario_cadastro_rodape.dart';
 import 'widgets/mascaras_cadastro_input.dart';
 
 class _FuncionarioSalvarIntent extends Intent {
@@ -62,11 +60,11 @@ class FuncionariosPage extends StatefulWidget {
     this.onLogout,
   });
 
-  final FuncionarioRepository funcionarioRepository;
-  final VendedorRepository vendedorRepository;
-  final VendaRepository vendaRepository;
-  final MotoristaRepository motoristaRepository;
-  final UsuarioRepository usuarioRepository;
+  final dynamic funcionarioRepository;
+  final dynamic vendedorRepository;
+  final dynamic vendaRepository;
+  final dynamic motoristaRepository;
+  final dynamic usuarioRepository;
   final UsuarioSistema? usuarioLogado;
   final VoidCallback? onLogout;
 
@@ -76,24 +74,39 @@ class FuncionariosPage extends StatefulWidget {
 
 class _FuncionariosPageState extends State<FuncionariosPage>
     with SingleTickerProviderStateMixin {
-  late final FuncionarioFolhaService _folhaService = FuncionarioFolhaService(
-    funcionarioRepository: widget.funcionarioRepository,
-    fechamentoRepository: widget.funcionarioRepository.fechamentos,
-    contaPagarRepository: ContaPagarRepository(
-      widget.funcionarioRepository.objectBox,
-    ),
-  );
+  bool get _terminalRh =>
+      widget.funcionarioRepository is FuncionarioApiRepository;
 
-  late final FuncionarioImagemService _imagemService = FuncionarioImagemService(
-    imagesDirectoryPath:
-        widget.funcionarioRepository.funcionarioImagesDirPath,
-  );
+  FuncionarioFolhaService? _folhaService;
+  late final FuncionarioImagemService _imagemService = _criarImagemService();
 
   String _fotoPathAtual = '';
   String? _fotoOrigemLocalPath;
   bool _fotoFoiRemovida = false;
 
-  static ButtonStyle get _estiloBotaoContornoCompacto => OutlinedButton.styleFrom(
+  FuncionarioImagemService _criarImagemService() {
+    if (_terminalRh) {
+      return FuncionarioImagemService(imagesDirectoryPath: '');
+    }
+    return FuncionarioImagemService(
+      imagesDirectoryPath:
+          widget.funcionarioRepository.funcionarioImagesDirPath as String,
+    );
+  }
+
+  void _avisoFolhaSoServidor() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Fechamento de folha / RH avancado so no PC servidor.',
+        ),
+      ),
+    );
+  }
+
+  static ButtonStyle get _estiloBotaoContornoCompacto =>
+      OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         minimumSize: Size.zero,
@@ -113,6 +126,15 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   static const double _wDiaPag = 132;
   static const double _wPct = 120;
   static const double _wCnh = 200;
+  static const EdgeInsets _padCampoCadastro =
+      EdgeInsets.symmetric(horizontal: 10, vertical: 10);
+  static const BoxConstraints _iconCampoCadastro = BoxConstraints(
+    minWidth: 28,
+    minHeight: 28,
+    maxWidth: 32,
+    maxHeight: 32,
+  );
+  static const Color _pageBg = Color(0xFFF8FAFC);
 
   final _cpfFormatter = CpfInputFormatter();
   final _cepFormatter = CepInputFormatter();
@@ -181,15 +203,36 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   DateTime _dataAdmissao = DateTime.now();
   String _status = '';
   final DateFormat _dateFormat = DateFormat('dd/MM/yyyy');
-  final NumberFormat _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+  final NumberFormat _moeda = NumberFormat.currency(
+    locale: 'pt_BR',
+    symbol: 'R\$',
+  );
   final DateFormat _mesAnoFormat = DateFormat('MMMM/yyyy', 'pt_BR');
   List<LancamentoFuncionario> _lancamentos = [];
-  late DateTime _mesFiltroLancamentos =
-      DateTime(DateTime.now().year, DateTime.now().month, 1);
+  late DateTime _mesFiltroLancamentos = DateTime(
+    DateTime.now().year,
+    DateTime.now().month,
+    1,
+  );
 
   @override
   void initState() {
     super.initState();
+    if (!_terminalRh) {
+      _folhaService = FuncionarioFolhaService(
+        funcionarioRepository: widget.funcionarioRepository,
+        fechamentoRepository: widget.funcionarioRepository.fechamentos,
+        contaPagarRepository: ContaPagarRepository(
+          widget.funcionarioRepository.objectBox,
+        ),
+      );
+    } else {
+      final repo = widget.funcionarioRepository;
+      if (repo is FuncionarioApiRepository) {
+        repo.addListener(_onFuncionarioApiChanged);
+        unawaited(_hidratarTerminal());
+      }
+    }
     _tabController = TabController(length: 4, vsync: this);
     _nomeController.addListener(_onCamposResumoChanged);
     unawaited(_carregarUsuariosCache());
@@ -198,6 +241,23 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       if (!mounted) return;
       _focarNomeSeNovo();
     });
+  }
+
+  void _onFuncionarioApiChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _hidratarTerminal() async {
+    final repo = widget.funcionarioRepository;
+    if (repo is! FuncionarioApiRepository) return;
+    try {
+      await repo.hidratar();
+      if (!mounted) return;
+      setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackAviso(context, e, prefixo: 'Funcionarios');
+    }
   }
 
   void _focarNomeSeNovo() {
@@ -217,6 +277,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
 
   @override
   void dispose() {
+    final repo = widget.funcionarioRepository;
+    if (repo is FuncionarioApiRepository) {
+      repo.removeListener(_onFuncionarioApiChanged);
+    }
     _nomeController.removeListener(_onCamposResumoChanged);
     _tabController.dispose();
     _scrollAbaIdent.dispose();
@@ -259,7 +323,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   void _preencherCodigoAutomaticoSeNovo() {
     if (_funcionarioEmEdicaoId != null) return;
     if (_codigoController.text.trim().isNotEmpty) return;
-    _codigoController.text = widget.funcionarioRepository.proximoCodigoInterno();
+    _codigoController.text = widget.funcionarioRepository
+        .proximoCodigoInterno();
   }
 
   Future<void> _selecionarDataNascimento() async {
@@ -287,7 +352,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   Future<void> _selecionarCnhValidade() async {
     final escolhida = await showDatePicker(
       context: context,
-      initialDate: _cnhValidade ?? DateTime.now().add(const Duration(days: 365)),
+      initialDate:
+          _cnhValidade ?? DateTime.now().add(const Duration(days: 365)),
       firstDate: DateTime(2000, 1, 1),
       lastDate: DateTime.now().add(const Duration(days: 365 * 15)),
     );
@@ -309,7 +375,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   Future<void> _selecionarAsoValidade() async {
     final escolhida = await showDatePicker(
       context: context,
-      initialDate: _asoValidade ?? DateTime.now().add(const Duration(days: 365)),
+      initialDate:
+          _asoValidade ?? DateTime.now().add(const Duration(days: 365)),
       firstDate: DateTime(2000, 1, 1),
       lastDate: DateTime.now().add(const Duration(days: 365 * 3)),
     );
@@ -428,8 +495,11 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       _fotoOrigemLocalPath = null;
       _fotoFoiRemovida = false;
       _lancamentos = [];
-      _mesFiltroLancamentos =
-          DateTime(DateTime.now().year, DateTime.now().month, 1);
+      _mesFiltroLancamentos = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        1,
+      );
       _observacoesController.clear();
       _dataNascimento = DateTime(2000, 1, 1);
       _dataAdmissao = DateTime.now();
@@ -504,7 +574,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     return double.tryParse(n) ?? 0;
   }
 
-  String _resumoSetorFuncaoAtual() => FuncionarioCadastroCatalogo.resumoSetorFuncao(
+  String _resumoSetorFuncaoAtual() =>
+      FuncionarioCadastroCatalogo.resumoSetorFuncao(
         setor: _setorSelecionado,
         funcao: _funcaoSelecionada,
         funcaoOutro: _funcaoOutroController.text,
@@ -523,7 +594,11 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     var funcao = f.funcao;
     var funcaoOutro = f.funcaoOutro;
     if (setor.isEmpty && funcao.isEmpty) {
-      final leg = FuncionarioCadastroCatalogo.migrarCargoLegado(f.cargo, '', '');
+      final leg = FuncionarioCadastroCatalogo.migrarCargoLegado(
+        f.cargo,
+        '',
+        '',
+      );
       setor = leg.setor;
       funcao = leg.funcao;
       funcaoOutro = leg.funcaoOutro;
@@ -648,7 +723,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     if (!_ativo) {
       if (_dataDemissao == null) {
         setState(
-          () => _status = 'Informe a data de demissao para funcionario inativo.',
+          () =>
+              _status = 'Informe a data de demissao para funcionario inativo.',
         );
         return;
       }
@@ -676,7 +752,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     int vendedorId = 0;
     if (_tambemVendedorPdv) {
       try {
-        vendedorId = _sincronizarVendedorVinculo();
+        vendedorId = await _sincronizarVendedorVinculo();
       } catch (e) {
         setState(
           () => _status = 'Nao foi possivel vincular vendedor no PDV: $e',
@@ -688,12 +764,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     int motoristaId = 0;
     if (_tambemMotoristaEntrega) {
       try {
-        motoristaId = _sincronizarMotoristaVinculo();
+        motoristaId = await _sincronizarMotoristaVinculo();
         _motoristaVinculadoId = motoristaId;
       } catch (e) {
-        setState(
-          () => _status = 'Nao foi possivel vincular motorista: $e',
-        );
+        setState(() => _status = 'Nao foi possivel vincular motorista: $e');
         return;
       }
     }
@@ -732,9 +806,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       // com seguranca (nao apaga o cadastro de vendedor).
       final uidAnterior = existente?.usuarioSistemaId.trim() ?? '';
       final vidAnterior = existente?.vendedorId ?? 0;
-      if (!_tambemVendedorPdv &&
-          uidAnterior.isNotEmpty &&
-          vidAnterior > 0) {
+      if (!_tambemVendedorPdv && uidAnterior.isNotEmpty && vidAnterior > 0) {
         try {
           await _limparVendedorIdDoUsuarioSeSeguro(
             usuarioId: uidAnterior,
@@ -763,7 +835,13 @@ class _FuncionariosPageState extends State<FuncionariosPage>
 
     final fotoPathExistente = existente?.fotoPath ?? '';
     var fotoPathFinal = fotoPathExistente;
-    if (_fotoOrigemLocalPath != null &&
+    var avisoFotoTerminal = false;
+    if (_terminalRh &&
+        ((_fotoOrigemLocalPath != null &&
+                _fotoOrigemLocalPath!.trim().isNotEmpty) ||
+            _fotoFoiRemovida)) {
+      avisoFotoTerminal = true;
+    } else if (_fotoOrigemLocalPath != null &&
         _fotoOrigemLocalPath!.trim().isNotEmpty) {
       final processada = await _imagemService.processarESalvar(
         sourceImagePath: _fotoOrigemLocalPath!,
@@ -781,9 +859,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           fotoPathExistente,
           contarReferencias: (path) =>
               widget.funcionarioRepository.contarFuncionariosComFotoPath(
-            path,
-            excluirFuncionarioId: existente?.id,
-          ),
+                path,
+                excluirFuncionarioId: existente?.id,
+              ),
         );
       }
       fotoPathFinal = processada;
@@ -792,9 +870,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         fotoPathExistente,
         contarReferencias: (path) =>
             widget.funcionarioRepository.contarFuncionariosComFotoPath(
-          path,
-          excluirFuncionarioId: existente?.id,
-        ),
+              path,
+              excluirFuncionarioId: existente?.id,
+            ),
       );
       fotoPathFinal = '';
     }
@@ -814,8 +892,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       whatsapp: somenteDigitos(_whatsappController.text),
       email: _emailController.text.trim(),
       contatoEmergenciaNome: _contatoEmergenciaNomeController.text.trim(),
-      contatoEmergenciaTelefone:
-          somenteDigitos(_contatoEmergenciaTelefoneController.text),
+      contatoEmergenciaTelefone: somenteDigitos(
+        _contatoEmergenciaTelefoneController.text,
+      ),
       endereco: _enderecoController.text.trim(),
       numero: _numeroController.text.trim(),
       bairro: _bairroController.text.trim(),
@@ -831,10 +910,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       diaPagamento: dia,
       ativo: _ativo,
       motivoDemissao: _ativo ? '' : _motivoDemissao,
-      motivoDemissaoOutro:
-          _ativo || _motivoDemissao != 'outro'
-              ? ''
-              : _motivoDemissaoOutroController.text.trim(),
+      motivoDemissaoOutro: _ativo || _motivoDemissao != 'outro'
+          ? ''
+          : _motivoDemissaoOutroController.text.trim(),
       dataNascimento: _dataNascimento,
       dataAdmissao: _dataAdmissao,
       dataDemissao: _ativo ? null : _dataDemissao,
@@ -854,32 +932,64 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       fotoPath: fotoPathFinal,
       criadoEm: existente?.criadoEm,
     );
-    var id = widget.funcionarioRepository.salvar(funcionario);
-    for (final l in _lancamentos.where((x) => x.id == 0).toList()) {
-      widget.funcionarioRepository.lancamentos.salvar(l, id);
+    try {
+      var id = widget.funcionarioRepository is FuncionarioApiRepository
+          ? await widget.funcionarioRepository.salvarRemoto(funcionario)
+          : widget.funcionarioRepository.salvar(funcionario);
+
+      final pendentes = _lancamentos.where((x) => x.id == 0).toList();
+      if (widget.funcionarioRepository is FuncionarioApiRepository) {
+        for (final l in pendentes) {
+          await widget.funcionarioRepository.lancamentos.salvarRemoto(l, id);
+        }
+        _carregarLancamentos(id);
+        if (!mounted) return;
+        setState(() {
+          _funcionarioEmEdicaoId = id;
+          _codigoController.text = codigo;
+          _vendedorVinculadoId = vendedorId;
+          _motoristaVinculadoId = motoristaId;
+          _usuarioVinculadoId = usuarioSistemaId;
+          _fotoOrigemLocalPath = null;
+          _fotoFoiRemovida = false;
+          _status = avisoFotoTerminal
+              ? 'Funcionario salvo. Foto nao sincroniza no terminal leve '
+                  '(use o PC servidor para alterar a foto).'
+              : 'Funcionario salvo com sucesso.';
+        });
+        unawaited(_carregarUsuariosCache());
+        return;
+      }
+      for (final l in pendentes) {
+        widget.funcionarioRepository.lancamentos.salvar(l, id);
+      }
+      final atualizado = widget.funcionarioRepository.obterPorId(id);
+      if (atualizado != null) {
+        atualizado.adiantamentoAtual = widget.funcionarioRepository.lancamentos
+            .totalValesAtivos(id);
+        atualizado.valesJson = '[]';
+        atualizado.historicoFinanceiro = '';
+        id = widget.funcionarioRepository.salvar(atualizado);
+      }
+      _carregarLancamentos(id);
+      if (!mounted) return;
+      setState(() {
+        _funcionarioEmEdicaoId = id;
+        _codigoController.text = codigo;
+        _vendedorVinculadoId = vendedorId;
+        _motoristaVinculadoId = motoristaId;
+        _usuarioVinculadoId = usuarioSistemaId;
+        _fotoPathAtual = fotoPathFinal;
+        _fotoOrigemLocalPath = null;
+        _fotoFoiRemovida = false;
+        _status = 'Funcionario salvo com sucesso.';
+      });
+      unawaited(_carregarUsuariosCache());
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(context, e, prefixo: 'Nao foi possivel salvar');
+      setState(() => _status = LanApiFeedback.mensagem(e));
     }
-    final atualizado = widget.funcionarioRepository.obterPorId(id);
-    if (atualizado != null) {
-      atualizado.adiantamentoAtual =
-          widget.funcionarioRepository.lancamentos.totalValesAtivos(id);
-      atualizado.valesJson = '[]';
-      atualizado.historicoFinanceiro = '';
-      id = widget.funcionarioRepository.salvar(atualizado);
-    }
-    _carregarLancamentos(id);
-    if (!mounted) return;
-    setState(() {
-      _funcionarioEmEdicaoId = id;
-      _codigoController.text = codigo;
-      _vendedorVinculadoId = vendedorId;
-      _motoristaVinculadoId = motoristaId;
-      _usuarioVinculadoId = usuarioSistemaId;
-      _fotoPathAtual = fotoPathFinal;
-      _fotoOrigemLocalPath = null;
-      _fotoFoiRemovida = false;
-      _status = 'Funcionario salvo com sucesso.';
-    });
-    unawaited(_carregarUsuariosCache());
   }
 
   String? _fotoPreviewPath() {
@@ -890,10 +1000,23 @@ class _FuncionariosPageState extends State<FuncionariosPage>
 
   Future<void> _aplicarFotoOrigem(String? path) async {
     if (path == null || path.trim().isEmpty) return;
+    if (_terminalRh) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Foto no terminal leve: o cadastro salva, mas a imagem so '
+            'grava no PC servidor. Use o servidor para alterar a foto.',
+          ),
+        ),
+      );
+    }
     setState(() {
       _fotoOrigemLocalPath = path;
       _fotoFoiRemovida = false;
-      _status = 'Foto selecionada. Salve para gravar no cadastro.';
+      _status = _terminalRh
+          ? 'Foto selecionada (nao sera sincronizada neste terminal).'
+          : 'Foto selecionada. Salve para gravar no cadastro.';
     });
   }
 
@@ -953,24 +1076,29 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       _carregarMotoristaFromFuncionario(f);
       _carregarUsuarioFromFuncionario(f);
       widget.funcionarioRepository.lancamentos.migrarLegadoSeNecessario(f);
-      _mesFiltroLancamentos =
-          DateTime(DateTime.now().year, DateTime.now().month, 1);
+      _mesFiltroLancamentos = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        1,
+      );
       _carregarLancamentos(f.id);
       _observacoesController.text = f.observacoes;
-      _tipoVinculo = FuncionarioCadastroCatalogo.idsTiposVinculo
-              .contains(f.tipoVinculo)
+      _tipoVinculo =
+          FuncionarioCadastroCatalogo.idsTiposVinculo.contains(f.tipoVinculo)
           ? f.tipoVinculo
           : 'clt';
       _cnhNumeroController.text = f.cnhNumero;
-      _cnhCategoria = FuncionarioCadastroCatalogo.idsCategoriasCnh
-              .contains(f.cnhCategoria)
+      _cnhCategoria =
+          FuncionarioCadastroCatalogo.idsCategoriasCnh.contains(f.cnhCategoria)
           ? f.cnhCategoria
           : '';
       _cnhValidade = f.cnhValidade?.toLocal();
       _asoData = f.asoData?.toLocal();
       _asoValidade = f.asoValidade?.toLocal();
-      _tamanhoUniforme = FuncionarioCadastroCatalogo.idsTamanhosUniforme
-              .contains(f.tamanhoUniforme)
+      _tamanhoUniforme =
+          FuncionarioCadastroCatalogo.idsTamanhosUniforme.contains(
+            f.tamanhoUniforme,
+          )
           ? f.tamanhoUniforme
           : '';
       _epiObservacoesController.text = f.epiObservacoes;
@@ -986,8 +1114,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     });
   }
 
-  LancamentoFuncionarioRepository get _lancRepo =>
-      widget.funcionarioRepository.lancamentos;
+  dynamic get _lancRepo => widget.funcionarioRepository.lancamentos;
 
   void _carregarLancamentos(int funcionarioId) {
     if (funcionarioId <= 0) {
@@ -1021,7 +1148,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
 
   double _descontoValor() => _parseBr(_descontoController.text);
 
-  double _liquidoReferencia() => _salarioValor() -
+  double _liquidoReferencia() =>
+      _salarioValor() -
       _descontoValor() -
       _totalVales() -
       _totalDescontosLancados() +
@@ -1030,31 +1158,56 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   bool _mesEstaFechado() {
     final fid = _funcionarioEmEdicaoId;
     if (fid == null || fid <= 0) return false;
-    return _folhaService.mesEstaFechado(fid, _mesFiltroLancamentos);
+    return _folhaService?.mesEstaFechado(fid, _mesFiltroLancamentos) ?? false;
   }
 
   FuncionarioMesResumo? _resumoMesAtual() {
     final fid = _funcionarioEmEdicaoId;
     if (fid == null || fid <= 0) return null;
-    final f = widget.funcionarioRepository.obterPorId(fid);
-    if (f == null) return null;
-    return _folhaService.calcularMes(
-      funcionario: f,
+    final folha = _folhaService;
+    if (folha != null) {
+      final f = widget.funcionarioRepository.obterPorId(fid);
+      if (f == null) return null;
+      return folha.calcularMes(
+        funcionario: f,
+        mesReferencia: _mesFiltroLancamentos,
+        salarioBaseOverride: _salarioValor(),
+        descontoFixoOverride: _descontoValor(),
+      );
+    }
+    // Terminal leve: resumo local (sem fechamento / Contas a Pagar).
+    final vales = _totalVales();
+    final descontos = _totalDescontosLancados();
+    final bonus = _totalBonus();
+    final salario = _salarioValor();
+    final descontoFixo = _descontoValor();
+    return FuncionarioMesResumo(
+      funcionarioId: fid,
       mesReferencia: _mesFiltroLancamentos,
-      salarioBaseOverride: _salarioValor(),
-      descontoFixoOverride: _descontoValor(),
+      salarioBase: salario,
+      descontoFixo: descontoFixo,
+      totalVales: vales,
+      totalDescontosLancados: descontos,
+      totalBonus: bonus,
+      qtdVales: _lancamentosAtivos
+          .where((l) => l.tipo == LancamentoFuncionarioCatalogo.vale)
+          .length,
+      liquidoApagar: salario - descontoFixo - vales - descontos + bonus,
+      fechado: false,
     );
   }
 
   List<FuncionarioFolhaAlerta> _alertasEquipeMes() =>
-      _folhaService.alertasEquipe(_mesFiltroLancamentos);
+      _folhaService?.alertasEquipe(_mesFiltroLancamentos) ?? const [];
 
   List<FolhaMesHistoricoItem> _historico12Meses() {
+    final folha = _folhaService;
+    if (folha == null) return const [];
     final fid = _funcionarioEmEdicaoId;
     if (fid == null || fid <= 0) return const [];
     final f = widget.funcionarioRepository.obterPorId(fid);
     if (f == null) return const [];
-    return _folhaService.historicoUltimosMeses(
+    return folha.historicoUltimosMeses(
       funcionario: f,
       salarioBaseOverride: _salarioValor(),
       descontoFixoOverride: _descontoValor(),
@@ -1085,12 +1238,16 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         : '$selectedPath.csv';
     await File(path).writeAsBytes(bytes, flush: true);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Arquivo salvo em: $path')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Arquivo salvo em: $path')));
   }
 
   Future<void> _fecharMesRh() async {
+    if (_folhaService == null) {
+      _avisoFolhaSoServidor();
+      return;
+    }
     final fid = _funcionarioEmEdicaoId;
     if (fid == null || fid <= 0) {
       setState(() => _status = 'Salve o funcionario antes de fechar o mes.');
@@ -1132,7 +1289,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     if (ok != true || !mounted) return;
 
     try {
-      final fechamento = await _folhaService.fecharMes(
+      final fechamento = await _folhaService!.fecharMes(
         funcionario: f,
         mesReferencia: _mesFiltroLancamentos,
         usuarioLogin: widget.usuarioLogado?.login ?? 'sistema',
@@ -1150,6 +1307,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   }
 
   Future<void> _reabrirMesRh() async {
+    if (_folhaService == null) {
+      _avisoFolhaSoServidor();
+      return;
+    }
     final fid = _funcionarioEmEdicaoId;
     if (fid == null || fid <= 0) return;
     if (!_mesEstaFechado()) {
@@ -1180,7 +1341,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     if (ok != true || !mounted) return;
 
     try {
-      await _folhaService.reabrirMes(
+      await _folhaService!.reabrirMes(
         funcionarioId: fid,
         mesReferencia: _mesFiltroLancamentos,
       );
@@ -1191,10 +1352,17 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   }
 
   Future<void> _exportarFolhaEquipeCsv() async {
+    final folha = _folhaService;
+    if (folha == null) {
+      _avisoFolhaSoServidor();
+      return;
+    }
     final mes = _mesFiltroLancamentos;
     final funcionarios = widget.funcionarioRepository.listarTodos();
-    final resumos = _folhaService.resumoEquipeMes(mes);
-    final fechamentos = widget.funcionarioRepository.fechamentos.listarPorMes(mes);
+    final resumos = folha.resumoEquipeMes(mes);
+    final fechamentos = widget.funcionarioRepository.fechamentos.listarPorMes(
+      mes,
+    );
     final csv = gerarCsvFolhaEquipeMes(
       mesReferencia: mes,
       funcionarios: funcionarios,
@@ -1232,17 +1400,20 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   }
 
   Future<void> _mostrarRelatorioFolhaSetor() async {
+    final folha = _folhaService;
+    if (folha == null) {
+      _avisoFolhaSoServidor();
+      return;
+    }
     final mes = _mesFiltroLancamentos;
-    final linhas = _folhaService.relatorioPorSetor(mes);
+    final linhas = folha.relatorioPorSetor(mes);
     if (!mounted) return;
 
     await showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text(
-            'Folha por setor — ${_mesAnoFormat.format(mes)}',
-          ),
+          title: Text('Folha por setor — ${_mesAnoFormat.format(mes)}'),
           content: SizedBox(
             width: 560,
             child: linhas.isEmpty
@@ -1315,7 +1486,11 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     if (!candidata.isBefore(hojeData)) return candidata;
 
     final proximoMes = DateTime(hoje.year, hoje.month + 1, 1);
-    final ultimoProximo = DateTime(proximoMes.year, proximoMes.month + 1, 0).day;
+    final ultimoProximo = DateTime(
+      proximoMes.year,
+      proximoMes.month + 1,
+      0,
+    ).day;
     final diaProximo = dia > ultimoProximo ? ultimoProximo : dia;
     return DateTime(proximoMes.year, proximoMes.month, diaProximo);
   }
@@ -1333,12 +1508,14 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     if (v == null) return;
     _vendedorApelidoController.text = v.apelido;
     if (v.percentualComissao > 0) {
-      _vendedorComissaoController.text =
-          v.percentualComissao.toStringAsFixed(2).replaceAll('.', ',');
+      _vendedorComissaoController.text = v.percentualComissao
+          .toStringAsFixed(2)
+          .replaceAll('.', ',');
     }
     if (v.metaMensalValor > 0) {
-      _vendedorMetaController.text =
-          v.metaMensalValor.toStringAsFixed(2).replaceAll('.', ',');
+      _vendedorMetaController.text = v.metaMensalValor
+          .toStringAsFixed(2)
+          .replaceAll('.', ',');
     }
   }
 
@@ -1352,7 +1529,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     return null;
   }
 
-  int _sincronizarVendedorVinculo() {
+  Future<int> _sincronizarVendedorVinculo() async {
     final nome = _nomeController.text.trim();
     if (nome.isEmpty) {
       throw StateError('Informe o nome antes de vincular ao PDV.');
@@ -1368,8 +1545,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     final codigoVendedor = codigoFunc.isEmpty
         ? widget.vendedorRepository.proximoCodigoInternoSequencial().toString()
         : (codigoFunc.toUpperCase().startsWith('V')
-            ? codigoFunc
-            : 'V$codigoFunc');
+              ? codigoFunc
+              : 'V$codigoFunc');
 
     v ??= Vendedor(
       codigoInterno: codigoVendedor,
@@ -1386,6 +1563,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     v.percentualComissao = _parseBr(_vendedorComissaoController.text);
     v.metaMensalValor = _parseBr(_vendedorMetaController.text);
     v.ativo = _ativo;
+    if (widget.vendedorRepository is VendedorApiRepository) {
+      return await widget.vendedorRepository.salvarRemoto(v);
+    }
     return widget.vendedorRepository.salvar(v);
   }
 
@@ -1398,7 +1578,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     return null;
   }
 
-  int _sincronizarMotoristaVinculo() {
+  Future<int> _sincronizarMotoristaVinculo() async {
     final nome = _nomeController.text.trim();
     if (nome.isEmpty) {
       throw StateError('Informe o nome antes de vincular motorista.');
@@ -1426,7 +1606,11 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     m.nome = nome;
     m.telefone = tel;
     m.ativo = _ativo;
-    return widget.motoristaRepository.salvar(m);
+    final repo = widget.motoristaRepository;
+    if (repo is MotoristaApiRepository) {
+      return await repo.salvarRemoto(m);
+    }
+    return repo.salvar(m) as int;
   }
 
   void _carregarMotoristaFromFuncionario(Funcionario f) {
@@ -1523,7 +1707,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       return;
     }
 
-    final loginController = TextEditingController(text: _sugerirLoginFromNome());
+    final loginController = TextEditingController(
+      text: _sugerirLoginFromNome(),
+    );
     final senhaController = TextEditingController();
     var perfil = _perfilSugeridoUsuario();
 
@@ -1613,7 +1799,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     var vendedorId = 0;
     if (_tambemVendedorPdv) {
       try {
-        vendedorId = _sincronizarVendedorVinculo();
+        vendedorId = await _sincronizarVendedorVinculo();
       } catch (e) {
         setState(
           () => _status = 'Nao foi possivel vincular vendedor no PDV: $e',
@@ -1677,7 +1863,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     TextStyle? estiloValor,
     bool destaque = false,
   }) {
-    final estilo = estiloValor ??
+    final estilo =
+        estiloValor ??
         (destaque
             ? const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)
             : const TextStyle(fontWeight: FontWeight.w600));
@@ -1776,8 +1963,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   Widget _buildSecaoVendedorPdv(BuildContext context) {
     final theme = Theme.of(context);
     final vendasVinculadas = _vendedorVinculadoId > 0
-        ? widget.vendaRepository
-            .contarVendasFinalizadasPorVendedor(_vendedorVinculadoId)
+        ? widget.vendaRepository.contarVendasFinalizadasPorVendedor(
+            _vendedorVinculadoId,
+          )
         : 0;
 
     return _buildSectionCard(
@@ -1803,7 +1991,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                 _vendedorVinculadoId = existente.id;
                 _vendedorApelidoController.text = existente.apelido;
                 if (existente.percentualComissao > 0) {
-                  _vendedorComissaoController.text = existente.percentualComissao
+                  _vendedorComissaoController.text = existente
+                      .percentualComissao
                       .toStringAsFixed(2)
                       .replaceAll('.', ',');
                 }
@@ -1881,13 +2070,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                 children: [
                   apelido,
                   const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      comissao,
-                      const SizedBox(width: 10),
-                      meta,
-                    ],
-                  ),
+                  Row(children: [comissao, const SizedBox(width: 10), meta]),
                 ],
               );
             },
@@ -1994,7 +2177,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                         ),
                       )
                       .toList(),
-                  onChanged: (v) => setState(() => _usuarioVinculadoId = v ?? ''),
+                  onChanged: (v) =>
+                      setState(() => _usuarioVinculadoId = v ?? ''),
                 ),
               ),
               const SizedBox(width: 8),
@@ -2014,9 +2198,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
               children: [
                 Chip(
                   visualDensity: VisualDensity.compact,
-                  label: Text(
-                    perfilUsuarioFromId(vinculado.perfil).rotulo,
-                  ),
+                  label: Text(perfilUsuarioFromId(vinculado.perfil).rotulo),
                 ),
                 if (vinculado.podeModoMotorista)
                   const Chip(
@@ -2053,22 +2235,16 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   Widget _buildCampoCategoriaCnh() {
     return DropdownButtonFormField<String>(
       isExpanded: true,
-      initialValue: FuncionarioCadastroCatalogo.idsCategoriasCnh
-              .contains(_cnhCategoria)
+      initialValue:
+          FuncionarioCadastroCatalogo.idsCategoriasCnh.contains(_cnhCategoria)
           ? _cnhCategoria
           : '',
-      decoration: const InputDecoration(
-        labelText: 'Categoria',
-        isDense: true,
-      ),
+      decoration: const InputDecoration(labelText: 'Categoria', isDense: true),
       items: FuncionarioCadastroCatalogo.categoriasCnh.entries
           .map(
             (e) => DropdownMenuItem(
               value: e.key,
-              child: Text(
-                e.value,
-                overflow: TextOverflow.ellipsis,
-              ),
+              child: Text(e.value, overflow: TextOverflow.ellipsis),
             ),
           )
           .toList(),
@@ -2164,10 +2340,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                   ],
                 ),
                 if (limparValidade != null)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: limparValidade,
-                  ),
+                  Align(alignment: Alignment.centerLeft, child: limparValidade),
               ],
             );
           },
@@ -2232,8 +2405,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         SizedBox(
           width: 220,
           child: DropdownButtonFormField<String>(
-            initialValue: FuncionarioCadastroCatalogo.idsTamanhosUniforme
-                    .contains(_tamanhoUniforme)
+            initialValue:
+                FuncionarioCadastroCatalogo.idsTamanhosUniforme.contains(
+                  _tamanhoUniforme,
+                )
                 ? _tamanhoUniforme
                 : '',
             decoration: const InputDecoration(
@@ -2242,10 +2417,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             ),
             items: FuncionarioCadastroCatalogo.tamanhosUniforme.entries
                 .map(
-                  (e) => DropdownMenuItem(
-                    value: e.key,
-                    child: Text(e.value),
-                  ),
+                  (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
                 )
                 .toList(),
             onChanged: (v) => setState(() => _tamanhoUniforme = v ?? ''),
@@ -2301,8 +2473,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   Future<void> _incluirLancamento() async {
     if (_mesEstaFechado()) {
       setState(
-        () => _status =
-            'Mes fechado. Reabra o mes RH para incluir lancamentos.',
+        () =>
+            _status = 'Mes fechado. Reabra o mes RH para incluir lancamentos.',
       );
       return;
     }
@@ -2348,7 +2520,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                           context: context,
                           initialDate: data,
                           firstDate: DateTime(2000, 1, 1),
-                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 365),
+                          ),
                         );
                         if (escolhida == null) return;
                         setDialogState(() => data = escolhida);
@@ -2415,7 +2589,11 @@ class _FuncionariosPageState extends State<FuncionariosPage>
 
     final fid = _funcionarioEmEdicaoId;
     if (fid != null && fid > 0) {
-      _lancRepo.salvar(lanc, fid);
+      if (_terminalRh) {
+        await _lancRepo.salvarRemoto(lanc, fid);
+      } else {
+        _lancRepo.salvar(lanc, fid);
+      }
       _carregarLancamentos(fid);
       if (!mounted) return;
       setState(() => _status = 'Lancamento gravado.');
@@ -2431,8 +2609,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
   Future<void> _estornarLancamento(LancamentoFuncionario lanc) async {
     if (_mesEstaFechado()) {
       setState(
-        () => _status =
-            'Mes fechado. Reabra o mes RH para estornar lancamentos.',
+        () =>
+            _status = 'Mes fechado. Reabra o mes RH para estornar lancamentos.',
       );
       return;
     }
@@ -2466,17 +2644,29 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       return;
     }
 
-    _lancRepo.estornar(lanc.id);
-    final fid = _funcionarioEmEdicaoId;
-    if (fid != null) _carregarLancamentos(fid);
-    if (!mounted) return;
-    setState(() => _status = 'Lancamento estornado.');
+    try {
+      if (_terminalRh) {
+        await _lancRepo.estornarRemoto(lanc.id);
+      } else {
+        _lancRepo.estornar(lanc.id);
+      }
+      final fid = _funcionarioEmEdicaoId;
+      if (fid != null) _carregarLancamentos(fid);
+      if (!mounted) return;
+      setState(() => _status = 'Lancamento estornado.');
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(context, e, prefixo: 'Estorno');
+      setState(() => _status = LanApiFeedback.mensagem(e));
+    }
   }
 
   Future<void> _exportarExtratoPdf() async {
     final fid = _funcionarioEmEdicaoId;
     if (fid == null || fid <= 0) {
-      setState(() => _status = 'Salve o funcionario antes de gerar o extrato PDF.');
+      setState(
+        () => _status = 'Salve o funcionario antes de gerar o extrato PDF.',
+      );
       return;
     }
     final f = widget.funcionarioRepository.obterPorId(fid);
@@ -2517,21 +2707,34 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         : '$selectedPath.pdf';
     await File(path).writeAsBytes(bytes, flush: true);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Extrato salvo em: $path')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Extrato salvo em: $path')));
   }
 
   Future<void> _confirmarRemocao(Funcionario f) async {
-    final vendasPdv = f.vendedorId > 0
-        ? widget.vendaRepository.contarVendasFinalizadasPorVendedor(f.vendedorId)
-        : 0;
+    var vendasPdv = 0;
+    try {
+      if (f.vendedorId > 0) {
+        vendasPdv = widget.vendaRepository.contarVendasFinalizadasPorVendedor(
+              f.vendedorId,
+            )
+            as int;
+      }
+    } catch (_) {
+      vendasPdv = 0;
+    }
     if (vendasPdv > 0) {
       setState(
         () => _status =
             'Nao e possivel remover: vendedor vinculado tem $vendasPdv venda(s) no PDV. '
             'Desative o funcionario em vez de apagar.',
       );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_status)),
+        );
+      }
       return;
     }
 
@@ -2542,7 +2745,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         content: Text(
           f.vendedorId > 0
               ? 'Remover "${f.nomeCompleto}"? O cadastro de vendedor #${f.vendedorId} '
-                  'permanece no sistema (sem vendas vinculadas).'
+                    'permanece no sistema (sem vendas vinculadas).'
               : 'Remover "${f.nomeCompleto}" da lista?',
         ),
         actions: [
@@ -2558,11 +2761,34 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       ),
     );
     if (ok != true || !mounted) return;
-    widget.funcionarioRepository.remover(f.id);
-    if (_funcionarioEmEdicaoId == f.id) {
-      _limparFormulario();
+    final repo = widget.funcionarioRepository;
+    try {
+      if (repo is FuncionarioApiRepository) {
+        final removido = await repo.removerRemoto(f.id);
+        if (!removido) {
+          if (!mounted) return;
+          LanApiFeedback.snackAviso(
+            context,
+            'Nao foi possivel remover o funcionario.',
+          );
+          return;
+        }
+      } else {
+        repo.remover(f.id);
+      }
+      if (!mounted) return;
+      if (_funcionarioEmEdicaoId == f.id) {
+        _limparFormulario();
+      }
+      setState(() => _status = 'Remocao concluida com sucesso.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Funcionario removido com sucesso.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(context, e, prefixo: 'Nao foi possivel remover');
+      setState(() => _status = LanApiFeedback.mensagem(e));
     }
-    setState(() => _status = 'Remocao concluida com sucesso.');
   }
 
   Future<void> _abrirPesquisaFuncionario() async {
@@ -2613,12 +2839,16 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             }
 
             void rolarParaIndiceSelecionado() {
-              if (!resultadosScrollController.hasClients || indiceSelecionado < 0) {
+              if (!resultadosScrollController.hasClients ||
+                  indiceSelecionado < 0) {
                 return;
               }
               const alturaEstimadaLinha = 64.0;
               final posicaoDesejada = (indiceSelecionado * alturaEstimadaLinha)
-                  .clamp(0.0, resultadosScrollController.position.maxScrollExtent);
+                  .clamp(
+                    0.0,
+                    resultadosScrollController.position.maxScrollExtent,
+                  );
               resultadosScrollController.animateTo(
                 posicaoDesejada,
                 duration: const Duration(milliseconds: 120),
@@ -2678,7 +2908,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                         ),
                         onChanged: (value) {
                           setDialogState(() {
-                            resultados = widget.funcionarioRepository.pesquisar(value);
+                            resultados = widget.funcionarioRepository.pesquisar(
+                              value,
+                            );
                             indiceSelecionado = resultados.isEmpty ? -1 : 0;
                           });
                           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2692,7 +2924,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                         },
                         onSubmitted: (_) {
                           if (resultados.isEmpty) return;
-                          final indice = indiceSelecionado >= 0 ? indiceSelecionado : 0;
+                          final indice = indiceSelecionado >= 0
+                              ? indiceSelecionado
+                              : 0;
                           Navigator.pop(context, resultados[indice]);
                         },
                       ),
@@ -2703,33 +2937,44 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                           maxHeight: MediaQuery.of(context).size.height * 0.58,
                         ),
                         child: resultados.isEmpty
-                            ? const Center(child: Text('Nenhum funcionario encontrado.'))
+                            ? const Center(
+                                child: Text('Nenhum funcionario encontrado.'),
+                              )
                             : ListView.builder(
                                 controller: resultadosScrollController,
                                 shrinkWrap: true,
                                 itemCount: resultados.length,
                                 itemBuilder: (context, index) {
                                   final f = resultados[index];
-                                  final consulta = pesquisaController.text.trim();
-                                  final estiloTitulo = Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(fontWeight: FontWeight.w600) ??
-                                      const TextStyle(fontWeight: FontWeight.w600);
+                                  final consulta = pesquisaController.text
+                                      .trim();
+                                  final estiloTitulo =
+                                      Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      ) ??
+                                      const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      );
                                   final estiloSubtitulo =
                                       Theme.of(context).textTheme.bodyMedium ??
-                                          const TextStyle();
-                                  final selecionado = index == indiceSelecionado;
+                                      const TextStyle();
+                                  final selecionado =
+                                      index == indiceSelecionado;
                                   return MouseRegion(
                                     onEnter: (_) {
                                       if (indiceSelecionado == index) return;
-                                      setDialogState(() => indiceSelecionado = index);
+                                      setDialogState(
+                                        () => indiceSelecionado = index,
+                                      );
                                     },
                                     child: ListTile(
-                                      contentPadding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 4,
-                                      ),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 4,
+                                          ),
                                       selected: selecionado,
                                       selectedTileColor: Theme.of(context)
                                           .colorScheme
@@ -2857,58 +3102,135 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       radius: const Radius.circular(8),
       child: ListView(
         controller: controller,
-        padding: const EdgeInsets.only(top: 8, bottom: 12),
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
         children: children,
       ),
     );
   }
 
+  ThemeData _temaCadastro(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    return theme.copyWith(
+      visualDensity: VisualDensity.compact,
+      scaffoldBackgroundColor: _pageBg,
+      inputDecorationTheme: InputDecorationTheme(
+        isDense: true,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: _padCampoCadastro,
+        prefixIconConstraints: _iconCampoCadastro,
+        suffixIconConstraints: _iconCampoCadastro,
+        floatingLabelBehavior: FloatingLabelBehavior.auto,
+        labelStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: scheme.onSurfaceVariant,
+        ),
+        floatingLabelStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: scheme.primary,
+        ),
+        hintStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
+          color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: scheme.primary, width: 1.4),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: scheme.error),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: scheme.error, width: 1.4),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.6),
+          ),
+        ),
+      ),
+      textTheme: theme.textTheme.copyWith(
+        bodyLarge: theme.textTheme.bodyLarge?.copyWith(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
+        ),
+        bodyMedium: theme.textTheme.bodyMedium?.copyWith(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
+        ),
+        bodySmall: theme.textTheme.bodySmall?.copyWith(fontSize: 10.5),
+        titleSmall: theme.textTheme.titleSmall?.copyWith(fontSize: 12.5),
+        labelLarge: theme.textTheme.labelLarge?.copyWith(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
   Widget _buildCorpoAbas(BuildContext context, {bool compactUi = false}) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Material(
-          color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-          child: TabBar(
-            controller: _tabController,
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            labelPadding: EdgeInsets.symmetric(
-              horizontal: compactUi ? 12 : 16,
+    final denseTheme = _temaCadastro(Theme.of(context));
+    return Theme(
+      data: denseTheme,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: Colors.white,
+            child: TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 14),
+              tabs: const [
+                Tab(height: 36, text: 'Dados'),
+                Tab(height: 36, text: 'Documentos'),
+                Tab(height: 36, text: 'Remuneracao'),
+                Tab(height: 36, text: 'Acessos'),
+              ],
             ),
-            tabs: const [
-              Tab(text: 'Dados'),
-              Tab(text: 'Documentos'),
-              Tab(text: 'Remuneracao'),
-              Tab(text: 'Acessos'),
-            ],
           ),
-        ),
-        Expanded(
-          child: TabBarView(
-            controller: _tabController,
-            children: [
-              _wrapAbaScroll(
-                controller: _scrollAbaIdent,
-                children: _conteudoAbaDados(context),
+          Expanded(
+            child: ColoredBox(
+              color: _pageBg,
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _wrapAbaScroll(
+                    controller: _scrollAbaIdent,
+                    children: _conteudoAbaDados(context),
+                  ),
+                  _wrapAbaScroll(
+                    controller: _scrollAbaDocs,
+                    children: _conteudoAbaDocumentos(context),
+                  ),
+                  _wrapAbaScroll(
+                    controller: _scrollAbaFin,
+                    children: _conteudoAbaRemuneracao(context),
+                  ),
+                  _wrapAbaScroll(
+                    controller: _scrollAbaOp,
+                    children: _conteudoAbaAcessos(context),
+                  ),
+                ],
               ),
-              _wrapAbaScroll(
-                controller: _scrollAbaDocs,
-                children: _conteudoAbaDocumentos(context),
-              ),
-              _wrapAbaScroll(
-                controller: _scrollAbaFin,
-                children: _conteudoAbaRemuneracao(context),
-              ),
-              _wrapAbaScroll(
-                controller: _scrollAbaOp,
-                children: _conteudoAbaAcessos(context),
-              ),
-            ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -2975,10 +3297,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         icon: Icons.work_outline,
         children: _camposSetorFuncaoDatas(),
       ),
-      if (!_ativo) ...[
-        const SizedBox(height: 8),
-        _buildSecaoDemissao(context),
-      ],
+      if (!_ativo) ...[const SizedBox(height: 8), _buildSecaoDemissao(context)],
     ];
   }
 
@@ -2996,10 +3315,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             ),
             items: FuncionarioCadastroCatalogo.setores.entries
                 .map(
-                  (e) => DropdownMenuItem(
-                    value: e.key,
-                    child: Text(e.value),
-                  ),
+                  (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
                 )
                 .toList(),
             onChanged: (v) {
@@ -3019,10 +3335,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             ),
             items: FuncionarioCadastroCatalogo.funcoes.entries
                 .map(
-                  (e) => DropdownMenuItem(
-                    value: e.key,
-                    child: Text(e.value),
-                  ),
+                  (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
                 )
                 .toList(),
             onChanged: (v) {
@@ -3037,11 +3350,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           if (empilhar) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                setor,
-                const SizedBox(height: 6),
-                funcao,
-              ],
+              children: [setor, const SizedBox(height: 6), funcao],
             );
           }
           return Row(
@@ -3067,8 +3376,8 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       ],
       const SizedBox(height: 6),
       DropdownButtonFormField<String>(
-        initialValue: FuncionarioCadastroCatalogo.idsTiposVinculo
-                .contains(_tipoVinculo)
+        initialValue:
+            FuncionarioCadastroCatalogo.idsTiposVinculo.contains(_tipoVinculo)
             ? _tipoVinculo
             : 'clt',
         isExpanded: true,
@@ -3077,12 +3386,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           isDense: true,
         ),
         items: FuncionarioCadastroCatalogo.tiposVinculo.entries
-            .map(
-              (e) => DropdownMenuItem(
-                value: e.key,
-                child: Text(e.value),
-              ),
-            )
+            .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
             .toList(),
         onChanged: (v) {
           if (v == null) return;
@@ -3235,9 +3539,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
               const SizedBox(height: 8),
               Text(
                 'Contato de emergencia',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 6),
               TextField(
@@ -3268,16 +3572,13 @@ class _FuncionariosPageState extends State<FuncionariosPage>
           );
 
           final largura = constraints.maxWidth;
-          final usarDuasColunas = constraints.hasBoundedWidth &&
+          final usarDuasColunas =
+              constraints.hasBoundedWidth &&
               FuncionarioLayout.documentosDuasColunas(largura);
           if (!usarDuasColunas) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                docCard,
-                const SizedBox(height: 8),
-                contCard,
-              ],
+              children: [docCard, const SizedBox(height: 8), contCard],
             );
           }
           return Row(
@@ -3353,10 +3654,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             width: _wNumero,
             child: TextField(
               controller: _numeroController,
-              decoration: const InputDecoration(
-                labelText: 'Nº',
-                isDense: true,
-              ),
+              decoration: const InputDecoration(labelText: 'Nº', isDense: true),
             ),
           ),
         ],
@@ -3393,10 +3691,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                 FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
                 LengthLimitingTextInputFormatter(2),
               ],
-              decoration: const InputDecoration(
-                labelText: 'UF',
-                isDense: true,
-              ),
+              decoration: const InputDecoration(labelText: 'UF', isDense: true),
             ),
           ),
         ],
@@ -3409,14 +3704,30 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     final compactUi = context.isFuncionarioCompactDesktop;
     final resumoMes = _resumoMesAtual();
     final mesFechado = _mesEstaFechado();
-    final fechamento = _funcionarioEmEdicaoId != null
-        ? _folhaService.fechamentoDe(
+    final fechamento = _folhaService != null && _funcionarioEmEdicaoId != null
+        ? _folhaService!.fechamentoDe(
             _funcionarioEmEdicaoId!,
             _mesFiltroLancamentos,
           )
         : null;
 
     return [
+      if (_terminalRh)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Material(
+            color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(8),
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.info_outline),
+              title: Text(
+                'Terminal leve: cadastro, vales/descontos/bonus e estorno '
+                'funcionam. Fechamento de mes / Contas a Pagar so no PC servidor.',
+              ),
+            ),
+          ),
+        ),
       _buildSectionCard(
         context: context,
         title: 'Salario e beneficios',
@@ -3485,8 +3796,9 @@ class _FuncionariosPageState extends State<FuncionariosPage>
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
-              final acoesWrap =
-                  FuncionarioLayout.acoesEmWrap(constraints.maxWidth);
+              final acoesWrap = FuncionarioLayout.acoesEmWrap(
+                constraints.maxWidth,
+              );
               final mesBtn = OutlinedButton.icon(
                 style: _estiloBotaoContornoCompacto,
                 onPressed: _selecionarMesFiltro,
@@ -3536,12 +3848,13 @@ class _FuncionariosPageState extends State<FuncionariosPage>
               itemCount: _lancamentos.length,
               itemBuilder: (context, index) {
                 final lanc = _lancamentos[index];
-                final tipoRotulo =
-                    LancamentoFuncionarioCatalogo.rotulo(lanc.tipo);
+                final tipoRotulo = LancamentoFuncionarioCatalogo.rotulo(
+                  lanc.tipo,
+                );
                 final valorTxt =
                     lanc.tipo == LancamentoFuncionarioCatalogo.observacao
-                        ? ''
-                        : ' · ${_formatMoeda(lanc.valor)}';
+                    ? ''
+                    : ' · ${_formatMoeda(lanc.valor)}';
                 return ListTile(
                   dense: true,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 4),
@@ -3565,8 +3878,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
                       ? null
                       : IconButton(
                           tooltip: 'Estornar',
-                          onPressed: () =>
-                              unawaited(_estornarLancamento(lanc)),
+                          onPressed: () => unawaited(_estornarLancamento(lanc)),
                           icon: Icon(
                             Icons.undo_outlined,
                             color: theme.colorScheme.error,
@@ -3711,171 +4023,63 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     );
   }
 
-  Widget _buildRodapeAcaoCadastro(BuildContext context, {required bool emEdicao}) {
-    final cs = Theme.of(context).colorScheme;
-    final theme = Theme.of(context);
-
-    final saveStyle = ElevatedButton.styleFrom(
-      backgroundColor: cs.primary,
-      foregroundColor: cs.onPrimary,
-      elevation: 1,
-      shadowColor: Colors.black.withValues(alpha: 0.14),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-    );
-    final cancelStyle = OutlinedButton.styleFrom(
-      foregroundColor: Color.lerp(cs.onSurface, cs.error, 0.35)!,
-      side: BorderSide(color: cs.outline.withValues(alpha: 0.42)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    );
-    final excluirStyle = OutlinedButton.styleFrom(
-      foregroundColor: cs.error,
-      side: BorderSide(color: cs.error.withValues(alpha: 0.55)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final narrow = constraints.maxWidth < 520;
-        final status = emEdicao
-            ? 'Edicao #${_funcionarioEmEdicaoId!} · F5 ou F10 salva'
-            : 'Novo cadastro · F5 ou F10 salva';
-
-        final salvar = ElevatedButton.icon(
-          style: saveStyle,
-          onPressed: () => unawaited(_salvar()),
-          icon: const Icon(Icons.save_rounded),
-          label: Text(
-            emEdicao ? 'Salvar (F5 · F10)' : 'Salvar (F5 · F10)',
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
-        );
-        final cancelar = OutlinedButton(
-          style: cancelStyle,
-          onPressed: _limparFormulario,
-          child: const Text('Cancelar (Esc)'),
-        );
-        final excluir = emEdicao
-            ? OutlinedButton.icon(
-                style: excluirStyle,
-                onPressed: () {
-                  final atualId = _funcionarioEmEdicaoId;
-                  if (atualId == null) return;
-                  final atual =
-                      widget.funcionarioRepository.obterPorId(atualId);
-                  if (atual == null) return;
-                  _confirmarRemocao(atual);
-                },
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Excluir'),
-              )
-            : null;
-
-        if (narrow) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                status,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 8),
-              salvar,
-              const SizedBox(height: 8),
-              cancelar,
-              if (excluir != null) ...[
-                const SizedBox(height: 8),
-                excluir,
-              ],
-            ],
-          );
-        }
-
-        return Row(
-          children: [
-            Expanded(
-              child: Text(
-                status,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-            ),
-            cancelar,
-            if (excluir != null) ...[
-              const SizedBox(width: 8),
-              excluir,
-            ],
-            const SizedBox(width: 8),
-            salvar,
-          ],
-        );
-      },
-    );
-  }
-
   Widget _buildPainelDetalhe(BuildContext context, {required bool compact}) {
     final emEdicao = _funcionarioEmEdicaoId != null;
     final compactUi = compact || context.isFuncionarioCompactDesktop;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        compactUi ? 10 : 16,
-        compactUi ? 6 : 10,
-        compactUi ? 10 : 16,
-        compactUi ? 8 : 12,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (_status.isNotEmpty) ...[
-            _buildStatusBanner(context, _status),
-            SizedBox(height: compactUi ? 6 : 8),
-          ],
-          FuncionarioAtalhosBar(
-            compact: compactUi,
-            mostrarNavegacao: true,
-            onPrimeiro: _irPrimeiroFuncionario,
-            onAnterior: _irFuncionarioAnterior,
-            onProximo: _irProximoFuncionario,
-            onUltimo: _irUltimoFuncionario,
-            onPesquisar: _abrirPesquisaFuncionario,
-            onNovo: _limparFormulario,
-          ),
-          SizedBox(height: compactUi ? 6 : 8),
-          _buildResumoHeader(context, compactUi: compactUi),
-          SizedBox(height: compactUi ? 4 : 6),
-          Expanded(child: _buildCorpoAbas(context, compactUi: compactUi)),
-          SizedBox(height: compactUi ? 6 : 8),
-          Material(
-            elevation: 2,
-            color: Theme.of(context).colorScheme.surface,
-            shadowColor: Colors.black.withValues(alpha: 0.12),
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                compactUi ? 4 : 8,
-                compactUi ? 8 : 10,
-                compactUi ? 4 : 8,
-                compactUi ? 4 : 6,
-              ),
-              child: SafeArea(
-                top: false,
-                child: _buildRodapeAcaoCadastro(context, emEdicao: emEdicao),
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FuncionarioAtalhosBar(
+                  compact: compactUi,
+                  mostrarNavegacao: true,
+                  onPrimeiro: _irPrimeiroFuncionario,
+                  onAnterior: _irFuncionarioAnterior,
+                  onProximo: _irProximoFuncionario,
+                  onUltimo: _irUltimoFuncionario,
+                  onPesquisar: () => unawaited(_abrirPesquisaFuncionario()),
+                ),
+                const SizedBox(height: 4),
+                _buildResumoHeader(context, compactUi: compactUi),
+                if (_status.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  _buildStatusBanner(context, _status),
+                ],
+                const SizedBox(height: 2),
+                Expanded(
+                  child: _buildCorpoAbas(context, compactUi: compactUi),
+                ),
+              ],
             ),
           ),
-        ],
-      ),
+        ),
+        FuncionarioCadastroRodape(
+          emEdicao: emEdicao,
+          onSalvar: () => unawaited(_salvar()),
+          onNovo: _limparFormulario,
+          podeExcluir: emEdicao,
+          onExcluir: () {
+            final atualId = _funcionarioEmEdicaoId;
+            if (atualId == null) return;
+            final atual = widget.funcionarioRepository.obterPorId(atualId);
+            if (atual == null) return;
+            _confirmarRemocao(atual);
+          },
+        ),
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final sessaoActions = widget.usuarioLogado != null && widget.onLogout != null
+    final sessaoActions =
+        widget.usuarioLogado != null && widget.onLogout != null
         ? ContaSessaoAppBarActions(
             login: widget.usuarioLogado!.login,
             onLogout: widget.onLogout!,
@@ -3884,7 +4088,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Funcionarios'),
+        title: const Text('Cadastro de Funcionarios'),
         actions: [
           IconButton(
             tooltip: 'Pesquisar funcionario (F3)',
@@ -3917,11 +4121,11 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             ),
             _FuncionarioPesquisarIntent:
                 CallbackAction<_FuncionarioPesquisarIntent>(
-              onInvoke: (_) {
-                unawaited(_abrirPesquisaFuncionario());
-                return null;
-              },
-            ),
+                  onInvoke: (_) {
+                    unawaited(_abrirPesquisaFuncionario());
+                    return null;
+                  },
+                ),
           },
           child: _buildPainelDetalhe(
             context,
@@ -3995,12 +4199,7 @@ class _FuncionariosPageState extends State<FuncionariosPage>
             isDense: true,
           ),
           items: FuncionarioCadastroCatalogo.motivosDemissao.entries
-              .map(
-                (e) => DropdownMenuItem(
-                  value: e.key,
-                  child: Text(e.value),
-                ),
-              )
+              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
               .toList(),
           onChanged: (v) {
             if (v == null) return;
@@ -4031,54 +4230,78 @@ class _FuncionariosPageState extends State<FuncionariosPage>
     required List<Widget> children,
   }) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 4),
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.75)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.045),
-            blurRadius: 8,
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Icon(icon, size: 18, color: cs.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 16, color: theme.colorScheme.primary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      letterSpacing: 0.1,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ...children,
-        ],
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...children,
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildStatusBanner(BuildContext context, String message) {
     final semantic = context.semanticColors;
-    final sucesso = message.toLowerCase().contains('sucesso');
-    final bg = sucesso ? semantic.successBg : semantic.errorBg;
-    final border = sucesso ? semantic.successBorder : semantic.errorBorder;
-    final fg = sucesso ? semantic.successFg : semantic.errorFg;
+    final m = message.toLowerCase();
+    final sucesso = m.contains('sucesso') ||
+        m.contains('salvo') ||
+        m.contains('preenchido') ||
+        m.contains('gravado') ||
+        m.contains('removido') ||
+        m.contains('reaberto') ||
+        m.contains('fechado') ||
+        m.contains('concluida') ||
+        m.contains('concluída');
+    final erro = m.contains('falha') ||
+        m.contains('erro') ||
+        m.contains('invalido') ||
+        m.contains('inválido') ||
+        m.contains('ja existe') ||
+        m.contains('já existe') ||
+        m.contains('informe') ||
+        m.contains('selecione') ||
+        m.contains('nao foi') ||
+        m.contains('não foi') ||
+        m.contains('nao e') ||
+        m.contains('não e') ||
+        m.contains('nao ha') ||
+        m.contains('não ha');
+    final ok = sucesso && !erro;
+    final bg = ok ? semantic.successBg : semantic.errorBg;
+    final border = ok ? semantic.successBorder : semantic.errorBorder;
+    final fg = ok ? semantic.successFg : semantic.errorFg;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -4089,7 +4312,10 @@ class _FuncionariosPageState extends State<FuncionariosPage>
       ),
       child: Row(
         children: [
-          Icon(sucesso ? Icons.check_circle_outline : Icons.info_outline, color: fg),
+          Icon(
+            ok ? Icons.check_circle_outline : Icons.info_outline,
+            color: fg,
+          ),
           const SizedBox(width: 8),
           Expanded(child: Text(message)),
         ],
@@ -4128,7 +4354,8 @@ class _DemissaoFuncionarioDialog extends StatefulWidget {
       _DemissaoFuncionarioDialogState();
 }
 
-class _DemissaoFuncionarioDialogState extends State<_DemissaoFuncionarioDialog> {
+class _DemissaoFuncionarioDialogState
+    extends State<_DemissaoFuncionarioDialog> {
   late DateTime _data;
   late String _motivo;
   late final TextEditingController _outroController;
@@ -4202,10 +4429,7 @@ class _DemissaoFuncionarioDialogState extends State<_DemissaoFuncionarioDialog> 
               ),
               items: FuncionarioCadastroCatalogo.motivosDemissao.entries
                   .map(
-                    (e) => DropdownMenuItem(
-                      value: e.key,
-                      child: Text(e.value),
-                    ),
+                    (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
                   )
                   .toList(),
               onChanged: (v) {
@@ -4250,4 +4474,3 @@ class _DemissaoFuncionarioDialogState extends State<_DemissaoFuncionarioDialog> 
     );
   }
 }
-

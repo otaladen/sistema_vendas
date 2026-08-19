@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/venda_repository.dart';
 import '../../domain/relatorios/devolucao_relatorio.dart';
+import '../../model/registro_devolucao.dart';
 import 'relatorio_export_util.dart';
 import 'relatorio_helpers.dart';
 import 'relatorio_periodo.dart';
@@ -10,9 +10,14 @@ import 'widgets/relatorio_exportacoes_menu.dart';
 import 'widgets/relatorio_periodo_painel.dart';
 
 class RelatorioDevolucoesPage extends StatefulWidget {
-  const RelatorioDevolucoesPage({super.key, required this.vendaRepository});
+  const RelatorioDevolucoesPage({
+    super.key,
+    required this.vendaRepository,
+    this.clienteRepository,
+  });
 
-  final VendaRepository vendaRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
 
   @override
   State<RelatorioDevolucoesPage> createState() =>
@@ -30,10 +35,15 @@ class _RelatorioDevolucoesPageState extends State<RelatorioDevolucoesPage> {
   List<DevolucaoProdutoResumoLinha> _resumo = [];
 
   void _carregar(LimitesPeriodo limites) {
-    final regs = widget.vendaRepository.listarRegistrosDevolucaoPorPeriodo(
+    final regs = (widget.vendaRepository.listarRegistrosDevolucaoPorPeriodo(
       relatorioPeriodoFiltro(limites),
+    ) as List)
+        .cast<RegistroDevolucao>();
+    final detalhes = montarDetalhesDevolucao(
+      widget.vendaRepository,
+      regs,
+      clienteRepository: widget.clienteRepository,
     );
-    final detalhes = montarDetalhesDevolucao(widget.vendaRepository, regs);
     setState(() {
       _limites = limites;
       _detalhes = detalhes;
@@ -150,6 +160,7 @@ class _RelatorioDevolucoesPageState extends State<RelatorioDevolucoesPage> {
       body: Column(
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: _carregar,
             onAtualizar: lim != null ? () => _carregar(lim) : null,
             filtrosExtras: [

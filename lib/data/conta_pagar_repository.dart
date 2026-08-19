@@ -26,6 +26,14 @@ class ContaPagarRepository {
     }
   }
 
+  String nomeFornecedorDe(ContaPagar c) {
+    final f = c.fornecedor.target;
+    if (f == null) return '—';
+    final nome =
+        f.nomeFantasia.trim().isNotEmpty ? f.nomeFantasia : f.razaoSocial;
+    return nome.trim().isEmpty ? '—' : nome.trim();
+  }
+
   List<ContaPagar> listar({String? status, bool ordenarDesc = false}) {
     final Query<ContaPagar> q;
     if (status != null && status.isNotEmpty) {
@@ -161,6 +169,14 @@ class ContaPagarRepository {
   }
 
   bool remover(int id) {
+    final conta = _box.get(id);
+    if (conta == null) return false;
+    if (conta.status == ContaPagarStatus.pago) {
+      throw StateError(
+        'Nao e possivel remover: titulo ja esta quitado/pago. '
+        'Estorne o pagamento antes de excluir.',
+      );
+    }
     final ok = _box.remove(id);
     if (ok) {
       registrarDeleteParaRede('conta_pagar', id);

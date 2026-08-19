@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 
-import '../data/produto_repository.dart';
-import '../data/promocao_repository.dart';
+import '../data/api/kit_promocao_api_repository.dart';
+import '../data/api/produto_api_repository.dart';
+import '../data/sync/sync_entity_codec_extras.dart';
 import '../domain/cliente_cadastro.dart';
 import '../domain/promocao_cadastro.dart';
 import '../model/produto.dart';
@@ -11,8 +14,9 @@ import '../model/promocao.dart';
 import '../model/promocao_combo_item.dart';
 import '../model/promocao_item.dart';
 import '../services/promocao_etiqueta_pdf.dart';
+import 'produtos/produto_pesquisa_dialog.dart';
+import 'widgets/lan_api_feedback.dart';
 import 'theme/app_modulo_cores.dart';
-import 'widgets/produto_busca_input.dart';
 
 class PromocoesPage extends StatefulWidget {
   const PromocoesPage({
@@ -21,8 +25,8 @@ class PromocoesPage extends StatefulWidget {
     required this.produtoRepository,
   });
 
-  final PromocaoRepository promocaoRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic promocaoRepository;
+  final dynamic produtoRepository;
 
   @override
   State<PromocoesPage> createState() => _PromocoesPageState();
@@ -30,35 +34,119 @@ class PromocoesPage extends StatefulWidget {
 
 class _PromocoesPageState extends State<PromocoesPage> {
   final _fmtData = DateFormat('dd/MM/yyyy');
+  bool _carregandoLista = false;
+
+  bool get _terminalLeve => widget.promocaoRepository is PromocaoApiRepository;
+
+  @override
+  void initState() {
+    super.initState();
+    final repo = widget.promocaoRepository;
+    if (repo is PromocaoApiRepository) {
+      repo.addListener(_onPromocaoApiChanged);
+      unawaited(_hidratarTerminal());
+    }
+  }
+
+  @override
+  void dispose() {
+    final repo = widget.promocaoRepository;
+    if (repo is PromocaoApiRepository) {
+      repo.removeListener(_onPromocaoApiChanged);
+    }
+    super.dispose();
+  }
+
+  void _onPromocaoApiChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _hidratarTerminal() async {
+    final repo = widget.promocaoRepository;
+    if (repo is! PromocaoApiRepository) return;
+    setState(() => _carregandoLista = true);
+    try {
+      await repo.hidratar();
+      final prod = widget.produtoRepository;
+      if (prod is ProdutoApiRepository) {
+        try {
+          await prod.hidratar();
+        } catch (_) {}
+      }
+    } catch (e) {
+      if (mounted) {
+        LanApiFeedback.snackAviso(context, e, prefixo: 'Promocoes');
+      }
+    } finally {
+      if (mounted) setState(() => _carregandoLista = false);
+    }
+  }
+
+  Future<void> _imprimirEtiquetas() async {
+    final hoje = DateTime.now();
+    final repo = widget.promocaoRepository;
+    final prodRepo = widget.produtoRepository;
+
+    // Terminal: garante produtos das promocoes vigentes no cache antes de montar PDF.
+    if (repo is PromocaoApiRepository && prodRepo is ProdutoApiRepository) {
+      final ids = <int>{};
+      for (final promo in repo.listarVigentesNaData(hoje)) {
+        for (final it in repo.itensDaPromocao(promo)) {
+          if (it.produtoAlvoId > 0) ids.add(it.produtoAlvoId);
+        }
+      }
+      if (ids.isNotEmpty) {
+        try {
+          await prodRepo.atualizarEstoquePorIds(ids.toList());
+        } catch (e) {
+          if (!mounted) return;
+          LanApiFeedback.snackAviso(context, e, prefixo: 'Etiquetas');
+        }
+      }
+    }
+
+    final itens = repo.listarProdutosEtiquetaGondola(
+      hoje,
+      obterProduto: prodRepo.obterPorId,
+    );
+    if (!mounted) return;
+    if (itens.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nenhum produto com promocao vigente hoje.'),
+        ),
+      );
+      return;
+    }
+    final bytes = await gerarPdfEtiquetasGondolaPromocao(itens);
+    if (!mounted) return;
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final lista = widget.promocaoRepository.listarPorNome();
+    final lista = widget.promocaoRepository.listarPorNome() as List;
     final hoje = DateTime.now();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Promocoes'),
         actions: [
+          if (_terminalLeve)
+            IconButton(
+              tooltip: 'Atualizar do servidor',
+              onPressed:
+                  _carregandoLista ? null : () => unawaited(_hidratarTerminal()),
+              icon: _carregandoLista
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh_outlined),
+            ),
           IconButton(
             tooltip: 'Etiquetas de gondola (vigentes hoje)',
-            onPressed: () async {
-              final itens = widget.promocaoRepository.listarProdutosEtiquetaGondola(
-                DateTime.now(),
-                obterProduto: widget.produtoRepository.obterPorId,
-              );
-              if (!context.mounted) return;
-              if (itens.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Nenhum produto com promocao vigente hoje.'),
-                  ),
-                );
-                return;
-              }
-              final bytes = await gerarPdfEtiquetasGondolaPromocao(itens);
-              if (!context.mounted) return;
-              await Printing.layoutPdf(onLayout: (_) async => bytes);
-            },
+            onPressed: _carregandoLista ? null : () => unawaited(_imprimirEtiquetas()),
             icon: const Icon(Icons.label_outlined),
           ),
         ],
@@ -78,61 +166,96 @@ class _PromocoesPageState extends State<PromocoesPage> {
         icon: const Icon(Icons.add),
         label: const Text('Nova promocao'),
       ),
-      body: lista.isEmpty
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  'Nenhuma promocao cadastrada.\n'
-                  'Defina vigencia, regra (% sobre preco 1 ou preco fixo) e produtos.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      body: _carregandoLista && lista.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                if (_terminalLeve)
+                  Material(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .secondaryContainer
+                        .withValues(alpha: 0.45),
+                    child: const ListTile(
+                      dense: true,
+                      leading: Icon(Icons.info_outline),
+                      title: Text(
+                        'Terminal leve: cadastro sincroniza com o PC servidor. '
+                        'Itens e vigencia vêm da API ao abrir/atualizar.',
                       ),
-                ),
-              ),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(12),
-              itemCount: lista.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, i) {
-                final p = lista[i];
-                final vigente = widget.promocaoRepository
-                    .listarVigentesNaData(hoje)
-                    .any((x) => x.id == p.id);
-                return Card(
-                  child: ListTile(
-                    leading: Icon(
-                      vigente ? Icons.local_offer : Icons.event_busy_outlined,
-                      color: vigente
-                          ? AppModuloCores.modulo(context, AppModuloId.promocoes)
-                          : null,
                     ),
-                    title: Text(p.nome),
-                    subtitle: Text(
-                      '${_fmtData.format(p.dataInicio.toLocal())} a '
-                      '${_fmtData.format(p.dataFim.toLocal())} · '
-                      '${PromocaoCadastro.rotuloTipoCampanha(p.tipoCampanha)} · '
-                      '${PromocaoCadastro.rotuloSegmentoCliente(p.segmentoCliente)} · '
-                      '${p.ativa ? "Ativa" : "Inativa"}',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () async {
-                      await Navigator.of(context).push<void>(
-                        MaterialPageRoute<void>(
-                          builder: (_) => PromocaoEditPage(
-                            promocaoId: p.id,
-                            promocaoRepository: widget.promocaoRepository,
-                            produtoRepository: widget.produtoRepository,
-                          ),
-                        ),
-                      );
-                      if (mounted) setState(() {});
-                    },
                   ),
-                );
-              },
+                Expanded(
+                  child: lista.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              'Nenhuma promocao cadastrada.\n'
+                              'Defina vigencia, regra (% sobre preco 1 ou preco fixo) e produtos.',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyLarge
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(12),
+                          itemCount: lista.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (context, i) {
+                            final p = lista[i] as Promocao;
+                            final vigente = widget.promocaoRepository
+                                .listarVigentesNaData(hoje)
+                                .any((x) => x.id == p.id);
+                            return Card(
+                              child: ListTile(
+                                leading: Icon(
+                                  vigente
+                                      ? Icons.local_offer
+                                      : Icons.event_busy_outlined,
+                                  color: vigente
+                                      ? AppModuloCores.modulo(
+                                          context,
+                                          AppModuloId.promocoes,
+                                        )
+                                      : null,
+                                ),
+                                title: Text(p.nome),
+                                subtitle: Text(
+                                  '${_fmtData.format(p.dataInicio.toLocal())} a '
+                                  '${_fmtData.format(p.dataFim.toLocal())} · '
+                                  '${PromocaoCadastro.rotuloTipoCampanha(p.tipoCampanha)} · '
+                                  '${PromocaoCadastro.rotuloSegmentoCliente(p.segmentoCliente)} · '
+                                  '${p.ativa ? "Ativa" : "Inativa"}',
+                                ),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () async {
+                                  await Navigator.of(context).push<void>(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => PromocaoEditPage(
+                                        promocaoId: p.id,
+                                        promocaoRepository:
+                                            widget.promocaoRepository,
+                                        produtoRepository:
+                                            widget.produtoRepository,
+                                      ),
+                                    ),
+                                  );
+                                  if (mounted) setState(() {});
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
     );
   }
@@ -160,10 +283,7 @@ class _LinhaPromocaoDraft {
 }
 
 class _LinhaComboDraft {
-  _LinhaComboDraft({
-    required this.produto,
-    required this.qtdController,
-  });
+  _LinhaComboDraft({required this.produto, required this.qtdController});
 
   final Produto produto;
   final TextEditingController qtdController;
@@ -180,8 +300,8 @@ class PromocaoEditPage extends StatefulWidget {
   });
 
   final int? promocaoId;
-  final PromocaoRepository promocaoRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic promocaoRepository;
+  final dynamic produtoRepository;
 
   @override
   State<PromocaoEditPage> createState() => _PromocaoEditPageState();
@@ -206,6 +326,7 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
   final List<_LinhaPromocaoDraft> _linhas = [];
   final List<_LinhaComboDraft> _linhasCombo = [];
   bool _salvando = false;
+  late int? _promocaoId;
 
   static final _fmtMoeda = NumberFormat('#,##0.00', 'pt_BR');
 
@@ -215,6 +336,7 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
     void tick() {
       if (mounted) setState(() {});
     }
+
     for (final c in [
       _valorCtrl,
       _margemCtrl,
@@ -236,75 +358,141 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
 
   int get _pagueQtd => int.tryParse(_pagueCtrl.text.trim()) ?? 0;
 
-  bool get _ehCombo =>
-      _tipoCampanha == PromocaoCadastro.tipoComboAb;
+  bool get _ehCombo => _tipoCampanha == PromocaoCadastro.tipoComboAb;
 
-  bool get _ehLevePague =>
-      _tipoCampanha == PromocaoCadastro.tipoLevePague;
+  bool get _ehLevePague => _tipoCampanha == PromocaoCadastro.tipoLevePague;
 
   bool get _mostraRegraPreco => !_ehCombo;
 
   @override
   void initState() {
     super.initState();
+    _promocaoId = widget.promocaoId;
     _registrarListenersPreview();
-    final id = widget.promocaoId;
+    final id = _promocaoId;
     if (id != null) {
       final p = widget.promocaoRepository.obterPorId(id);
       if (p != null) {
-        _nomeCtrl.text = p.nome;
-        _descCtrl.text = p.descricao;
-        _inicio = p.dataInicio.toLocal();
-        _fim = p.dataFim.toLocal();
-        _ativa = p.ativa;
-        _tipoRegra = PromocaoCadastro.normalizarTipoRegra(p.tipoRegra);
-        _valorCtrl.text = p.valorRegra.toStringAsFixed(2);
-        _prioridadeCtrl.text = '${p.prioridade}';
-        _segmentoCliente =
-            PromocaoCadastro.normalizarSegmentoCliente(p.segmentoCliente);
-        _tipoCampanha = PromocaoCadastro.normalizarTipoCampanha(p.tipoCampanha);
-        _margemCtrl.text = p.margemMinimaPercentual.toStringAsFixed(1);
-        _limiteGlobalCtrl.text = '${p.limiteQuantidadeTotal}';
-        _leveCtrl.text = '${p.leveQuantidade > 0 ? p.leveQuantidade : 3}';
-        _pagueCtrl.text = '${p.pagueQuantidade > 0 ? p.pagueQuantidade : 2}';
-        _precoComboCtrl.text = p.precoCombo > 0
-            ? p.precoCombo.toStringAsFixed(2)
-            : '';
-        for (final c in p.comboItens) {
-          final prod = c.produtoAlvoId > 0
-              ? widget.produtoRepository.obterPorId(c.produtoAlvoId)
-              : null;
-          if (prod == null) continue;
-          _linhasCombo.add(
-            _LinhaComboDraft(
-              produto: prod,
-              qtdController: TextEditingController(text: '${c.quantidade}'),
-            ),
-          );
-        }
-        for (final it in p.itens) {
-          Produto? prod;
-          if (it.produtoAlvoId > 0) {
-            prod = widget.produtoRepository.obterPorId(it.produtoAlvoId);
-          }
-          _linhas.add(
-            _LinhaPromocaoDraft(
-              produto: prod,
-              categoria: it.categoria,
-              subcategoria: it.subcategoria,
-              qtdMinController: TextEditingController(
-                text: '${it.quantidadeMinima}',
-              ),
-              qtdMaxController: TextEditingController(
-                text: it.quantidadeMaximaPromo > 0
-                    ? '${it.quantidadeMaximaPromo}'
-                    : '',
-              ),
-            ),
-          );
+        _preencherFormulario(p);
+        // Terminal leve: completa produtos ainda fora do cache via /api/produtos.
+        if (widget.produtoRepository is ProdutoApiRepository) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _completarProdutosRemotos(p);
+          });
         }
       }
     }
+  }
+
+  void _preencherFormulario(Promocao p) {
+    _nomeCtrl.text = p.nome;
+    _descCtrl.text = p.descricao;
+    _inicio = p.dataInicio.toLocal();
+    _fim = p.dataFim.toLocal();
+    _ativa = p.ativa;
+    _tipoRegra = PromocaoCadastro.normalizarTipoRegra(p.tipoRegra);
+    _valorCtrl.text = p.valorRegra.toStringAsFixed(2);
+    _prioridadeCtrl.text = '${p.prioridade}';
+    _segmentoCliente = PromocaoCadastro.normalizarSegmentoCliente(
+      p.segmentoCliente,
+    );
+    _tipoCampanha = PromocaoCadastro.normalizarTipoCampanha(p.tipoCampanha);
+    _margemCtrl.text = p.margemMinimaPercentual.toStringAsFixed(1);
+    _limiteGlobalCtrl.text = '${p.limiteQuantidadeTotal}';
+    _leveCtrl.text = '${p.leveQuantidade > 0 ? p.leveQuantidade : 3}';
+    _pagueCtrl.text = '${p.pagueQuantidade > 0 ? p.pagueQuantidade : 2}';
+    _precoComboCtrl.text =
+        p.precoCombo > 0 ? p.precoCombo.toStringAsFixed(2) : '';
+
+    for (final l in _linhasCombo) {
+      l.dispose();
+    }
+    _linhasCombo.clear();
+    for (final c in _comboItensDe(p)) {
+      if (c.produtoAlvoId <= 0) continue;
+      final prod =
+          widget.produtoRepository.obterPorId(c.produtoAlvoId) as Produto?;
+      if (prod == null) continue;
+      _linhasCombo.add(
+        _LinhaComboDraft(
+          produto: prod,
+          qtdController: TextEditingController(text: '${c.quantidade}'),
+        ),
+      );
+    }
+
+    for (final l in _linhas) {
+      l.dispose();
+    }
+    _linhas.clear();
+    for (final it in _itensDe(p)) {
+      final prod = it.produtoAlvoId > 0
+          ? widget.produtoRepository.obterPorId(it.produtoAlvoId) as Produto?
+          : null;
+      _linhas.add(
+        _LinhaPromocaoDraft(
+          produto: prod,
+          categoria: it.categoria,
+          subcategoria: it.subcategoria,
+          qtdMinController: TextEditingController(
+            text: '${it.quantidadeMinima}',
+          ),
+          qtdMaxController: TextEditingController(
+            text: it.quantidadeMaximaPromo > 0
+                ? '${it.quantidadeMaximaPromo}'
+                : '',
+          ),
+        ),
+      );
+    }
+  }
+
+  List<PromocaoItem> _itensDe(Promocao p) {
+    final repo = widget.promocaoRepository;
+    if (repo is PromocaoApiRepository) {
+      return List<PromocaoItem>.from(repo.itensDaPromocao(p));
+    }
+    try {
+      return List<PromocaoItem>.from(p.itens);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  List<PromocaoComboItem> _comboItensDe(Promocao p) {
+    final repo = widget.promocaoRepository;
+    if (repo is PromocaoApiRepository) {
+      return List<PromocaoComboItem>.from(repo.comboItensDaPromocao(p));
+    }
+    try {
+      return List<PromocaoComboItem>.from(p.comboItens);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _completarProdutosRemotos(Promocao p) async {
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoApiRepository) return;
+    final faltando = <int>{};
+    for (final it in _itensDe(p)) {
+      if (it.produtoAlvoId > 0 && repo.obterPorId(it.produtoAlvoId) == null) {
+        faltando.add(it.produtoAlvoId);
+      }
+    }
+    for (final c in _comboItensDe(p)) {
+      if (c.produtoAlvoId > 0 && repo.obterPorId(c.produtoAlvoId) == null) {
+        faltando.add(c.produtoAlvoId);
+      }
+    }
+    if (faltando.isEmpty) return;
+    try {
+      await repo.atualizarEstoquePorIds(faltando.toList());
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _preencherFormulario(p));
   }
 
   @override
@@ -347,76 +535,20 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
   }
 
   Future<void> _adicionarProduto() async {
-    final buscaCtrl = TextEditingController();
-    var resultados = widget.produtoRepository.pesquisarPadraoPdv('', limite: 40);
-    await showDialog<void>(
+    final p = await showProdutoPesquisaDialog(
       context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDlg) {
-            return AlertDialog(
-              title: const Text('Produto na promocao'),
-              content: SizedBox(
-                width: 420,
-                height: 380,
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: buscaCtrl,
-                      autofocus: true,
-                      decoration: produtoBuscaInputDecoration(isDense: true),
-                      onChanged: (t) {
-                        resultados = widget.produtoRepository.pesquisarPadraoPdv(
-                          t,
-                          limite: 40,
-                          somenteAtivos: false,
-                        );
-                        setDlg(() {});
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: resultados.length,
-                        itemBuilder: (_, i) {
-                          final p = resultados[i];
-                          return ListTile(
-                            dense: true,
-                            title: Text(p.nome, maxLines: 2),
-                            subtitle: Text(p.codigoInterno),
-                            onTap: () {
-                              setState(() {
-                                _linhas.add(
-                                  _LinhaPromocaoDraft(
-                                    produto: p,
-                                    qtdMinController: TextEditingController(
-                                      text: '1',
-                                    ),
-                                    qtdMaxController: TextEditingController(),
-                                  ),
-                                );
-                              });
-                              Navigator.pop(ctx);
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Fechar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      produtoRepository: widget.produtoRepository,
     );
-    buscaCtrl.dispose();
+    if (p == null || !mounted) return;
+    setState(() {
+      _linhas.add(
+        _LinhaPromocaoDraft(
+          produto: p,
+          qtdMinController: TextEditingController(text: '1'),
+          qtdMaxController: TextEditingController(),
+        ),
+      );
+    });
   }
 
   void _adicionarCategoria() {
@@ -469,83 +601,26 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
   }
 
   Future<void> _adicionarProdutoCombo() async {
-    final buscaCtrl = TextEditingController();
-    var resultados = widget.produtoRepository.pesquisarPadraoPdv('', limite: 40);
-    await showDialog<void>(
+    final p = await showProdutoPesquisaDialog(
       context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDlg) {
-            return AlertDialog(
-              title: const Text('Produto do combo'),
-              content: SizedBox(
-                width: 420,
-                height: 380,
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: buscaCtrl,
-                      autofocus: true,
-                      decoration: produtoBuscaInputDecoration(isDense: true),
-                      onChanged: (t) {
-                        resultados = widget.produtoRepository.pesquisarPadraoPdv(
-                          t,
-                          limite: 40,
-                          somenteAtivos: false,
-                        );
-                        setDlg(() {});
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: resultados.length,
-                        itemBuilder: (_, i) {
-                          final p = resultados[i];
-                          return ListTile(
-                            dense: true,
-                            title: Text(p.nome, maxLines: 2),
-                            subtitle: Text(p.codigoInterno),
-                            onTap: () {
-                              setState(() {
-                                _linhasCombo.add(
-                                  _LinhaComboDraft(
-                                    produto: p,
-                                    qtdController: TextEditingController(
-                                      text: '1',
-                                    ),
-                                  ),
-                                );
-                              });
-                              Navigator.pop(ctx);
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Fechar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      produtoRepository: widget.produtoRepository,
     );
-    buscaCtrl.dispose();
+    if (p == null || !mounted) return;
+    setState(() {
+      _linhasCombo.add(
+        _LinhaComboDraft(
+          produto: p,
+          qtdController: TextEditingController(text: '1'),
+        ),
+      );
+    });
   }
 
   Future<void> _salvar() async {
     final tipo = PromocaoCadastro.normalizarTipoCampanha(_tipoCampanha);
     final valor = _valorRegra;
     final precoCombo = _precoComboValor;
-    final margem =
-        double.tryParse(_margemCtrl.text.replaceAll(',', '.')) ?? 0;
+    final margem = double.tryParse(_margemCtrl.text.replaceAll(',', '.')) ?? 0;
     final limiteGlobal = int.tryParse(_limiteGlobalCtrl.text.trim()) ?? 0;
     final erros = PromocaoCadastro.validarFormulario(
       nome: _nomeCtrl.text,
@@ -561,15 +636,15 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
       limiteGlobal: limiteGlobal,
     );
     if (erros.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(erros.first)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(erros.first)));
       return;
     }
     setState(() => _salvando = true);
     try {
       final promo = Promocao(
-        id: widget.promocaoId ?? 0,
+        id: _promocaoId ?? 0,
         nome: _nomeCtrl.text.trim(),
         descricao: _descCtrl.text.trim(),
         dataInicio: DateTime.utc(_inicio.year, _inicio.month, _inicio.day),
@@ -582,8 +657,7 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
         tipoCampanha: tipo,
         margemMinimaPercentual:
             double.tryParse(_margemCtrl.text.replaceAll(',', '.')) ?? 0,
-        limiteQuantidadeTotal:
-            int.tryParse(_limiteGlobalCtrl.text.trim()) ?? 0,
+        limiteQuantidadeTotal: int.tryParse(_limiteGlobalCtrl.text.trim()) ?? 0,
         leveQuantidade: _ehLevePague ? _leveQtd : 0,
         pagueQuantidade: _ehLevePague ? _pagueQtd : 0,
         precoCombo: _ehCombo ? precoCombo : 0,
@@ -612,20 +686,81 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
           ),
         );
       }
-      widget.promocaoRepository.salvar(
-        promo,
-        itens,
-        comboItens: comboItens,
-      );
-      if (!mounted) return;
-      Navigator.pop(context);
+      if (widget.promocaoRepository is PromocaoApiRepository) {
+        final idSalvo = await widget.promocaoRepository.salvarRemoto({
+              'promocao': SyncEntityCodecExtras.promocaoParaMap(promo),
+              'itens': itens
+                  .map(
+                    (i) => {
+                      'produtoAlvoId': i.produtoAlvoId,
+                      'categoria': i.categoria,
+                      'subcategoria': i.subcategoria,
+                      'quantidadeMinima': i.quantidadeMinima,
+                      'quantidadeMaximaPromo': i.quantidadeMaximaPromo,
+                    },
+                  )
+                  .toList(),
+              'comboItens': comboItens
+                  .map(
+                    (i) => {
+                      'produtoAlvoId': i.produtoAlvoId,
+                      'quantidade': i.quantidade,
+                    },
+                  )
+                  .toList(),
+            })
+            as int;
+        if (!mounted) return;
+        // Evita criar promoção duplicada em salvamentos seguintes.
+        if (idSalvo > 0) {
+          setState(() => _promocaoId = idSalvo);
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Promocao salva com sucesso.')),
+        );
+      } else {
+        widget.promocaoRepository.salvar(promo, itens, comboItens: comboItens);
+        if (!mounted) return;
+        Navigator.pop(context);
+      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      LanApiFeedback.snackErro(context, e, prefixo: 'Erro ao salvar promocao');
     } finally {
       if (mounted) setState(() => _salvando = false);
+    }
+  }
+
+  Future<void> _excluir() async {
+    final id = _promocaoId;
+    if (id == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir promocao?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      if (widget.promocaoRepository is PromocaoApiRepository) {
+        await widget.promocaoRepository.removerRemoto(id);
+      } else {
+        widget.promocaoRepository.excluir(id);
+      }
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(context, e, prefixo: 'Erro ao excluir promocao');
     }
   }
 
@@ -711,7 +846,10 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Simulacao do combo', style: Theme.of(context).textTheme.labelLarge),
+            Text(
+              'Simulacao do combo',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
             const SizedBox(height: 6),
             Text('Soma preco 1 dos itens: ${_fmt(ref)}'),
             Text('Preco do pacote: ${_fmt(combo)}'),
@@ -814,12 +952,12 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
               ),
             ),
             Text(
-              'No orcamento/cupom: ${qtdSim} un. x ${_fmt(precoUnitEfetivo)} = '
+              'No orcamento/cupom: $qtdSim un. x ${_fmt(precoUnitEfetivo)} = '
               '${_fmt(totalLinha)} (preco medio; o cliente paga $_pagueQtd x '
               '${_fmt(precoBasePromo)}, nao $qtdSim x ${_fmt(precoBasePromo)})',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
             ),
           ] else
             Text(
@@ -844,7 +982,7 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
     final titulo = l.produto != null
         ? '${l.produto!.codigoInterno} · ${l.produto!.nome}'
         : 'Categoria: ${l.categoria}'
-            '${l.subcategoria.isNotEmpty ? " / ${l.subcategoria}" : ""}';
+              '${l.subcategoria.isNotEmpty ? " / ${l.subcategoria}" : ""}';
 
     String? detalhePreco;
     if (l.produto != null) {
@@ -953,33 +1091,14 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.promocaoId == null ? 'Nova promocao' : 'Editar promocao'),
+        title: Text(
+          _promocaoId == null ? 'Nova promocao' : 'Editar promocao',
+        ),
         actions: [
-          if (widget.promocaoId != null)
+          if (_promocaoId != null)
             IconButton(
               tooltip: 'Excluir',
-              onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Excluir promocao?'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancelar'),
-                      ),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Excluir'),
-                      ),
-                    ],
-                  ),
-                );
-                if (ok == true) {
-                  widget.promocaoRepository.excluir(widget.promocaoId!);
-                  if (mounted) Navigator.pop(context);
-                }
-              },
+              onPressed: _excluir,
               icon: const Icon(Icons.delete_outline),
             ),
         ],
@@ -1003,7 +1122,9 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                 TextField(
                   controller: _descCtrl,
                   maxLines: 2,
-                  decoration: const InputDecoration(labelText: 'Descricao (opcional)'),
+                  decoration: const InputDecoration(
+                    labelText: 'Descricao (opcional)',
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -1022,7 +1143,9 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                       child: OutlinedButton.icon(
                         onPressed: () => _pickData(inicio: false),
                         icon: const Icon(Icons.event, size: 18),
-                        label: Text('Fim ${DateFormat('dd/MM/yy').format(_fim)}'),
+                        label: Text(
+                          'Fim ${DateFormat('dd/MM/yy').format(_fim)}',
+                        ),
                       ),
                     ),
                   ],
@@ -1046,7 +1169,9 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                   initialValue: _segmentoCliente.isEmpty
                       ? PromocaoCadastro.segmentoTodos
                       : _segmentoCliente,
-                  decoration: const InputDecoration(labelText: 'Segmento de cliente'),
+                  decoration: const InputDecoration(
+                    labelText: 'Segmento de cliente',
+                  ),
                   items: [
                     const DropdownMenuItem(
                       value: PromocaoCadastro.segmentoTodos,
@@ -1081,7 +1206,9 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                 DropdownButtonFormField<String>(
                   key: ValueKey(_tipoCampanha),
                   initialValue: _tipoCampanha,
-                  decoration: const InputDecoration(labelText: 'Como a promo funciona'),
+                  decoration: const InputDecoration(
+                    labelText: 'Como a promo funciona',
+                  ),
                   items: PromocaoCadastro.tiposCampanha
                       .map(
                         (t) => DropdownMenuItem(value: t.$1, child: Text(t.$2)),
@@ -1105,10 +1232,13 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                   DropdownButtonFormField<String>(
                     key: ValueKey(_tipoRegra),
                     initialValue: _tipoRegra,
-                    decoration: const InputDecoration(labelText: 'Forma do desconto'),
+                    decoration: const InputDecoration(
+                      labelText: 'Forma do desconto',
+                    ),
                     items: PromocaoCadastro.tiposRegra
                         .map(
-                          (t) => DropdownMenuItem(value: t.$1, child: Text(t.$2)),
+                          (t) =>
+                              DropdownMenuItem(value: t.$1, child: Text(t.$2)),
                         )
                         .toList(),
                     onChanged: (v) {
@@ -1118,8 +1248,9 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: _valorCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     decoration: InputDecoration(
                       labelText: _tipoRegra == 'desconto_percentual'
                           ? 'Percentual de desconto'
@@ -1127,7 +1258,9 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                       helperText: _tipoRegra == 'desconto_percentual'
                           ? 'Ex.: 10 = 10% off sobre preco 1'
                           : 'Valor final por unidade na promocao',
-                      suffixText: _tipoRegra == 'desconto_percentual' ? '%' : 'R\$',
+                      suffixText: _tipoRegra == 'desconto_percentual'
+                          ? '%'
+                          : 'R\$',
                     ),
                   ),
                   if (_ehLevePague) ...[
@@ -1170,12 +1303,14 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
             else
               _secao(
                 titulo: '4. Preco do combo',
-                subtitulo: 'Valor total do pacote quando todos os itens estiverem no carrinho.',
+                subtitulo:
+                    'Valor total do pacote quando todos os itens estiverem no carrinho.',
                 children: [
                   TextField(
                     controller: _precoComboCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     decoration: const InputDecoration(
                       labelText: 'Preco fechado do combo',
                       suffixText: 'R\$',
@@ -1190,8 +1325,9 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
               children: [
                 TextField(
                   controller: _margemCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   decoration: const InputDecoration(
                     labelText: 'Margem minima (%)',
                     helperText:
@@ -1211,7 +1347,9 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
               ],
             ),
             _secao(
-              titulo: _ehCombo ? '6. Produtos do combo' : '6. Produtos e categorias',
+              titulo: _ehCombo
+                  ? '6. Produtos do combo'
+                  : '6. Produtos e categorias',
               subtitulo: _ehCombo
                   ? 'Todos devem estar no carrinho com as quantidades abaixo.'
                   : 'Produto especifico ou categoria/subcategoria inteira.',
@@ -1244,19 +1382,19 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                   ..._linhasCombo.asMap().entries.map((e) {
                     final l = e.value;
                     final q = int.tryParse(l.qtdController.text.trim()) ?? 1;
-                    final p1 = PromocaoCadastro.preco1DoProduto(l.produto) *
+                    final p1 =
+                        PromocaoCadastro.preco1DoProduto(l.produto) *
                         (q < 1 ? 1 : q);
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       child: ListTile(
-                        title: Text(
-                          l.produto.nome,
-                          maxLines: 2,
-                        ),
+                        title: Text(l.produto.nome, maxLines: 2),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('SKU ${l.produto.codigoInterno} · preco 1 ${_fmt(p1)}'),
+                            Text(
+                              'SKU ${l.produto.codigoInterno} · preco 1 ${_fmt(p1)}',
+                            ),
                             TextField(
                               controller: l.qtdController,
                               keyboardType: TextInputType.number,
@@ -1284,13 +1422,13 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
                   Text(
                     'Nenhum item. Toque em Produto ou Categoria.',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   )
                 else
                   ..._linhas.asMap().entries.map(
-                        (e) => _linhaProdutoCard(e.key, e.value),
-                      ),
+                    (e) => _linhaProdutoCard(e.key, e.value),
+                  ),
               ],
             ),
             const SizedBox(height: 8),

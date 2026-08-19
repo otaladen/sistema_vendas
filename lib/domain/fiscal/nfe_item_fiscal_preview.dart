@@ -1,4 +1,5 @@
 import '../../config/fiscal_config.dart';
+import '../entregas/romaneio_carga_merge.dart';
 import '../produto_nome_exibicao.dart';
 import '../../model/item_venda.dart';
 import '../../model/produto.dart';
@@ -7,7 +8,6 @@ import '../../services/fiscal_service.dart';
 import 'grupo_tributario_produto.dart';
 import 'nfe_cfop_resolver.dart';
 import 'nfe_fiscal_helpers.dart';
-import 'produto_fiscal_catalog.dart';
 
 /// Linha da grade de conferencia fiscal (pre-emissao NF-e).
 class NfeItemFiscalPreview {
@@ -55,16 +55,38 @@ abstract final class NfeItemFiscalPreviewBuilder {
     Venda venda, {
     required bool consumidorFinal,
     required String ufDestinatario,
+    List<ItemVenda>? itens,
+    Produto? Function(int produtoId)? resolverProduto,
   }) {
     final linhas = <NfeItemFiscalPreview>[];
     var numero = 1;
     final uf = ufDestinatario.trim().toUpperCase();
     final interestadual =
         uf.isNotEmpty && uf != FiscalConfig.ufEmitente.toUpperCase();
+    final listaItens =
+        itens ?? RomaneioCargaMerge.itensDaVendaSafe(venda);
 
-    for (final item in venda.itens) {
+    for (final item in listaItens) {
       if (item.quantidade <= 0) continue;
-      final produto = item.produto.target;
+      Produto? produto;
+      try {
+        produto = item.produto.target;
+      } catch (_) {
+        produto = null;
+      }
+      var pid = 0;
+      try {
+        pid = item.produto.targetId;
+      } catch (_) {
+        pid = 0;
+      }
+      if (produto == null && pid > 0 && resolverProduto != null) {
+        try {
+          produto = resolverProduto(pid);
+        } catch (_) {
+          produto = null;
+        }
+      }
       if (produto == null) {
         linhas.add(
           NfeItemFiscalPreview(

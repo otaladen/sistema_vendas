@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_config_repository.dart';
-import '../data/cliente_repository.dart';
-import '../data/produto_repository.dart';
-import '../data/venda_repository.dart';
+import '../data/api/lan_api_client.dart';
 import '../domain/main_menu_sub_destino.dart';
 import '../model/usuario_sistema.dart';
 import 'fiscal/nfe_importacao_xml_flow.dart';
@@ -20,20 +18,36 @@ class NotasFiscaisPage extends StatelessWidget {
     required this.clienteRepository,
     required this.appConfigRepository,
     required this.usuarioLogado,
+    this.terminalLeve = false,
+    this.lanApiClient,
   });
 
-  final ProdutoRepository produtoRepository;
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
+  final dynamic produtoRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
   final AppConfigRepository appConfigRepository;
   final UsuarioSistema usuarioLogado;
+  final bool terminalLeve;
+  final LanApiClient? lanApiClient;
 
-  Future<void> _importarNfeXml(BuildContext context) =>
-      NfeImportacaoXmlFlow.executar(
-        context,
-        produtoRepository: produtoRepository,
-        appConfigRepository: appConfigRepository,
+  Future<void> _importarNfeXml(BuildContext context) async {
+    if (terminalLeve && lanApiClient == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Conecte-se a API do PC servidor (:8788) para importar NF-e.',
+          ),
+        ),
       );
+      return;
+    }
+    await NfeImportacaoXmlFlow.executar(
+      context,
+      produtoRepository: produtoRepository,
+      appConfigRepository: appConfigRepository,
+      lanApiClient: lanApiClient,
+    );
+  }
 
   void _abrirSub(BuildContext context, MainMenuSubDestino sub) {
     HubNavigation.abrirSub(context, sub);

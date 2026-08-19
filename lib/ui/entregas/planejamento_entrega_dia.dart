@@ -217,6 +217,7 @@ class FaixaSemanaPlanejamentoEntrega extends StatelessWidget {
     required this.onSelecionarDia,
     required this.onSemanaAnterior,
     required this.onSemanaProxima,
+    this.compacto = false,
   });
 
   final DateTime inicioSemana;
@@ -225,11 +226,14 @@ class FaixaSemanaPlanejamentoEntrega extends StatelessWidget {
   final ValueChanged<DateTime> onSelecionarDia;
   final VoidCallback onSemanaAnterior;
   final VoidCallback onSemanaProxima;
+  final bool compacto;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final compacto =
+        this.compacto || MediaQuery.sizeOf(context).height < 800;
     final dias = PlanejamentoEntregaDia.diasDaSemana(inicioSemana);
     final hojeChave = PlanejamentoEntregaDia.chaveDeDateTime(DateTime.now());
     final tituloSemana =
@@ -243,6 +247,10 @@ class FaixaSemanaPlanejamentoEntrega extends StatelessWidget {
             IconButton(
               tooltip: 'Semana anterior',
               visualDensity: VisualDensity.compact,
+              padding: compacto ? EdgeInsets.zero : null,
+              constraints: compacto
+                  ? const BoxConstraints(minWidth: 32, minHeight: 32)
+                  : null,
               onPressed: onSemanaAnterior,
               icon: const Icon(Icons.chevron_left),
             ),
@@ -252,18 +260,23 @@ class FaixaSemanaPlanejamentoEntrega extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: theme.textTheme.labelMedium?.copyWith(
                   fontWeight: FontWeight.w700,
+                  fontSize: compacto ? 11 : null,
                 ),
               ),
             ),
             IconButton(
               tooltip: 'Proxima semana',
               visualDensity: VisualDensity.compact,
+              padding: compacto ? EdgeInsets.zero : null,
+              constraints: compacto
+                  ? const BoxConstraints(minWidth: 32, minHeight: 32)
+                  : null,
               onPressed: onSemanaProxima,
               icon: const Icon(Icons.chevron_right),
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        SizedBox(height: compacto ? 2 : 4),
         Row(
           children: [
             for (final dia in dias) ...[
@@ -280,10 +293,11 @@ class FaixaSemanaPlanejamentoEntrega extends StatelessWidget {
                       hojeChave,
                   scheme: scheme,
                   theme: theme,
+                  compacto: compacto,
                   onTap: () => onSelecionarDia(dia),
                 ),
               ),
-              if (dia != dias.last) const SizedBox(width: 4),
+              if (dia != dias.last) SizedBox(width: compacto ? 2 : 4),
             ],
           ],
         ),
@@ -300,6 +314,7 @@ class FaixaSemanaPlanejamentoEntrega extends StatelessWidget {
     required ColorScheme scheme,
     required ThemeData theme,
     required VoidCallback onTap,
+    bool compacto = false,
   }) {
     final bg = selecionado
         ? scheme.primaryContainer
@@ -319,7 +334,10 @@ class FaixaSemanaPlanejamentoEntrega extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+          padding: EdgeInsets.symmetric(
+            vertical: compacto ? 2 : 6,
+            horizontal: 2,
+          ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: border, width: selecionado ? 1.5 : 1),
@@ -338,20 +356,23 @@ class FaixaSemanaPlanejamentoEntrega extends StatelessWidget {
                 '${dia.day}',
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w800,
+                  fontSize: compacto ? 13 : null,
                   color: selecionado ? scheme.onPrimaryContainer : null,
                 ),
               ),
-              Text(
-                qtd > 0 ? '$qtd' : '·',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: qtd > 0
-                      ? (selecionado
-                          ? scheme.onPrimaryContainer
-                          : scheme.primary)
-                      : scheme.onSurfaceVariant,
-                  fontWeight: qtd > 0 ? FontWeight.w700 : FontWeight.w400,
+              if (!compacto || qtd > 0)
+                Text(
+                  qtd > 0 ? '$qtd' : '·',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: compacto ? 10 : null,
+                    color: qtd > 0
+                        ? (selecionado
+                            ? scheme.onPrimaryContainer
+                            : scheme.primary)
+                        : scheme.onSurfaceVariant,
+                    fontWeight: qtd > 0 ? FontWeight.w700 : FontWeight.w400,
+                  ),
                 ),
-              ),
             ],
           ),
         ),

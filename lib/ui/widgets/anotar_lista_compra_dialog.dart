@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../data/lista_compra_repository.dart';
 import '../../domain/lista_compra_item_constantes.dart';
 import '../../model/produto.dart';
 
 /// Dialogo reutilizavel para anotar item na lista de compras.
 Future<bool> mostrarAnotarListaCompraDialog(
   BuildContext context, {
-  required ListaCompraRepository repository,
+  required dynamic repository,
   Produto? produto,
   String descricaoLivre = '',
   int quantidadeInicial = 1,
@@ -26,9 +25,7 @@ Future<bool> mostrarAnotarListaCompraDialog(
     text: quantidadeInicial > 0 ? '$quantidadeInicial' : '1',
   );
   final unidadeController = TextEditingController(
-    text: itemLivre
-        ? unidadeInicial.trim().toUpperCase()
-        : produto.unidade,
+    text: itemLivre ? unidadeInicial.trim().toUpperCase() : produto.unidade,
   );
   final obsController = TextEditingController(text: observacaoInicial);
   final fornecedorController = TextEditingController(
@@ -68,8 +65,8 @@ Future<bool> mostrarAnotarListaCompraDialog(
                         child: Text(
                           produto.nome.trim(),
                           style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     const SizedBox(height: 12),
@@ -150,8 +147,9 @@ Future<bool> mostrarAnotarListaCompraDialog(
     },
   );
 
-  final nomeDigitado =
-      itemLivre ? nomeController.text.trim() : produto.nome.trim();
+  final nomeDigitado = itemLivre
+      ? nomeController.text.trim()
+      : produto.nome.trim();
   final qtd = int.tryParse(qtdController.text) ?? 0;
   final fornecedor = fornecedorController.text;
   final obs = obsController.text;
@@ -168,9 +166,9 @@ Future<bool> mostrarAnotarListaCompraDialog(
   if (ok != true || !context.mounted) return false;
 
   if (itemLivre && nomeDigitado.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Informe o nome do produto.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Informe o nome do produto.')));
     return false;
   }
 
@@ -182,7 +180,7 @@ Future<bool> mostrarAnotarListaCompraDialog(
   }
 
   try {
-    repository.anotar(
+    final r = repository.anotar(
       produto: produto,
       descricaoLivre: itemLivre ? nomeDigitado : '',
       quantidadeSugerida: qtd,
@@ -193,19 +191,18 @@ Future<bool> mostrarAnotarListaCompraDialog(
       origem: origem,
       criadoPor: criadoPor,
     );
+    if (r is Future) await r;
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('"$nomeDigitado" anotado na lista de compras.'),
-        ),
+        SnackBar(content: Text('"$nomeDigitado" anotado na lista de compras.')),
       );
     }
     return true;
   } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel anotar: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Nao foi possivel anotar: $e')));
     }
     return false;
   }

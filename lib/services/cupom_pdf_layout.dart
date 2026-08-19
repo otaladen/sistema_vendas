@@ -334,11 +334,16 @@ class CupomPdfLayout {
     required String Function(double) formatarMoeda,
     String? quantidadeExibicao,
     String sufixoEntrega = '',
+    String? codigoSku,
+    String? modalidade,
   }) {
     final qtdTxt = quantidadeExibicao ?? '$quantidade';
+    final sku = (codigoSku ?? '').trim();
+    final modal = (modalidade ?? '').trim();
+    final nomeBase = sku.isEmpty ? nomeProduto : '$sku - $nomeProduto';
     final nomeLinha = sufixoEntrega.isEmpty
-        ? nomeProduto
-        : '$nomeProduto$sufixoEntrega';
+        ? nomeBase
+        : '$nomeBase$sufixoEntrega';
     final fsNome = layout.tamanhoFonteItens.fontSizeItem;
     final fsDet = layout.tamanhoFonteItens.fontSizeItemDetalhe;
 
@@ -350,12 +355,24 @@ class CupomPdfLayout {
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Text(
-              nomeLinha,
+              textoTermicoAscii(nomeLinha),
               style: estilo(layout, fontSize: fsNome),
             ),
+            if (modal.isNotEmpty)
+              pw.Text(
+                textoTermicoAscii(modal),
+                style: estilo(
+                  layout,
+                  fontSize: fsDet,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
             if (layout.linhaQuantidadePreco)
               pw.Text(
-                '$qtdTxt x ${formatarMoeda(precoUnitario)} = ${formatarMoeda(subtotal)}',
+                // Padrao termico: indent + "QTD x R$ UNIT = R$ TOTAL".
+                textoTermicoAscii(
+                  '  $qtdTxt x ${formatarMoeda(precoUnitario)} = ${formatarMoeda(subtotal)}',
+                ),
                 style: estilo(layout, fontSize: fsDet),
               ),
           ],
@@ -370,16 +387,29 @@ class CupomPdfLayout {
         children: [
           linhaColunas(
             layout: layout,
-            esquerda: nomeLinha,
+            esquerda: textoTermicoAscii(nomeLinha),
             direita: formatarMoeda(subtotal),
             fontSize: fsNome,
             fontWeightDireita: pw.FontWeight.bold,
           ),
+          if (modal.isNotEmpty) ...[
+            pw.SizedBox(height: 0.3 * PdfPageFormat.mm),
+            pw.Text(
+              textoTermicoAscii(modal),
+              style: estilo(
+                layout,
+                fontSize: fsDet,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ],
           if (layout.linhaQuantidadePreco) ...[
             pw.SizedBox(height: 0.4 * PdfPageFormat.mm),
             linhaColunas(
               layout: layout,
-              esquerda: '$qtdTxt x ${formatarMoeda(precoUnitario)}',
+              esquerda: textoTermicoAscii(
+                '  $qtdTxt x ${formatarMoeda(precoUnitario)} = ${formatarMoeda(subtotal)}',
+              ),
               direita: '',
               fontSize: fsDet,
             ),
@@ -387,6 +417,64 @@ class CupomPdfLayout {
         ],
       ),
     );
+  }
+
+  /// Aviso legal padrao de cotacao (LGPD / sem valor fiscal).
+  static List<pw.Widget> avisoCotacaoSemValorFiscal(
+    ConfigLayoutImpressao layout,
+  ) {
+    return [
+      divisoriaSecao(layout: layout, compacta: true),
+      _textoCentralizado(
+        layout,
+        texto: 'ESTE DOCUMENTO E UMA COTACAO E NAO POSSUI VALOR FISCAL.',
+        fontSize: layout.tamanhoFonteCorpo.fontSizeRodape,
+        fontWeight: pw.FontWeight.bold,
+      ),
+    ];
+  }
+
+  /// Espaco para aceite/assinatura do cliente (opcional; orcamento nao usa).
+  static List<pw.Widget> blocoAssinaturaAceiteCliente(
+    ConfigLayoutImpressao layout,
+  ) {
+    if (layout.espacoCompacto) {
+      return [
+        pw.SizedBox(height: 4 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: '______________________________',
+          fontSize: layout.tamanhoFonteCorpo.fontSizeContato,
+        ),
+        _textoCentralizado(
+          layout,
+          texto: 'Assinatura / aceite do cliente',
+          fontSize: layout.tamanhoFonteCorpo.fontSizeRodape,
+        ),
+      ];
+    }
+    return [
+      pw.SizedBox(height: 6 * PdfPageFormat.mm),
+      divisoriaSecao(layout: layout, compacta: true),
+      textoCorpo('Aceite do cliente:', layout, fontWeight: pw.FontWeight.bold),
+      pw.SizedBox(height: 8 * PdfPageFormat.mm),
+      _textoCentralizado(
+        layout,
+        texto: '________________________________',
+        fontSize: layout.tamanhoFonteCorpo.fontSizeContato,
+      ),
+      _textoCentralizado(
+        layout,
+        texto: 'Nome / assinatura',
+        fontSize: layout.tamanhoFonteCorpo.fontSizeRodape,
+      ),
+      pw.SizedBox(height: 4 * PdfPageFormat.mm),
+      _textoCentralizado(
+        layout,
+        texto: 'Data: ____/____/________',
+        fontSize: layout.tamanhoFonteCorpo.fontSizeRodape,
+      ),
+    ];
   }
 
   static pw.Widget linhaTotal({
@@ -464,12 +552,22 @@ class CupomPdfLayout {
     Uint8List? logoBytes,
     String? telefone,
     String? endereco,
+    String? cnpj,
+    String? whatsapp,
   }) {
     final logo = logoBytes;
     final temLogo = layout.exibirLogo && logo != null && logo.isNotEmpty;
     final fsNome = layout.tamanhoNomeLoja.fontSizeNome;
     final fsContato = layout.tamanhoFonteCorpo.fontSizeContato;
     final hLogo = layout.alturaLogoMm.clamp(20.0, 52.0);
+    final tel = (telefone ?? '').trim();
+    final zap = (whatsapp ?? '').trim();
+    final contatoTel = zap.isNotEmpty && zap != tel
+        ? (tel.isEmpty ? 'WhatsApp: $zap' : 'Tel/WhatsApp: $tel / $zap')
+        : (tel.isEmpty ? '' : 'Tel/WhatsApp: $tel');
+    final cnpjFmt = (cnpj ?? '').trim().isEmpty
+        ? ''
+        : formatarCnpjCupom(cnpj!.trim());
     return [
       if (temLogo)
         pw.Center(
@@ -484,12 +582,16 @@ class CupomPdfLayout {
         fontSize: fsNome,
         fontWeight: pw.FontWeight.bold,
       ),
-      if (layout.exibirTelefone &&
-          telefone != null &&
-          telefone.trim().isNotEmpty)
+      if (layout.exibirTelefone && contatoTel.isNotEmpty)
         _textoCentralizado(
           layout,
-          texto: 'Tel: ${telefone.trim()}',
+          texto: contatoTel,
+          fontSize: fsContato,
+        ),
+      if (cnpjFmt.isNotEmpty)
+        _textoCentralizado(
+          layout,
+          texto: 'CNPJ $cnpjFmt',
           fontSize: fsContato,
         ),
       if (layout.exibirEndereco &&
@@ -629,6 +731,39 @@ class CupomPdfLayout {
     return u.clamp(0, 999);
   }
 
+  /// Itens de orcamento: SKU+nome + modalidade + linha qtd x preco.
+  static int unidadesAlturaItensOrcamento(
+    Iterable<String> nomesProduto, {
+    int caracteresPorLinha = 24,
+    bool comModalidade = true,
+  }) {
+    var u = 0;
+    for (final nome in nomesProduto) {
+      final linhasNome =
+          (nome.length / caracteresPorLinha).ceil().clamp(1, 6);
+      u += linhasNome;
+      if (comModalidade) u += 1;
+      u += 1; // qtd x unitario = total
+    }
+    return u.clamp(0, 999);
+  }
+
+  /// Substitui glifos que a Courier termica nao desenha (vira quadrado).
+  static String textoTermicoAscii(String texto) {
+    return texto
+        .replaceAll('—', '-')
+        .replaceAll('–', '-')
+        .replaceAll('−', '-')
+        .replaceAll('·', '-')
+        .replaceAll('•', '-')
+        .replaceAll('³', '3')
+        .replaceAll('²', '2')
+        .replaceAll('¹', '1')
+        .replaceAll('°', 'o')
+        .replaceAll('×', 'x')
+        .replaceAll('…', '...');
+  }
+
   static PdfPageFormat formatoPaginaTermica({
     required ConfigLayoutImpressao layout,
     required int linhasTexto,
@@ -636,6 +771,7 @@ class CupomPdfLayout {
     int linhasExtras = 0,
     bool comLogo = false,
     bool segundaVia = false,
+    double? margemSegurancaMm,
   }) {
     final margem = _margemPagina(layout);
     final corte = _margemCorte(layout);
@@ -655,7 +791,8 @@ class CupomPdfLayout {
     if (layout.exibirEspacoFinal) mm += corte;
     if (comLogo) mm += layout.alturaLogoMm.clamp(20, 52) + 4;
     if (segundaVia) mm += 4;
-    mm = mm * fatorAltura + margemSegurancaAlturaBobinaMm;
+    final seguranca = margemSegurancaMm ?? margemSegurancaAlturaBobinaMm;
+    mm = mm * fatorAltura + seguranca;
     mm = mm.clamp(45.0, 1200.0);
     return PdfPageFormat(
       larguraPdfMm(layout) * PdfPageFormat.mm,
@@ -675,6 +812,7 @@ class CupomPdfLayout {
     int linhasExtras = 0,
     bool comLogo = false,
     bool segundaVia = false,
+    double? margemSegurancaMm,
   }) {
     if (modelo == EmpresaModeloPdf.a4) {
       return PdfPageFormat.a4;
@@ -686,25 +824,39 @@ class CupomPdfLayout {
       linhasExtras: linhasExtras,
       comLogo: comLogo,
       segundaVia: segundaVia,
+      margemSegurancaMm: margemSegurancaMm,
     );
   }
 
-  /// PDF de orcamento salvo em arquivo: largura termica, altura livre (nao corta itens).
+  /// PDF de orcamento salvo em arquivo: bobina com altura finita (evita erro no pdf package).
+  /// Folga minima apos o conteudo (sem desperdicar papel).
   static PdfPageFormat formatoPaginaOrcamentoSalvar({
     required EmpresaModeloPdf modelo,
     required ConfigLayoutImpressao layout,
+    int qtdItens = 1,
+    int linhasTexto = 14,
+    int linhasExtras = 8,
+    bool comLogo = false,
   }) {
-    if (modelo == EmpresaModeloPdf.a4) {
-      return PdfPageFormat.a4;
-    }
-    final margem = _margemPagina(layout);
-    return PdfPageFormat(
-      larguraPdfMm(layout) * PdfPageFormat.mm,
-      double.infinity,
-      marginTop: margem * PdfPageFormat.mm,
-      marginBottom: margem * PdfPageFormat.mm,
-      marginLeft: margem * PdfPageFormat.mm,
-      marginRight: margem * PdfPageFormat.mm,
+    // Preset economico (fator 0.5) cortava o final; ~0.9 cobre o conteudo
+    // sem sobrar meia bobina em branco.
+    final layoutAltura = layout.copyWith(
+      fatorEspacoVertical: layout.fatorEspacoVertical < 0.9
+          ? 0.9
+          : layout.fatorEspacoVertical,
+      fatorAlturaPaginaPdf: layout.fatorAlturaPaginaPdf < 1.02
+          ? 1.02
+          : layout.fatorAlturaPaginaPdf,
+    );
+    return formatoPagina(
+      modelo,
+      layout: layoutAltura,
+      linhasTexto: linhasTexto,
+      qtdItens: qtdItens < 1 ? 1 : qtdItens,
+      linhasExtras: linhasExtras < 1 ? 1 : linhasExtras,
+      comLogo: comLogo,
+      // Corte logo abaixo do fim (sem os 14 mm padrao do cupom).
+      margemSegurancaMm: 4,
     );
   }
 

@@ -88,7 +88,7 @@ class _ClienteEnderecoIbgeSelectorState extends State<ClienteEnderecoIbgeSelecto
           isExpanded: true,
           initialValue: _selecao.isEmpty ? null : _selecao,
           decoration: const InputDecoration(
-            labelText: 'Municipio (IBGE) — NF-e',
+            labelText: 'Município (IBGE) — NF-e',
             isDense: true,
             helperText:
                 'Opcoes rapidas da regiao. Use "Outro" se a API nao preencher.',
@@ -118,7 +118,7 @@ class _ClienteEnderecoIbgeSelectorState extends State<ClienteEnderecoIbgeSelecto
             child: TextField(
               controller: widget.codigoIbgeController,
               decoration: const InputDecoration(
-                labelText: 'Codigo IBGE manual',
+                labelText: 'Código IBGE manual',
                 hintText: '7 digitos',
                 isDense: true,
               ),

@@ -2,18 +2,21 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../services/cupom_nao_fiscal_venda_pdf.dart';
-import '../data/usuario_repository.dart';
-import '../data/vendedor_repository.dart';
+import '../data/api/vendedor_api_repository.dart';
 import '../model/vendedor.dart';
+import '../services/cupom_nao_fiscal_venda_pdf.dart';
+import 'widgets/lan_api_feedback.dart';
 
 enum _ModoIdentificacaoVendedorPdv { senhaVendedor, usuarioSistema }
 
 /// Identifica o vendedor no terminal PDV (senha do cadastro ou login do sistema).
+///
+/// [vendedorRepository] / [usuarioRepository]: ObjectBox local (PC servidor) ou
+/// `*ApiRepository` (terminal leve).
 Future<Vendedor?> solicitarIdentificacaoVendedorPdv({
   required BuildContext context,
-  required VendedorRepository vendedorRepository,
-  required UsuarioRepository usuarioRepository,
+  required dynamic vendedorRepository,
+  required dynamic usuarioRepository,
   bool permitirCancelar = true,
   String titulo = 'Identificacao do vendedor',
   String mensagem =
@@ -21,8 +24,10 @@ Future<Vendedor?> solicitarIdentificacaoVendedorPdv({
       'ou o PIN do vendedor para desbloqueio rapido no balcao.',
   String rotuloConfirmar = 'Entrar',
 }) async {
-  final comSenha = vendedorRepository.contarAtivosComSenhaPdv();
-  final comUsuario = await usuarioRepository.contarAtivosComVendedorVinculado();
+  final comSenha =
+      (vendedorRepository.contarAtivosComSenhaPdv() as int?) ?? 0;
+  final comUsuario =
+      (await usuarioRepository.contarAtivosComVendedorVinculado() as int?) ?? 0;
   if (comSenha == 0 && comUsuario == 0) {
     if (!context.mounted) return null;
     await showDialog<void>(
@@ -48,6 +53,7 @@ Future<Vendedor?> solicitarIdentificacaoVendedorPdv({
     return null;
   }
 
+  if (!context.mounted) return null;
   return showDialog<Vendedor>(
     context: context,
     useRootNavigator: true,
@@ -68,8 +74,8 @@ Future<Vendedor?> solicitarIdentificacaoVendedorPdv({
 /// Senha PDV ou login do sistema para registrar quem autorizou retirada na loja.
 Future<String?> solicitarOperadorRetiradaNaLoja({
   required BuildContext context,
-  required VendedorRepository vendedorRepository,
-  required UsuarioRepository usuarioRepository,
+  required dynamic vendedorRepository,
+  required dynamic usuarioRepository,
 }) async {
   final vendedor = await solicitarIdentificacaoVendedorPdv(
     context: context,
@@ -84,6 +90,16 @@ Future<String?> solicitarOperadorRetiradaNaLoja({
   return CupomNaoFiscalVendaPdf.rotuloVendedorUmLinha(vendedor);
 }
 
+Future<Vendedor?> _autenticarPinVendedor(
+  dynamic vendedorRepository,
+  String pin,
+) async {
+  if (vendedorRepository is VendedorApiRepository) {
+    return vendedorRepository.autenticarPorSenhaPdvRemoto(pin);
+  }
+  return vendedorRepository.autenticarPorSenhaPdv(pin) as Vendedor?;
+}
+
 class _DialogoBloqueioVendedorPdv extends StatefulWidget {
   const _DialogoBloqueioVendedorPdv({
     required this.vendedorRepository,
@@ -96,8 +112,8 @@ class _DialogoBloqueioVendedorPdv extends StatefulWidget {
     required this.rotuloConfirmar,
   });
 
-  final VendedorRepository vendedorRepository;
-  final UsuarioRepository usuarioRepository;
+  final dynamic vendedorRepository;
+  final dynamic usuarioRepository;
   final bool permitirCancelar;
   final bool permiteSenhaVendedor;
   final bool permiteUsuarioSistema;
@@ -175,57 +191,69 @@ class _DialogoBloqueioVendedorPdvState extends State<_DialogoBloqueioVendedorPdv
       _erro = '';
     });
 
-    Vendedor? vendedor;
-    if (_modo == _ModoIdentificacaoVendedorPdv.senhaVendedor) {
-      final senha = _senhaController.text.trim();
-      if (senha.isEmpty) {
-        setState(() {
-          _autenticando = false;
-          _erro = 'Informe o PIN do vendedor.';
-        });
-        return;
+    try {
+      Vendedor? vendedor;
+      if (_modo == _ModoIdentificacaoVendedorPdv.senhaVendedor) {
+        final senha = _senhaController.text.trim();
+        if (senha.isEmpty) {
+          setState(() {
+            _autenticando = false;
+            _erro = 'Informe o PIN do vendedor.';
+          });
+          return;
+        }
+        vendedor = await _autenticarPinVendedor(
+          widget.vendedorRepository,
+          senha,
+        );
+        if (vendedor == null && mounted) {
+          setState(() {
+            _autenticando = false;
+            _erro = 'PIN invalido ou ambiguo. Verifique o cadastro do vendedor.';
+          });
+          return;
+        }
+      } else {
+        final login = _loginController.text.trim();
+        final senha = _senhaUsuarioController.text.trim();
+        if (login.isEmpty || senha.isEmpty) {
+          setState(() {
+            _autenticando = false;
+            _erro = 'Informe login e senha do sistema.';
+          });
+          return;
+        }
+        final usuario =
+            await widget.usuarioRepository.autenticarComVendedorVinculado(
+          login,
+          senha,
+          vendedorAtivo: (id) {
+            final v = widget.vendedorRepository.obterPorId(id);
+            return v != null && v.ativo;
+          },
+        );
+        if (!mounted) return;
+        if (usuario == null) {
+          setState(() {
+            _autenticando = false;
+            _erro =
+                'Login invalido, usuario inativo, sem vendedor vinculado '
+                'ou vendedor inativo.';
+          });
+          return;
+        }
+        vendedor = widget.vendedorRepository.obterPorId(usuario.vendedorId);
       }
-      vendedor = widget.vendedorRepository.autenticarPorSenhaPdv(senha);
-      if (vendedor == null && mounted) {
-        setState(() {
-          _autenticando = false;
-          _erro = 'PIN invalido ou ambiguo. Verifique o cadastro do vendedor.';
-        });
-        return;
-      }
-    } else {
-      final login = _loginController.text.trim();
-      final senha = _senhaUsuarioController.text.trim();
-      if (login.isEmpty || senha.isEmpty) {
-        setState(() {
-          _autenticando = false;
-          _erro = 'Informe login e senha do sistema.';
-        });
-        return;
-      }
-      final usuario = await widget.usuarioRepository.autenticarComVendedorVinculado(
-        login,
-        senha,
-        vendedorAtivo: (id) {
-          final v = widget.vendedorRepository.obterPorId(id);
-          return v != null && v.ativo;
-        },
-      );
-      if (!mounted) return;
-      if (usuario == null) {
-        setState(() {
-          _autenticando = false;
-          _erro =
-              'Login invalido, usuario inativo, sem vendedor vinculado '
-              'ou vendedor inativo.';
-        });
-        return;
-      }
-      vendedor = widget.vendedorRepository.obterPorId(usuario.vendedorId);
-    }
 
-    if (!mounted || vendedor == null) return;
-    Navigator.of(context).pop(vendedor);
+      if (!mounted || vendedor == null) return;
+      Navigator.of(context).pop(vendedor);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _autenticando = false;
+        _erro = LanApiFeedback.mensagem(e);
+      });
+    }
   }
 
   @override

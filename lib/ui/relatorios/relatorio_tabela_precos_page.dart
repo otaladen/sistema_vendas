@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../../data/produto_busca_util.dart';
-import '../../data/produto_repository.dart';
 import '../widgets/produto_busca_input.dart';
 import '../../domain/produto_embalagem.dart';
 import '../../model/produto.dart';
@@ -19,7 +18,7 @@ import 'widgets/relatorio_exportacoes_menu.dart';
 class RelatorioTabelaPrecosPage extends StatefulWidget {
   const RelatorioTabelaPrecosPage({super.key, required this.produtoRepository});
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
 
   @override
   State<RelatorioTabelaPrecosPage> createState() =>
@@ -43,13 +42,15 @@ class _RelatorioTabelaPrecosPageState extends State<RelatorioTabelaPrecosPage> {
   List<Produto> _produtosFiltrados() {
     final termo = _busca.trim();
     if (termo.isNotEmpty) {
-      return widget.produtoRepository.pesquisarPadraoPdv(
+      return (widget.produtoRepository.pesquisarPadraoPdv(
         termo,
         limite: 500,
         somenteAtivos: _somenteAtivos,
-      );
+      ) as List)
+          .cast<Produto>();
     }
-    final base = widget.produtoRepository.listarTodos();
+    final base =
+        (widget.produtoRepository.listarTodos() as List).cast<Produto>();
     final filtrado = _somenteAtivos
         ? base.where((p) => p.ativo).toList()
         : List<Produto>.from(base);

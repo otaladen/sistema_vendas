@@ -55,7 +55,7 @@ abstract final class ConfigSecoes {
     ConfigSecaoInfo(
       id: 'rede',
       titulo: 'Rede e terminais',
-      descricao: 'Sincronizacao LAN entre computadores',
+      descricao: 'API dos terminais (:8788) e rede local',
       icon: Icons.lan_outlined,
     ),
     ConfigSecaoInfo(
@@ -63,12 +63,6 @@ abstract final class ConfigSecoes {
       titulo: 'Backup e seguranca',
       descricao: 'Copias, restauracao e protecao dos dados',
       icon: Icons.backup_outlined,
-    ),
-    ConfigSecaoInfo(
-      id: 'mensagens',
-      titulo: 'Mensagens',
-      descricao: 'WhatsApp, templates e alertas',
-      icon: Icons.chat_outlined,
     ),
     ConfigSecaoInfo(
       id: 'sistema',

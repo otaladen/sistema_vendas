@@ -340,6 +340,10 @@ class ConfigLayoutImpressao {
   static ConfigLayoutImpressao padraoOrcamento() =>
       economico(orcamento: true).copyWith(
         familiaFonte: LayoutFamiliaFonte.courier,
+        // Orcamento precisa de qtd x unitario = total (preset economico omite no cupom).
+        linhaQuantidadePreco: true,
+        // LGPD: CPF/CNPJ do cliente nao sai no papel de cotacao.
+        exibirDocumentoCliente: false,
       );
 
   /// Bematech MP-4200 TH e termicas 80 mm com area util ~72 mm.
@@ -391,7 +395,8 @@ class ConfigLayoutImpressao {
         divisoriaDestaqueAntesTotais: false,
         divisoriaAntesRodape: false,
         colunasEsquerdaDireita: false,
-        linhaQuantidadePreco: false,
+        // Cupom: so nome (economia). Orcamento: linha qtd x preco obrigatoria.
+        linhaQuantidadePreco: orcamento,
         estiloCupomNfce: false,
         espacoCompacto: true,
         margemPaginaMm: 2,
@@ -404,6 +409,8 @@ class ConfigLayoutImpressao {
         exibirValidadeOrcamento: orcamento,
         exibirObservacaoEntrega: false,
         exibirEntrega: !orcamento ? false : false,
+        // LGPD: orcamento impresso nao leva CPF/CNPJ do cliente.
+        exibirDocumentoCliente: !orcamento,
       );
 
   static ConfigLayoutImpressao compacto({required bool orcamento}) =>

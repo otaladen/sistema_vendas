@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/promocao_repository.dart';
 import '../../data/venda_repository.dart';
+import '../../model/promocao.dart';
 import 'relatorio_cores.dart';
 import 'relatorio_periodo.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
@@ -15,8 +15,8 @@ class RelatorioVendasPromocaoPage extends StatefulWidget {
     required this.promocaoRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final PromocaoRepository promocaoRepository;
+  final dynamic vendaRepository;
+  final dynamic promocaoRepository;
 
   @override
   State<RelatorioVendasPromocaoPage> createState() =>
@@ -37,11 +37,12 @@ class _RelatorioVendasPromocaoPageState extends State<RelatorioVendasPromocaoPag
       setState(() => _linhas = []);
       return;
     }
-    final lista = widget.vendaRepository.listarVendasPromocaoPeriodo(
+    final lista = (widget.vendaRepository.listarVendasPromocaoPeriodo(
       inicio: lim.$1,
       fim: lim.$2,
       promocaoId: _filtroPromocaoId,
-    );
+    ) as List)
+        .cast<VendaPromocaoRelatorioLinha>();
     setState(() => _linhas = lista);
   }
 
@@ -49,7 +50,7 @@ class _RelatorioVendasPromocaoPageState extends State<RelatorioVendasPromocaoPag
 
   Map<String, ({int qtd, double total, double lucro})> _resumoPorPromocao() {
     final map = <String, ({int qtd, double total, double lucro})>{};
-    for (final l in _linhas) {
+    for (final VendaPromocaoRelatorioLinha l in _linhas) {
       final k = l.promocaoNome;
       final atual = map[k];
       map[k] = (
@@ -106,7 +107,7 @@ class _RelatorioVendasPromocaoPageState extends State<RelatorioVendasPromocaoPag
     }
     buf.writeln('');
     buf.writeln('DETALHE');
-    for (final l in _linhas.take(200)) {
+    for (final VendaPromocaoRelatorioLinha l in _linhas.take(200)) {
       buf.writeln(
         '${DateFormat('dd/MM/yy').format(l.dataVenda)} '
         '${l.promocaoNome} · ${l.codigoInterno} · '
@@ -121,7 +122,8 @@ class _RelatorioVendasPromocaoPageState extends State<RelatorioVendasPromocaoPag
     final tQtd = _linhas.fold<int>(0, (s, e) => s + e.quantidade);
     final tVal = _linhas.fold<double>(0, (s, e) => s + e.total);
     final tLuc = _linhas.fold<double>(0, (s, e) => s + e.lucro);
-    final promos = widget.promocaoRepository.listarPorNome();
+    final promos = (widget.promocaoRepository.listarPorNome() as List)
+        .cast<Promocao>();
     final resumo = _resumoPorPromocao();
 
     return Scaffold(
@@ -139,6 +141,7 @@ class _RelatorioVendasPromocaoPageState extends State<RelatorioVendasPromocaoPag
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: (lim) {
               setState(() => _limites = lim);
               _carregar();

@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../data/api/lan_api_client.dart';
+import '../data/api/lan_api_event_hub.dart';
+import '../data/api/recado_loja_api_repository.dart';
 import '../data/objectbox.dart';
 import '../data/recado_loja_repository.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
@@ -9,16 +14,20 @@ import '../domain/recado_loja_constantes.dart';
 import '../domain/recado_loja_helper.dart';
 import '../model/recado_loja.dart';
 import '../model/usuario_sistema.dart';
+import 'shell/main_menu_deps.dart';
+import 'widgets/lan_api_feedback.dart';
 
-/// Recados internos para a equipe da loja (Fase 1).
+/// Recados internos para a equipe da loja (PC1 ObjectBox ou Terminal Leve via API).
 class RecadosLojaPage extends StatefulWidget {
   const RecadosLojaPage({
     super.key,
-    required this.objectBox,
+    this.objectBox,
+    this.recadoRepository,
     required this.usuarioLogado,
   });
 
-  final ObjectBox objectBox;
+  final ObjectBox? objectBox;
+  final dynamic recadoRepository;
   final UsuarioSistema usuarioLogado;
 
   @override
@@ -27,28 +36,78 @@ class RecadosLojaPage extends StatefulWidget {
 
 class _RecadosLojaPageState extends State<RecadosLojaPage>
     with SafeSyncRefreshMixin {
-  late final RecadoLojaRepository _repo;
+  late final dynamic _repo;
   List<RecadoLoja> _recados = [];
   String _filtro = 'ativos';
+  bool _carregando = false;
   static final _dataFmt = DateFormat('dd/MM/yyyy HH:mm', 'pt_BR');
+
+  bool get _viaApi => _repo is RecadoLojaApiRepository;
 
   @override
   void initState() {
     super.initState();
-    _repo = RecadoLojaRepository(widget.objectBox);
-    initSafeSyncRefresh(onReload: _recarregar);
-    _recarregar();
+    final deps = MainMenuDeps.maybeOf(context);
+    _repo = widget.recadoRepository ??
+        deps?.recadoLojaRepository ??
+        (widget.objectBox != null
+            ? RecadoLojaRepository(widget.objectBox!)
+            : (deps?.lanApiClient != null
+                ? RecadoLojaApiRepository(deps!.lanApiClient!)
+                : null));
+    if (_repo == null) {
+      throw StateError('Recados requer ObjectBox ou conexao com o PC servidor.');
+    }
+    initSafeSyncRefresh(onReload: () {
+      unawaited(_recarregar(forcarApi: _viaApi));
+    });
+    if (_viaApi) {
+      LanApiEventHub.instance.addListener(_onLanApiEvento);
+    }
+    unawaited(_carregarInicial());
   }
 
-  @override
-  void dispose() {
-    disposeSafeSyncRefresh();
-    super.dispose();
+  Future<void> _carregarInicial() async {
+    if (_viaApi) {
+      setState(() => _carregando = true);
+      try {
+        await (_repo as RecadoLojaApiRepository).hidratar();
+      } on LanApiException catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackAviso(context, e, prefixo: 'Recados');
+        }
+      } catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackAviso(context, e, prefixo: 'Recados');
+        }
+      }
+      if (mounted) setState(() => _carregando = false);
+    }
+    await _recarregar();
   }
 
-  void _recarregar() {
+  void _onLanApiEvento() {
     if (!mounted) return;
-    setState(() => _recados = _repo.listarTodos());
+    // Atualiza FAB offline / chips mesmo sem entidade nova.
+    setState(() {});
+    if (LanApiEventHub.instance.deveBloquearOperacoes) return;
+    if (LanApiEventHub.instance.ultimaEntidade != 'recado_loja') return;
+    unawaited(_recarregar(forcarApi: true));
+  }
+
+  Future<void> _recarregar({bool forcarApi = false}) async {
+    if (!mounted) return;
+    if (forcarApi && _viaApi) {
+      try {
+        await (_repo as RecadoLojaApiRepository).hidratar();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() => _recados = List<RecadoLoja>.from(_repo.listarTodos()));
+  }
+
+  Future<void> _aguardar(dynamic r) async {
+    if (r is Future) await r;
   }
 
   List<RecadoLoja> get _visiveis {
@@ -72,11 +131,22 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
             .toList();
       case 'ativos':
       default:
-        return _repo.listarAtivosParaUsuario(u);
+        return List<RecadoLoja>.from(_repo.listarAtivosParaUsuario(u));
     }
   }
 
+  bool _offlineTerminal() =>
+      _viaApi && LanApiEventHub.instance.deveBloquearOperacoes;
+
   Future<void> _novoRecado() async {
+    if (_offlineTerminal()) {
+      LanApiFeedback.snackAviso(
+        context,
+        LanApiEventHub.msgServidorOffline,
+        prefixo: 'Recados',
+      );
+      return;
+    }
     final textoController = TextEditingController();
     var prioridade = RecadoLojaPrioridade.normal;
     var destinoTipo = RecadoLojaDestino.todos;
@@ -122,8 +192,7 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
                             )
                             .toList(),
                         onChanged: (v) {
-                          if (v == null) return;
-                          setLocal(() => prioridade = v);
+                          if (v != null) setLocal(() => prioridade = v);
                         },
                       ),
                       const SizedBox(height: 12),
@@ -144,8 +213,7 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
                           ),
                         ],
                         onChanged: (v) {
-                          if (v == null) return;
-                          setLocal(() => destinoTipo = v);
+                          if (v != null) setLocal(() => destinoTipo = v);
                         },
                       ),
                       if (destinoTipo == RecadoLojaDestino.perfil) ...[
@@ -165,8 +233,7 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
                               )
                               .toList(),
                           onChanged: (v) {
-                            if (v == null) return;
-                            setLocal(() => destinoPerfil = v);
+                            if (v != null) setLocal(() => destinoPerfil = v);
                           },
                         ),
                       ],
@@ -196,32 +263,59 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
     }
 
     try {
-      _repo.criar(
-        texto: textoController.text,
-        prioridade: prioridade,
-        destinoTipo: destinoTipo,
-        destinoPerfil: destinoPerfil,
-        criadoPorLogin: widget.usuarioLogado.login,
-        criadoPorNome: widget.usuarioLogado.nome,
+      await _aguardar(
+        _repo.criar(
+          texto: textoController.text,
+          prioridade: prioridade,
+          destinoTipo: destinoTipo,
+          destinoPerfil: destinoPerfil,
+          criadoPorLogin: widget.usuarioLogado.login,
+          criadoPorNome: widget.usuarioLogado.nome,
+        ),
       );
-      _recarregar();
+      await _recarregar(forcarApi: _viaApi);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Recado publicado.')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      if (_viaApi) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Recados');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
     } finally {
       textoController.dispose();
     }
   }
 
-  void _marcarLido(RecadoLoja recado) {
-    _repo.marcarLido(recado.id, widget.usuarioLogado.login);
-    _recarregar();
+  Future<void> _marcarLido(RecadoLoja recado) async {
+    if (_offlineTerminal()) {
+      LanApiFeedback.snackAviso(
+        context,
+        LanApiEventHub.msgServidorOffline,
+        prefixo: 'Recados',
+      );
+      return;
+    }
+    try {
+      await _aguardar(
+        _repo.marcarLido(recado.id, widget.usuarioLogado.login),
+      );
+      await _recarregar(forcarApi: _viaApi);
+    } catch (e) {
+      if (!mounted) return;
+      if (_viaApi) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Recados');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    }
   }
 
   Future<void> _arquivar(RecadoLoja recado) async {
@@ -230,6 +324,14 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
         const SnackBar(
           content: Text('Somente quem criou ou gerente/dono pode arquivar.'),
         ),
+      );
+      return;
+    }
+    if (_offlineTerminal()) {
+      LanApiFeedback.snackAviso(
+        context,
+        LanApiEventHub.msgServidorOffline,
+        prefixo: 'Recados',
       );
       return;
     }
@@ -250,9 +352,19 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
         ],
       ),
     );
-    if (ok == true) {
-      _repo.arquivar(recado.id);
-      _recarregar();
+    if (ok != true) return;
+    try {
+      await _aguardar(_repo.arquivar(recado.id));
+      await _recarregar(forcarApi: _viaApi);
+    } catch (e) {
+      if (!mounted) return;
+      if (_viaApi) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Recados');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
     }
   }
 
@@ -265,8 +377,16 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
       );
       return;
     }
+    if (_offlineTerminal()) {
+      LanApiFeedback.snackAviso(
+        context,
+        LanApiEventHub.msgServidorOffline,
+        prefixo: 'Recados',
+      );
+      return;
+    }
 
-    final qtd = _repo.contarArquivados();
+    final qtd = _repo.contarArquivados() as int;
     final acao = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -321,15 +441,28 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
     );
     if (confirma != true || !mounted) return;
 
-    final n = _repo.apagarTodosArquivados();
-    _recarregar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          n > 0 ? '$n recado(s) apagado(s).' : 'Nenhum recado arquivado.',
+    try {
+      final raw = _repo.apagarTodosArquivados();
+      final n = raw is Future ? await raw as int : raw as int;
+      await _recarregar(forcarApi: _viaApi);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            n > 0 ? '$n recado(s) apagado(s).' : 'Nenhum recado arquivado.',
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      if (_viaApi) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Recados');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    }
   }
 
   Color _corPrioridade(BuildContext context, String prioridade) {
@@ -344,11 +477,20 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
   }
 
   @override
+  void dispose() {
+    if (_viaApi) {
+      LanApiEventHub.instance.removeListener(_onLanApiEvento);
+    }
+    disposeSafeSyncRefresh();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final u = widget.usuarioLogado;
     final lista = _visiveis;
-    final naoLidos = _repo.contarNaoLidos(u);
-    final arquivados = _repo.contarArquivados();
+    final naoLidos = _repo.contarNaoLidos(u) as int;
+    final arquivados = _repo.contarArquivados() as int;
     final podeManutencao = RecadoLojaHelper.podeManutencao(u);
 
     return Scaffold(
@@ -372,123 +514,138 @@ class _RecadosLojaPageState extends State<RecadosLojaPage>
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _novoRecado,
+        onPressed: _offlineTerminal() ? null : _novoRecado,
         icon: const Icon(Icons.add_comment_outlined),
-        label: const Text('Novo recado'),
+        label: Text(_offlineTerminal() ? 'Offline' : 'Novo recado'),
       ),
-      body: Column(
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Row(
+      body: _carregando
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
               children: [
-                _chipFiltro('Nao lidos', 'nao_lidos'),
-                _chipFiltro('Ativos', 'ativos'),
-                _chipFiltro('Todos', 'todos'),
-                _chipFiltro('Arquivados', 'arquivados'),
-              ],
-            ),
-          ),
-          if (_filtro == 'arquivados' && podeManutencao) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: OutlinedButton.icon(
-                onPressed: _abrirManutencaoArquivados,
-                icon: const Icon(Icons.delete_sweep_outlined),
-                label: Text(
-                  arquivados > 0
-                      ? 'Manutencao — apagar todos ($arquivados)'
-                      : 'Manutencao — apagar arquivados',
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                  child: Row(
+                    children: [
+                      _chipFiltro('Nao lidos', 'nao_lidos'),
+                      _chipFiltro('Ativos', 'ativos'),
+                      _chipFiltro('Todos', 'todos'),
+                      _chipFiltro('Arquivados', 'arquivados'),
+                    ],
+                  ),
                 ),
-              ),
-            ),
-          ],
-          Expanded(
-            child: lista.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        _filtro == 'nao_lidos'
-                            ? 'Nenhum recado pendente de leitura.'
-                            : _filtro == 'arquivados'
-                                ? 'Nenhum recado arquivado.'
-                                : 'Nenhum recado neste filtro.',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyLarge,
+                if (_filtro == 'arquivados' && podeManutencao) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: OutlinedButton.icon(
+                      onPressed: _abrirManutencaoArquivados,
+                      icon: const Icon(Icons.delete_sweep_outlined),
+                      label: Text(
+                        arquivados > 0
+                            ? 'Manutencao — apagar todos ($arquivados)'
+                            : 'Manutencao — apagar arquivados',
                       ),
                     ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: lista.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final recado = lista[index];
-                      final lido = RecadoLojaHelper.foiLido(recado, u.login);
-                      final cor = _corPrioridade(context, recado.prioridade);
-                      final autor = recado.criadoPorNome.trim().isNotEmpty
-                          ? recado.criadoPorNome.trim()
-                          : recado.criadoPorLogin;
-                      return Card(
-                        child: ListTile(
-                          isThreeLine: true,
-                          leading: CircleAvatar(
-                            backgroundColor: cor.withValues(alpha: 0.15),
-                            child: Icon(
-                              lido
-                                  ? Icons.mark_email_read_outlined
-                                  : Icons.mark_email_unread_outlined,
-                              color: cor,
+                  ),
+                ],
+                Expanded(
+                  child: lista.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              _filtro == 'nao_lidos'
+                                  ? 'Nenhum recado pendente de leitura.'
+                                  : _filtro == 'arquivados'
+                                      ? 'Nenhum recado arquivado.'
+                                      : 'Nenhum recado neste filtro.',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodyLarge,
                             ),
                           ),
-                          title: Text(
-                            recado.texto,
-                            style: TextStyle(
-                              fontWeight:
-                                  lido ? FontWeight.w500 : FontWeight.w700,
-                            ),
-                          ),
-                          subtitle: Text(
-                            '${RecadoLojaPrioridade.rotulo(recado.prioridade)} · '
-                            '${RecadoLojaDestino.rotuloTipo(recado.destinoTipo, recado.destinoPerfil)}\n'
-                            '$autor · ${_dataFmt.format(recado.criadoEm.toLocal())}',
-                          ),
-                          trailing: PopupMenuButton<String>(
-                            onSelected: (v) {
-                              switch (v) {
-                                case 'lido':
-                                  _marcarLido(recado);
-                                  break;
-                                case 'arquivar':
-                                  _arquivar(recado);
-                                  break;
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              if (!lido && recado.ativo)
-                                const PopupMenuItem(
-                                  value: 'lido',
-                                  child: Text('Marcar como lido'),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(12),
+                          itemCount: lista.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            final recado = lista[index];
+                            final lido =
+                                RecadoLojaHelper.foiLido(recado, u.login);
+                            final cor =
+                                _corPrioridade(context, recado.prioridade);
+                            final autor =
+                                recado.criadoPorNome.trim().isNotEmpty
+                                    ? recado.criadoPorNome.trim()
+                                    : recado.criadoPorLogin;
+                            final podeMarcarLido = !lido && recado.ativo;
+                            final podeArquivar = recado.ativo &&
+                                RecadoLojaHelper.podeArquivar(recado, u);
+                            return Card(
+                              child: ListTile(
+                                isThreeLine: true,
+                                leading: CircleAvatar(
+                                  backgroundColor:
+                                      cor.withValues(alpha: 0.15),
+                                  child: Icon(
+                                    lido
+                                        ? Icons.mark_email_read_outlined
+                                        : Icons.mark_email_unread_outlined,
+                                    color: cor,
+                                  ),
                                 ),
-                              if (recado.ativo)
-                                const PopupMenuItem(
-                                  value: 'arquivar',
-                                  child: Text('Arquivar'),
+                                title: Text(
+                                  recado.texto,
+                                  style: TextStyle(
+                                    fontWeight: lido
+                                        ? FontWeight.w500
+                                        : FontWeight.w700,
+                                  ),
                                 ),
-                            ],
-                          ),
-                          onTap: () {
-                            if (!lido && recado.ativo) _marcarLido(recado);
+                                subtitle: Text(
+                                  '${RecadoLojaPrioridade.rotulo(recado.prioridade)} · '
+                                  '${RecadoLojaDestino.rotuloTipo(recado.destinoTipo, recado.destinoPerfil)}\n'
+                                  '$autor · ${_dataFmt.format(recado.criadoEm.toLocal())}',
+                                ),
+                                trailing: (podeMarcarLido || podeArquivar)
+                                    ? PopupMenuButton<String>(
+                                        onSelected: (v) {
+                                          switch (v) {
+                                            case 'lido':
+                                              unawaited(_marcarLido(recado));
+                                              break;
+                                            case 'arquivar':
+                                              unawaited(_arquivar(recado));
+                                              break;
+                                          }
+                                        },
+                                        itemBuilder: (context) => [
+                                          if (podeMarcarLido)
+                                            const PopupMenuItem(
+                                              value: 'lido',
+                                              child: Text('Marcar como lido'),
+                                            ),
+                                          if (podeArquivar)
+                                            const PopupMenuItem(
+                                              value: 'arquivar',
+                                              child: Text('Arquivar'),
+                                            ),
+                                        ],
+                                      )
+                                    : null,
+                                onTap: () {
+                                  if (!lido && recado.ativo) {
+                                    unawaited(_marcarLido(recado));
+                                  }
+                                },
+                              ),
+                            );
                           },
                         ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
+                ),
+              ],
+            ),
     );
   }
 

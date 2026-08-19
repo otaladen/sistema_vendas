@@ -8,7 +8,6 @@ import 'package:path/path.dart' as p;
 import 'package:printing/printing.dart';
 
 import '../../data/app_config_repository.dart';
-import '../../data/produto_repository.dart';
 import '../../domain/obra_calculadora.dart';
 import '../../domain/obra_calculadora_gemini_parse.dart';
 import '../../domain/obra_calculadora_projeto.dart';
@@ -46,7 +45,8 @@ class PdvObraCalculadoraPanel extends StatefulWidget {
   static const double alturaEstimada = 720;
 
   final EmpresaConfig config;
-  final ProdutoRepository produtoRepository;
+  /// [ProdutoRepository] (PC1) ou [ProdutoApiRepository] (Terminal Leve).
+  final dynamic produtoRepository;
   final VoidCallback onFechar;
   final Future<void> Function(List<PdvObraCalculadoraLinhaInsercao> linhas)
       onAdicionarTudo;

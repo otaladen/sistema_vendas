@@ -4,15 +4,19 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../../domain/venda_relacao_safe.dart';
 import '../../model/venda.dart';
 import 'logistica_entregas.dart';
 import 'romaneio_carga_consolidada.dart';
 
 /// Endereco completo para romaneio/PDF (entrega ou cadastro do cliente).
-String enderecoExibicaoRomaneio(Venda venda) {
+String enderecoExibicaoRomaneio(Venda venda, {dynamic clienteRepository}) {
   final entrega = venda.enderecoEntrega.trim();
   if (entrega.isNotEmpty) return entrega;
-  final cli = venda.cliente.target;
+  final cli = VendaRelacaoSafe.cliente(
+    venda,
+    clienteRepository: clienteRepository,
+  );
   if (cli == null) return '';
   final enderecos = cli.listarEnderecos();
   if (enderecos.isNotEmpty) return enderecos.first.resumo();
@@ -81,7 +85,13 @@ pw.Widget pwRomaneioSecaoCargaConsolidada({
           ...linhas.map(
             (l) => pw.TableRow(
               children: [
-                _pwCelCorpoRomaneio(l.nomeProduto, fsLin, base),
+                _pwCelCorpoRomaneio(
+                  l.rotuloLote.trim().isEmpty
+                      ? l.nomeProduto
+                      : '${l.nomeProduto}\n${l.rotuloLote}',
+                  fsLin,
+                  base,
+                ),
                 _pwCelCorpoRomaneio(l.codigoSku, fsLin, base),
                 _pwCelCorpoRomaneio(l.unidade, fsLin, base),
                 _pwCelCorpoRomaneio(

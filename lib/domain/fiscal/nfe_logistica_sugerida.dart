@@ -1,4 +1,6 @@
 import '../entrega_venda_helper.dart';
+import '../entregas/romaneio_carga_merge.dart';
+import '../../model/item_venda.dart';
 import '../../model/venda.dart';
 import 'peso_carga_venda_estimador.dart';
 
@@ -23,15 +25,23 @@ class NfeLogisticaSugerida {
   final String mensagem;
   final bool temTransporteLoja;
 
-  static NfeLogisticaSugerida calcular(Venda venda) {
-    EntregaVendaHelper.aplicarLegadoTipoUnicoNosItensSeNecessario(venda);
+  static NfeLogisticaSugerida calcular(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
+    final lista =
+        itens ?? RomaneioCargaMerge.itensDaVendaSafe(venda);
+    EntregaVendaHelper.aplicarLegadoTipoUnicoNosItensSeNecessario(
+      venda,
+      itens: lista,
+    );
 
     final temFrete = venda.valorFrete > 0.009;
-    final temCarreto = _vendaTemCarretoOuEntrega(venda);
+    final temCarreto = _vendaTemCarretoOuEntrega(venda, lista);
     final temTransporte = temFrete || temCarreto;
 
     if (!temTransporte) {
-      final est = PesoCargaVendaEstimador.estimar(venda);
+      final est = PesoCargaVendaEstimador.estimar(venda, itens: lista);
       return NfeLogisticaSugerida(
         modalidadeFrete: 9,
         volumes: 1,
@@ -45,7 +55,10 @@ class NfeLogisticaSugerida {
       );
     }
 
-    final est = PesoCargaVendaEstimador.estimarItensComTransporte(venda);
+    final est = PesoCargaVendaEstimador.estimarItensComTransporte(
+      venda,
+      itens: lista,
+    );
     final placa = _extrairPlacaSugerida(venda);
     final partes = <String>[];
     if (temCarreto) partes.add('carreto/entrega');
@@ -67,19 +80,22 @@ class NfeLogisticaSugerida {
     );
   }
 
-  static bool _vendaTemCarretoOuEntrega(Venda venda) {
+  static bool _vendaTemCarretoOuEntrega(
+    Venda venda,
+    List<ItemVenda> itens,
+  ) {
     if (venda.tipoEntrega == EntregaVendaHelper.tipoEntregaLoja) {
       return true;
     }
     if (venda.tipoEntrega == EntregaVendaHelper.tipoMisto) {
-      return venda.itens.any(
+      return itens.any(
         (i) =>
             EntregaVendaHelper.tipoEfetivoItem(i) ==
                 EntregaVendaHelper.tipoEntregaLoja ||
             EntregaVendaHelper.itemEntraNaCargaEntrega(venda, i),
       );
     }
-    return venda.itens.any(
+    return itens.any(
       (i) => EntregaVendaHelper.itemEntraNaCargaEntrega(venda, i),
     );
   }

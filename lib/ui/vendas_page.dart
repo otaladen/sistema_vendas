@@ -1,11 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_config_repository.dart';
-import '../data/cliente_repository.dart';
-import '../data/produto_repository.dart';
-import '../data/venda_repository.dart';
-import '../data/vendedor_repository.dart';
-import '../data/motorista_repository.dart';
 import '../domain/main_menu_sub_destino.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
@@ -31,11 +26,11 @@ class VendasPage extends StatelessWidget {
     required this.onLogout,
   });
 
-  final ProdutoRepository produtoRepository;
-  final ClienteRepository clienteRepository;
-  final VendaRepository vendaRepository;
-  final VendedorRepository vendedorRepository;
-  final MotoristaRepository motoristaRepository;
+  final dynamic produtoRepository;
+  final dynamic clienteRepository;
+  final dynamic vendaRepository;
+  final dynamic vendedorRepository;
+  final dynamic motoristaRepository;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
   final UsuarioSistema usuarioLogado;

@@ -68,6 +68,8 @@ abstract final class NfeNumeracaoFiscalHelper {
     required int numeroInicial,
     required int numeroFinal,
     NfeInutilizacaoStore? inutilizacaoStore,
+    /// `55` = NF-e (valida contra historico local). `65` = NFC-e (so sobreposicao).
+    String modelo = '55',
   }) {
     if (numeroInicial <= 0 || numeroFinal < numeroInicial) {
       return 'Faixa invalida: numero inicial deve ser <= final e ambos > 0.';
@@ -75,31 +77,37 @@ abstract final class NfeNumeracaoFiscalHelper {
     if (numeroFinal - numeroInicial > 9999) {
       return 'Faixa maxima de 10.000 numeros por pedido (SEFAZ).';
     }
-    final conflitos = conflitosNaFaixa(
-      store: store,
-      serie: serie,
-      numeroInicial: numeroInicial,
-      numeroFinal: numeroFinal,
-    );
-    if (conflitos.isNotEmpty) {
-      final amostra = conflitos
-          .take(5)
-          .map((c) => '${c.numero} (${c.situacao})')
-          .join(', ');
-      final extra = conflitos.length > 5 ? '...' : '';
-      return 'Conflito: ja existe NF-e na faixa ($amostra$extra). '
-          'Inutilize apenas numeros nunca emitidos.';
+    final modeloNorm = modelo == '65' ? '65' : '55';
+    if (modeloNorm == '55') {
+      final conflitos = conflitosNaFaixa(
+        store: store,
+        serie: serie,
+        numeroInicial: numeroInicial,
+        numeroFinal: numeroFinal,
+      );
+      if (conflitos.isNotEmpty) {
+        final amostra = conflitos
+            .take(5)
+            .map((c) => '${c.numero} (${c.situacao})')
+            .join(', ');
+        final extra = conflitos.length > 5 ? '...' : '';
+        return 'Conflito: ja existe NF-e na faixa ($amostra$extra). '
+            'Inutilize apenas numeros nunca emitidos.';
+      }
     }
     final inutStore = inutilizacaoStore;
     if (inutStore != null) {
       final serieNorm = normalizarSerie(serie);
       for (final inut in inutStore.listar()) {
         if (!inut.sucesso || normalizarSerie(inut.serie) != serieNorm) continue;
+        final inutModelo = inut.modelo == '65' ? '65' : '55';
+        if (inutModelo != modeloNorm) continue;
         final sobrepoe = numeroInicial <= inut.numeroFinal &&
             numeroFinal >= inut.numeroInicial;
         if (sobrepoe) {
           return 'Faixa sobrepoe inutilizacao ja registrada '
-              '(${inut.numeroInicial}-${inut.numeroFinal} serie ${inut.serie}).';
+              '(${inut.rotuloModelo} ${inut.numeroInicial}-${inut.numeroFinal} '
+              'serie ${inut.serie}).';
         }
       }
     }

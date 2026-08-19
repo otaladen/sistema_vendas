@@ -4,6 +4,7 @@ import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../../model/vendedor.dart';
 import '../../domain/produto_imagem_nome_arquivo.dart';
+import '../../domain/venda_relacao_safe.dart';
 
 /// Serializacao para sync LAN (JSON).
 class SyncEntityCodec {
@@ -61,8 +62,11 @@ class SyncEntityCodec {
       'embalagemMultiplica': p.embalagemMultiplica,
       'permiteQuantidadeFracionada': p.permiteQuantidadeFracionada,
       'ultimaVendaEm': p.ultimaVendaEm?.toUtc().toIso8601String(),
+      'precoAlteradoEm': p.precoAlteradoEm?.toUtc().toIso8601String(),
       'criadoEm': p.criadoEm.toUtc().toIso8601String(),
       'ativo': p.ativo,
+      'controlaLoteValidade': p.controlaLoteValidade,
+      'percentualBotaFora': p.percentualBotaFora,
     };
   }
 
@@ -123,8 +127,13 @@ class SyncEntityCodec {
       ultimaVendaEm: DateTime.tryParse(
         (m['ultimaVendaEm'] ?? '').toString(),
       )?.toUtc(),
+      precoAlteradoEm: DateTime.tryParse(
+        (m['precoAlteradoEm'] ?? '').toString(),
+      )?.toUtc(),
       criadoEm: DateTime.tryParse((m['criadoEm'] ?? '').toString())?.toUtc(),
       ativo: m['ativo'] != false,
+      controlaLoteValidade: m['controlaLoteValidade'] == true,
+      percentualBotaFora: (m['percentualBotaFora'] as num?)?.toDouble() ?? 0,
     );
   }
 
@@ -261,6 +270,7 @@ class SyncEntityCodec {
     final itens = <Map<String, dynamic>>[];
     for (final i in v.itens) {
       itens.add({
+        'id': i.id,
         'nomeProduto': i.nomeProduto,
         'quantidade': i.quantidade,
         'quantidadeJaRetirada': i.quantidadeJaRetirada,
@@ -272,10 +282,16 @@ class SyncEntityCodec {
         'precoCustoUnitario': i.precoCustoUnitario,
         'promocaoId': i.promocaoId,
         'promocaoNomeSnapshot': i.promocaoNomeSnapshot,
+        'loteConsumosJson': i.loteConsumosJson,
+        'botaForaAplicado': i.botaForaAplicado,
+        'percentualBotaForaAplicado': i.percentualBotaForaAplicado,
+        'lojaOrigemMercadoria': i.lojaOrigemMercadoria,
+        'buscarNaLojaStatus': i.buscarNaLojaStatus,
+        'quantidadeBuscarNaLoja': i.quantidadeBuscarNaLoja,
         'produtoId': i.produto.targetId,
       });
     }
-    return {
+    final m = <String, dynamic>{
       'id': v.id,
       'data': v.data.toUtc().toIso8601String(),
       'total': v.total,
@@ -300,6 +316,7 @@ class SyncEntityCodec {
       'cargaCarregada': v.cargaCarregada,
       'cargaSaiu': v.cargaSaiu,
       'carretoReservaAteSaida': v.carretoReservaAteSaida,
+      'lojaOrigemMercadoria': v.lojaOrigemMercadoria,
       'entregaPendente': v.entregaPendente,
       'cancelada': v.cancelada,
       'motivoCancelamento': v.motivoCancelamento,
@@ -341,8 +358,11 @@ class SyncEntityCodec {
           v.cupomNaoFiscalEmitidoEm?.toUtc().toIso8601String(),
       'clienteId': v.cliente.targetId,
       'vendedorId': v.vendedor.targetId,
+      'uuidLocal': v.uuidLocal,
       'itens': itens,
     };
+    VendaRelacaoSafe.preencherMapaComCliente(m, v);
+    return m;
   }
 
   static Venda vendaCabecaDeMap(Map<String, dynamic> m) {
@@ -373,6 +393,7 @@ class SyncEntityCodec {
       cargaCarregada: m['cargaCarregada'] == true,
       cargaSaiu: m['cargaSaiu'] == true,
       carretoReservaAteSaida: m['carretoReservaAteSaida'] == true,
+      lojaOrigemMercadoria: (m['lojaOrigemMercadoria'] ?? '').toString(),
       entregaPendente: m['entregaPendente'] == true,
       cancelada: m['cancelada'] == true,
       motivoCancelamento: (m['motivoCancelamento'] ?? '').toString(),
@@ -425,11 +446,12 @@ class SyncEntityCodec {
       cupomNaoFiscalEmitidoEm: DateTime.tryParse(
         (m['cupomNaoFiscalEmitidoEm'] ?? '').toString(),
       )?.toUtc(),
+      uuidLocal: (m['uuidLocal'] ?? '').toString(),
     );
   }
 
   static ItemVenda itemDeMap(Map<String, dynamic> m) {
-    return ItemVenda(
+    final item = ItemVenda(
       id: 0,
       nomeProduto: (m['nomeProduto'] ?? '').toString(),
       quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
@@ -442,6 +464,17 @@ class SyncEntityCodec {
       precoCustoUnitario: (m['precoCustoUnitario'] as num?)?.toDouble() ?? 0,
       promocaoId: (m['promocaoId'] as num?)?.toInt() ?? 0,
       promocaoNomeSnapshot: (m['promocaoNomeSnapshot'] ?? '').toString(),
+      loteConsumosJson: (m['loteConsumosJson'] ?? '').toString(),
+      botaForaAplicado: m['botaForaAplicado'] == true,
+      percentualBotaForaAplicado:
+          (m['percentualBotaForaAplicado'] as num?)?.toDouble() ?? 0,
+      lojaOrigemMercadoria: (m['lojaOrigemMercadoria'] ?? '').toString(),
+      buscarNaLojaStatus: (m['buscarNaLojaStatus'] ?? '').toString(),
+      quantidadeBuscarNaLoja:
+          (m['quantidadeBuscarNaLoja'] as num?)?.toInt() ?? 0,
     );
+    final pid = (m['produtoId'] as num?)?.toInt() ?? 0;
+    if (pid > 0) item.produto.targetId = pid;
+    return item;
   }
 }

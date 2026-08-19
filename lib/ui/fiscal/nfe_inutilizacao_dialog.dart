@@ -11,13 +11,15 @@ import '../../services/fiscal_config_store.dart';
 import '../../services/focus_nfe_service.dart';
 import '../layout/app_layout.dart';
 
-/// Inutilizacao de numeracao NF-e (POST Focus /v2/nfe/inutilizacao).
+/// Inutilizacao de numeracao NF-e (55) ou NFC-e (65) via Focus/SEFAZ.
 Future<void> showNfeInutilizacaoDialog({
   required BuildContext context,
   required FocusNfeService focusNfe,
   required String usuarioLogin,
   required NfeSaidaFiscalStore nfeStore,
   required NfeInutilizacaoStore inutilizacaoStore,
+  /// `55` = NF-e, `65` = NFC-e.
+  String modeloInicial = '55',
 }) {
   return showDialog<void>(
     context: context,
@@ -27,6 +29,7 @@ Future<void> showNfeInutilizacaoDialog({
       usuarioLogin: usuarioLogin,
       nfeStore: nfeStore,
       inutilizacaoStore: inutilizacaoStore,
+      modeloInicial: modeloInicial == '65' ? '65' : '55',
     ),
   );
 }
@@ -37,24 +40,35 @@ class _NfeInutilizacaoDialog extends StatefulWidget {
     required this.usuarioLogin,
     required this.nfeStore,
     required this.inutilizacaoStore,
+    required this.modeloInicial,
   });
 
   final FocusNfeService focusNfe;
   final String usuarioLogin;
   final NfeSaidaFiscalStore nfeStore;
   final NfeInutilizacaoStore inutilizacaoStore;
+  final String modeloInicial;
 
   @override
   State<_NfeInutilizacaoDialog> createState() => _NfeInutilizacaoDialogState();
 }
 
 class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
+  late String _modelo;
   final _serie = TextEditingController(text: '1');
   final _numIni = TextEditingController();
   final _numFim = TextEditingController();
   final _just = TextEditingController();
   bool _processando = false;
   String? _avisoConflito;
+
+  String get _rotuloModelo => _modelo == '65' ? 'NFC-e' : 'NF-e';
+
+  @override
+  void initState() {
+    super.initState();
+    _modelo = widget.modeloInicial;
+  }
 
   @override
   void dispose() {
@@ -78,6 +92,7 @@ class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
       serie: _serie.text,
       numeroInicial: ini,
       numeroFinal: fim,
+      modelo: _modelo,
     );
     setState(() => _avisoConflito = msg);
   }
@@ -100,6 +115,7 @@ class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
       serie: _serie.text,
       numeroInicial: ini,
       numeroFinal: fim,
+      modelo: _modelo,
     );
     if (validacao != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -110,9 +126,10 @@ class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Confirmar inutilizacao'),
+        title: Text('Confirmar inutilizacao $_rotuloModelo'),
         content: Text(
-          'Inutilizar numeros $ini a $fim serie ${_serie.text.trim()}?\n\n'
+          'Inutilizar numeros $ini a $fim serie ${_serie.text.trim()} '
+          '($_rotuloModelo)?\n\n'
           'Acao irreversivel na SEFAZ.',
         ),
         actions: [
@@ -130,20 +147,29 @@ class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
     if (ok != true || !mounted) return;
 
     setState(() => _processando = true);
-    final r = await widget.focusNfe.inutilizarNumeracaoNfe(
-      cnpjEmitente: FiscalConfigStore.efetivo.cnpjEmitente,
-      serie: _serie.text,
-      numeroInicial: ini,
-      numeroFinal: fim,
-      justificativa: just,
-    );
+    final r = _modelo == '65'
+        ? await widget.focusNfe.inutilizarNumeracaoNfce(
+            cnpjEmitente: FiscalConfigStore.efetivo.cnpjEmitente,
+            serie: _serie.text,
+            numeroInicial: ini,
+            numeroFinal: fim,
+            justificativa: just,
+          )
+        : await widget.focusNfe.inutilizarNumeracaoNfe(
+            cnpjEmitente: FiscalConfigStore.efetivo.cnpjEmitente,
+            serie: _serie.text,
+            numeroInicial: ini,
+            numeroFinal: fim,
+            justificativa: just,
+          );
     if (!mounted) return;
     setState(() => _processando = false);
 
-    final id = '${DateTime.now().millisecondsSinceEpoch}_${ini}_$fim';
+    final id = '${DateTime.now().millisecondsSinceEpoch}_${_modelo}_${ini}_$fim';
     widget.inutilizacaoStore.gravar(
       NfeInutilizacaoRegistro(
         id: id,
+        modelo: _modelo,
         serie: _serie.text.trim().isEmpty ? '1' : _serie.text.trim(),
         numeroInicial: ini,
         numeroFinal: fim,
@@ -168,8 +194,9 @@ class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
         modulo: AuditoriaModulo.fiscal,
         acao: AuditoriaAcao.nfeInutilizar,
         usuarioLogin: widget.usuarioLogin,
-        resumo: 'Inutilizacao NF-e serie ${_serie.text} $ini-$fim',
+        resumo: 'Inutilizacao $_rotuloModelo serie ${_serie.text} $ini-$fim',
         detalhes: {
+          'modelo': _modelo,
           'serie': _serie.text,
           'ini': ini,
           'fim': fim,
@@ -194,7 +221,7 @@ class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Inutilizar numeracao NF-e'),
+      title: Text('Inutilizar numeracao $_rotuloModelo'),
       content: AdaptiveDialogContent(
         desktopWidth: 480,
         child: Column(
@@ -205,6 +232,25 @@ class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
               'Homologacao: apenas testes.',
             ),
             const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _modelo,
+              decoration: const InputDecoration(
+                labelText: 'Modelo do documento',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: '55', child: Text('NF-e (modelo 55)')),
+                DropdownMenuItem(value: '65', child: Text('NFC-e (modelo 65)')),
+              ],
+              onChanged: _processando
+                  ? null
+                  : (v) {
+                      if (v == null) return;
+                      setState(() => _modelo = v);
+                      _atualizarAvisoConflito();
+                    },
+            ),
+            const SizedBox(height: 8),
             TextField(
               controller: _serie,
               decoration: const InputDecoration(

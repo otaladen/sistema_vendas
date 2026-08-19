@@ -559,3 +559,191 @@ String? dicaBuscaContextual(String termoBruto) {
   }
   return null;
 }
+
+/// Normaliza texto de busca (acentos, pontuacao) — espelha o motor ObjectBox.
+String normalizarTextoBuscaProduto(String texto) {
+  final lower = texto.toLowerCase().trim();
+  if (lower.isEmpty) return '';
+  final sb = StringBuffer();
+  const mapa = <String, String>{
+    'á': 'a',
+    'à': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'ä': 'a',
+    'é': 'e',
+    'è': 'e',
+    'ê': 'e',
+    'ë': 'e',
+    'í': 'i',
+    'ì': 'i',
+    'î': 'i',
+    'ï': 'i',
+    'ó': 'o',
+    'ò': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ö': 'o',
+    'ú': 'u',
+    'ù': 'u',
+    'û': 'u',
+    'ü': 'u',
+    'ç': 'c',
+    'ñ': 'n',
+  };
+  for (final rune in lower.runes) {
+    final char = String.fromCharCode(rune);
+    sb.write(mapa[char] ?? char);
+  }
+  return sb.toString().replaceAll(RegExp(r'[^\w\s\/\-\+]'), ' ');
+}
+
+class _ProdutoMemoriaScore {
+  const _ProdutoMemoriaScore(this.produto, this.score);
+  final Produto produto;
+  final double score;
+}
+
+/// Busca em memoria (Terminal Leve / cache) com curingas `%` e campos basicos.
+List<Produto> pesquisarProdutosEmMemoria(
+  Iterable<Produto> produtos,
+  String termo, {
+  int offset = 0,
+  int limite = 50,
+  bool somenteAtivos = true,
+  bool somenteInativos = false,
+  bool excluirProdutosInternos = false,
+}) {
+  Iterable<Produto> base = produtos;
+  if (excluirProdutosInternos) {
+    base = base.where((p) => !produtoEhCadastroInternoSistema(p));
+  }
+  if (somenteInativos) {
+    base = base.where((p) => !p.ativo);
+  } else if (somenteAtivos) {
+    base = base.where((p) => p.ativo);
+  }
+
+  final consultaBruta = termo.trim();
+  if (consultaBruta.isEmpty) {
+    final lista = base.toList();
+    if (offset >= lista.length) return const [];
+    return lista.skip(offset).take(limite).toList();
+  }
+
+  if (consultaBruta.contains('%')) {
+    final consultaCuringa = normalizarConsultaCuringa(
+      consultaBruta,
+      normalizarTextoBuscaProduto,
+    );
+    if (consultaUsaModoCuringa(consultaCuringa)) {
+      final curinga = parseConsultaCuringa(consultaCuringa);
+      if (curinga == null) return const [];
+      final scored = <_ProdutoMemoriaScore>[];
+      for (final p in base) {
+        final score = _scoreCuringaEmMemoria(p, curinga.segmentos);
+        if (score > 0) scored.add(_ProdutoMemoriaScore(p, score));
+      }
+      scored.sort((a, b) {
+        final byScore = b.score.compareTo(a.score);
+        if (byScore != 0) return byScore;
+        return a.produto.nome.toLowerCase().compareTo(b.produto.nome.toLowerCase());
+      });
+      return scored.skip(offset).take(limite).map((e) => e.produto).toList();
+    }
+  }
+
+  final consulta = normalizarTextoBuscaProduto(consultaBruta);
+  if (consulta.isEmpty) return const [];
+  final tokens = consulta
+      .split(RegExp(r'\s+'))
+      .where((t) => t.length >= 2)
+      .toList();
+  final scored = <_ProdutoMemoriaScore>[];
+  for (final p in base) {
+    final score = _scoreContemEmMemoria(p, consulta, tokens);
+    if (score > 0) scored.add(_ProdutoMemoriaScore(p, score));
+  }
+  scored.sort((a, b) {
+    final byScore = b.score.compareTo(a.score);
+    if (byScore != 0) return byScore;
+    return a.produto.nome.toLowerCase().compareTo(b.produto.nome.toLowerCase());
+  });
+  return scored.skip(offset).take(limite).map((e) => e.produto).toList();
+}
+
+double _scoreCuringaEmMemoria(Produto p, List<String> segmentos) {
+  final nome = normalizarTextoBuscaProduto(p.nome);
+  var match = avaliarMatchCuringa(nome, segmentos);
+  var todosNoNome = match != null;
+  if (match == null) {
+    final apelidos = parseApelidosBusca(p.apelidosBusca)
+        .map(normalizarTextoBuscaProduto)
+        .where((a) => a.isNotEmpty)
+        .toList();
+    final texto = textoBuscaCuringaProduto(
+      nomeNormalizado: nome,
+      apelidosNormalizados: apelidos,
+    );
+    match = avaliarMatchCuringa(texto, segmentos);
+    if (match == null) {
+      final codigo = normalizarTextoBuscaProduto(p.codigoInterno);
+      final barras = normalizarTextoBuscaProduto(p.codigoBarras);
+      final extra = '$codigo $barras'.trim();
+      match = avaliarMatchCuringa(extra, segmentos);
+      if (match == null) return 0;
+      todosNoNome = false;
+    } else {
+      todosNoNome = false;
+    }
+  }
+
+  var score = 920.0;
+  score += segmentos.length * 200;
+  score += (380 - match.totalSpan).clamp(0, 380);
+  score += (50 - nome.length * 0.12).clamp(0, 50);
+  if (todosNoNome) {
+    score += 300;
+  } else {
+    score -= 80;
+  }
+  if (p.estoqueReal > 0) {
+    score += p.estoqueReal > 35 ? 35 : p.estoqueReal.toDouble();
+  } else {
+    score -= 60;
+  }
+  return score;
+}
+
+double _scoreContemEmMemoria(
+  Produto p,
+  String consulta,
+  List<String> tokens,
+) {
+  final nome = normalizarTextoBuscaProduto(p.nome);
+  final codigo = normalizarTextoBuscaProduto(p.codigoInterno);
+  final barras = normalizarTextoBuscaProduto(p.codigoBarras);
+  final apelidos = normalizarTextoBuscaProduto(p.apelidosBusca);
+  final impressao = normalizarTextoBuscaProduto(p.nomeImpressao);
+  final blob = '$nome $impressao $codigo $barras $apelidos';
+
+  if (codigo == consulta || barras == consulta) return 2000;
+  if (codigo.startsWith(consulta) || barras.startsWith(consulta)) return 1500;
+  if (nome.startsWith(consulta)) return 1200;
+
+  if (tokens.isEmpty) {
+    if (!blob.contains(consulta)) return 0;
+    var score = 400.0;
+    if (nome.contains(consulta)) score += 200;
+    if (p.estoqueReal > 0) score += 20;
+    return score;
+  }
+
+  for (final t in tokens) {
+    if (!blob.contains(t)) return 0;
+  }
+  var score = 500.0 + tokens.length * 40;
+  if (tokens.every(nome.contains)) score += 180;
+  if (p.estoqueReal > 0) score += 20;
+  return score;
+}

@@ -46,15 +46,20 @@ class UsuarioResumoPermissoes {
       'Listagem de vendas',
     );
     add(
-      UsuarioPermissaoHelper.podeVisualizarEntregas(u),
+      UsuarioPermissaoHelper.podeAcessarModuloEntregas(u),
       'Ver entregas / romaneio',
+    );
+    add(
+      UsuarioPermissaoHelper.podeUsarModoMotorista(u),
+      'Modo motorista (rotas e POD)',
     );
     add(
       UsuarioPermissaoHelper.podeGerenciarEntregas(u),
       'Alterar status e montagem de entregas',
     );
     add(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.cadastros), 'Cadastros gerais');
-    add(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque), 'Estoque e NF');
+    add(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque), 'Estoque');
+    add(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.fiscal), 'Fiscal (NFC-e / NF-e)');
     add(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro), 'Financeiro');
     add(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarRelatorios), 'Relatorios');
     add(UsuarioPermissaoHelper.podeCancelarVendas(u), 'Cancelar vendas e devolucoes');

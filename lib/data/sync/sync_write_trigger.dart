@@ -1,9 +1,17 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
+import '../../services/lan_api_server.dart';
+import 'caixa_local_refresh_hub.dart';
+import 'entrega_local_refresh_hub.dart';
+import 'estoque_local_refresh_hub.dart';
 import 'lan_sync_scheduler.dart';
 import 'sync_delete_outbox.dart';
 import 'sync_dirty_outbox.dart';
 import 'sync_priority.dart';
+import 'sync_refresh_hub.dart';
 
 bool _silenciarNotificacaoRede = false;
 
@@ -16,20 +24,69 @@ void leaveSyncApplySilencioso() {
   _silenciarNotificacaoRede = false;
 }
 
+/// PC Windows com LanApi ativa: propaga via WebSocket aos terminais, sem outbox P2P.
+bool _propagarViaLanApiServidor() {
+  if (kIsWeb) return false;
+  try {
+    if (!Platform.isWindows) return false;
+  } catch (_) {
+    return false;
+  }
+  return LanApiServerHub.instance.ativo;
+}
+
 /// Chamado pelos repositorios apos gravacao bem-sucedida para propagar na LAN.
 ///
-/// Com [entidade]/[entidadeId], registra delta no outbox (S4).
+/// No PC servidor Windows (LanApi 8788 ativa): notifica terminais via WS.
+/// No celular: marca dirty outbox e agenda pull/push do hub 8787.
+///
+/// Com [entidade]/[entidadeId], registra delta no outbox (S4) — so clientes.
 /// [entidadeId] == 0 marca todas as linhas da entidade no proximo push.
-///
-/// Prioridade:
-/// - alta (venda/estoque): push quase imediato
-/// - media (cadastros/entregas): debounce curto
-/// - baixa (config fria): so marca dirty; sobe no timer ou pull-to-refresh
-///
-/// O registro no dirty e aguardado antes de agendar o sync (evita corrida de
-/// 350ms em que o push saia vazio e o orcamento nunca suba).
-void notificarAlteracaoParaRede({String? entidade, int? entidadeId}) {
+void notificarAlteracaoParaRede({
+  String? entidade,
+  int? entidadeId,
+  List<int>? entidadeIds,
+}) {
   if (_silenciarNotificacaoRede) return;
+
+  if (_propagarViaLanApiServidor()) {
+    final e = entidade?.trim();
+    if (e != null && e.isNotEmpty) {
+      final ids = entidadeIds ??
+          (entidadeId != null && entidadeId > 0 ? <int>[entidadeId] : null);
+      LanApiServerHub.instance.notificar(e, ids: ids);
+      // PC1 UI: LanApiDeps usa outra instancia de ProdutoRepository; forca
+      // a shell a re-ler o ObjectBox compartilhado sem esperar timer.
+      if (e == 'produto') {
+        EstoqueLocalRefreshHub.instance.notificar(ids: ids);
+      }
+      if (e == 'nfe_importada') {
+        SyncRefreshHub.instance.notificarDadosAtualizados();
+      }
+      if (e == 'recado_loja') {
+        // PC1: UI do Inicio / Recados escuta SyncRefreshHub (API so manda WS).
+        SyncRefreshHub.instance.notificarDadosAtualizados();
+      }
+      if (e == 'inventario') {
+        SyncRefreshHub.instance.notificarDadosAtualizados();
+      }
+      if (e == 'venda' || e == 'titulo_receber' || e == 'recebimento_fiado') {
+        // KPI "Vendas hoje" / financeiro no Inicio do PC servidor.
+        SyncRefreshHub.instance.notificarDadosAtualizados();
+      }
+      if (e == 'caixa_sessoes' || e == 'caixa') {
+        CaixaLocalRefreshHub.instance.notificar();
+      }
+      if (e == 'venda' ||
+          e == 'entrega' ||
+          e == 'conferencia_carga' ||
+          e == 'conferencia_carga_romaneio') {
+        EntregaLocalRefreshHub.instance.notificar();
+      }
+    }
+    return;
+  }
+
   unawaited(
     _notificarAlteracaoParaRedeAsync(
       entidade: entidade,
@@ -71,6 +128,15 @@ void registrarDeleteParaRede(
   int? localId,
 }) {
   if (_silenciarNotificacaoRede) return;
+
+  if (_propagarViaLanApiServidor()) {
+    final e = entity.trim();
+    if (e.isNotEmpty) {
+      LanApiServerHub.instance.notificar(e);
+    }
+    return;
+  }
+
   unawaited(
     _registrarDeleteParaRedeAsync(entity, entityId, localId: localId),
   );

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 enum PermissaoUsuario {
   cadastros,
   estoque,
+  /// Modulo Notas Fiscais (NFC-e / NF-e) — isolado do estoque. Alias: PERM_FISCAL.
+  fiscal,
   vendasHub,
   acessarPdv,
   acessarCaixa,
@@ -113,8 +115,16 @@ class PermissaoUsuarioCatalogo {
     ),
     PermissaoUsuarioInfo(
       chave: PermissaoUsuario.estoque,
-      titulo: 'Estoque e notas fiscais',
-      descricao: 'Entrada de mercadoria, NF importadas e movimentacoes.',
+      titulo: 'Estoque',
+      descricao: 'Entrada de mercadoria, produtos e movimentacoes.',
+      grupo: PermissaoGrupo.modulosMenu,
+    ),
+    PermissaoUsuarioInfo(
+      chave: PermissaoUsuario.fiscal,
+      titulo: 'Fiscal (NFC-e / NF-e)',
+      descricao:
+          'Modulo fiscal: importacao, pendencias, emissao e fechamento. '
+          '(PERM_FISCAL)',
       grupo: PermissaoGrupo.modulosMenu,
     ),
     PermissaoUsuarioInfo(
@@ -299,7 +309,7 @@ class PermissaoUsuarioCatalogo {
       titulo: 'Emitir NF-e de saida (55)',
       descricao: 'Painel NF-e / Focus — faturamento construtoras.',
       grupo: PermissaoGrupo.autorizacoesGerente,
-      dependeDe: PermissaoUsuario.estoque,
+      dependeDe: PermissaoUsuario.fiscal,
     ),
     PermissaoUsuarioInfo(
       chave: PermissaoUsuario.cancelarNfeSaida,

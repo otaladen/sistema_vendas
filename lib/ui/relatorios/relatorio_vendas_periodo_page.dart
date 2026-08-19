@@ -1,9 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/cliente_repository.dart';
-import '../../data/venda_repository.dart';
-import '../../data/vendedor_repository.dart';
 import '../../model/cliente.dart';
 import '../../model/venda.dart';
 import '../../model/vendedor.dart';
@@ -23,9 +20,9 @@ class RelatorioVendasPeriodoPage extends StatefulWidget {
     required this.vendedorRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
-  final VendedorRepository vendedorRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
+  final dynamic vendedorRepository;
 
   @override
   State<RelatorioVendasPeriodoPage> createState() =>
@@ -37,25 +34,19 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
   final DateFormat _dh = DateFormat('dd/MM/yyyy HH:mm');
   LimitesPeriodo? _limites;
   bool _compararPeriodo = false;
-  List<Venda> _linhas = [];
+  List<RelatorioVendaLinhaLiquida> _linhas = [];
 
   String _fmt(double v) => 'R\$ ${_moeda.format(v)}';
 
-  Cliente? _cliente(Venda v) {
-    final t = v.cliente.target;
-    if (t != null) return t;
-    final id = v.cliente.targetId;
-    if (id == 0) return null;
-    return widget.clienteRepository.obterPorId(id);
-  }
+  Cliente? _cliente(Venda v) => relatorioClienteDaVenda(
+        v,
+        clienteRepository: widget.clienteRepository,
+      );
 
-  Vendedor? _vendedor(Venda v) {
-    final t = v.vendedor.target;
-    if (t != null) return t;
-    final id = v.vendedor.targetId;
-    if (id == 0) return null;
-    return widget.vendedorRepository.obterPorId(id);
-  }
+  Vendedor? _vendedor(Venda v) => relatorioVendedorDaVenda(
+        v,
+        vendedorRepository: widget.vendedorRepository,
+      );
 
   String _nomeVendedor(Venda v) {
     final w = _vendedor(v);
@@ -67,7 +58,7 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
   void _atualizar(LimitesPeriodo limites) {
     setState(() {
       _limites = limites;
-      _linhas = relatorioVendasFinalizadasPeriodo(widget.vendaRepository, limites);
+      _linhas = relatorioVendasPeriodoLiquidas(widget.vendaRepository, limites);
     });
   }
 
@@ -95,19 +86,20 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
         'Lucro',
         'Margem %',
       ],
-      ..._linhas.map((v) {
+      ..._linhas.map((l) {
+        final v = l.venda;
         final c = _cliente(v);
-        final margem = v.total.abs() < 0.01
+        final margem = l.total.abs() < 0.01
             ? ''
-            : ((v.lucroTotal / v.total) * 100).toStringAsFixed(1);
+            : ((l.lucro / l.total) * 100).toStringAsFixed(1);
         return [
           '${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
           _dh.format(v.data.toLocal()),
           c?.nomeRazao ?? 'Sem cliente',
           _nomeVendedor(v),
           relatorioRotuloFormaPagamento(v.formaPagamento),
-          _moeda.format(v.total),
-          _moeda.format(v.lucroTotal),
+          _moeda.format(l.total),
+          _moeda.format(l.lucro),
           margem,
         ];
       }),
@@ -132,12 +124,12 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
       ],
       linhas: _linhas
           .map(
-            (v) => [
-              '${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
-              DateFormat('dd/MM/yyyy').format(v.data.toLocal()),
-              _cliente(v)?.nomeRazao ?? '-',
-              _fmt(v.total),
-              _fmt(v.lucroTotal),
+            (l) => [
+              '${l.venda.numeroOrcamento > 0 ? l.venda.numeroOrcamento : l.venda.id}',
+              DateFormat('dd/MM/yyyy').format(l.venda.data.toLocal()),
+              _cliente(l.venda)?.nomeRazao ?? '-',
+              _fmt(l.total),
+              _fmt(l.lucro),
             ],
           )
           .toList(),
@@ -166,6 +158,7 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
       body: Column(
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: _atualizar,
             onAtualizar: lim != null ? () => _atualizar(lim) : null,
             filtrosExtras: [
@@ -194,6 +187,7 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
                       ),
                       const SizedBox(height: 6),
                       Text(
+                        'Valores liquidos de devolucao/troca do periodo. '
                         'Margem ${t.margemPct.toStringAsFixed(1)}% · '
                         'Ticket medio ${_fmt(t.ticketMedio)} · '
                         'Toque na linha para detalhes',
@@ -209,16 +203,18 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
                 : ListView.builder(
                     itemCount: _linhas.length,
                     itemBuilder: (context, i) {
-                      final v = _linhas[i];
+                      final l = _linhas[i];
+                      final v = l.venda;
                       final c = _cliente(v);
-                      final margem = v.total.abs() < 0.01
+                      final margem = l.total.abs() < 0.01
                           ? 0.0
-                          : (v.lucroTotal / v.total) * 100;
+                          : (l.lucro / l.total) * 100;
                       return ListTile(
                         dense: true,
                         title: Text(
                           '${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id} · '
-                          '${_fmt(v.total)} · Lucro ${_fmt(v.lucroTotal)}',
+                          '${_fmt(l.total)} · Lucro ${_fmt(l.lucro)}'
+                          '${l.teveAjuste ? ' (liq.)' : ''}',
                         ),
                         subtitle: Text(
                           '${_dh.format(v.data.toLocal())} · '
@@ -232,6 +228,7 @@ class _RelatorioVendasPeriodoPageState extends State<RelatorioVendasPeriodoPage>
                           context,
                           vendaRepository: widget.vendaRepository,
                           vendaId: v.id,
+                          clienteRepository: widget.clienteRepository,
                         ),
                         onLongPress: c != null && c.id > 0
                             ? () => mostrarResumoClienteRelatorio(

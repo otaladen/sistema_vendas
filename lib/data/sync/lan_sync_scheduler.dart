@@ -86,6 +86,13 @@ class LanSyncScheduler {
     _instanciaAtiva = this;
     _reconnectTentativa = 0;
     _revisionPendenteGrace = null;
+
+    // Servidor Windows: hub/API sobem no LanServidorBootstrap.
+    // Nao agenda heartbeat/presenca contra si mesmo nem pull/push.
+    if (config.redeModoServidor) {
+      return;
+    }
+
     if (_plataformaCelular) {
       _graceAte = DateTime.now().add(_graceCelular);
     } else {
@@ -131,13 +138,23 @@ class LanSyncScheduler {
 
   /// App voltou ao foreground (Wi-Fi pode ter oscilado): reconecta WS + sync leve.
   static void aoRetomarApp() {
+    if (_noopNesteAmbiente) return;
     final s = _instanciaAtiva;
     if (s == null) return;
-    s._reconnectTentativa = 0;
-    s._reconnectRealtimeTimer?.cancel();
-    unawaited(s._conectarTempoReal());
-    unawaited(s._enviarHeartbeat());
-    unawaited(s.sincronizarAgora(modo: SyncModo.periodico, forcar: true));
+    unawaited(s._aoRetomarApp());
+  }
+
+  Future<void> _aoRetomarApp() async {
+    _reconnectTentativa = 0;
+    _reconnectRealtimeTimer?.cancel();
+    final config = await _configRepository.carregarEmpresaConfig();
+    if (config.redeModoServidor) {
+      // Servidor nao e cliente de sync.
+      return;
+    }
+    unawaited(_conectarTempoReal());
+    unawaited(_enviarHeartbeat());
+    unawaited(sincronizarAgora(modo: SyncModo.periodico, forcar: true));
   }
 
   Future<String> _rotuloEstacaoParaHeartbeat() async {
@@ -397,8 +414,19 @@ class LanSyncScheduler {
     });
   }
 
+  /// PC Windows nao usa pull/push P2P (LanApi :8788 + WS). Evita no-ops.
+  static bool get _noopNesteAmbiente {
+    if (kIsWeb) return false;
+    try {
+      return Platform.isWindows;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Apos gravacao de prioridade media (cadastros, entregas).
   static Future<void> solicitarSyncImediato() async {
+    if (_noopNesteAmbiente) return;
     final scheduler = _instanciaAtiva;
     if (scheduler == null) return;
     if (_plataformaCelular) {
@@ -425,6 +453,7 @@ class LanSyncScheduler {
   /// aguardam o **mesmo** ciclo final — nunca liberar o await anterior cedo,
   /// senao o PDV mostra o numero local antes do ACK `numeroCorrections`.
   static Future<void> solicitarSyncPrioritario() async {
+    if (_noopNesteAmbiente) return;
     final scheduler = _instanciaAtiva;
     if (scheduler == null) return;
     // Coalesca gravações em rajada (itens) sem perder o await do ultimo ciclo.
@@ -463,6 +492,9 @@ class LanSyncScheduler {
 
   /// Pull-to-refresh / botao manual: ciclo completo sem pular pull.
   static Future<String?> solicitarSyncCompleto() async {
+    if (_noopNesteAmbiente) {
+      return null;
+    }
     final scheduler = _instanciaAtiva;
     if (scheduler == null) return 'Sincronizacao de rede nao esta ativa.';
     return scheduler.sincronizarAgora(modo: SyncModo.completo, forcar: true);
@@ -475,6 +507,11 @@ class LanSyncScheduler {
     SyncModo modo = SyncModo.periodico,
   }) async {
     if (!forcar && _emGraceCelular) return null;
+
+    final config = await _configRepository.carregarEmpresaConfig();
+    if (config.redeModoServidor) {
+      return null;
+    }
 
     final anterior = _mutexSync;
     final liberado = Completer<void>();

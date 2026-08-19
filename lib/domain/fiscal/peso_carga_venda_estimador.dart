@@ -1,4 +1,5 @@
 import '../entrega_venda_helper.dart';
+import '../entregas/romaneio_carga_merge.dart';
 import '../../model/item_venda.dart';
 import '../../model/produto.dart';
 import '../../model/venda.dart';
@@ -19,13 +20,21 @@ class EstimativaCargaVenda {
 abstract final class PesoCargaVendaEstimador {
   /// Heuristica por unidade de venda: KG usa quantidade como peso; demais unidades
   /// recebem fator padrao de material de construcao.
-  static EstimativaCargaVenda estimar(Venda venda) {
-    return _estimarItens(venda.itens.where((i) => i.quantidade > 0));
+  static EstimativaCargaVenda estimar(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
+    final lista = itens ?? RomaneioCargaMerge.itensDaVendaSafe(venda);
+    return _estimarItens(lista.where((i) => i.quantidade > 0));
   }
 
   /// Peso/volumes apenas dos itens de carreto ou que entram na carga.
-  static EstimativaCargaVenda estimarItensComTransporte(Venda venda) {
-    final filtrados = venda.itens.where((item) {
+  static EstimativaCargaVenda estimarItensComTransporte(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
+    final lista = itens ?? RomaneioCargaMerge.itensDaVendaSafe(venda);
+    final filtrados = lista.where((item) {
       if (item.quantidade <= 0) return false;
       if (EntregaVendaHelper.tipoEfetivoItem(item) ==
           EntregaVendaHelper.tipoEntregaLoja) {
@@ -35,7 +44,7 @@ abstract final class PesoCargaVendaEstimador {
     });
     final est = _estimarItens(filtrados);
     if (est.quantidadeItens > 0) return est;
-    return estimar(venda);
+    return estimar(venda, itens: lista);
   }
 
   static EstimativaCargaVenda _estimarItens(Iterable<ItemVenda> itens) {
@@ -66,7 +75,12 @@ abstract final class PesoCargaVendaEstimador {
   }
 
   static double _pesoItemKg(ItemVenda item) {
-    final produto = item.produto.target;
+    Produto? produto;
+    try {
+      produto = item.produto.target;
+    } catch (_) {
+      produto = null;
+    }
     final q = item.quantidade;
     if (q <= 0) return 0;
     final un = (produto?.unidade ?? 'UN').trim().toUpperCase();

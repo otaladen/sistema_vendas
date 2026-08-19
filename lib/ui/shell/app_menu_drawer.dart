@@ -21,6 +21,7 @@ class AppMenuDrawer extends StatelessWidget {
     required this.onSelecionarSub,
     required this.badgeDe,
     this.badgeSubDe,
+    this.terminalLeve = false,
   });
 
   final List<MainMenuDestino> itens;
@@ -32,6 +33,7 @@ class AppMenuDrawer extends StatelessWidget {
       onSelecionarSub;
   final int Function(MainMenuDestino destino) badgeDe;
   final int Function(MainMenuSubDestino sub)? badgeSubDe;
+  final bool terminalLeve;
 
   @override
   Widget build(BuildContext context) {
@@ -77,6 +79,7 @@ class AppMenuDrawer extends StatelessWidget {
                         usuarioLogado: usuarioLogado,
                         badge: badgeDe(d),
                         badgeSubDe: badgeSubDe,
+                        terminalLeve: terminalLeve,
                         onSelecionarSub: (sub) => onSelecionarSub(d, sub),
                       )
                     else
@@ -178,6 +181,7 @@ class _GrupoDrawer extends StatelessWidget {
     required this.usuarioLogado,
     required this.badge,
     this.badgeSubDe,
+    this.terminalLeve = false,
     required this.onSelecionarSub,
   });
 
@@ -187,12 +191,16 @@ class _GrupoDrawer extends StatelessWidget {
   final UsuarioSistema usuarioLogado;
   final int badge;
   final int Function(MainMenuSubDestino sub)? badgeSubDe;
+  final bool terminalLeve;
   final ValueChanged<MainMenuSubDestino> onSelecionarSub;
 
   @override
   Widget build(BuildContext context) {
-    final subs =
-        MainMenuSubDestinoHelper.subitensDe(destino, usuarioLogado);
+    final subs = MainMenuSubDestinoHelper.subitensDe(
+      destino,
+      usuarioLogado,
+      terminalLeve: terminalLeve,
+    );
     final cor = destino.cor(context);
     return ExpansionTile(
       initiallyExpanded: destinoAtual == destino,

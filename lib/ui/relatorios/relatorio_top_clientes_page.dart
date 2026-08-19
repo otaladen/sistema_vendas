@@ -1,8 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/cliente_repository.dart';
-import '../../data/venda_repository.dart';
 import '../../model/cliente.dart';
 import '../../model/venda.dart';
 import 'relatorio_comparativo.dart';
@@ -39,8 +37,8 @@ class RelatorioTopClientesPage extends StatefulWidget {
     required this.clienteRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
 
   @override
   State<RelatorioTopClientesPage> createState() => _RelatorioTopClientesPageState();
@@ -54,13 +52,10 @@ class _RelatorioTopClientesPageState extends State<RelatorioTopClientesPage> {
 
   String _fmt(double v) => 'R\$ ${_moeda.format(v)}';
 
-  Cliente? _cliente(Venda v) {
-    final t = v.cliente.target;
-    if (t != null) return t;
-    final id = v.cliente.targetId;
-    if (id == 0) return null;
-    return widget.clienteRepository.obterPorId(id);
-  }
+  Cliente? _cliente(Venda v) => relatorioClienteDaVenda(
+        v,
+        clienteRepository: widget.clienteRepository,
+      );
 
   void _calcular(LimitesPeriodo limites) {
     final vendas = relatorioVendasFinalizadasPeriodo(widget.vendaRepository, limites);
@@ -68,10 +63,11 @@ class _RelatorioTopClientesPageState extends State<RelatorioTopClientesPage> {
     for (final v in vendas) {
       final id = v.cliente.targetId;
       final c = _cliente(v);
+      final nomeRazao = c?.nomeRazao.trim();
       final nome = id == 0
           ? 'Sem cliente'
-          : (c?.nomeRazao.trim().isNotEmpty == true
-              ? c!.nomeRazao.trim()
+          : (nomeRazao != null && nomeRazao.isNotEmpty
+              ? nomeRazao
               : 'Cliente #$id');
       final cur = map[id];
       if (cur == null) {
@@ -98,11 +94,13 @@ class _RelatorioTopClientesPageState extends State<RelatorioTopClientesPage> {
       final id = e.key;
       final adj = e.value;
       if (adj.abs() < 0.0001) continue;
-      final cli = id == 0 ? null : widget.clienteRepository.obterPorId(id);
+      final Cliente? cli =
+          id == 0 ? null : widget.clienteRepository.obterPorId(id) as Cliente?;
+      final nomeCli = cli?.nomeRazao.trim();
       final nomeFallback = id == 0
           ? 'Sem cliente'
-          : (cli?.nomeRazao.trim().isNotEmpty == true
-              ? cli!.nomeRazao.trim()
+          : (nomeCli != null && nomeCli.isNotEmpty
+              ? nomeCli
               : 'Cliente #$id');
       final cur = map[id];
       if (cur == null) {
@@ -120,6 +118,36 @@ class _RelatorioTopClientesPageState extends State<RelatorioTopClientesPage> {
           qtd: cur.qtd,
           total: cur.total + adj,
           lucro: cur.lucro,
+        );
+      }
+    }
+    for (final e in imp.porClienteLucro.entries) {
+      final id = e.key;
+      final adj = e.value;
+      if (adj.abs() < 0.0001) continue;
+      final cur = map[id];
+      if (cur == null) {
+        final Cliente? cli =
+            id == 0 ? null : widget.clienteRepository.obterPorId(id) as Cliente?;
+        final nomeCli = cli?.nomeRazao.trim();
+        map[id] = _LinhaCliente(
+          clienteId: id,
+          nome: id == 0
+              ? 'Sem cliente'
+              : (nomeCli != null && nomeCli.isNotEmpty
+                  ? nomeCli
+                  : 'Cliente #$id'),
+          qtd: 0,
+          total: 0,
+          lucro: adj,
+        );
+      } else {
+        map[id] = _LinhaCliente(
+          clienteId: id,
+          nome: cur.nome,
+          qtd: cur.qtd,
+          total: cur.total,
+          lucro: cur.lucro + adj,
         );
       }
     }
@@ -197,6 +225,7 @@ class _RelatorioTopClientesPageState extends State<RelatorioTopClientesPage> {
       body: Column(
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: _calcular,
             onAtualizar: lim != null ? () => _calcular(lim) : null,
             filtrosExtras: [

@@ -96,6 +96,8 @@ class ConferenciaNfeLinhaConfirmacao {
     required this.unidadeInterna,
     required this.embalagemMultiplica,
     this.produtoExistenteId,
+    this.numeroLote = '',
+    this.dataValidade,
   });
 
   final ItemNotaTemporario item;
@@ -103,6 +105,18 @@ class ConferenciaNfeLinhaConfirmacao {
   final String unidadeInterna;
   final bool embalagemMultiplica;
   final int? produtoExistenteId;
+
+  /// Override da conferencia (vazio = usar [item.numeroLote]).
+  final String numeroLote;
+  final DateTime? dataValidade;
+
+  String get numeroLoteEfetivo {
+    final o = numeroLote.trim();
+    if (o.isNotEmpty) return o;
+    return item.numeroLote.trim();
+  }
+
+  DateTime? get dataValidadeEfetiva => dataValidade ?? item.dataValidade;
 }
 
 class NfeEntradaRepository {
@@ -125,18 +139,22 @@ class NfeEntradaRepository {
     'LT',
   ];
 
-  void _notificarMutacaoNfeEntrada() {
-    const entidades = [
-      'nfe_importada',
-      'produto',
-      'fornecedor_nfe',
-      'vinculo_fornecedor',
-      'historico_entrada',
-    ];
-    for (final ent in entidades) {
-      unawaited(SyncDirtyOutbox.registrar(entity: ent, entityId: 0));
-    }
-    notificarAlteracaoParaRede();
+  void _notificarMutacaoNfeEntrada({List<int>? produtoIds}) {
+    // Uma unica notificacao de produto com ids (evita flood WS que atrasa o terminal).
+    final idsProduto = (produtoIds ?? const <int>[])
+        .where((id) => id > 0)
+        .toSet()
+        .toList();
+    unawaited(SyncDirtyOutbox.registrar(entity: 'nfe_importada', entityId: 0));
+    unawaited(SyncDirtyOutbox.registrar(entity: 'produto', entityId: 0));
+    notificarAlteracaoParaRede(
+      entidade: 'produto',
+      entidadeId: 0,
+      entidadeIds: idsProduto.isEmpty ? null : idsProduto,
+    );
+    notificarAlteracaoParaRede(entidade: 'nfe_importada', entidadeId: 0);
+    notificarAlteracaoParaRede(entidade: 'fornecedor_nfe', entidadeId: 0);
+    notificarAlteracaoParaRede(entidade: 'conta_pagar', entidadeId: 0);
   }
 
   /// Resolve EAN, vinculo fornecedor+cProd e valores iniciais de fator/unidade.
@@ -277,6 +295,9 @@ class NfeEntradaRepository {
   NfeImportadaRegistro? obterImportacaoPorId(int id) =>
       _db.nfeImportadaRegistroBox.get(id);
 
+  /// XML original gravado no disco do PC servidor (fechamento / espelho).
+  String? lerXmlImportacao(String chaveAcesso) => _xmlStore.lerXml(chaveAcesso);
+
   /// Verifica se o estorno e possivel (estoque suficiente, sem reserva comprometida).
   ValidacaoEstornoNfe validarEstornoImportacao(int registroId) {
     final registro = obterImportacaoPorId(registroId);
@@ -355,8 +376,33 @@ class NfeEntradaRepository {
     return ValidacaoEstornoNfe(podeEstornar: true, linhas: linhas);
   }
 
-  /// Estorna importacao: reverte estoque, remove historico e libera a chave para nova entrada.
-  void estornarImportacaoNfe(int registroId) {
+  /// Contas a pagar geradas pela importacao desta chave (44 digitos).
+  List<ContaPagar> listarContasPagarPorChaveNfe(String chaveAcesso) {
+    final chave = chaveAcesso.replaceAll(RegExp(r'\D'), '');
+    if (chave.length != 44) return const [];
+    final q = _db.contaPagarBox
+        .query(ContaPagar_.nfeChave.equals(chave))
+        .build();
+    try {
+      return q.find();
+    } finally {
+      q.close();
+    }
+  }
+
+  void _removerContasPagarVinculadasNfe(String chave44) {
+    final contas = listarContasPagarPorChaveNfe(chave44);
+    for (final c in contas) {
+      if (_db.contaPagarBox.remove(c.id)) {
+        registrarDeleteParaRede('conta_pagar', c.id);
+      }
+    }
+  }
+
+  /// Estorna importacao: reverte estoque/custo medio, remove historico,
+  /// cancela titulos a pagar da NF-e e libera a chave para nova entrada.
+  /// Retorna ids de produtos afetados (para WS).
+  List<int> estornarImportacaoNfe(int registroId) {
     final validacao = validarEstornoImportacao(registroId);
     if (!validacao.podeEstornar) {
       throw StateError(
@@ -370,6 +416,7 @@ class NfeEntradaRepository {
     }
     final chaveNorm = registro.chaveAcesso.replaceAll(RegExp(r'\D'), '');
     final historico = listarHistoricoPorChaveNfe(chaveNorm);
+    final produtoIdsAfetados = <int>{};
 
     _db.store.runInTransaction(TxMode.write, () {
       final produtosParaRemover = <int>{};
@@ -402,6 +449,7 @@ class NfeEntradaRepository {
           );
         }
         _estoque.persistirProdutoMetadados(produto);
+        produtoIdsAfetados.add(produto.id);
         _db.historicoEntradaBox.remove(h.id);
 
         if (_podeRemoverProdutoCriadoNaNfe(produto)) {
@@ -412,12 +460,15 @@ class NfeEntradaRepository {
       for (final produtoId in produtosParaRemover) {
         _removerVinculosDoProduto(produtoId);
         _db.produtoBox.remove(produtoId);
+        produtoIdsAfetados.add(produtoId);
       }
 
+      _removerContasPagarVinculadasNfe(chaveNorm);
       _db.nfeImportadaRegistroBox.remove(registro.id);
     });
 
-    _notificarMutacaoNfeEntrada();
+    _notificarMutacaoNfeEntrada(produtoIds: produtoIdsAfetados.toList());
+    return produtoIdsAfetados.toList(growable: false);
   }
 
   /// Itens de estoque lançados nesta NF-e (mesma chave de 44 dígitos).
@@ -477,7 +528,8 @@ class NfeEntradaRepository {
   }
 
   /// Grava fornecedor, produtos, estoque e vinculos em uma unica transacao.
-  void confirmarEntrada({
+  /// Confirma a entrada. Retorna os ids de produtos afetados (existentes + novos).
+  List<int> confirmarEntrada({
     required NfeXmlParseResult nfe,
     required List<ConferenciaNfeLinhaConfirmacao> linhas,
     ConferenciaNfeOpcoes opcoes = const ConferenciaNfeOpcoes(),
@@ -486,6 +538,7 @@ class NfeEntradaRepository {
   }) {
     final chaveNorm = nfe.chaveAcesso.replaceAll(RegExp(r'\D'), '');
     final linhasResolucaoListaCompra = <ListaCompraEntradaNfeLinha>[];
+    final produtoIdsAfetados = <int>{};
     _db.store.runInTransaction(TxMode.write, () {
       if (chaveNorm.length != 44) {
         throw StateError(
@@ -608,6 +661,8 @@ class NfeEntradaRepository {
               produto,
               qtdEntrada,
               documentoReferencia: 'NF-e $chaveNorm',
+              numeroLote: linha.numeroLoteEfetivo,
+              dataValidade: linha.dataValidadeEfetiva,
             );
           }
           if (opcoes.lancarEstoque &&
@@ -659,6 +714,8 @@ class NfeEntradaRepository {
               produto,
               qtdEntradaNovo,
               documentoReferencia: 'NF-e $chaveNorm',
+              numeroLote: linha.numeroLoteEfetivo,
+              dataValidade: linha.dataValidadeEfetiva,
             );
           }
         }
@@ -690,6 +747,9 @@ class NfeEntradaRepository {
         hist.produto.target = produto;
         _db.historicoEntradaBox.put(hist);
 
+        if (produto.id > 0) {
+          produtoIdsAfetados.add(produto.id);
+        }
         if (produto.id > 0 && opcoes.lancarEstoque && qtdInterna > 0) {
           linhasResolucaoListaCompra.add(
             ListaCompraEntradaNfeLinha(
@@ -735,7 +795,8 @@ class NfeEntradaRepository {
       );
     }
 
-    _notificarMutacaoNfeEntrada();
+    _notificarMutacaoNfeEntrada(produtoIds: produtoIdsAfetados.toList());
+    return produtoIdsAfetados.toList();
   }
 
   static void _aplicarPrecosVendaPeloCustoXml(

@@ -1,8 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/venda_repository.dart';
-import '../../data/vendedor_repository.dart';
 import '../../model/vendedor.dart';
 import 'relatorio_comparativo.dart';
 import 'relatorio_export_util.dart';
@@ -18,8 +16,8 @@ class RelatorioVendasPorVendedorPage extends StatefulWidget {
     required this.vendedorRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final VendedorRepository vendedorRepository;
+  final dynamic vendaRepository;
+  final dynamic vendedorRepository;
 
   @override
   State<RelatorioVendasPorVendedorPage> createState() =>
@@ -67,7 +65,10 @@ class _RelatorioVendasPorVendedorPageState
     final map = <int, _LinhaVendedor>{};
     for (final v in vendas) {
       final id = v.vendedor.targetId;
-      final w = v.vendedor.target ?? widget.vendedorRepository.obterPorId(id);
+      final Vendedor? w = relatorioVendedorDaVenda(
+        v,
+        vendedorRepository: widget.vendedorRepository,
+      );
       final nome = _nome(w);
       final cur = map[id];
       if (cur == null) {
@@ -97,7 +98,8 @@ class _RelatorioVendasPorVendedorPageState
       final adjFat = e.value;
       final adjLuc = imp.porVendedorLucro[id] ?? 0;
       if (adjFat.abs() < 0.0001 && adjLuc.abs() < 0.0001) continue;
-      final w = id == 0 ? null : widget.vendedorRepository.obterPorId(id);
+      final Vendedor? w =
+          id == 0 ? null : widget.vendedorRepository.obterPorId(id) as Vendedor?;
       final nome = _nome(w);
       final cur = map[id];
       if (cur == null) {
@@ -247,6 +249,7 @@ class _RelatorioVendasPorVendedorPageState
       body: Column(
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: _calcular,
             onAtualizar: lim != null ? () => _calcular(lim) : null,
             filtrosExtras: [
@@ -286,7 +289,10 @@ class _RelatorioVendasPorVendedorPageState
                     itemBuilder: (context, i) {
                       final r = _linhas[i];
                       final w = r.vendedor;
-                      final meta = w?.metaMensalValor ?? 0;
+                      final metaMensal = w?.metaMensalValor ?? 0;
+                      final meta = _limites == null || metaMensal <= 0
+                          ? 0.0
+                          : relatorioMetaProporcional(metaMensal, _limites!);
                       final ating = meta > 0 ? (r.total / meta).clamp(0.0, 1.5) : null;
                       return ListTile(
                         leading: CircleAvatar(child: Text('${i + 1}')),
@@ -310,8 +316,9 @@ class _RelatorioVendasPorVendedorPageState
                               ),
                             if (meta > 0)
                               Text(
-                                'Meta ${_fmt(meta)} · '
-                                '${(ating! * 100).toStringAsFixed(0)}% no periodo',
+                                'Meta do periodo ${_fmt(meta)} '
+                                '(mensal ${_fmt(metaMensal)}) · '
+                                '${(ating! * 100).toStringAsFixed(0)}%',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                           ],

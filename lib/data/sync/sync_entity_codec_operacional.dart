@@ -5,6 +5,7 @@ import '../../model/produto_sugestao_venda.dart';
 import '../../model/sugestao_venda_metrica_evento.dart';
 import '../../model/recado_loja.dart';
 import '../../model/movimento_estoque.dart';
+import '../../model/lote_produto.dart';
 import '../../model/reajuste_preco.dart';
 import '../../model/reajuste_preco_item.dart';
 
@@ -53,20 +54,58 @@ class SyncEntityCodecOperacional {
     return linha;
   }
 
-  // --- ContaPagar ---
-  static Map<String, dynamic> contaPagarParaMap(ContaPagar c) => {
-        'id': c.id,
-        'nfeChave': c.nfeChave,
-        'numeroNota': c.numeroNota,
-        'numeroParcela': c.numeroParcela,
-        'dataEmissao': _dt(c.dataEmissao),
-        'dataVencimento': _dt(c.dataVencimento),
-        'valorParcela': c.valorParcela,
-        'status': c.status,
-        'dataPagamento': _dt(c.dataPagamento),
-        'valorPago': c.valorPago,
-        'fornecedorId': c.fornecedor.targetId,
+  // --- LoteProduto ---
+  static Map<String, dynamic> loteProdutoParaMap(LoteProduto l) => {
+        'id': l.id,
+        'numeroLote': l.numeroLote,
+        'dataValidade': _dt(l.dataValidade),
+        'quantidadeEstoque': l.quantidadeEstoque,
+        'dataEntrada': _dt(l.dataEntrada),
+        'ativo': l.ativo,
+        'produtoId': l.produto.targetId,
       };
+
+  static LoteProduto loteProdutoDeMap(Map<String, dynamic> m) {
+    final lote = LoteProduto(
+      id: (m['id'] as num?)?.toInt() ?? 0,
+      numeroLote: (m['numeroLote'] ?? '').toString(),
+      dataValidade: _parseDt((m['dataValidade'] ?? '').toString()),
+      quantidadeEstoque: (m['quantidadeEstoque'] as num?)?.toInt() ?? 0,
+      dataEntrada: _parseDt((m['dataEntrada'] ?? '').toString()),
+      ativo: m['ativo'] != false,
+    );
+    final pid = (m['produtoId'] as num?)?.toInt() ?? 0;
+    if (pid > 0) lote.produto.targetId = pid;
+    return lote;
+  }
+
+  // --- ContaPagar ---
+  static Map<String, dynamic> contaPagarParaMap(ContaPagar c) {
+    var nomeFornecedor = '';
+    try {
+      final f = c.fornecedor.target;
+      if (f != null) {
+        final n = f.nomeFantasia.trim().isNotEmpty
+            ? f.nomeFantasia
+            : f.razaoSocial;
+        nomeFornecedor = n.trim();
+      }
+    } catch (_) {}
+    return {
+      'id': c.id,
+      'nfeChave': c.nfeChave,
+      'numeroNota': c.numeroNota,
+      'numeroParcela': c.numeroParcela,
+      'dataEmissao': _dt(c.dataEmissao),
+      'dataVencimento': _dt(c.dataVencimento),
+      'valorParcela': c.valorParcela,
+      'status': c.status,
+      'dataPagamento': _dt(c.dataPagamento),
+      'valorPago': c.valorPago,
+      'fornecedorId': c.fornecedor.targetId,
+      'nomeFornecedor': nomeFornecedor,
+    };
+  }
 
   static ContaPagar contaPagarDeMap(Map<String, dynamic> m) {
     final c = ContaPagar(

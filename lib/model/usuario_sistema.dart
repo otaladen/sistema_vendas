@@ -11,6 +11,7 @@ class UsuarioSistema {
     this.perfil = 'customizado',
     this.podeCadastros = false,
     this.podeEstoque = false,
+    this.podeFiscal = false,
     this.podeVendas = false,
     this.podeCaixa = false,
     this.podeAcessarPdv = false,
@@ -59,6 +60,9 @@ class UsuarioSistema {
 
   final bool podeCadastros;
   final bool podeEstoque;
+
+  /// Modulo fiscal (NFC-e / NF-e). Isolado de [podeEstoque]. Alias: PERM_FISCAL.
+  final bool podeFiscal;
   final bool podeVendas;
 
   /// Legado — espelha [podeAcessarCaixa] ao salvar.
@@ -143,6 +147,7 @@ class UsuarioSistema {
     String? perfil,
     bool? podeCadastros,
     bool? podeEstoque,
+    bool? podeFiscal,
     bool? podeVendas,
     bool? podeCaixa,
     bool? podeAcessarPdv,
@@ -193,6 +198,7 @@ class UsuarioSistema {
       perfil: perfil ?? this.perfil,
       podeCadastros: podeCadastros ?? this.podeCadastros,
       podeEstoque: podeEstoque ?? this.podeEstoque,
+      podeFiscal: podeFiscal ?? this.podeFiscal,
       podeVendas: podeVendas ?? this.podeVendas,
       podeCaixa: caixa,
       podeAcessarPdv: podeAcessarPdv ?? this.podeAcessarPdv,
@@ -268,6 +274,7 @@ class UsuarioSistema {
       'perfil': perfil,
       'podeCadastros': podeCadastros,
       'podeEstoque': podeEstoque,
+      'podeFiscal': podeFiscal,
       'podeVendas': podeVendas,
       'podeCaixa': caixa,
       'podeAcessarPdv': podeAcessarPdv,
@@ -350,6 +357,10 @@ class UsuarioSistema {
       perfil: (map['perfil'] ?? (admin ? 'dono' : 'customizado')).toString(),
       podeCadastros: map['podeCadastros'] == true,
       podeEstoque: map['podeEstoque'] == true,
+      // Legado: menu fiscal era liberado por estoque.
+      podeFiscal: map.containsKey('podeFiscal')
+          ? map['podeFiscal'] == true
+          : map['podeEstoque'] == true,
       podeVendas: map['podeVendas'] == true,
       podeCaixa: caixa,
       podeAcessarPdv: pdvLegado,
@@ -403,13 +414,28 @@ class UsuarioSistema {
               legadoCancelarSemFlag ||
               legadoCancelarAuditoria ||
               admin),
-      descontoMaximoPercentualPdv:
-          (map['descontoMaximoPercentualPdv'] as num?)?.toDouble(),
+      descontoMaximoPercentualPdv: _lerDoubleOpicional(
+        map['descontoMaximoPercentualPdv'],
+      ),
       motoristaEntregaNome: (map['motoristaEntregaNome'] ?? '').toString(),
       podeModoMotorista: map['podeModoMotorista'] == true ||
           perfilUsuarioFromId((map['perfil'] ?? '').toString()) ==
               PerfilUsuarioPreset.motorista,
-      vendedorId: (map['vendedorId'] as num?)?.toInt() ?? 0,
+      vendedorId: _lerInt(map['vendedorId']),
     );
+  }
+
+  static int _lerInt(dynamic v, [int fallback = 0]) {
+    if (v == null) return fallback;
+    if (v is num) return v.toInt();
+    return int.tryParse(v.toString().trim()) ?? fallback;
+  }
+
+  static double? _lerDoubleOpicional(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    final s = v.toString().trim();
+    if (s.isEmpty) return null;
+    return double.tryParse(s.replaceAll(',', '.'));
   }
 }

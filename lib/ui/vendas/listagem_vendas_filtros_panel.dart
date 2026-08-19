@@ -12,6 +12,7 @@ class ListagemVendasFiltrosPanel extends StatefulWidget {
     required this.buscaController,
     required this.filtrosAvancados,
     required this.onPesquisar,
+    this.onBuscaChanged,
     required this.onLimpar,
     required this.onExportarCsv,
     required this.onExportarPdf,
@@ -22,6 +23,7 @@ class ListagemVendasFiltrosPanel extends StatefulWidget {
   final TextEditingController buscaController;
   final ListagemVendasFiltrosBuilder filtrosAvancados;
   final VoidCallback onPesquisar;
+  final VoidCallback? onBuscaChanged;
   final VoidCallback onLimpar;
   final VoidCallback onExportarCsv;
   final VoidCallback onExportarPdf;
@@ -35,6 +37,13 @@ class ListagemVendasFiltrosPanel extends StatefulWidget {
 
 class _ListagemVendasFiltrosPanelState extends State<ListagemVendasFiltrosPanel> {
   bool _expandido = false;
+  final ScrollController _filtrosScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _filtrosScrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -72,6 +81,7 @@ class _ListagemVendasFiltrosPanelState extends State<ListagemVendasFiltrosPanel>
                   ),
                   textInputAction: TextInputAction.search,
                   onSubmitted: (_) => widget.onPesquisar(),
+                  onChanged: (_) => widget.onBuscaChanged?.call(),
                 );
                 final acoes = Wrap(
                   spacing: 8,
@@ -185,14 +195,36 @@ class _ListagemVendasFiltrosPanelState extends State<ListagemVendasFiltrosPanel>
             ),
             if (_expandido) ...[
               const SizedBox(height: 8),
+              // Limita altura dos filtros para a tabela nao ficar espremida
+              // (e evita sensacao de "scroll travado" na listagem).
               LayoutBuilder(
-                builder: (context, constraints) =>
-                    widget.filtrosAvancados(context, constraints),
+                builder: (context, outer) {
+                  final tela = MediaQuery.sizeOf(context).height;
+                  final maxFiltros = (tela * 0.28).clamp(140.0, 260.0);
+                  return ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxFiltros),
+                    child: Scrollbar(
+                      controller: _filtrosScrollController,
+                      thumbVisibility: true,
+                      interactive: true,
+                      child: SingleChildScrollView(
+                        controller: _filtrosScrollController,
+                        primary: false,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            widget.filtrosAvancados(context, outer),
+                            if (widget.periodoPersonalizado != null) ...[
+                              const SizedBox(height: 8),
+                              widget.periodoPersonalizado!,
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
-              if (widget.periodoPersonalizado != null) ...[
-                const SizedBox(height: 8),
-                widget.periodoPersonalizado!,
-              ],
             ],
           ],
         ),

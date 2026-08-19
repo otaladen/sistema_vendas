@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/venda_repository.dart';
+import '../../domain/venda_relacao_safe.dart';
 import '../../services/focus_nfe_service.dart';
 import '../layout/app_layout.dart';
 
@@ -148,11 +148,22 @@ class _NfeEnviarEmailDialogState extends State<_NfeEnviarEmailDialog> {
 }
 
 /// E-mails sugeridos do cliente da venda.
-List<String> emailsSugeridosDaVenda(VendaRepository repo, int vendaId) {
-  if (vendaId <= 0) return const [];
-  final v = repo.obterPorId(vendaId);
-  final c = v?.cliente.target;
-  if (c == null) return const [];
-  final e = c.email.trim();
-  return e.contains('@') ? [e] : const [];
+List<String> emailsSugeridosDaVenda(
+  dynamic repo,
+  int vendaId, {
+  dynamic clienteRepository,
+}) {
+  if (vendaId <= 0 || repo == null) return const [];
+  try {
+    final v = repo.obterPorId(vendaId);
+    if (v == null) return const [];
+    final c = VendaRelacaoSafe.cliente(
+      v,
+      clienteRepository: clienteRepository,
+    );
+    final e = (c?.email ?? '').trim();
+    return e.contains('@') ? [e] : const [];
+  } catch (_) {
+    return const [];
+  }
 }

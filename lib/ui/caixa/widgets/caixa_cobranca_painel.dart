@@ -115,13 +115,22 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
                     ),
                 ],
               ),
-              const Spacer(),
-              Text(
-                totalFormatado,
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: scheme.primary,
-                  height: 1.0,
+              const SizedBox(width: 8),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    totalFormatado,
+                    maxLines: 1,
+                    softWrap: false,
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: scheme.primary,
+                      height: 1.0,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -184,11 +193,17 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
               color: scheme.onSurfaceVariant,
             ),
           ),
-          Text(
-            valor,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: destaque ? scheme.primary : null,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              valor,
+              maxLines: 1,
+              softWrap: false,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: destaque ? scheme.primary : null,
+              ),
             ),
           ),
         ],
@@ -481,7 +496,7 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
   final Widget recebimento;
   final double valorRecebidoExibicao;
   final double troco;
-  final VoidCallback onFinalizar;
+  final VoidCallback? onFinalizar;
   final VoidCallback? onAlterarForma;
   final VoidCallback? onDesconto;
   final VoidCallback? onFechar;
@@ -560,8 +575,18 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
               height: 46,
               child: FilledButton.icon(
                 onPressed: onFinalizar,
-                icon: const Icon(Icons.check_circle_outline),
-                label: const Text('Finalizar venda (Enter)'),
+                icon: onFinalizar == null
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check_circle_outline),
+                label: Text(
+                  onFinalizar == null
+                      ? 'Processando...'
+                      : 'Finalizar venda (Enter)',
+                ),
               ),
             ),
             Padding(

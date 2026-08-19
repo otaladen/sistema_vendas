@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import '../data/app_config_repository.dart';
-import '../data/produto_repository.dart';
 import '../model/produto.dart';
 import 'obra_calculadora.dart';
 import 'pdv_estoque_semaforo_util.dart';
@@ -45,7 +44,7 @@ abstract final class PdvObraCalculadoraInsercaoUtil {
   static PdvObraCalculadoraMontagem montar({
     required ObraCalculadoraResultado resultado,
     required EmpresaConfig config,
-    required ProdutoRepository produtoRepository,
+    required dynamic produtoRepository,
   }) {
     final erros = <String>[];
     final avisos = <String>[ObraCalculadora.avisoEstimativa];
@@ -104,7 +103,7 @@ abstract final class PdvObraCalculadoraInsercaoUtil {
   static ({Produto produto, bool substituto, String nomeOriginal}) _resolverProduto({
     required Produto produto,
     required EmpresaConfig config,
-    required ProdutoRepository produtoRepository,
+    required dynamic produtoRepository,
     required List<String> avisos,
   }) {
     if (!config.obraCalcUsarSubstitutoEstoqueZero) {
@@ -115,7 +114,10 @@ abstract final class PdvObraCalculadoraInsercaoUtil {
       return (produto: produto, substituto: false, nomeOriginal: produto.nome);
     }
 
-    final subs = produtoRepository.listarSubstitutosCadastrados(produto.id);
+    final rawSubs = produtoRepository.listarSubstitutosCadastrados(produto.id);
+    final subs = rawSubs is List
+        ? rawSubs.whereType<Produto>().toList()
+        : const <Produto>[];
     Produto? escolhido;
     for (final s in subs) {
       if (PdvEstoqueSemaforoUtil.nivelDe(s) !=

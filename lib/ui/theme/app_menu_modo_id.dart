@@ -40,8 +40,8 @@ enum AppMenuModoId {
   ),
   retro(
     'retro',
-    'Retro',
-    'Estilo ERP classico com blocos coloridos',
+    'ERP compacto',
+    'Menu estreito estilo retaguarda: letras pequenas e icones coloridos',
     Icons.computer_outlined,
   ),
   faixa(

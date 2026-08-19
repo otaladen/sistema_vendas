@@ -16,6 +16,7 @@ class CaixaUltimasVendasList extends StatelessWidget {
     required this.formatarMoeda,
     required this.onVendaTap,
     this.ordenacao = UltimasVendasFinalizadasOrdenacao.padrao,
+    this.quantidadeItens,
   });
 
   final List<Venda> vendas;
@@ -23,6 +24,9 @@ class CaixaUltimasVendasList extends StatelessWidget {
   final String Function(double valor) formatarMoeda;
   final void Function(Venda venda) onVendaTap;
   final UltimasVendasFinalizadasOrdenacao ordenacao;
+
+  /// Terminal leve: evita ToMany detached (sempre 0). Servidor pode omitir.
+  final int Function(Venda venda)? quantidadeItens;
 
   @override
   Widget build(BuildContext context) {
@@ -78,7 +82,7 @@ class CaixaUltimasVendasList extends StatelessWidget {
                 [
                   '$prefixoData · '
                   '${cliente?.nomeRazao ?? 'Sem cliente'} · '
-                  '${v.itens.length} itens',
+                  '${quantidadeItens?.call(v) ?? _qtdItensSafe(v)} itens',
                   if (docFiscal.isNotEmpty) docFiscal,
                 ].join('\n'),
                 maxLines: 2,
@@ -104,6 +108,14 @@ class CaixaUltimasVendasList extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static int _qtdItensSafe(Venda v) {
+    try {
+      return v.itens.length;
+    } catch (_) {
+      return 0;
+    }
   }
 
   static List<Widget> _iconesNotaFiscalEmitida(Venda v) {

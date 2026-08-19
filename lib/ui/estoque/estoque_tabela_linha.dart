@@ -196,7 +196,7 @@ class EstoqueTabelaLinha extends StatelessWidget {
                   tooltip: 'Ponto de pedido / limiar',
                 ),
                 _celulaNum(
-                  produto.vendaMediaDiaria.toStringAsFixed(2),
+                  EstoqueListaMetricas.formatarMediaDiaria(produto),
                   estiloNum,
                   largura: EstoqueTabelaColunas.larguraMedia,
                   tooltip: 'Media diaria de vendas (60 dias)',

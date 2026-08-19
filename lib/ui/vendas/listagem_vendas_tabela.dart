@@ -35,6 +35,32 @@ class ListagemVendasTabela extends StatefulWidget {
 class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
   ListagemVendasColuna _coluna = ListagemVendasColuna.data;
   bool _ascendente = false;
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void didUpdateWidget(covariant ListagemVendasTabela oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Apos filtrar/paginar, o offset antigo pode ficar alem do maximo e
+    // a barra de rolagem no Windows "trava" (nao arrasta / nao desce).
+    if (!identical(oldWidget.itens, widget.itens) ||
+        oldWidget.itens.length != widget.itens.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        final pos = _scrollController.position;
+        if (!pos.hasContentDimensions) return;
+        final max = pos.maxScrollExtent;
+        if (_scrollController.offset > max) {
+          _scrollController.jumpTo(max < 0 ? 0 : max);
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   void _alternarOrdenacao(ListagemVendasColuna coluna) {
     setState(() {
@@ -173,11 +199,16 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
           ),
           Expanded(
             child: Scrollbar(
+              controller: _scrollController,
               thumbVisibility: true,
+              interactive: true,
               child: ListView.builder(
+                controller: _scrollController,
+                primary: false,
                 itemCount: itens.length,
                 itemExtent: ListagemVendasLayout.alturaLinhaTabela,
                 cacheExtent: 400,
+                physics: const AlwaysScrollableScrollPhysics(),
                 itemBuilder: (context, index) {
                   final item = itens[index];
                   final zebra = index.isOdd
@@ -218,10 +249,22 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                             ),
                             SizedBox(
                               width: ListagemVendasLayout.colStatus,
-                              child: _StatusChip(
-                                texto: item.status,
-                                cor: item.statusCor,
-                                detalhe: item.statusDetalhe,
+                              child: Wrap(
+                                spacing: 4,
+                                runSpacing: 4,
+                                children: [
+                                  _StatusChip(
+                                    texto: item.status,
+                                    cor: item.statusCor,
+                                    detalhe: item.statusDetalhe,
+                                  ),
+                                  if (item.temDevolucaoTroca)
+                                    _StatusChip(
+                                      texto: 'Dev/Troca',
+                                      cor: Colors.deepOrange,
+                                      detalhe: 'Venda com devolucao ou troca',
+                                    ),
+                                ],
                               ),
                             ),
                             SizedBox(

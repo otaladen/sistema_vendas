@@ -89,6 +89,7 @@ class VendaService {
     int? vendedorId,
     double descontoEmReais = 0,
     bool permitirVendaSemEstoque = false,
+    String? uuidLocal,
   }) {
     return _vendaRepository.registrarOrcamento(
       itens,
@@ -100,6 +101,7 @@ class VendaService {
       vendedorId: vendedorId,
       descontoEmReais: descontoEmReais,
       permitirVendaSemEstoque: permitirVendaSemEstoque,
+      uuidLocal: uuidLocal,
     );
   }
 

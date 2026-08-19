@@ -29,4 +29,34 @@ class NotaFiscalEntradaFechamentoItem {
     if (chave.length >= 44) return 'NFe_entrada_$chave.xml';
     return 'NFe_entrada_${numero}_$cnpjFornecedor.xml';
   }
+
+  Map<String, dynamic> toJson() => {
+        'dataEmissao': dataEmissao.toUtc().toIso8601String(),
+        'chaveAcesso': chaveAcesso,
+        'cnpjFornecedor': cnpjFornecedor,
+        'razaoSocialFornecedor': razaoSocialFornecedor,
+        'numero': numero,
+        'serie': serie,
+        'valorTotal': valorTotal,
+        'dataEntradaSistema': dataEntradaSistema.toUtc().toIso8601String(),
+        'caminhoXmlLocal': caminhoXmlLocal,
+        'temXmlLocal': temXmlLocal,
+      };
+
+  factory NotaFiscalEntradaFechamentoItem.fromJson(Map<String, dynamic> json) {
+    return NotaFiscalEntradaFechamentoItem(
+      dataEmissao: DateTime.tryParse((json['dataEmissao'] ?? '').toString()) ??
+          DateTime.now().toUtc(),
+      chaveAcesso: (json['chaveAcesso'] ?? '').toString(),
+      cnpjFornecedor: (json['cnpjFornecedor'] ?? '').toString(),
+      razaoSocialFornecedor: (json['razaoSocialFornecedor'] ?? '').toString(),
+      numero: (json['numero'] ?? '').toString(),
+      serie: (json['serie'] ?? '').toString(),
+      valorTotal: (json['valorTotal'] as num?)?.toDouble() ?? 0,
+      dataEntradaSistema:
+          DateTime.tryParse((json['dataEntradaSistema'] ?? '').toString()) ??
+              DateTime.now().toUtc(),
+      caminhoXmlLocal: (json['caminhoXmlLocal'] ?? '').toString(),
+    );
+  }
 }

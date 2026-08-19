@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
 
 import '../../config/fiscal_config.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../data/app_config_repository.dart';
-import '../../data/cliente_repository.dart';
 import '../../data/sync/sync_cursor_storage.dart';
-import '../../data/venda_repository.dart';
-import '../../data/vendedor_repository.dart';
 import '../../domain/fiscal/abrir_danfe_focus.dart';
 import '../../domain/fiscal/caixa_fiscal_acao_helper.dart';
 import '../../domain/fiscal/fiscal_emissao_lock.dart';
 import '../../domain/fiscal/venda_documento_fiscal_mutex.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../model/cliente.dart';
+import '../../model/item_venda.dart';
+import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../../model/vendedor.dart';
 import '../../services/cupom_nao_fiscal_venda_pdf.dart';
+import '../../services/esc_pos_cupom_builder.dart';
 import '../../services/focus_nfe_reconsulta_helper.dart';
 import '../../services/focus_nfe_service.dart';
 import '../../services/print_service.dart';
@@ -29,11 +30,14 @@ class EmitirNfceVendaDeps {
     required this.appConfigRepository,
     required this.printService,
     required this.focusNfeService,
+    this.produtoRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
-  final VendedorRepository vendedorRepository;
+  /// [VendaRepository] local ou [VendaApiRepository] no terminal.
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
+  final dynamic vendedorRepository;
+  final dynamic produtoRepository;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
   final FocusNfeService focusNfeService;
@@ -111,9 +115,19 @@ class EmissaoNfceVendaResult {
 abstract final class EmitirNfceVendaFlow {
   EmitirNfceVendaFlow._();
 
-  static bool podeEmitir(Venda venda, {Cliente? cliente}) {
+  static bool podeEmitir(
+    Venda venda, {
+    Cliente? cliente,
+    List<ItemVenda>? itens,
+  }) {
     if (venda.cancelada || venda.status != 'finalizada') return false;
-    if (venda.itens.isEmpty) return false;
+    try {
+      final lista = itens ?? venda.itens.toList();
+      if (lista.isEmpty) return false;
+    } catch (_) {
+      // Entidade detached (terminal API): itens podem nao estar anexados.
+      if (itens == null || itens.isEmpty) return false;
+    }
     if (VendaDocumentoFiscalMutex.bloqueiaNovaNfce(venda)) return false;
     if (CaixaFiscalAcaoHelper.mensagemBloqueioNfceClienteCnpj(
           cliente: cliente,
@@ -128,24 +142,36 @@ abstract final class EmitirNfceVendaFlow {
 
   static Cliente? clienteDaVenda(
     Venda venda,
-    ClienteRepository clienteRepository,
+    dynamic clienteRepository,
   ) {
-    final ligado = venda.cliente.target;
-    if (ligado != null) return ligado;
+    try {
+      final ligado = venda.cliente.target;
+      if (ligado != null) return ligado;
+    } catch (_) {}
     final id = venda.cliente.targetId;
     if (id == 0) return null;
-    return clienteRepository.obterPorId(id);
+    try {
+      return clienteRepository.obterPorId(id) as Cliente?;
+    } catch (_) {
+      return null;
+    }
   }
 
   static Vendedor? vendedorDaVenda(
     Venda venda,
-    VendedorRepository vendedorRepository,
+    dynamic vendedorRepository,
   ) {
-    final ligado = venda.vendedor.target;
-    if (ligado != null) return ligado;
+    try {
+      final ligado = venda.vendedor.target;
+      if (ligado != null) return ligado;
+    } catch (_) {}
     final id = venda.vendedor.targetId;
     if (id == 0) return null;
-    return vendedorRepository.obterPorId(id);
+    try {
+      return vendedorRepository.obterPorId(id) as Vendedor?;
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<void> executar(
@@ -157,6 +183,19 @@ abstract final class EmitirNfceVendaFlow {
   }) async {
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
+    // Terminal leve deve emitir NFC-e via LAN API (PC servidor), nao Focus local.
+    if (deps.vendaRepository is VendaApiRepository) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No terminal, emita a NFC-e pelo Caixa ou pela listagem '
+            '(rota API do servidor).',
+          ),
+          duration: Duration(seconds: 6),
+        ),
+      );
+      return;
+    }
     var vendaAtual = deps.vendaRepository.obterPorId(venda.id) ?? venda;
     final cliente = clienteDaVenda(vendaAtual, deps.clienteRepository);
 
@@ -589,7 +628,25 @@ abstract final class EmitirNfceVendaFlow {
     Venda venda,
   ) async {
     final vendaAtual = deps.vendaRepository.obterPorId(venda.id) ?? venda;
-    if (vendaAtual.itens.isEmpty) {
+    List<ItemVenda> itens = const [];
+    try {
+      final repo = deps.vendaRepository;
+      if (repo is VendaApiRepository) {
+        itens = await repo.carregarItensRemoto(vendaAtual.id);
+      } else {
+        final raw = repo.listarItensPorVenda(vendaAtual.id);
+        if (raw is List<ItemVenda>) {
+          itens = raw;
+        } else if (raw is List) {
+          itens = raw.whereType<ItemVenda>().toList();
+        }
+      }
+    } catch (_) {
+      try {
+        itens = List<ItemVenda>.from(vendaAtual.itens);
+      } catch (_) {}
+    }
+    if (itens.isEmpty) {
       return EmissaoNfceVendaResult.erroValidacao(
         'A venda nao possui itens para emitir NFC-e.',
       );
@@ -602,11 +659,23 @@ abstract final class EmitirNfceVendaFlow {
     }
 
     final cliente = clienteDaVenda(vendaAtual, deps.clienteRepository);
+    Produto? obterProduto(int id) {
+      if (id <= 0) return null;
+      final repo = deps.produtoRepository;
+      if (repo == null) return null;
+      try {
+        return repo.obterPorId(id) as Produto?;
+      } catch (_) {
+        return null;
+      }
+    }
 
     try {
       var resultado = await deps.focusNfeService.emitirNfce(
         vendaAtual,
         cliente: cliente,
+        itens: itens,
+        obterProduto: obterProduto,
         entregaDomicilio: vendaAtual.tipoEntrega == 'entrega_loja' ||
             vendaAtual.enderecoEntrega.trim().isNotEmpty,
       );
@@ -674,6 +743,19 @@ abstract final class EmitirNfceVendaFlow {
   }) async {
     if (!context.mounted) return;
     final vendaAtual = deps.vendaRepository.obterPorId(venda.id) ?? venda;
+    List<ItemVenda> itensCupom = const [];
+    try {
+      final repo = deps.vendaRepository;
+      final listed = repo.listarItensPorVenda(vendaAtual.id);
+      if (listed is List && listed.isNotEmpty) {
+        itensCupom = List<ItemVenda>.from(listed);
+      }
+    } catch (_) {}
+    if (itensCupom.isEmpty) {
+      try {
+        itensCupom = List<ItemVenda>.from(vendaAtual.itens);
+      } catch (_) {}
+    }
     final infer =
         CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(vendaAtual);
     final nomeArquivo =
@@ -695,6 +777,16 @@ abstract final class EmitirNfceVendaFlow {
         segundaVia: false,
         dataCabecalhoVenda:
             vendaAtual.nfceEmitidaEm ?? vendaAtual.data,
+        itens: itensCupom,
+      ),
+      dadosEscPos: CupomBalcaoDados(
+        venda: vendaAtual,
+        config: config,
+        itens: itensCupom,
+        cliente: clienteDaVenda(vendaAtual, deps.clienteRepository),
+        vendedor: vendedorDaVenda(vendaAtual, deps.vendedorRepository),
+        totalRecebido: infer.recebido,
+        troco: infer.troco,
       ),
       suggestedFileName: nomeArquivo,
     );

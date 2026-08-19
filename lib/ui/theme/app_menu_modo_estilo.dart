@@ -76,7 +76,8 @@ abstract final class AppMenuModoEstilo {
       case AppMenuModoId.pastel:
         return estendido ? 232 : 82;
       case AppMenuModoId.retro:
-        return estendido ? 244 : 88;
+        // Estreito como retaguarda classica (Chacal): ~15% da tela em Full HD.
+        return estendido ? 168 : 52;
       case AppMenuModoId.faixa:
         return estendido ? 218 : 78;
     }
@@ -129,9 +130,9 @@ abstract final class AppMenuModoEstilo {
         );
       case AppMenuModoId.retro:
         return const BoxDecoration(
-          color: Color(0xFFD5D5D5),
+          color: Color(0xFFF2F2F2),
           border: Border(
-            right: BorderSide(color: Color(0xFF9E9E9E), width: 2),
+            right: BorderSide(color: Color(0xFFC0C0C0), width: 1),
           ),
         );
       case AppMenuModoId.faixa:
@@ -184,7 +185,7 @@ abstract final class AppMenuModoEstilo {
       case AppMenuModoId.pastel:
         return 26;
       case AppMenuModoId.retro:
-        return 30;
+        return 18;
       case AppMenuModoId.faixa:
         return 24;
     }
@@ -205,15 +206,17 @@ abstract final class AppMenuModoEstilo {
       case AppMenuModoId.pastel:
         return 14;
       case AppMenuModoId.retro:
-        return 14.5;
+        return 11.5;
       case AppMenuModoId.faixa:
         return 13.5;
     }
   }
 
   /// Subitens do menu (orcamentos, listagem, etc.) — menor que o grupo pai.
-  static double tamanhoFonteSubItem(BuildContext context) =>
-      (tamanhoFonteItem(context) - 1.25).clamp(11.0, 14.0);
+  static double tamanhoFonteSubItem(BuildContext context) {
+    if (modoAtual(context) == AppMenuModoId.retro) return 10.5;
+    return (tamanhoFonteItem(context) - 1.25).clamp(11.0, 14.0);
+  }
 
   static FontWeight pesoTextoGrupoMenu(BuildContext context, bool selecionado) {
     if (selecionado) return pesoTextoItem(context, true);
@@ -238,7 +241,7 @@ abstract final class AppMenuModoEstilo {
       case AppMenuModoId.pastel:
         return 50;
       case AppMenuModoId.retro:
-        return 58;
+        return 28;
       case AppMenuModoId.faixa:
         return 46;
     }
@@ -278,8 +281,8 @@ abstract final class AppMenuModoEstilo {
         );
       case AppMenuModoId.retro:
         return EdgeInsets.symmetric(
-          horizontal: estendido ? 12 : 8,
-          vertical: 8,
+          horizontal: estendido ? 8 : 4,
+          vertical: 3,
         );
       case AppMenuModoId.faixa:
         return EdgeInsets.symmetric(
@@ -383,23 +386,16 @@ abstract final class AppMenuModoEstilo {
           ),
         );
       case AppMenuModoId.retro:
+        // Compacto: fundo neutro; destaque sutil; icone colorido faz a identidade.
         return BoxDecoration(
-          color: selecionado ? cor : const Color(0xFFEEEEEE),
+          color: selecionado
+              ? cor.withValues(alpha: 0.16)
+              : Colors.transparent,
           borderRadius: radius,
-          border: Border.all(
-            color: selecionado
-                ? cor.withValues(alpha: 0.9)
-                : const Color(0xFFBDBDBD),
-            width: selecionado ? 2 : 1,
-          ),
-          boxShadow: selecionado
-              ? const [
-                  BoxShadow(
-                    color: Color(0x40000000),
-                    blurRadius: 0,
-                    offset: Offset(2, 2),
-                  ),
-                ]
+          border: selecionado
+              ? Border(
+                  left: BorderSide(color: cor, width: 3),
+                )
               : null,
         );
       case AppMenuModoId.faixa:
@@ -439,7 +435,8 @@ abstract final class AppMenuModoEstilo {
       case AppMenuModoId.pastel:
         return cor;
       case AppMenuModoId.retro:
-        return selecionado ? Colors.white : cor;
+        // Sempre colorido (como o ERP antigo), mesmo sem selecao.
+        return cor;
       case AppMenuModoId.faixa:
         return selecionado ? cor : scheme.onSurfaceVariant;
     }
@@ -470,7 +467,7 @@ abstract final class AppMenuModoEstilo {
       case AppMenuModoId.pastel:
         return cor.withValues(alpha: selecionado ? 1 : 0.82);
       case AppMenuModoId.retro:
-        return selecionado ? Colors.white : const Color(0xFF212121);
+        return selecionado ? cor : const Color(0xFF333333);
       case AppMenuModoId.faixa:
         return selecionado
             ? cor
@@ -489,8 +486,9 @@ abstract final class AppMenuModoEstilo {
       case AppMenuModoId.faixa:
         return FontWeight.w700;
       case AppMenuModoId.amplo:
-      case AppMenuModoId.retro:
         return FontWeight.w800;
+      case AppMenuModoId.retro:
+        return FontWeight.w600;
     }
   }
 

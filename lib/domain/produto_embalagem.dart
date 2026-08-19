@@ -326,6 +326,35 @@ class ProdutoEmbalagem {
         QuantidadeVendaUtil.escalaFracionada;
   }
 
+  /// Media diaria persistida ([Produto.vendaMediaDiaria]) na unidade de venda.
+  ///
+  /// A media e gravada na mesma escala de [ItemVenda.quantidade] (raw). Valores
+  /// >= 1000 em produto fracionado sao milésimos/dia (2410,33 → 2,41 m²/dia).
+  static double valorMediaDiariaExibicao(
+    Produto produto,
+    double mediaArmazenada,
+  ) {
+    if (!mediaArmazenada.isFinite || mediaArmazenada <= 0) return 0;
+    if (!estoqueUsaEscalaFracionada(produto)) return mediaArmazenada;
+    if (mediaArmazenada >= QuantidadeVendaUtil.escalaFracionada) {
+      return mediaArmazenada / QuantidadeVendaUtil.escalaFracionada;
+    }
+    return mediaArmazenada;
+  }
+
+  /// Texto da media diaria na unidade de venda (ex.: "2,41").
+  static String formatarMediaDiaria(
+    Produto produto,
+    double mediaArmazenada, {
+    bool comUnidade = false,
+  }) {
+    final v = valorMediaDiariaExibicao(produto, mediaArmazenada);
+    if (v <= 0) return '—';
+    final txt = formatarQuantidadeUnidadeVenda(produto, v);
+    if (!comUnidade) return txt;
+    return '$txt ${normalizarUnidade(produto.unidade)}';
+  }
+
   static String formatarEstoque(
     Produto produto,
     int estoqueArmazenado, {

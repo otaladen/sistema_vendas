@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-
 import '../../model/venda.dart';
 import 'romaneio_relatorios.dart';
 
@@ -8,6 +6,7 @@ class EntregasMontagemCallbacks {
   const EntregasMontagemCallbacks({
     required this.atualizarChecklist,
     required this.atualizarStatus,
+    required this.liberarSaida,
     required this.emitirRelatorio,
     required this.trocarParada,
     required this.trocarParadaMotorista,
@@ -19,9 +18,10 @@ class EntregasMontagemCallbacks {
     required this.removerAgrupamento,
     required this.editarMotoristaPedido,
     required this.definirMotoristaEmLote,
+    required this.confirmarBuscarNaLoja,
   });
 
-  final void Function(
+  final Future<bool> Function(
     Venda venda, {
     bool? separado,
     bool? carregado,
@@ -33,6 +33,14 @@ class EntregasMontagemCallbacks {
     String novoStatus, {
     bool mostrarSnackSucesso,
   }) atualizarStatus;
+
+  /// Checklist Separado+Carregado+Saiu + status `saiu_entrega` (+ estoque).
+  final Future<bool> Function(
+    Venda venda, {
+    bool mostrarSnackSucesso,
+    String? lojaOrigemMercadoria,
+    Map<int, String>? origemPorItem,
+  }) liberarSaida;
 
   final Future<void> Function({
     required RelatorioEntregaTipo tipo,
@@ -60,7 +68,7 @@ class EntregasMontagemCallbacks {
 
   final void Function(Venda venda) abrirDetalheItens;
   final void Function(Venda venda) abrirNavegacao;
-  final VoidCallback recarregar;
+  final Future<void> Function() recarregar;
 
   /// Agrupa pedidos selecionados (carreto finalizado; clientes podem ser diferentes).
   final Future<void> Function(Set<int> vendaIds) confirmarAgrupamento;
@@ -73,4 +81,8 @@ class EntregasMontagemCallbacks {
 
   /// Mesmo motorista em varios pedidos (ids da lista visivel).
   final Future<void> Function(Set<int> vendaIds) definirMotoristaEmLote;
+
+  /// Patio confirma itens que o motorista pediu para buscar nesta loja.
+  final Future<void> Function(int vendaId, List<int> itemIds)
+      confirmarBuscarNaLoja;
 }

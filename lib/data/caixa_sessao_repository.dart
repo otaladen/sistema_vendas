@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../model/caixa_sessao.dart';
+import '../services/lan_api_server.dart';
+import 'sync/caixa_status_hub.dart';
 import 'sync/sync_write_trigger.dart';
 
 /// Persistencia local + pacote para sincronizacao LAN de sessoes de caixa.
@@ -65,6 +67,8 @@ class CaixaSessaoRepository {
       await _migrarLegadoSeNecessario();
     }
     final prefs = await SharedPreferences.getInstance();
+    // Nao usar prefs.reload() aqui: em Windows pode reler disco atrasado e
+    // apagar escrita recente (KPI "Fechado" com caixa aberto na UI).
     final raw = prefs.getString(_kSessoesRede);
     if (raw == null || raw.trim().isEmpty) return {};
     try {
@@ -103,6 +107,62 @@ class CaixaSessaoRepository {
     return null;
   }
 
+  /// Sessao aberta deste terminal, ou a da loja quando [umCaixaAbertoPorLoja].
+  static CaixaSessao? sessaoAbertaPara(
+    Map<String, CaixaSessao> mapa, {
+    required String terminalId,
+    required bool umCaixaAbertoPorLoja,
+  }) {
+    final id = terminalId.trim();
+    final minha = id.isEmpty ? null : mapa[id];
+    if (minha != null && minha.aberto) return minha;
+    if (umCaixaAbertoPorLoja) {
+      for (final s in mapa.values) {
+        if (s.aberto) return s;
+      }
+    }
+    return null;
+  }
+
+  /// Soma atomica de suprimento/sangria na sessao aberta (mutex interno).
+  Future<CaixaSessao> registrarMovimentacao({
+    required String terminalId,
+    double deltaSuprimento = 0,
+    double deltaSangria = 0,
+    bool umCaixaAbertoPorLoja = true,
+    bool propagarRede = true,
+  }) async {
+    if (deltaSuprimento == 0 && deltaSangria == 0) {
+      throw ArgumentError('Informe um valor de suprimento ou sangria.');
+    }
+    if (deltaSuprimento < 0 || deltaSangria < 0) {
+      throw ArgumentError('Valor da movimentacao deve ser positivo.');
+    }
+    return _serializar(() async {
+      final todas = await _listarTodasSessoesInterno(migrarLegado: false);
+      final atual = sessaoAbertaPara(
+        todas,
+        terminalId: terminalId,
+        umCaixaAbertoPorLoja: umCaixaAbertoPorLoja,
+      );
+      if (atual == null || !atual.aberto) {
+        throw StateError('caixa nao aberto neste terminal');
+      }
+      final nova = atual.copyWith(
+        suprimentos: atual.suprimentos + deltaSuprimento,
+        sangrias: atual.sangrias + deltaSangria,
+        atualizadoEm: DateTime.now(),
+      );
+      todas[atual.terminalId] = nova;
+      await _persistirMapa(todas);
+      CaixaStatusHub.instance.publicarDasSessoes(todas);
+      if (propagarRede) {
+        _propagarCaixaRede();
+      }
+      return nova;
+    });
+  }
+
   Future<void> salvarSessaoLocal(CaixaSessao sessao, {bool propagarRede = true}) async {
     await _serializar(() async {
       final todas = await _listarTodasSessoesInterno(migrarLegado: false);
@@ -115,13 +175,58 @@ class CaixaSessaoRepository {
       );
       todas[terminalId] = atualizado;
       await _persistirMapa(todas);
+      CaixaStatusHub.instance.publicarDasSessoes(todas);
       if (propagarRede) {
-        notificarAlteracaoParaRede(
-          entidade: 'caixa_sessoes',
-          entidadeId: 1,
-        );
+        _propagarCaixaRede();
       }
     });
+  }
+
+  /// Fecha todas as sessoes abertas (fechamento aderido / um-caixa no PC servidor).
+  Future<int> fecharTodasSessoesAbertas({bool propagarRede = true}) async {
+    return _serializar(() async {
+      final todas = await _listarTodasSessoesInterno(migrarLegado: false);
+      var fechadas = 0;
+      final agora = DateTime.now();
+      for (final e in todas.entries) {
+        if (!e.value.aberto) continue;
+        todas[e.key] = e.value.copyWith(
+          aberto: false,
+          operador: '',
+          limparAbertura: true,
+          fundoTroco: 0,
+          suprimentos: 0,
+          sangrias: 0,
+          atualizadoEm: agora,
+        );
+        fechadas++;
+      }
+      if (fechadas > 0) {
+        await _persistirMapa(todas);
+        CaixaStatusHub.instance.publicar(
+          aberto: false,
+          operador: '',
+          terminalId: '',
+        );
+        if (propagarRede) {
+          _propagarCaixaRede();
+        }
+      } else {
+        CaixaStatusHub.instance.publicar(aberto: false);
+      }
+      return fechadas;
+    });
+  }
+
+  void _propagarCaixaRede() {
+    notificarAlteracaoParaRede(
+      entidade: 'caixa_sessoes',
+      entidadeId: 1,
+    );
+    try {
+      LanApiServerHub.instance.notificar('caixa_sessoes');
+      LanApiServerHub.instance.notificar('caixa');
+    } catch (_) {}
   }
 
   Future<void> aplicarPacoteRede(Map<String, dynamic> payload) async {
@@ -142,6 +247,7 @@ class CaixaSessaoRepository {
         }
       }
       await _persistirMapa(locais);
+      CaixaStatusHub.instance.publicarDasSessoes(locais);
     });
   }
 
@@ -186,7 +292,7 @@ class CaixaSessaoRepository {
       final terminalId = await _obterTerminalIdInterno();
       final sessao = CaixaSessao(
         terminalId: terminalId,
-        aberto: map['aberto'] == true,
+        aberto: CaixaSessao.boolFrom(map['aberto']),
         operador: (map['operador'] as String?) ?? '',
         aberturaEm: DateTime.tryParse((map['aberturaEm'] ?? '').toString()),
         fundoTroco: ((map['fundoTroco'] as num?) ?? 0).toDouble(),

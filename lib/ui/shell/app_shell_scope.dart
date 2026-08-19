@@ -14,6 +14,7 @@ class AppShellScope extends InheritedWidget {
     required this.irParaSub,
     required this.alternarFavorito,
     required this.fecharAbaAtual,
+    required this.abrirAbaDocumento,
     required super.child,
   });
 
@@ -25,6 +26,16 @@ class AppShellScope extends InheritedWidget {
   final void Function(MainMenuDestino pai, MainMenuSubDestino sub) irParaSub;
   final Future<void> Function(MainMenuDestino destino) alternarFavorito;
   final VoidCallback fecharAbaAtual;
+
+  /// Abre (ou foca) aba de documento com [documentoId] distinto.
+  final void Function({
+    required String tipo,
+    required Object documentoId,
+    required String titulo,
+    required MainMenuDestino destino,
+    MainMenuSubDestino? sub,
+    required Widget pagina,
+  }) abrirAbaDocumento;
 
   static AppShellScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppShellScope>();

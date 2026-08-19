@@ -48,10 +48,13 @@ MensagemCargaConsolidadaVazia explicarCargaConsolidadaSemItens(
   var linhasTotalmenteRetiradas = 0;
 
   for (final v in vendasGrupo) {
-    if (EntregaVendaHelper.vendaTemItensMigradosRetiradaParaCarreto(v)) {
+    if (EntregaVendaHelper.vendaTemItensMigradosRetiradaParaCarreto(
+      v,
+      itens: RomaneioCargaMerge.itensDaVendaSafe(v),
+    )) {
       migrado = true;
     }
-    for (final item in v.itens) {
+    for (final item in RomaneioCargaMerge.itensDaVendaSafe(v)) {
       if (!EntregaVendaHelper.itemEntraNaCargaEntrega(v, item)) continue;
       itensCarreto++;
       final q = quantidadeEntrega(v, item);

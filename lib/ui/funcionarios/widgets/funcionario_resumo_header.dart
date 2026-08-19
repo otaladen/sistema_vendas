@@ -6,7 +6,7 @@ import '../../../domain/main_menu_destino.dart';
 import '../../theme/app_modulo_cores.dart';
 import '../../theme/app_semantic_helper.dart';
 
-/// Resumo somente leitura do funcionario selecionado (estilo cadastro de produtos).
+/// Cabecalho compacto do cadastro de funcionarios (mesmo visual de clientes).
 class FuncionarioResumoHeader extends StatelessWidget {
   const FuncionarioResumoHeader({
     super.key,
@@ -56,182 +56,123 @@ class FuncionarioResumoHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final semantic = context.semanticColors;
-    final titulo = nome.trim().isEmpty ? 'Novo funcionario' : nome.trim();
-    final codigoRotulo =
-        codigo.trim().isEmpty ? 'Sem codigo' : 'Codigo ${codigo.trim()}';
-
-    final chips = <Widget>[
-      Chip(
-        visualDensity: VisualDensity.compact,
-        label: Text(codigoRotulo),
-      ),
-      Chip(
-        visualDensity: VisualDensity.compact,
-        label: Text(ativo ? 'Ativo' : 'Inativo'),
-        backgroundColor: ativo
-            ? scheme.primaryContainer.withValues(alpha: 0.55)
-            : scheme.errorContainer.withValues(alpha: 0.4),
-      ),
-      if (tempoCasa.isNotEmpty)
-        Chip(
-          visualDensity: VisualDensity.compact,
-          label: Text(tempoCasa),
-        ),
-      if (emEdicaoId != null)
-        Chip(
-          visualDensity: VisualDensity.compact,
-          label: Text('#$emEdicaoId'),
-        ),
-      if (tambemVendedorPdv)
-        Chip(
-          visualDensity: VisualDensity.compact,
-          label: Text(
-            vendedorVinculadoId > 0
-                ? 'PDV #$vendedorVinculadoId'
-                : 'Vendedor PDV',
-          ),
-        ),
-      if (tambemMotoristaEntrega)
-        Chip(
-          visualDensity: VisualDensity.compact,
-          label: Text(
-            motoristaVinculadoId > 0
-                ? 'Motorista #$motoristaVinculadoId'
-                : 'Motorista',
-          ),
-          backgroundColor: MainMenuDestino.entregas
-              .cor(context)
-              .withValues(alpha: 0.18),
-        ),
-      if (temUsuarioSistema)
-        Chip(
-          visualDensity: VisualDensity.compact,
-          label: Text(
-            usuarioLogin != null && usuarioLogin!.isNotEmpty
-                ? 'Login $usuarioLogin'
-                : 'Usuario ERP',
-          ),
-        ),
-      if (cnhVencida)
-        Chip(
-          visualDensity: VisualDensity.compact,
-          label: const Text('CNH vencida'),
-          backgroundColor: semantic.errorBg.withValues(alpha: 0.55),
-        ),
-      if (asoVencido)
-        Chip(
-          visualDensity: VisualDensity.compact,
-          label: const Text('ASO vencido'),
-          backgroundColor: semantic.errorBg.withValues(alpha: 0.55),
-        ),
-      if (!ativo && dataDemissaoFormatada != null)
-        Chip(
-          visualDensity: VisualDensity.compact,
-          label: Text('Demissao $dataDemissaoFormatada'),
-          backgroundColor: semantic.errorBg.withValues(alpha: 0.45),
-        ),
-    ];
-
-    final identidade = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildAvatar(scheme),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                titulo,
-                maxLines: compact ? 1 : 2,
-                overflow: TextOverflow.ellipsis,
-                style: (compact
-                        ? theme.textTheme.titleMedium
-                        : theme.textTheme.titleLarge)
-                    ?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                resumoRh.isEmpty
-                    ? 'Defina setor e funcao na aba Dados'
-                    : resumoRh,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: chips,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-
-    final metricas = Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Text(
-          'Liquido ref.',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
-        Text(
-          liquidoFormatado,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
-            color: scheme.primary,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Prox. pag.: $proximoPagamentoFormatado',
-          style: theme.textTheme.bodySmall?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
+    final titulo = nome.trim().isEmpty
+        ? (emEdicaoId != null ? 'Funcionario em edicao' : 'Novo funcionario')
+        : nome.trim();
+    final codigoRotulo = codigo.trim().isNotEmpty
+        ? codigo.trim()
+        : (emEdicaoId != null ? '#$emEdicaoId' : 'Novo');
 
     return Container(
-      margin: EdgeInsets.only(bottom: compact ? 4 : 6),
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 10 : 12,
-        vertical: compact ? 8 : 10,
-      ),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.55)),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final empilhar = constraints.maxWidth < 640;
-          if (empilhar) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: EdgeInsets.fromLTRB(4, compact ? 3 : 4, 8, compact ? 3 : 4),
+      color: scheme.surfaceContainerHighest,
+      child: Row(
+        children: [
+          _buildAvatar(scheme),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                identidade,
-                const SizedBox(height: 8),
-                Align(alignment: Alignment.centerLeft, child: metricas),
+                Text(
+                  titulo,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (resumoRh.trim().isNotEmpty)
+                  Text(
+                    resumoRh,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 10.5,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
               ],
-            );
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: identidade),
-              const SizedBox(width: 16),
-              metricas,
-            ],
-          );
-        },
+            ),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Wrap(
+              spacing: 4,
+              runSpacing: 2,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              alignment: WrapAlignment.end,
+              children: [
+                _ChipInfo(label: codigoRotulo, theme: theme),
+                _ChipInfo(
+                  label: ativo ? 'Ativo' : 'Inativo',
+                  theme: theme,
+                  destaque: ativo
+                      ? scheme.primaryContainer
+                      : scheme.errorContainer,
+                ),
+                if (tempoCasa.isNotEmpty)
+                  _ChipInfo(label: tempoCasa, theme: theme),
+                if (tambemVendedorPdv)
+                  _ChipInfo(
+                    label: vendedorVinculadoId > 0
+                        ? 'PDV #$vendedorVinculadoId'
+                        : 'Vendedor PDV',
+                    theme: theme,
+                  ),
+                if (tambemMotoristaEntrega)
+                  _ChipInfo(
+                    label: motoristaVinculadoId > 0
+                        ? 'Motorista #$motoristaVinculadoId'
+                        : 'Motorista',
+                    theme: theme,
+                    destaque: MainMenuDestino.entregas
+                        .cor(context)
+                        .withValues(alpha: 0.18),
+                  ),
+                if (temUsuarioSistema)
+                  _ChipInfo(
+                    label: usuarioLogin != null && usuarioLogin!.isNotEmpty
+                        ? 'Login $usuarioLogin'
+                        : 'Usuario ERP',
+                    theme: theme,
+                  ),
+                if (cnhVencida)
+                  _ChipInfo(
+                    label: 'CNH vencida',
+                    theme: theme,
+                    destaque: semantic.errorBg,
+                  ),
+                if (asoVencido)
+                  _ChipInfo(
+                    label: 'ASO vencido',
+                    theme: theme,
+                    destaque: semantic.errorBg,
+                  ),
+                if (!ativo && dataDemissaoFormatada != null)
+                  _ChipInfo(
+                    label: 'Demissao $dataDemissaoFormatada',
+                    theme: theme,
+                    destaque: semantic.errorBg,
+                  ),
+                Text(
+                  'Liq. $liquidoFormatado',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.primary,
+                  ),
+                ),
+                Text(
+                  'Pag. $proximoPagamentoFormatado',
+                  style: theme.textTheme.bodySmall?.copyWith(fontSize: 10.5),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -240,9 +181,9 @@ class FuncionarioResumoHeader extends StatelessWidget {
     final path = fotoPath?.trim() ?? '';
     final file = path.isNotEmpty ? File(path) : null;
     final temFoto = file != null && file.existsSync();
-    final tamanho = compact ? 44.0 : 56.0;
+    final tamanho = compact ? 28.0 : 32.0;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(6),
       child: SizedBox(
         width: tamanho,
         height: tamanho,
@@ -251,11 +192,42 @@ class FuncionarioResumoHeader extends StatelessWidget {
             : ColoredBox(
                 color: scheme.primaryContainer.withValues(alpha: 0.45),
                 child: Icon(
-                  Icons.person_outline,
+                  Icons.badge_outlined,
                   color: scheme.primary,
-                  size: compact ? 24 : 28,
+                  size: compact ? 16 : 18,
                 ),
               ),
+      ),
+    );
+  }
+}
+
+class _ChipInfo extends StatelessWidget {
+  const _ChipInfo({
+    required this.label,
+    required this.theme,
+    this.destaque,
+  });
+
+  final String label;
+  final ThemeData theme;
+  final Color? destaque;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: destaque ?? theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w600,
+          fontSize: 10.5,
+        ),
       ),
     );
   }

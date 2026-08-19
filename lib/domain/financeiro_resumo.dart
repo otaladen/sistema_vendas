@@ -49,6 +49,26 @@ class FinanceiroResumoSnapshot {
       totalAReceber < 0.01 &&
       totalAPagarPendente < 0.01 &&
       !caixaAberto;
+
+  factory FinanceiroResumoSnapshot.fromMap(Map<String, dynamic> m) {
+    return FinanceiroResumoSnapshot(
+      totalAReceber: (m['totalAReceber'] as num?)?.toDouble() ?? 0,
+      aReceberVencido: (m['aReceberVencido'] as num?)?.toDouble() ?? 0,
+      aReceberVenceHoje: (m['aReceberVenceHoje'] as num?)?.toDouble() ?? 0,
+      aReceberProximos7: (m['aReceberProximos7'] as num?)?.toDouble() ?? 0,
+      totalAPagarPendente: (m['totalAPagarPendente'] as num?)?.toDouble() ?? 0,
+      aPagarAtrasado: (m['aPagarAtrasado'] as num?)?.toDouble() ?? 0,
+      aPagarProximos7: (m['aPagarProximos7'] as num?)?.toDouble() ?? 0,
+      qtdTitulosReceberAbertos:
+          (m['qtdTitulosReceberAbertos'] as num?)?.toInt() ?? 0,
+      qtdContasPagarAbertas: (m['qtdContasPagarAbertas'] as num?)?.toInt() ?? 0,
+      qtdContasPagarAtrasadas:
+          (m['qtdContasPagarAtrasadas'] as num?)?.toInt() ?? 0,
+      saldoCaixaEstimado: (m['saldoCaixaEstimado'] as num?)?.toDouble(),
+      caixaAberto: m['caixaAberto'] == true,
+      operadorCaixa: (m['operadorCaixa'] ?? '').toString(),
+    );
+  }
 }
 
 /// Agrega indicadores financeiros a partir dos dados existentes no ERP.

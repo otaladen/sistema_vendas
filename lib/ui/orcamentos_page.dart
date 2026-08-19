@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_config_repository.dart';
-import '../data/cliente_repository.dart';
-import '../data/produto_repository.dart';
-import '../data/venda_repository.dart';
-import '../data/vendedor_repository.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
@@ -26,16 +22,20 @@ class OrcamentosPage extends StatelessWidget {
     required this.usuarioLogado,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
-  final ProdutoRepository produtoRepository;
-  final VendedorRepository vendedorRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
+  final dynamic produtoRepository;
+  final dynamic vendedorRepository;
   final AppConfigRepository appConfigRepository;
   final PrintService printService;
   final UsuarioSistema usuarioLogado;
 
   bool get _podeEditarNoPdv =>
       UsuarioPermissaoHelper.tem(usuarioLogado, PermissaoUsuario.acessarPdv);
+
+  /// Mesma permissao de cancelar venda: apaga orcamento pendente.
+  bool get _podeApagar =>
+      UsuarioPermissaoHelper.podeCancelarVendas(usuarioLogado);
 
   Future<void> _editarNoPdv(BuildContext context, Venda venda) {
     return abrirPdvComOrcamento(
@@ -62,6 +62,8 @@ class OrcamentosPage extends StatelessWidget {
       exibirExportacoesRelatorio: false,
       podeEditarNoPdv: _podeEditarNoPdv,
       onEditarNoPdv: _podeEditarNoPdv ? _editarNoPdv : null,
+      podeApagarOrcamentos: _podeApagar,
+      usuarioExecutor: _podeApagar ? usuarioLogado : null,
     );
   }
 }

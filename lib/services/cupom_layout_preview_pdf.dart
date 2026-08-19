@@ -190,6 +190,7 @@ class CupomLayoutPreviewPdf {
                 logoBytes: comLogo ? logoBytes : null,
                 telefone: empresa.telefone,
                 endereco: empresa.endereco,
+                cnpj: orcamento ? FiscalConfig.cnpjEmitente : null,
               ),
               CupomPdfLayout.faixaTipoDocumento(
                 layout: layout,
@@ -199,12 +200,16 @@ class CupomLayoutPreviewPdf {
                 subtitulo: orcamento ? null : 'SEGUNDA VIA',
               ),
               CupomPdfLayout.tituloSecao(
-                orcamento ? 'ORCAMENTO 1042' : 'CONTROLE 1042',
+                orcamento ? 'ORCAMENTO N. 1042' : 'CONTROLE 1042',
                 layout,
               ),
               if (!orcamento)
                 CupomPdfLayout.textoCorpo('NFC-e 4521', layout),
-              CupomPdfLayout.textoCorpo('Data: $dataHora', layout),
+              CupomPdfLayout.textoCorpo(
+                orcamento ? 'Emissao: $dataHora' : 'Data: $dataHora',
+                layout,
+                fontWeight: orcamento ? pw.FontWeight.bold : pw.FontWeight.normal,
+              ),
               if (!orcamento)
                 CupomPdfLayout.textoCorpo(
                   'Reimpressao: $dataHora',
@@ -213,8 +218,13 @@ class CupomLayoutPreviewPdf {
                 ),
               CupomPdfLayout.textoCorpo('Cliente: Cliente Exemplo Ltda', layout),
               if (layout.exibirVendedor)
-                CupomPdfLayout.textoCorpo('Vendedor: 01 · Maria', layout),
-              if (layout.exibirDocumentoCliente)
+                CupomPdfLayout.textoCorpo(
+                  orcamento
+                      ? 'Vendedor/Atendente: 01 · Maria'
+                      : 'Vendedor: 01 · Maria',
+                  layout,
+                ),
+              if (!orcamento && layout.exibirDocumentoCliente)
                 CupomPdfLayout.textoCorpo(
                   'Documento: 12.345.678/0001-99',
                   layout,
@@ -226,7 +236,7 @@ class CupomLayoutPreviewPdf {
                 ),
               if (orcamento && layout.exibirValidadeOrcamento)
                 CupomPdfLayout.textoCorpo(
-                  'Validade do orcamento: ${DateFormat('dd/MM/yyyy').format(agora.add(const Duration(days: 7)))} (7 dias)',
+                  'Validade: ${DateFormat('dd/MM/yyyy').format(agora.add(const Duration(days: 7)))} (7 dias)',
                   layout,
                   fontWeight: pw.FontWeight.bold,
                 ),
@@ -250,7 +260,10 @@ class CupomLayoutPreviewPdf {
                 (i) => CupomPdfLayout.itemVenda(
                   layout: layout,
                   nomeProduto: i.nome,
+                  codigoSku: orcamento ? 'SKU-01' : null,
+                  modalidade: orcamento ? '[RETIRA LOGO]' : null,
                   quantidade: i.qtd,
+                  quantidadeExibicao: orcamento ? '${i.qtd} UN' : null,
                   precoUnitario: i.unit,
                   subtotal: i.qtd * i.unit,
                   formatarMoeda: _moeda,
@@ -265,15 +278,22 @@ class CupomLayoutPreviewPdf {
               ),
               CupomPdfLayout.linhaTotal(
                 layout: layout,
-                rotulo: 'Frete:',
+                rotulo: orcamento ? 'Frete/Entrega:' : 'Frete:',
                 valor: _moeda(frete),
               ),
               CupomPdfLayout.linhaTotal(
                 layout: layout,
-                rotulo: orcamento ? 'Total:' : 'TOTAL:',
+                rotulo: orcamento ? 'VALOR TOTAL:' : 'TOTAL:',
                 valor: _moeda(total),
-                destaque: layout.destacarTotal,
+                destaque: layout.destacarTotal || orcamento,
               ),
+              if (orcamento)
+                CupomPdfLayout.linhaTotal(
+                  layout: layout,
+                  rotulo: 'Pagamento:',
+                  valor: 'PIX a vista',
+                  colunas: layout.alinharPagamentoColunas,
+                ),
               if (!orcamento) ...[
                 CupomPdfLayout.linhaTotal(
                   layout: layout,
@@ -294,20 +314,17 @@ class CupomLayoutPreviewPdf {
                   destaque: layout.destacarTroco,
                   colunas: layout.alinharPagamentoColunas,
                 ),
-              ] else
-                CupomPdfLayout.linhaTotal(
-                  layout: layout,
-                  rotulo: 'Pagamento:',
-                  valor: 'A combinar',
-                  colunas: layout.alinharPagamentoColunas,
-                ),
+              ],
+              if (orcamento) ...[
+                ...CupomPdfLayout.avisoCotacaoSemValorFiscal(layout),
+              ],
               ...CupomPdfLayout.rodapeDocumento(
                 layout: layout,
                 textoRodape: orcamento
                     ? empresa.rodapeOrcamento
                     : empresa.rodapeNota,
               ),
-              CupomPdfLayout.espacoFinalDocumento(layout),
+              if (!orcamento) CupomPdfLayout.espacoFinalDocumento(layout),
             ],
           );
         },

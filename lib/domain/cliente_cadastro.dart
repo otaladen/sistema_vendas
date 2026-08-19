@@ -14,7 +14,7 @@ class ClienteCadastro {
   static const tabelasPreco = [
     ('preco1', 'A prazo (preco 1)'),
     ('preco2', 'A vista (preco 2)'),
-    ('preco3', 'Atacado (preco 3)'),
+    ('preco3', 'Especial (preco 3)'),
   ];
 
   static const indicadoresIe = [

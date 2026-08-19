@@ -84,6 +84,88 @@ class TesourariaSemanalSnapshot {
 
   double get saldoRealizadoSemana =>
       totalEntradasRealizadas - totalSaidasRealizadas;
+
+  factory TesourariaSemanalSnapshot.fromMap(Map<String, dynamic> m) {
+    final diasRaw = m['dias'];
+    final dias = <TesourariaLinhaDia>[];
+    if (diasRaw is List) {
+      for (final raw in diasRaw.whereType<Map>()) {
+        final d = Map<String, dynamic>.from(raw);
+        dias.add(
+          TesourariaLinhaDia(
+            dia: () {
+              final rawDia =
+                  DateTime.tryParse((d['dia'] ?? '').toString())?.toLocal() ??
+                      DateTime.now();
+              return DateTime(rawDia.year, rawDia.month, rawDia.day);
+            }(),
+            entradasPrevistas: (d['entradasPrevistas'] as num?)?.toDouble() ?? 0,
+            saidasPrevistas: (d['saidasPrevistas'] as num?)?.toDouble() ?? 0,
+            entradasRealizadas:
+                (d['entradasRealizadas'] as num?)?.toDouble() ?? 0,
+            saidasRealizadas: (d['saidasRealizadas'] as num?)?.toDouble() ?? 0,
+            qtdEntradasPrevistas:
+                (d['qtdEntradasPrevistas'] as num?)?.toInt() ?? 0,
+            qtdSaidasPrevistas: (d['qtdSaidasPrevistas'] as num?)?.toInt() ?? 0,
+            qtdEntradasRealizadas:
+                (d['qtdEntradasRealizadas'] as num?)?.toInt() ?? 0,
+            qtdSaidasRealizadas:
+                (d['qtdSaidasRealizadas'] as num?)?.toInt() ?? 0,
+          ),
+        );
+      }
+    }
+    final itensPorDia = <DateTime, List<TesourariaItemDetalhe>>{};
+    final itensRaw = m['itensPorDia'];
+    if (itensRaw is Map) {
+      for (final e in itensRaw.entries) {
+        final chave = e.key.toString();
+        DateTime? dia;
+        final parsed = DateTime.tryParse(chave);
+        if (parsed != null) {
+          dia = DateTime(parsed.year, parsed.month, parsed.day);
+        } else {
+          final parts = chave.split('-');
+          if (parts.length == 3) {
+            final y = int.tryParse(parts[0]);
+            final mo = int.tryParse(parts[1]);
+            final d = int.tryParse(parts[2]);
+            if (y != null && mo != null && d != null) {
+              dia = DateTime(y, mo, d);
+            }
+          }
+        }
+        if (dia == null) continue;
+        final lista = <TesourariaItemDetalhe>[];
+        if (e.value is List) {
+          for (final raw in (e.value as List).whereType<Map>()) {
+            final i = Map<String, dynamic>.from(raw);
+            lista.add(
+              TesourariaItemDetalhe(
+                tipo: (i['tipo'] ?? '').toString(),
+                descricao: (i['descricao'] ?? '').toString(),
+                valor: (i['valor'] as num?)?.toDouble() ?? 0,
+                referencia: (i['referencia'] ?? '').toString(),
+                realizado: i['realizado'] == true,
+              ),
+            );
+          }
+        }
+        itensPorDia[dia] = lista;
+      }
+    }
+    return TesourariaSemanalSnapshot(
+      dias: dias,
+      itensPorDia: itensPorDia,
+      totalEntradasPrevistas:
+          (m['totalEntradasPrevistas'] as num?)?.toDouble() ?? 0,
+      totalSaidasPrevistas: (m['totalSaidasPrevistas'] as num?)?.toDouble() ?? 0,
+      totalEntradasRealizadas:
+          (m['totalEntradasRealizadas'] as num?)?.toDouble() ?? 0,
+      totalSaidasRealizadas:
+          (m['totalSaidasRealizadas'] as num?)?.toDouble() ?? 0,
+    );
+  }
 }
 
 /// Agrega vencimentos e movimentos para planejamento de caixa.

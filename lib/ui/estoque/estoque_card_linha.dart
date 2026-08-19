@@ -53,6 +53,11 @@ class EstoqueCardLinha extends StatelessWidget {
       produto.estoqueReal,
       comUnidade: false,
     );
+    final reservado = ProdutoEmbalagem.formatarEstoque(
+      produto,
+      produto.estoqueReservado,
+      comUnidade: false,
+    );
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -197,7 +202,12 @@ class EstoqueCardLinha extends StatelessWidget {
                         destaque: produto.estoqueLivreParaVenda <=
                             produto.quantidadeMinima,
                       ),
-                      _chip(context, label: 'Est $fisico'),
+                      _chip(context, label: 'Fis $fisico'),
+                      _chip(
+                        context,
+                        label: 'Res $reservado',
+                        destaque: produto.estoqueReservado > 0,
+                      ),
                       _chip(
                         context,
                         label: 'Min ${produto.quantidadeMinima}',

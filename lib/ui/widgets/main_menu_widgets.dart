@@ -416,22 +416,20 @@ class MainMenuFeaturedVendasTile extends StatelessWidget {
   }
 }
 
-/// Cabecalho contextual do menu (loja, data, sync).
+/// Cabecalho contextual do menu (loja, data, status da API LAN).
 class MainMenuContextHeader extends StatelessWidget {
   const MainMenuContextHeader({
     super.key,
     required this.nomeLoja,
     required this.dataHoraFormatada,
-    this.syncAtivo = false,
-    this.syncSucesso,
-    this.syncMensagem,
+    this.statusApi,
   });
 
   final String nomeLoja;
   final String dataHoraFormatada;
-  final bool syncAtivo;
-  final bool? syncSucesso;
-  final String? syncMensagem;
+
+  /// Indicador opcional de conexao com a API (:8788).
+  final MainMenuApiStatus? statusApi;
 
   @override
   Widget build(BuildContext context) {
@@ -463,7 +461,7 @@ class MainMenuContextHeader extends StatelessWidget {
                 ],
               ),
             ),
-            if (syncAtivo) _SyncBadge(sucesso: syncSucesso, mensagem: syncMensagem),
+            if (statusApi != null) _ApiStatusBadge(status: statusApi!),
           ],
         ),
       ),
@@ -471,31 +469,36 @@ class MainMenuContextHeader extends StatelessWidget {
   }
 }
 
-class _SyncBadge extends StatelessWidget {
-  const _SyncBadge({this.sucesso, this.mensagem});
+/// Estado da API de terminais para o badge do Inicio.
+class MainMenuApiStatus {
+  const MainMenuApiStatus({
+    required this.online,
+    required this.rotulo,
+    this.tooltip,
+  });
 
-  final bool? sucesso;
-  final String? mensagem;
+  final bool online;
+  final String rotulo;
+  final String? tooltip;
+}
+
+class _ApiStatusBadge extends StatelessWidget {
+  const _ApiStatusBadge({required this.status});
+
+  final MainMenuApiStatus status;
 
   @override
   Widget build(BuildContext context) {
     final tema = Theme.of(context);
     final semantic = tema.extension<AppSemanticColors>();
-    final ok = sucesso == true;
-    final falha = sucesso == false;
-    final cor = ok
-        ? (semantic?.successFg ?? tema.colorScheme.primary)
-        : falha
-            ? (semantic?.errorFg ?? tema.colorScheme.error)
-            : tema.colorScheme.onSurfaceVariant;
-    final rotulo = ok
-        ? 'Sync OK'
-        : falha
-            ? 'Sync falhou'
-            : 'Sync LAN';
+    final cor = status.online
+        ? (semantic?.successFg ?? Colors.green.shade700)
+        : (semantic?.errorFg ?? tema.colorScheme.error);
 
     return Tooltip(
-      message: mensagem?.trim().isNotEmpty == true ? mensagem!.trim() : rotulo,
+      message: status.tooltip?.trim().isNotEmpty == true
+          ? status.tooltip!.trim()
+          : status.rotulo,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
@@ -507,17 +510,15 @@ class _SyncBadge extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              ok
+              status.online
                   ? Icons.cloud_done_outlined
-                  : falha
-                      ? Icons.cloud_off_outlined
-                      : Icons.sync_outlined,
+                  : Icons.cloud_off_outlined,
               size: 16,
               color: cor,
             ),
             const SizedBox(width: 6),
             Text(
-              rotulo,
+              status.rotulo,
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,

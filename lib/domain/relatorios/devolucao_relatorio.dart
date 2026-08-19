@@ -1,5 +1,6 @@
-import '../../data/venda_repository.dart';
 import '../../model/registro_devolucao.dart';
+import '../../model/venda.dart';
+import '../venda_relacao_safe.dart';
 
 /// Linha agregada por produto em devolucoes/trocas.
 class DevolucaoProdutoResumoLinha {
@@ -47,21 +48,59 @@ class DevolucaoDetalheLinha {
   final double impactoFaturamento;
 }
 
+Venda? _vendaOrigemSafe(RegistroDevolucao r, dynamic repo) {
+  try {
+    final ligado = r.vendaOrigem.target;
+    if (ligado != null) return ligado;
+  } catch (_) {}
+  final id = r.vendaOrigem.targetId;
+  if (id <= 0 || repo == null) return null;
+  try {
+    return repo.obterPorId(id) as Venda?;
+  } catch (_) {
+    return null;
+  }
+}
+
+String _nomeProdutoLinha({
+  required String snapshot,
+  required int produtoId,
+  required dynamic Function() targetProduto,
+}) {
+  final snap = snapshot.trim();
+  if (snap.isNotEmpty) return snap;
+  try {
+    final p = targetProduto();
+    final n = (p?.nome as String?)?.trim() ?? '';
+    if (n.isNotEmpty) return n;
+  } catch (_) {}
+  return produtoId > 0 ? 'Produto #$produtoId' : 'Produto';
+}
+
+/// [repo] aceita VendaRepository (servidor) ou VendaApiRepository (terminal).
 List<DevolucaoDetalheLinha> montarDetalhesDevolucao(
-  VendaRepository repo,
-  List<RegistroDevolucao> registros,
-) {
+  dynamic repo,
+  List<RegistroDevolucao> registros, {
+  dynamic clienteRepository,
+}) {
   final linhas = <DevolucaoDetalheLinha>[];
   for (final r in registros) {
-    final venda = r.vendaOrigem.target;
-    final cliente = venda?.cliente.target?.nomeRazao ?? 'Sem cliente';
+    final venda = _vendaOrigemSafe(r, repo);
+    final cliente = venda == null
+        ? 'Sem cliente'
+        : VendaRelacaoSafe.nomeCliente(
+            venda,
+            clienteRepository: clienteRepository,
+          );
     final numero = venda?.numeroOrcamento ?? 0;
-    final impacto = repo.impactoFaturamentoRegistro(r);
+    final impacto = (repo.impactoFaturamentoRegistro(r) as num).toDouble();
     if (r.tipo == 'troca') {
       for (final l in r.linhasEntrada) {
-        final nome = l.nomeProdutoSnapshot.trim().isNotEmpty
-            ? l.nomeProdutoSnapshot
-            : (l.produto.target?.nome ?? 'Produto');
+        final nome = _nomeProdutoLinha(
+          snapshot: l.nomeProdutoSnapshot,
+          produtoId: l.produto.targetId,
+          targetProduto: () => l.produto.target,
+        );
         linhas.add(
           DevolucaoDetalheLinha(
             data: r.data.toLocal(),
@@ -78,9 +117,11 @@ List<DevolucaoDetalheLinha> montarDetalhesDevolucao(
         );
       }
       for (final l in r.linhasSaidaTroca) {
-        final nome = l.nomeProdutoSnapshot.trim().isNotEmpty
-            ? l.nomeProdutoSnapshot
-            : (l.produto.target?.nome ?? 'Produto');
+        final nome = _nomeProdutoLinha(
+          snapshot: l.nomeProdutoSnapshot,
+          produtoId: l.produto.targetId,
+          targetProduto: () => l.produto.target,
+        );
         linhas.add(
           DevolucaoDetalheLinha(
             data: r.data.toLocal(),
@@ -99,9 +140,11 @@ List<DevolucaoDetalheLinha> montarDetalhesDevolucao(
       continue;
     }
     for (final l in r.linhasEntrada) {
-      final nome = l.nomeProdutoSnapshot.trim().isNotEmpty
-          ? l.nomeProdutoSnapshot
-          : (l.produto.target?.nome ?? 'Produto');
+      final nome = _nomeProdutoLinha(
+        snapshot: l.nomeProdutoSnapshot,
+        produtoId: l.produto.targetId,
+        targetProduto: () => l.produto.target,
+      );
       linhas.add(
         DevolucaoDetalheLinha(
           data: r.data.toLocal(),

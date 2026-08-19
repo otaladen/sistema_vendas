@@ -1,10 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/produto_repository.dart';
 import '../../data/sugestao_venda_metrica_repository.dart';
+import '../../data/api/sugestao_venda_metrica_api_repository.dart';
 import '../../domain/sugestao_venda_metrica_constantes.dart';
 import '../../domain/sugestao_venda_ranking.dart';
+import '../../model/produto.dart';
 import 'relatorio_export_util.dart';
 import 'relatorio_periodo.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
@@ -17,8 +20,8 @@ class RelatorioSugestoesVendaPage extends StatefulWidget {
     required this.produtoRepository,
   });
 
-  final SugestaoVendaMetricaRepository metricaRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic metricaRepository;
+  final dynamic produtoRepository;
 
   @override
   State<RelatorioSugestoesVendaPage> createState() =>
@@ -32,21 +35,34 @@ class _RelatorioSugestoesVendaPageState extends State<RelatorioSugestoesVendaPag
   final NumberFormat _pct = NumberFormat('#,##0.0', 'pt_BR');
   final NumberFormat _int = NumberFormat('#,##0', 'pt_BR');
 
-  void _carregar() {
+  Future<void> _carregar() async {
     final lim = _limites;
     if (lim == null) {
       setState(() => _linhas = const []);
       return;
     }
-    final lista = widget.metricaRepository.listarRanking(
-      inicio: lim.$1,
-      fim: lim.$2,
-    );
-    setState(() => _linhas = lista);
+    final repo = widget.metricaRepository;
+    try {
+      final lista = repo is SugestaoVendaMetricaApiRepository
+          ? await repo.listarRanking(inicio: lim.$1, fim: lim.$2)
+          : (repo as SugestaoVendaMetricaRepository).listarRanking(
+              inicio: lim.$1,
+              fim: lim.$2,
+            );
+      if (!mounted) return;
+      setState(() {
+        _linhas = lista;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sugestoes: $e')),
+      );
+    }
   }
 
   String _nomeProduto(int id) =>
-      widget.produtoRepository.obterPorId(id)?.nome ?? '#$id';
+      (widget.produtoRepository.obterPorId(id) as Produto?)?.nome ?? '#$id';
 
   String _rotuloFonte(String fonte) => switch (fonte) {
         SugestaoVendaMetricaFonte.historico => 'Historico',

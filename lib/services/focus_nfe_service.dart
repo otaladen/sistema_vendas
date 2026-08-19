@@ -18,7 +18,6 @@ import 'package:intl/intl.dart';
 
 import '../config/fiscal_config.dart';
 import '../domain/fiscal/focus_documento_fiscal_url.dart';
-import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../domain/fiscal/icms_focus_item_helper.dart';
 import '../domain/fiscal/ibscbs_focus_item_helper.dart';
 import '../domain/fiscal/venda_documento_fiscal_mutex.dart';
@@ -32,6 +31,7 @@ import '../domain/pagamento_orcamento.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../model/cliente.dart';
 import '../model/item_nota_temporario.dart';
+import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import 'fiscal_service.dart';
@@ -697,6 +697,8 @@ class FocusNfeService {
     String ufDestino = FiscalConfig.ufEmitente,
     bool entregaDomicilio = false,
     FocusNfeOpcoesEmissao opcoes = const FocusNfeOpcoesEmissao(),
+    List<ItemVenda>? itens,
+    Produto? Function(int id)? obterProduto,
   }) async {
     validarConfiguracao();
     final bloqueioNfce = VendaDocumentoFiscalMutex.mensagemBloqueioNovaNfce(venda);
@@ -721,6 +723,8 @@ class FocusNfeService {
       tipoEmissao: tipoEmissao,
       formaEmissao: formaUrl,
       dataEmissao: emissaoBase,
+      itens: itens,
+      obterProduto: obterProduto,
     );
     var resultado = await _postDocumento(
       uri: Uri.parse(_config.endpointNfce(ref, formaEmissao: formaUrl)),
@@ -739,6 +743,8 @@ class FocusNfeService {
         tipoEmissao: FocusNfeEmissaoSefaz.tipoEmissaoContingenciaOfflineNfce,
         formaEmissao: FocusNfeFormaEmissaoUrl.contingenciaOfflineNfce,
         dataEmissao: DateTime.now(),
+        itens: itens,
+        obterProduto: obterProduto,
       );
       resultado = await _postDocumento(
         uri: Uri.parse(
@@ -924,8 +930,45 @@ class FocusNfeService {
     }
   }
 
-  /// Inutiliza faixa de numeracao (POST /v2/nfe/inutilizacao).
+  /// Inutiliza faixa de numeracao NF-e (POST /v2/nfe/inutilizacao).
   Future<FocusNfeOperacaoSimplesResultado> inutilizarNumeracaoNfe({
+    String? cnpjEmitente,
+    required String serie,
+    required int numeroInicial,
+    required int numeroFinal,
+    required String justificativa,
+  }) =>
+      _inutilizarNumeracao(
+        path: '/v2/nfe/inutilizacao',
+        rotulo: 'NF-e',
+        cnpjEmitente: cnpjEmitente,
+        serie: serie,
+        numeroInicial: numeroInicial,
+        numeroFinal: numeroFinal,
+        justificativa: justificativa,
+      );
+
+  /// Inutiliza faixa de numeracao NFC-e (POST /v2/nfce/inutilizacao).
+  Future<FocusNfeOperacaoSimplesResultado> inutilizarNumeracaoNfce({
+    String? cnpjEmitente,
+    required String serie,
+    required int numeroInicial,
+    required int numeroFinal,
+    required String justificativa,
+  }) =>
+      _inutilizarNumeracao(
+        path: '/v2/nfce/inutilizacao',
+        rotulo: 'NFC-e',
+        cnpjEmitente: cnpjEmitente,
+        serie: serie,
+        numeroInicial: numeroInicial,
+        numeroFinal: numeroFinal,
+        justificativa: justificativa,
+      );
+
+  Future<FocusNfeOperacaoSimplesResultado> _inutilizarNumeracao({
+    required String path,
+    required String rotulo,
     String? cnpjEmitente,
     required String serie,
     required int numeroInicial,
@@ -955,7 +998,7 @@ class FocusNfeService {
       return FocusNfeOperacaoSimplesResultado.erro('CNPJ emitente invalido.');
     }
     final base = _config.baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
-    final uri = Uri.parse('$base/v2/nfe/inutilizacao');
+    final uri = Uri.parse('$base$path');
     final body = <String, dynamic>{
       'cnpj': cnpj,
       'serie': serie.trim().isNotEmpty ? serie.trim() : '1',
@@ -974,7 +1017,7 @@ class FocusNfeService {
       return _interpretarOperacaoSimples(response);
     } catch (e) {
       return FocusNfeOperacaoSimplesResultado.erro(
-        'Falha ao inutilizar numeracao na Focus: $e',
+        'Falha ao inutilizar numeracao $rotulo na Focus: $e',
       );
     }
   }
@@ -1408,13 +1451,20 @@ class FocusNfeService {
     String tipoEmissao = FocusNfeEmissaoSefaz.tipoEmissaoNormal,
     FocusNfeFormaEmissaoUrl formaEmissao = FocusNfeFormaEmissaoUrl.normal,
     DateTime? dataEmissao,
+    List<ItemVenda>? itens,
+    Produto? Function(int id)? obterProduto,
   }) {
-    final itens = _itensFocusDeVenda(venda, ufDestino: ufDestino);
-    if (itens.isEmpty) {
+    final itensPayload = _itensFocusDeVenda(
+      venda,
+      ufDestino: ufDestino,
+      itens: itens,
+      obterProduto: obterProduto,
+    );
+    if (itensPayload.isEmpty) {
       throw FocusNfeValidacaoException('Venda sem itens para NFC-e.');
     }
 
-    final valorProdutos = _somaValorBrutoItens(itens);
+    final valorProdutos = _somaValorBrutoItens(itensPayload);
     final desconto = venda.descontoImplicitoTotal;
     final frete = venda.valorFrete;
     final valorTotal = (valorProdutos + frete - desconto)
@@ -1447,7 +1497,7 @@ class FocusNfeService {
       'valor_desconto': _formatarDecimal(desconto),
       'valor_frete': _formatarDecimal(frete),
       'valor_total': _formatarDecimal(valorTotal),
-      'items': itens,
+      'items': itensPayload,
       'formas_pagamento': _formasPagamentoDeVenda(venda, valorTotal),
       'informacoes_adicionais_contribuinte': _observacaoVenda(venda),
     };
@@ -2241,12 +2291,28 @@ class FocusNfeService {
     required String ufDestino,
     bool emissaoNfe = false,
     bool consumidorFinal = true,
+    List<ItemVenda>? itens,
+    Produto? Function(int id)? obterProduto,
   }) {
     final lista = <Map<String, dynamic>>[];
     var numero = 1;
-    for (final item in venda.itens) {
+    List<ItemVenda> linhas;
+    if (itens != null && itens.isNotEmpty) {
+      linhas = itens;
+    } else {
+      try {
+        linhas = List<ItemVenda>.from(venda.itens);
+      } catch (_) {
+        linhas = const [];
+      }
+    }
+    for (final item in linhas) {
       if (item.quantidade <= 0) continue;
-      final produto = item.produto.target;
+      Produto? produto;
+      try {
+        produto = item.produto.target;
+      } catch (_) {}
+      produto ??= obterProduto?.call(item.produto.targetId);
       if (produto == null) {
         throw FocusNfeValidacaoException(
           'Item "${item.nomeProduto}" sem produto vinculado.',

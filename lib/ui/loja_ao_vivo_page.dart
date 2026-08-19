@@ -3,8 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../data/api/lan_api_client.dart';
+import '../data/api/lan_api_event_hub.dart';
 import '../data/objectbox.dart';
 import '../data/produto_repository.dart';
+import '../data/sync/caixa_status_hub.dart';
+import '../data/sync/sync_refresh_hub.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../domain/loja_ao_vivo_service.dart';
@@ -13,6 +17,7 @@ import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../ui/relatorios/relatorio_horarios_pico_helper.dart';
 import 'shell/app_shell_aba_visibilidade.dart';
+import 'widgets/lan_api_feedback.dart';
 
 /// Painel fullscreen com visao operacional da loja em tempo real.
 class LojaAoVivoPage extends StatefulWidget {
@@ -21,14 +26,18 @@ class LojaAoVivoPage extends StatefulWidget {
     required this.vendaRepository,
     required this.produtoRepository,
     required this.vendedorRepository,
-    required this.objectBox,
     required this.usuarioLogado,
+    this.objectBox,
+    this.lanApiClient,
+    this.terminalLeve = false,
   });
 
-  final VendaRepository vendaRepository;
-  final ProdutoRepository produtoRepository;
-  final VendedorRepository vendedorRepository;
-  final ObjectBox objectBox;
+  final dynamic vendaRepository;
+  final dynamic produtoRepository;
+  final dynamic vendedorRepository;
+  final ObjectBox? objectBox;
+  final LanApiClient? lanApiClient;
+  final bool terminalLeve;
   final UsuarioSistema usuarioLogado;
 
   @override
@@ -42,11 +51,72 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
   bool _carregando = true;
   Timer? _autoRefresh;
   bool _timerAtivo = false;
+  VoidCallback? _syncHubListener;
+  VoidCallback? _apiHubListener;
+  VoidCallback? _caixaStatusListener;
+
+  static const _entidades = {
+    'venda',
+    'entrega',
+    'caixa',
+    'caixa_sessoes',
+    'titulo_receber',
+    'produto',
+  };
+
+  bool get _viaApi =>
+      widget.terminalLeve ||
+      widget.objectBox == null ||
+      widget.vendaRepository is! VendaRepository;
 
   @override
   void initState() {
     super.initState();
-    _atualizar();
+    _syncHubListener = () {
+      if (!mounted || _viaApi) return;
+      unawaited(_atualizar(silencioso: true));
+    };
+    SyncRefreshHub.instance.addListener(_syncHubListener!);
+    _apiHubListener = () {
+      if (!mounted || !_viaApi) return;
+      final hub = LanApiEventHub.instance;
+      if (!_entidades.contains(hub.ultimaEntidade)) return;
+      unawaited(_atualizar(silencioso: true));
+    };
+    LanApiEventHub.instance.addListener(_apiHubListener!);
+    _caixaStatusListener = () {
+      if (!mounted) return;
+      final snap = _snap;
+      if (snap == null) return;
+      final hub = CaixaStatusHub.instance;
+      if (snap.caixaAberto == hub.lojaAberta &&
+          snap.caixaOperador == hub.operador &&
+          snap.caixaTerminalId == hub.terminalId) {
+        return;
+      }
+      setState(() {
+        _snap = LojaAoVivoSnapshot(
+          vendasHoje: snap.vendasHoje,
+          faturamentoHoje: snap.faturamentoHoje,
+          horaPicoHoje: snap.horaPicoHoje,
+          vendasHoraPico: snap.vendasHoraPico,
+          caixaAberto: hub.lojaAberta,
+          caixaOperador: hub.operador,
+          caixaTerminalId: hub.terminalId,
+          outroTerminalCaixaAberto: snap.outroTerminalCaixaAberto,
+          entregasAtrasadas: snap.entregasAtrasadas,
+          entregasEmAberto: snap.entregasEmAberto,
+          estoqueCritico: snap.estoqueCritico,
+          estoqueZerado: snap.estoqueZerado,
+          fiadoVencido: snap.fiadoVencido,
+          orcamentosAbertos: snap.orcamentosAbertos,
+          metasVendedores: snap.metasVendedores,
+          atualizadoEm: DateTime.now(),
+        );
+      });
+    };
+    CaixaStatusHub.instance.addListener(_caixaStatusListener!);
+    unawaited(_atualizar());
   }
 
   @override
@@ -57,7 +127,9 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
 
   bool _abaVisivelAgora() {
     if (!mounted) return false;
-    if (!AppShellAbaVisibilidade.leituraSemDependencia(context)) return false;
+    final inherited =
+        context.getInheritedWidgetOfExactType<AppShellAbaVisibilidade>();
+    if (inherited != null && !inherited.ativa) return false;
     final route = ModalRoute.of(context);
     if (route != null && !route.isCurrent) return false;
     return true;
@@ -65,41 +137,109 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
 
   void _sincronizarTimerComVisibilidade() {
     if (!mounted) return;
-    final abaAtiva = AppShellAbaVisibilidade.estaAtiva(context);
+    // Sem Inherited do shell (rota push): considera visivel se rota atual.
+    final inherited =
+        context.getInheritedWidgetOfExactType<AppShellAbaVisibilidade>();
+    final abaAtiva = inherited?.ativa ?? true;
     final route = ModalRoute.of(context);
-    final deveRodar =
-        abaAtiva && (route == null || route.isCurrent);
+    final deveRodar = abaAtiva && (route == null || route.isCurrent);
     if (deveRodar == _timerAtivo) return;
+    final ficouVisivel = deveRodar && !_timerAtivo;
     _timerAtivo = deveRodar;
     _autoRefresh?.cancel();
     _autoRefresh = null;
     if (!deveRodar) return;
+    if (ficouVisivel) unawaited(_atualizar(silencioso: true));
     _autoRefresh = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!_abaVisivelAgora()) return;
-      _atualizar();
+      unawaited(_atualizar(silencioso: true));
     });
   }
 
   @override
   void dispose() {
     _autoRefresh?.cancel();
+    if (_syncHubListener != null) {
+      SyncRefreshHub.instance.removeListener(_syncHubListener!);
+    }
+    if (_apiHubListener != null) {
+      LanApiEventHub.instance.removeListener(_apiHubListener!);
+    }
+    if (_caixaStatusListener != null) {
+      CaixaStatusHub.instance.removeListener(_caixaStatusListener!);
+    }
     super.dispose();
   }
 
-  Future<void> _atualizar() async {
-    setState(() => _carregando = true);
-    final svc = LojaAoVivoService(
-      vendaRepository: widget.vendaRepository,
-      produtoRepository: widget.produtoRepository,
-      vendedorRepository: widget.vendedorRepository,
-      objectBox: widget.objectBox,
-    );
-    final snap = await svc.carregar(usuario: widget.usuarioLogado);
-    if (!mounted) return;
-    setState(() {
-      _snap = snap;
-      _carregando = false;
-    });
+  Future<void> _atualizar({bool silencioso = false}) async {
+    if (!silencioso && mounted) {
+      setState(() => _carregando = true);
+    }
+    try {
+      LojaAoVivoSnapshot snap;
+      final client = widget.lanApiClient;
+      if (_viaApi && client != null && client.configurado) {
+        final m = await client.obterLojaAoVivo(
+          login: widget.usuarioLogado.login,
+        );
+        snap = LojaAoVivoSnapshot.fromMap(m);
+        if (snap.caixaAberto) {
+          CaixaStatusHub.instance.publicar(
+            aberto: true,
+            operador: snap.caixaOperador,
+            terminalId: snap.caixaTerminalId,
+          );
+        } else if (!CaixaStatusHub.instance.lojaAberta) {
+          CaixaStatusHub.instance.publicar(aberto: false);
+        } else {
+          // Hub local diz aberto: respeita (ex.: acabou de abrir neste PC).
+          snap = LojaAoVivoSnapshot(
+            vendasHoje: snap.vendasHoje,
+            faturamentoHoje: snap.faturamentoHoje,
+            horaPicoHoje: snap.horaPicoHoje,
+            vendasHoraPico: snap.vendasHoraPico,
+            caixaAberto: true,
+            caixaOperador: CaixaStatusHub.instance.operador.isNotEmpty
+                ? CaixaStatusHub.instance.operador
+                : snap.caixaOperador,
+            caixaTerminalId: CaixaStatusHub.instance.terminalId.isNotEmpty
+                ? CaixaStatusHub.instance.terminalId
+                : snap.caixaTerminalId,
+            outroTerminalCaixaAberto: snap.outroTerminalCaixaAberto,
+            entregasAtrasadas: snap.entregasAtrasadas,
+            entregasEmAberto: snap.entregasEmAberto,
+            estoqueCritico: snap.estoqueCritico,
+            estoqueZerado: snap.estoqueZerado,
+            fiadoVencido: snap.fiadoVencido,
+            orcamentosAbertos: snap.orcamentosAbertos,
+            metasVendedores: snap.metasVendedores,
+            atualizadoEm: snap.atualizadoEm,
+          );
+        }
+      } else if (widget.vendaRepository is VendaRepository &&
+          widget.produtoRepository is ProdutoRepository &&
+          widget.vendedorRepository is VendedorRepository) {
+        snap = await LojaAoVivoService(
+          vendaRepository: widget.vendaRepository as VendaRepository,
+          produtoRepository: widget.produtoRepository as ProdutoRepository,
+          vendedorRepository: widget.vendedorRepository as VendedorRepository,
+          objectBox: widget.objectBox,
+        ).carregar(usuario: widget.usuarioLogado);
+      } else {
+        throw StateError('Loja ao vivo: repositorios locais indisponiveis.');
+      }
+      if (!mounted) return;
+      setState(() {
+        _snap = snap;
+        _carregando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _carregando = false);
+      if (!silencioso) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Loja ao vivo');
+      }
+    }
   }
 
   String _fmt(double v) => 'R\$ ${_moeda.format(v)}';
@@ -111,9 +251,10 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
     final u = widget.usuarioLogado;
     final verVendas = UsuarioPermissaoHelper.podeVerMinhasVendasHoje(u);
     final verCaixa = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarCaixa);
-    final verEntregas = UsuarioPermissaoHelper.podeVisualizarEntregas(u);
+    final verEntregas = UsuarioPermissaoHelper.podeAcessarModuloEntregas(u);
     final verEstoque = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.estoque);
-    final verFinanceiro = UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro);
+    final verFinanceiro =
+        UsuarioPermissaoHelper.tem(u, PermissaoUsuario.financeiro);
     final verOrcamentos =
         UsuarioPermissaoHelper.podeVerOrcamentosDashboard(u);
     final verMetasTodos =
@@ -137,7 +278,7 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
             ),
           IconButton(
             tooltip: 'Atualizar',
-            onPressed: _atualizar,
+            onPressed: () => unawaited(_atualizar()),
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -147,7 +288,7 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
           : snap == null
               ? const Center(child: Text('Sem dados.'))
               : RefreshIndicator(
-                  onRefresh: _atualizar,
+                  onRefresh: () => _atualizar(),
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
@@ -284,7 +425,7 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
               valor: snap.caixaAberto ? 'Aberto' : 'Fechado',
               detalhe: snap.caixaAberto
                   ? '${snap.caixaOperador} · ${snap.caixaTerminalId}'
-                  : 'Nenhuma sessao local',
+                  : 'Nenhuma sessao aberta',
               icone: Icons.account_balance_outlined,
               destaque: snap.caixaAberto,
             ),
@@ -312,14 +453,14 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
               icone: Icons.description_outlined,
             ),
         ];
-        if (cards.isEmpty) return const SizedBox.shrink();
+
         return GridView.count(
           crossAxisCount: cols,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
           crossAxisSpacing: 10,
-          childAspectRatio: cols >= 4 ? 1.55 : 1.85,
+          mainAxisSpacing: 10,
+          childAspectRatio: cols == 1 ? 3.2 : 1.55,
           children: cards,
         );
       },
@@ -327,8 +468,8 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
   }
 
   Widget _buildMetaCard(BuildContext context, MetaVendedorDiaria m) {
-    final pct = (m.percentual * 100).clamp(0, 200);
     final theme = Theme.of(context);
+    final pct = (m.percentual * 100).clamp(0, 200);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
@@ -342,30 +483,22 @@ class _LojaAoVivoPageState extends State<LojaAoVivoPage> {
                   child: Text(
                     m.nome,
                     style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-                Text(
-                  '${pct.toStringAsFixed(0)}%',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: pct >= 100
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
+                Text('${pct.toStringAsFixed(0)}%'),
               ],
             ),
             const SizedBox(height: 6),
             LinearProgressIndicator(
-              value: m.percentual > 1 ? 1 : m.percentual,
+              value: m.percentual.clamp(0, 1),
               minHeight: 8,
               borderRadius: BorderRadius.circular(4),
             ),
             const SizedBox(height: 6),
             Text(
-              'Hoje: ${_fmt(m.realizadoHoje)} · Meta dia: ${_fmt(m.metaDiaria)}',
+              '${_fmt(m.realizadoHoje)} / ${_fmt(m.metaDiaria)}',
               style: theme.textTheme.bodySmall,
             ),
           ],
@@ -395,44 +528,35 @@ class _KpiCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final bg = alerta
+        ? theme.colorScheme.errorContainer.withValues(alpha: 0.55)
+        : destaque
+            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.55)
+            : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55);
     return Card(
-      color: alerta
-          ? scheme.errorContainer.withValues(alpha: 0.35)
-          : destaque
-              ? scheme.primaryContainer.withValues(alpha: 0.4)
-              : null,
+      color: bg,
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Row(
-              children: [
-                Icon(icone, size: 20, color: scheme.primary),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    rotulo,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
+            Icon(icone, size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(rotulo, style: theme.textTheme.labelMedium),
+                  Text(
+                    valor,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                ),
-              ],
-            ),
-            const Spacer(),
-            Text(
-              valor,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
+                  Text(detalhe, style: theme.textTheme.bodySmall),
+                ],
               ),
-            ),
-            Text(
-              detalhe,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall,
             ),
           ],
         ),

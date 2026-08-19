@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/entrega_venda_helper.dart';
+import '../theme/app_semantic_colors.dart';
 
 /// Botao compacto para alternar tipo de entrega do item do carrinho (PDV).
 class PdvBotaoTipoEntregaItem extends StatelessWidget {
@@ -26,15 +27,44 @@ class PdvBotaoTipoEntregaItem extends StatelessWidget {
     }
   }
 
-  static Color? corPara(BuildContext context, String tipo) {
-    final scheme = Theme.of(context).colorScheme;
+  static AppSemanticColors _semantic(BuildContext context) =>
+      Theme.of(context).extension<AppSemanticColors>() ??
+      AppSemanticColors.claro;
+
+  /// Fundo claro da linha: leva agora verde, carreto amarelo, futura vermelho.
+  static Color fundoPara(BuildContext context, String tipo) {
+    final s = _semantic(context);
     switch (EntregaVendaHelper.normalizarTipoItem(tipo)) {
       case EntregaVendaHelper.tipoEntregaLoja:
-        return scheme.tertiary;
+        return s.warningBg;
       case EntregaVendaHelper.tipoRetiradaFutura:
-        return scheme.primary;
+        return s.errorBg;
       default:
-        return scheme.secondary;
+        return s.successBg;
+    }
+  }
+
+  static Color bordaPara(BuildContext context, String tipo) {
+    final s = _semantic(context);
+    switch (EntregaVendaHelper.normalizarTipoItem(tipo)) {
+      case EntregaVendaHelper.tipoEntregaLoja:
+        return s.warningBorder;
+      case EntregaVendaHelper.tipoRetiradaFutura:
+        return s.errorBorder;
+      default:
+        return s.successBorder;
+    }
+  }
+
+  static Color corPara(BuildContext context, String tipo) {
+    final s = _semantic(context);
+    switch (EntregaVendaHelper.normalizarTipoItem(tipo)) {
+      case EntregaVendaHelper.tipoEntregaLoja:
+        return s.warningFg;
+      case EntregaVendaHelper.tipoRetiradaFutura:
+        return s.errorFg;
+      default:
+        return s.successFg;
     }
   }
 

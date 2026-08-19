@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/produto_repository.dart';
 import '../widgets/produto_busca_input.dart';
 import '../../data/venda_repository.dart';
 import '../../model/produto.dart';
@@ -20,8 +19,8 @@ class RelatorioSaidasProdutoPage extends StatefulWidget {
     required this.produtoRepository,
   });
 
-  final VendaRepository vendaRepository;
-  final ProdutoRepository produtoRepository;
+  final dynamic vendaRepository;
+  final dynamic produtoRepository;
 
   @override
   State<RelatorioSaidasProdutoPage> createState() =>
@@ -42,17 +41,18 @@ class _RelatorioSaidasProdutoPageState extends State<RelatorioSaidasProdutoPage>
     final porBarras = widget.produtoRepository.resolverLeitorCodigoBarras(
       t,
       somenteAtivos: false,
-    );
+    ) as Produto?;
     if (porBarras != null) return porBarras;
-    final hits = widget.produtoRepository.pesquisarPadraoPdv(
+    final hits = (widget.produtoRepository.pesquisarPadraoPdv(
       t,
       limite: 20,
       somenteAtivos: false,
-    );
+    ) as List)
+        .cast<Produto>();
     if (hits.isEmpty) return null;
     if (hits.length == 1) return hits.first;
     final lower = t.toLowerCase();
-    for (final p in hits) {
+    for (final Produto p in hits) {
       if (p.codigoInterno.toLowerCase() == lower) return p;
     }
     return hits.first;
@@ -64,13 +64,14 @@ class _RelatorioSaidasProdutoPageState extends State<RelatorioSaidasProdutoPage>
     final porBarras = widget.produtoRepository.resolverLeitorCodigoBarras(
       t,
       somenteAtivos: false,
-    );
+    ) as Produto?;
     if (porBarras != null) return [porBarras];
-    return widget.produtoRepository.pesquisarPadraoPdv(
+    return (widget.produtoRepository.pesquisarPadraoPdv(
       t,
       limite: 40,
       somenteAtivos: false,
-    );
+    ) as List)
+        .cast<Produto>();
   }
 
   void _aplicarProduto(Produto? p) {
@@ -100,11 +101,12 @@ class _RelatorioSaidasProdutoPageState extends State<RelatorioSaidasProdutoPage>
       setState(() => _linhas = []);
       return;
     }
-    final lista = widget.vendaRepository.listarSaidasProdutoPeriodo(
+    final lista = (widget.vendaRepository.listarSaidasProdutoPeriodo(
       produtoId: p.id,
       inicio: lim.$1,
       fim: lim.$2,
-    );
+    ) as List)
+        .cast<SaidaProdutoRelatorioLinha>();
     setState(() => _linhas = lista);
   }
 
@@ -138,7 +140,7 @@ class _RelatorioSaidasProdutoPageState extends State<RelatorioSaidasProdutoPage>
       )
       ..writeln('-' * 96);
 
-    for (final l in _linhas) {
+    for (final SaidaProdutoRelatorioLinha l in _linhas) {
       cab.writeln(_linhaPdf(l));
     }
     cab.writeln('-' * 96);
@@ -266,6 +268,7 @@ class _RelatorioSaidasProdutoPageState extends State<RelatorioSaidasProdutoPage>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: (lim) {
               setState(() => _limites = lim);
               _carregar();

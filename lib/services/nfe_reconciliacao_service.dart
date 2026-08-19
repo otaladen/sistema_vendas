@@ -73,7 +73,7 @@ class NfeReconciliacaoService {
       registro: atualizado,
     );
     if (_xmlLocal != null && atualizado.urlXml.trim().isNotEmpty) {
-      await _xmlLocal!.tentarArquivar(
+      await _xmlLocal.tentarArquivar(
         chaveAcesso: atualizado.chaveNfe,
         urlXml: atualizado.urlXml,
       );

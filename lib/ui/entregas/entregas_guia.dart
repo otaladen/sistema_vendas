@@ -79,56 +79,88 @@ class EntregasGuia {
             children: [
               _secao(
                 ctx,
-                titulo: 'Por onde comecar',
+                titulo: 'Fluxo do dia (resumo)',
                 icone: Icons.play_arrow_outlined,
                 itens: const [
-                  'Escolha o dia na faixa "Dia da entrega" (topo da tela). A tela abre em Hoje.',
-                  'Use os chips de Status ou Atr. / Pend. hoje para focar rapidamente.',
-                  'Na lista, use o botao principal de cada pedido (Roteirizar, Saiu, Entregue).',
+                  '1) Escolha o dia no topo (abre em Hoje).',
+                  '2) Defina o motorista no pedido.',
+                  '3) O motorista carrega na outra loja e toca em Sair para entrega no celular.',
+                  '4) Nesta tela acompanhe: Aguardando motorista → Em rota → Entregue.',
+                  '5) Quando o cliente receber, o motorista marca Entregue no celular '
+                      '(ou use Marcar entregue aqui se precisar).',
                 ],
               ),
               _secao(
                 ctx,
-                titulo: 'Dia operacional',
-                icone: Icons.calendar_view_week_outlined,
-                itens: const [
-                  'Use a faixa da semana para saltar entre dias com entregas.',
-                  'Alterne Lista e Kanban na mesma aba (topo da area do dia).',
-                  'Pedidos agrupados por motorista por padrao.',
-                ],
-              ),
-              _secao(
-                ctx,
-                titulo: 'Lista',
-                icone: Icons.view_list_outlined,
-                itens: const [
-                  'Todos os pedidos do dia, agrupados por motorista (ou bairro).',
-                  'Toque no pedido para ver detalhes, status, motorista e navegacao.',
-                  'Opcional: "Agrupar mesmo carro" junta pedidos na mesma viagem '
-                  '(podem ser clientes diferentes). Depois defina a ordem na rota.',
-                ],
-              ),
-              _secao(
-                ctx,
-                titulo: 'Patio (carga do caminhao)',
+                titulo: 'Quando o estoque e baixado',
                 icone: Icons.inventory_2_outlined,
                 itens: const [
-                  '1. Selecione o motorista / caminhao.',
-                  '2. Selecione a viagem (pedido avulso ou grupo no mesmo carro).',
-                  '3. Marque os itens em Carga consolidada (patio).',
-                  '4. Em grupos com 2+ paradas, use as setas na rota para a ordem.',
-                  '5. Checklist: Separado → Carregado → Saiu.',
-                  '6. Quando tudo estiver ok, toque em "Saiu p/ entrega".',
+                  'Na venda (PDV), itens de carreto/entrega ficam RESERVADOS (ainda nao saem do fisico).',
+                  'Quando o motorista toca em Sair para entrega, a reserva e liberada. '
+                      'O fisico desta loja so baixa se ele pediu para buscar material aqui '
+                      'e o patio confirmou Separar aqui.',
+                  'Se a loja permite venda sem estoque, a saida nao trava com '
+                      'fisico zerado — o saldo pode ficar negativo ate a NF-e de entrada.',
+                  'Itens "Retira logo" / leva agora ja baixam no caixa; '
+                      'nao entram nessa regra do carreto.',
                 ],
               ),
               _secao(
                 ctx,
-                titulo: 'Kanban',
-                icone: Icons.view_kanban_outlined,
+                titulo: 'Acompanhar a viagem',
+                icone: Icons.warehouse_outlined,
                 itens: const [
-                  'Na aba Dia, alterne para Kanban no topo.',
-                  'Arraste o card do pedido entre colunas para mudar o status.',
-                  'Fluxo tipico: Pendente → Roteirizada → Saiu → Entregue.',
+                  'Selecione o motorista e a viagem (pedido ou grupo no mesmo carro).',
+                  'Aba Carga: veja o que vai no carro. Se o motorista pedir material '
+                      'desta loja, aparece Separar aqui.',
+                  'Aba Rota: acompanhe as paradas (setas para ordenar se houver 2+ pedidos).',
+                  'A saida e do motorista no celular. Liberar saida nesta tela fica '
+                      'no menu, so se o celular nao tiver sido usado.',
+                ],
+              ),
+              _secao(
+                ctx,
+                titulo: 'Se o produto NAO for entregue',
+                icone: Icons.report_problem_outlined,
+                itens: const [
+                  'Faltou item na ida (cliente recebeu so parte): com status '
+                      '"Saiu para entrega", use o menu → Faltou item (complemento). '
+                      'Registra o que faltou e deixa complemento pendente para uma 2a viagem.',
+                  'Depois da 2a viagem: Concluir complemento → vira Entregue '
+                      '(estoque do complemento e tratado nessa etapa).',
+                  'Cliente nao estava / remarcar dia: Status → Reagendada '
+                      '(informe o motivo) e marque a nova data de entrega.',
+                  'Mercadoria voltou pro estoque apos ter saido no carro: menu → '
+                      'Devolucao / troca (mercadoria voltou). Isso devolve o fisico.',
+                  'Entrega cancelada de vez: Status → Cancelada (com motivo). '
+                      'Use com cuidado — veja o historico do pedido.',
+                  'Ainda aguardando o motorista sair: so troque motorista, '
+                      'data ou remova do dia — o estoque ainda esta so reservado.',
+                ],
+              ),
+              _secao(
+                ctx,
+                titulo: 'Lista e Kanban (aba Dia)',
+                icone: Icons.view_list_outlined,
+                itens: const [
+                  'Lista: defina o motorista e acompanhe. Botao principal = '
+                      'Marcar entregue (depois que o motorista saiu).',
+                  'Kanban: Aguardando motorista → Em rota → Entregue. '
+                      'O motorista passa para Em rota pelo celular.',
+                  'Opcional: Agrupar mesmo carro junta varios pedidos numa viagem.',
+                ],
+              ),
+              _secao(
+                ctx,
+                titulo: 'Dicas de operacao',
+                icone: Icons.tips_and_updates_outlined,
+                itens: const [
+                  'O motorista libera a saida no celular (Sair para entrega).',
+                  'Se faltar material na outra loja, ele pede buscar nesta loja; '
+                      'o patio confirma Separar aqui. Se chegar de ultima hora la, '
+                      'o motorista pode desistir mesmo depois do aceite — o estoque desta loja volta.',
+                  'Use o Historico do pedido para ver quem mudou status e quando.',
+                  'Filtros Atr. / Pend. hoje e Sem motorista ajudam a limpar a fila do dia.',
                 ],
               ),
             ],
@@ -195,11 +227,12 @@ class EntregasGuia {
   static String dicaCurtaAba(int indice, {bool kanban = false}) {
     switch (indice) {
       case 0:
-        return 'Patio: motorista → viagem → aba Carga ou Rota. "Rota do dia" ordena todas as paradas.';
+        return 'Acompanhe a viagem. O motorista libera a saida no celular. '
+            'Se ele pedir material desta loja, use Separar aqui.';
       case 1:
         return kanban
-            ? 'Kanban: arraste o pedido entre colunas para atualizar o status rapidamente.'
-            : 'Lista: por motorista, expanda "Rota do dia" para ordenar paradas sem agrupar.';
+            ? 'Kanban: Aguardando motorista → Em rota → Entregue.'
+            : 'Lista: defina o motorista e acompanhe. Entregue depois que ele sair.';
       default:
         return '';
     }

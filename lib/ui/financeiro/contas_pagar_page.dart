@@ -7,11 +7,17 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
+import '../../data/api/conta_pagar_api_repository.dart';
+import '../../data/api/lan_api_event_hub.dart';
+import '../../data/api/obrigacao_mensal_api_repository.dart';
 import '../../data/conta_pagar_repository.dart';
 import '../../data/models/conta_pagar.dart';
 import '../../data/objectbox.dart';
+import '../../data/obrigacao_mensal_fixa_repository.dart';
 import '../../domain/filtro_contas_pagar.dart';
 import '../theme/app_semantic_helper.dart';
+import '../widgets/lan_api_feedback.dart';
+import 'obrigacoes_mensais_page.dart';
 import 'widgets/grafico_vencimentos.dart';
 
 final NumberFormat _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
@@ -41,14 +47,17 @@ enum _FiltroStatusConta {
 class ContasPagarPage extends StatefulWidget {
   const ContasPagarPage({
     super.key,
-    required this.objectBox,
+    this.objectBox,
+    this.contaPagarRepository,
     this.saldoCaixaReferencia,
     this.filtroInicial = FiltroContasPagar.todos,
-  });
+  }) : assert(
+          objectBox != null || contaPagarRepository != null,
+          'Informe objectBox ou contaPagarRepository',
+        );
 
-  final ObjectBox objectBox;
-
-  /// Saldo em caixa para linha de referência no gráfico (opcional).
+  final ObjectBox? objectBox;
+  final dynamic contaPagarRepository;
   final double? saldoCaixaReferencia;
   final FiltroContasPagar filtroInicial;
 
@@ -57,17 +66,34 @@ class ContasPagarPage extends StatefulWidget {
 }
 
 class _ContasPagarPageState extends State<ContasPagarPage> {
-  late ContaPagarRepository _repo;
+  late dynamic _repo;
   late _FiltroStatusConta _filtro;
   List<ContaPagar> _linhas = [];
   ContasPagarVencimentosBuckets _buckets = ContasPagarVencimentosBuckets.zero;
+  final _scrollVertical = ScrollController();
+  final _scrollHorizontal = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _repo = ContaPagarRepository(widget.objectBox);
+    _repo = widget.contaPagarRepository ??
+        (widget.objectBox != null
+            ? ContaPagarRepository(widget.objectBox!)
+            : null);
+    if (_repo == null) {
+      throw StateError(
+        'Contas a pagar: informe contaPagarRepository ou objectBox.',
+      );
+    }
     _filtro = _FiltroStatusConta.de(widget.filtroInicial);
     _recarregar();
+  }
+
+  @override
+  void dispose() {
+    _scrollVertical.dispose();
+    _scrollHorizontal.dispose();
+    super.dispose();
   }
 
   String? _statusQuery(_FiltroStatusConta f) {
@@ -83,11 +109,28 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
     }
   }
 
-  void _recarregar() {
+  Future<void> _recarregar() async {
+    await _garantirObrigacoesDoMes();
+    if (!mounted) return;
+    if (_repo is ContaPagarApiRepository) {
+      if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+        return;
+      }
+      try {
+        await (_repo as ContaPagarApiRepository).hidratar();
+      } catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackErro(
+            context,
+            e,
+            prefixo: 'Falha ao carregar contas a pagar',
+          );
+        }
+        return;
+      }
+    }
     _repo.sincronizarPendenteParaAtrasado();
-    final buckets = computeContasPagarVencimentosBuckets(
-      widget.objectBox.contaPagarBox,
-    );
+    final buckets = computeContasPagarVencimentosBucketsDeLista(_repo.listar());
     final status = _statusQuery(_filtro);
     final lista = _repo.listar(
       status: status,
@@ -100,15 +143,54 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
     });
   }
 
+  /// Gera contas das obrigacoes fixas do mes (idempotente).
+  Future<void> _garantirObrigacoesDoMes() async {
+    try {
+      if (widget.objectBox != null) {
+        await ObrigacaoMensalFixaRepository(widget.objectBox!)
+            .gerarPendenciasRecentes();
+      } else if (_repo is ContaPagarApiRepository) {
+        await (_repo as ContaPagarApiRepository).garantirObrigacoesMensais();
+      }
+    } catch (_) {
+      // Nao bloqueia a listagem se a geracao falhar.
+    }
+  }
+
+  void _abrirObrigacoesMensais() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ObrigacoesMensaisPage(
+          objectBox: widget.objectBox,
+          obrigacaoRepository: _repo is ContaPagarApiRepository
+              ? ObrigacaoMensalApiRepository(
+                  (_repo as ContaPagarApiRepository).client,
+                )
+              : null,
+        ),
+      ),
+    ).then((_) => _recarregar());
+  }
+
   double get _kpiPendente => _repo.somaPorStatus(ContaPagarStatus.pendente);
   double get _kpiPago => _repo.somaTotalPago();
   double get _kpiAtrasado => _repo.somaPorStatus(ContaPagarStatus.atrasado);
 
   String _nomeFornecedor(ContaPagar c) {
-    final f = c.fornecedor.target;
-    if (f == null) return '—';
-    final nome = f.nomeFantasia.trim().isNotEmpty ? f.nomeFantasia : f.razaoSocial;
-    return nome.trim().isEmpty ? '—' : nome;
+    try {
+      final viaRepo = _repo.nomeFornecedorDe(c) as String?;
+      if (viaRepo != null && viaRepo.trim().isNotEmpty) return viaRepo.trim();
+    } catch (_) {}
+    try {
+      final f = c.fornecedor.target;
+      if (f != null) {
+        final nome =
+            f.nomeFantasia.trim().isNotEmpty ? f.nomeFantasia : f.razaoSocial;
+        if (nome.trim().isNotEmpty) return nome.trim();
+      }
+    } catch (_) {}
+    return '—';
   }
 
   Future<void> _confirmarBaixa(ContaPagar conta) async {
@@ -203,17 +285,96 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
       return;
     }
 
-    await _repo.registrarBaixa(
-      conta: conta,
-      valorPago: vp,
-      dataPagamento: dataPg,
-    );
+    try {
+      if (_repo is ContaPagarApiRepository &&
+          !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+        return;
+      }
+      await _repo.registrarBaixa(
+        conta: conta,
+        valorPago: vp,
+        dataPagamento: dataPg,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Nao foi possivel dar baixa',
+      );
+      return;
+    }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Pagamento registrado.')),
     );
     _recarregar();
+  }
+
+  Future<void> _confirmarRemover(ContaPagar conta) async {
+    if (conta.status == ContaPagarStatus.pago) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Titulo ja quitado/pago. Estorne o pagamento antes de excluir.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover conta a pagar'),
+        content: Text(
+          'Excluir o titulo de ${_nomeFornecedor(conta)} '
+          '(${conta.numeroParcela}, ${_moeda.format(conta.valorParcela)})?\n\n'
+          'Esta acao nao pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      if (_repo is ContaPagarApiRepository) {
+        if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+          return;
+        }
+        await (_repo as ContaPagarApiRepository)
+            .removerContaPagarRemoto(conta.id);
+      } else {
+        (_repo as ContaPagarRepository).remover(conta.id);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Conta a pagar removida.')),
+      );
+      await _recarregar();
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Nao foi possivel remover',
+      );
+    }
   }
 
   Future<void> _abrirLancamentoManual() async {
@@ -334,6 +495,10 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
     }
 
     try {
+      if (_repo is ContaPagarApiRepository &&
+          !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+        return;
+      }
       await _repo.criarManual(
         nomeFornecedor: nome,
         cnpj: cnpj.isEmpty ? null : cnpj,
@@ -349,8 +514,10 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
       _recarregar();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel salvar: $e')),
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Nao foi possivel salvar',
       );
     }
   }
@@ -548,6 +715,11 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
         title: const Text('Contas a pagar'),
         actions: [
           IconButton(
+            tooltip: 'Obrigacoes fixas (semanal/mensal/anual)',
+            onPressed: _abrirObrigacoesMensais,
+            icon: const Icon(Icons.event_repeat_outlined),
+          ),
+          IconButton(
             tooltip: 'Exportar CSV',
             onPressed: _exportarCsv,
             icon: const Icon(Icons.download_outlined),
@@ -635,13 +807,23 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
                             ),
                           )
                         : Scrollbar(
+                            controller: _scrollVertical,
+                            thumbVisibility: true,
                             child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  minWidth: tableMinWidth,
-                                ),
-                                child: DataTable(
+                              controller: _scrollVertical,
+                              child: Scrollbar(
+                                controller: _scrollHorizontal,
+                                thumbVisibility: true,
+                                notificationPredicate: (n) =>
+                                    n.metrics.axis == Axis.horizontal,
+                                child: SingleChildScrollView(
+                                  controller: _scrollHorizontal,
+                                  scrollDirection: Axis.horizontal,
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      minWidth: tableMinWidth,
+                                    ),
+                                    child: DataTable(
                                   headingRowHeight: 44,
                                   dataRowMinHeight: 48,
                                   columnSpacing: 20,
@@ -700,29 +882,54 @@ class _ContasPagarPageState extends State<ContasPagarPage> {
                                             ),
                                           ),
                                           DataCell(
-                                            conta.status ==
-                                                    ContaPagarStatus.pago
-                                                ? const Text(
-                                                    '—',
-                                                    style: TextStyle(
-                                                      color: Colors.grey,
-                                                    ),
-                                                  )
-                                                : OutlinedButton.icon(
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (conta.status !=
+                                                    ContaPagarStatus.pago)
+                                                  OutlinedButton.icon(
                                                     onPressed: () =>
                                                         _confirmarBaixa(conta),
                                                     icon: const Icon(
-                                                      Icons.check_circle_outline,
+                                                      Icons
+                                                          .check_circle_outline,
                                                       size: 18,
                                                     ),
                                                     label: const Text(
                                                       'Dar baixa',
                                                     ),
+                                                  )
+                                                else
+                                                  const Text(
+                                                    '—',
+                                                    style: TextStyle(
+                                                      color: Colors.grey,
+                                                    ),
                                                   ),
+                                                if (conta.status !=
+                                                    ContaPagarStatus.pago) ...[
+                                                  const SizedBox(width: 4),
+                                                  IconButton(
+                                                    tooltip: 'Remover titulo',
+                                                    onPressed: () =>
+                                                        _confirmarRemover(
+                                                      conta,
+                                                    ),
+                                                    icon: Icon(
+                                                      Icons.delete_outline,
+                                                      color: theme
+                                                          .colorScheme.error,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
                                           ),
                                         ],
                                       ),
                                   ],
+                                ),
+                                  ),
                                 ),
                               ),
                             ),

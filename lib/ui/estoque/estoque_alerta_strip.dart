@@ -10,32 +10,39 @@ class EstoqueAlertaStrip extends StatelessWidget {
     required this.criticosDiagnostico,
     required this.alertasDiagnostico,
     required this.qtdCriticosPp,
+    this.lotesCriticosOuVencidos = 0,
     this.onVerDiagnostico,
     this.onFiltrarPp,
     this.onListaCompra,
+    this.onVerValidades,
     this.onDismiss,
   });
 
   final int criticosDiagnostico;
   final int alertasDiagnostico;
   final int qtdCriticosPp;
+  final int lotesCriticosOuVencidos;
   final VoidCallback? onVerDiagnostico;
   final VoidCallback? onFiltrarPp;
   final VoidCallback? onListaCompra;
+  final VoidCallback? onVerValidades;
   final VoidCallback? onDismiss;
 
   bool get _temDiagnostico => criticosDiagnostico > 0 || alertasDiagnostico > 0;
   bool get _temPp => qtdCriticosPp > 0;
+  bool get _temLotes => lotesCriticosOuVencidos > 0;
 
   @override
   Widget build(BuildContext context) {
-    if (!_temDiagnostico && !_temPp) return const SizedBox.shrink();
+    if (!_temDiagnostico && !_temPp && !_temLotes) {
+      return const SizedBox.shrink();
+    }
 
     final theme = Theme.of(context);
     final semantic = context.semanticColors;
     final scheme = theme.colorScheme;
     final compact = EstoqueLayout.isCompact(context);
-    final severo = criticosDiagnostico > 0;
+    final severo = criticosDiagnostico > 0 || lotesCriticosOuVencidos > 0;
     final fg = severo ? semantic.errorFg : semantic.warningFg;
     final bg = severo ? semantic.errorBg : semantic.warningBg;
     final border = severo ? semantic.errorBorder : semantic.warningBorder;
@@ -53,6 +60,13 @@ class EstoqueAlertaStrip extends StatelessWidget {
         compact
             ? '$qtdCriticosPp no PP'
             : '$qtdCriticosPp produto(s) no ou abaixo do PP',
+      );
+    }
+    if (_temLotes) {
+      partes.add(
+        compact
+            ? '$lotesCriticosOuVencidos lote(s)'
+            : '$lotesCriticosOuVencidos lote(s) critico(s)/vencido(s)',
       );
     }
 
@@ -107,6 +121,23 @@ class EstoqueAlertaStrip extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                 ),
                 child: const Text('Compras'),
+              ),
+      if (_temLotes && onVerValidades != null)
+        compact
+            ? IconButton(
+                tooltip: 'Validades',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                onPressed: onVerValidades,
+                icon: Icon(Icons.event_busy_outlined, color: fg),
+              )
+            : TextButton(
+                onPressed: onVerValidades,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text('Validades'),
               ),
       if (onDismiss != null)
         IconButton(

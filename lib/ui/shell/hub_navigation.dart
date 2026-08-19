@@ -22,20 +22,8 @@ class HubNavigation {
     Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
-        builder: (ctx) => MainMenuDeps(
-          objectBox: deps.objectBox,
-          produtoRepository: deps.produtoRepository,
-          clienteRepository: deps.clienteRepository,
-          vendaRepository: deps.vendaRepository,
-          vendedorRepository: deps.vendedorRepository,
-          funcionarioRepository: deps.funcionarioRepository,
-          motoristaRepository: deps.motoristaRepository,
-          usuarioLogado: deps.usuarioLogado,
-          onLogout: deps.onLogout,
-          lanSyncScheduler: deps.lanSyncScheduler,
-          appConfigRepository: deps.appConfigRepository,
-          printService: deps.printService,
-          child: MainMenuSubRouter.pagina(
+        builder: (ctx) => deps.wrap(
+          MainMenuSubRouter.pagina(
             sub,
             deps,
             navigatorContext: ctx,

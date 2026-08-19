@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/produto_repository.dart';
+import '../../data/api/produto_api_repository.dart';
 import '../../model/historico_entrada.dart';
 import '../theme/app_semantic_helper.dart';
+import 'lan_api_feedback.dart';
 
 /// Aba com historico de compras (NF-e) do produto, mais recente primeiro.
 class AbasHistoricoProdutoWidget extends StatefulWidget {
@@ -13,7 +14,8 @@ class AbasHistoricoProdutoWidget extends StatefulWidget {
     required this.produtoId,
   });
 
-  final ProdutoRepository produtoRepository;
+  /// [ProdutoRepository] local ou API no terminal leve.
+  final dynamic produtoRepository;
   final int? produtoId;
 
   @override
@@ -53,7 +55,40 @@ class _AbasHistoricoProdutoWidgetState extends State<AbasHistoricoProdutoWidget>
       return;
     }
     setState(() => _carregando = true);
-    final itens = widget.produtoRepository.listarHistoricoEntradaPorProduto(id);
+    final repo = widget.produtoRepository;
+    if (repo is ProdutoApiRepository) {
+      () async {
+        try {
+          final itens = await repo.listarHistoricoEntradaPorProdutoRemoto(id);
+          if (!mounted) return;
+          setState(() {
+            _lista = itens;
+            _carregando = false;
+          });
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _lista = const [];
+            _carregando = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(LanApiFeedback.mensagem(e))),
+          );
+        }
+      }();
+      return;
+    }
+    List<HistoricoEntrada> itens = const [];
+    try {
+      final raw = repo.listarHistoricoEntradaPorProduto(id);
+      if (raw is List<HistoricoEntrada>) {
+        itens = raw;
+      } else if (raw is List) {
+        itens = raw.whereType<HistoricoEntrada>().toList();
+      }
+    } catch (_) {
+      itens = const [];
+    }
     setState(() {
       _lista = itens;
       _carregando = false;

@@ -86,7 +86,7 @@ class QuantidadeVendaUtil {
     if (quantidadeArmazenada < escalaFracionada) return false;
     final f = produto.quantidadePorEmbalagem;
     if (f <= 0 || (f - 1).abs() < 0.0001) return false;
-    final uCompra = (produto.unidadeCompra ?? '').trim().toUpperCase();
+    final uCompra = produto.unidadeCompra.trim().toUpperCase();
     final uVenda = produto.unidade.trim().toUpperCase();
     if (uCompra.isEmpty || uCompra == uVenda) return false;
     final emUnidadeVenda =

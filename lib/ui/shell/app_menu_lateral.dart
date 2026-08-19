@@ -25,6 +25,7 @@ class AppMenuLateral extends StatelessWidget {
     this.badgeSubDe,
     this.quantidadeFavoritos = 0,
     this.larguraTela = 1200,
+    this.terminalLeve = false,
   });
 
   final List<MainMenuDestino> itens;
@@ -41,10 +42,13 @@ class AppMenuLateral extends StatelessWidget {
   final int Function(MainMenuSubDestino sub)? badgeSubDe;
   final int quantidadeFavoritos;
   final double larguraTela;
+  final bool terminalLeve;
 
   @override
   Widget build(BuildContext context) {
     final classico = AppMenuModoEstilo.usaRailPadrao(context);
+    final compactoErp =
+        AppMenuModoEstilo.modoAtual(context) == AppMenuModoId.retro;
     final estendidoEfetivo = estendido && larguraTela >= 1200;
     final largura = classico
         ? (estendidoEfetivo ? 200.0 : 72.0)
@@ -61,27 +65,40 @@ class AppMenuLateral extends StatelessWidget {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.only(top: 8, bottom: 4),
+              padding: EdgeInsets.only(
+                top: compactoErp ? 4 : 8,
+                bottom: compactoErp ? 2 : 4,
+              ),
               child: IconButton(
                 tooltip: estendido ? 'Recolher menu' : 'Expandir menu',
                 onPressed: onAlternarEstendido,
+                visualDensity: compactoErp
+                    ? VisualDensity.compact
+                    : VisualDensity.standard,
                 color: classico
                     ? null
                     : AppMenuModoEstilo.corIconeMenu(context),
                 icon: Icon(
                   estendido ? Icons.menu_open_rounded : Icons.menu_rounded,
-                  size: classico
-                      ? 24
-                      : (AppMenuModoEstilo.modoAtual(context) ==
-                              AppMenuModoId.amplo
-                          ? 28
-                          : 24),
+                  size: compactoErp
+                      ? 20
+                      : (classico
+                          ? 24
+                          : (AppMenuModoEstilo.modoAtual(context) ==
+                                  AppMenuModoId.amplo
+                              ? 28
+                              : 24)),
                 ),
               ),
             ),
             Expanded(
               child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                padding: EdgeInsets.fromLTRB(
+                  compactoErp ? 4 : 8,
+                  compactoErp ? 2 : 4,
+                  compactoErp ? 4 : 8,
+                  compactoErp ? 4 : 8,
+                ),
                 itemCount: itens.length,
                 itemBuilder: (context, index) {
                   final d = itens[index];
@@ -95,6 +112,7 @@ class AppMenuLateral extends StatelessWidget {
                       menuExpandido: estendidoEfetivo,
                       badge: badgeDe(d),
                       badgeSubDe: badgeSubDe,
+                      terminalLeve: terminalLeve,
                       onAlternarGrupo: () => onAlternarGrupo(d),
                       onSelecionarSub: (sub) => onSelecionarSub(d, sub),
                     );
@@ -143,6 +161,7 @@ class _ItemMenuGrupo extends StatelessWidget {
     required this.menuExpandido,
     required this.badge,
     this.badgeSubDe,
+    this.terminalLeve = false,
     required this.onAlternarGrupo,
     required this.onSelecionarSub,
   });
@@ -155,13 +174,18 @@ class _ItemMenuGrupo extends StatelessWidget {
   final bool menuExpandido;
   final int badge;
   final int Function(MainMenuSubDestino sub)? badgeSubDe;
+  final bool terminalLeve;
   final VoidCallback onAlternarGrupo;
   final ValueChanged<MainMenuSubDestino> onSelecionarSub;
 
   bool get _grupoAtivo => destinoAtual == destino;
 
   List<MainMenuSubDestino> get _subitens =>
-      MainMenuSubDestinoHelper.subitensDe(destino, usuarioLogado);
+      MainMenuSubDestinoHelper.subitensDe(
+        destino,
+        usuarioLogado,
+        terminalLeve: terminalLeve,
+      );
 
   Future<void> _abrirFlyoutRecolhido(BuildContext context) async {
     final box = context.findRenderObject() as RenderBox?;
@@ -203,7 +227,11 @@ class _ItemMenuGrupo extends StatelessWidget {
     );
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: EdgeInsets.only(
+        bottom: AppMenuModoEstilo.modoAtual(context) == AppMenuModoId.retro
+            ? 1
+            : 4,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -213,7 +241,11 @@ class _ItemMenuGrupo extends StatelessWidget {
               onTap: menuExpandido
                   ? onAlternarGrupo
                   : () => _abrirFlyoutRecolhido(context),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(
+                AppMenuModoEstilo.modoAtual(context) == AppMenuModoId.retro
+                    ? 4
+                    : 16,
+              ),
               child: Ink(
                 decoration: AppMenuModoEstilo.decoracaoItemLateral(
                   context,
@@ -230,7 +262,12 @@ class _ItemMenuGrupo extends StatelessWidget {
                         ? Row(
                             children: [
                               icone,
-                              const SizedBox(width: 12),
+                              SizedBox(
+                                width: AppMenuModoEstilo.modoAtual(context) ==
+                                        AppMenuModoId.retro
+                                    ? 6
+                                    : 12,
+                              ),
                               Expanded(
                                 child: Text(
                                   destino.titulo,
@@ -259,7 +296,10 @@ class _ItemMenuGrupo extends StatelessWidget {
                                 expandido
                                     ? Icons.expand_less
                                     : Icons.expand_more,
-                                size: 20,
+                                size: AppMenuModoEstilo.modoAtual(context) ==
+                                        AppMenuModoId.retro
+                                    ? 16
+                                    : 20,
                                 color: AppMenuModoEstilo.corIconeItem(
                                   context,
                                   destino: destino,
@@ -331,48 +371,66 @@ class _ItemMenuSub extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final corModulo = _corSub(context, sub);
+    final erpCompacto =
+        AppMenuModoEstilo.modoAtual(context) == AppMenuModoId.retro;
     final fundo = selecionado
-        ? corModulo.withValues(alpha: 0.18)
+        ? corModulo.withValues(alpha: erpCompacto ? 0.14 : 0.18)
         : Colors.transparent;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: EdgeInsets.only(bottom: erpCompacto ? 1 : 4),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(erpCompacto ? 4 : 12),
           child: Ink(
             decoration: BoxDecoration(
               color: fundo,
-              borderRadius: BorderRadius.circular(12),
-              border: selecionado
+              borderRadius: BorderRadius.circular(erpCompacto ? 4 : 12),
+              border: selecionado && !erpCompacto
                   ? Border.all(color: corModulo.withValues(alpha: 0.45))
                   : null,
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              padding: EdgeInsets.symmetric(
+                horizontal: erpCompacto ? 6 : 8,
+                vertical: erpCompacto ? 3 : 6,
+              ),
               child: Row(
                 children: [
-                  if (badge > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: Badge(
-                        label: Text(badge > 99 ? '99+' : '$badge'),
-                        child: Icon(
-                          sub.icone,
-                          size: 16,
-                          color: selecionado ? corModulo : scheme.onSurfaceVariant,
+                  // ERP antigo: subitens so texto (sem icone) — economiza espaco.
+                  if (!erpCompacto) ...[
+                    if (badge > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Badge(
+                          label: Text(badge > 99 ? '99+' : '$badge'),
+                          child: Icon(
+                            sub.icone,
+                            size: 16,
+                            color: selecionado
+                                ? corModulo
+                                : scheme.onSurfaceVariant,
+                          ),
                         ),
+                      )
+                    else
+                      Icon(
+                        sub.icone,
+                        size: 16,
+                        color: selecionado
+                            ? corModulo
+                            : scheme.onSurfaceVariant,
                       ),
-                    )
-                  else
-                    Icon(
-                      sub.icone,
-                      size: 16,
-                      color: selecionado ? corModulo : scheme.onSurfaceVariant,
+                    const SizedBox(width: 8),
+                  ] else if (badge > 0) ...[
+                    Badge(
+                      label: Text(badge > 99 ? '99+' : '$badge'),
+                      smallSize: 14,
                     ),
-                  const SizedBox(width: 8),
+                    const SizedBox(width: 6),
+                  ],
                   Expanded(
                     child: Text(
                       sub.titulo,
@@ -383,11 +441,11 @@ class _ItemMenuSub extends StatelessWidget {
                           selecionado,
                         ),
                         color: selecionado
-                            ? scheme.onSurface
+                            ? (erpCompacto ? corModulo : scheme.onSurface)
                             : scheme.onSurfaceVariant.withValues(alpha: 0.92),
-                        height: 1.2,
+                        height: 1.15,
                       ),
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -427,12 +485,18 @@ class _ItemMenuLateral extends StatelessWidget {
     );
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: EdgeInsets.only(
+        bottom: AppMenuModoEstilo.modoAtual(context) == AppMenuModoId.retro
+            ? 1
+            : 6,
+      ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(
+            AppMenuModoEstilo.modoAtual(context) == AppMenuModoId.retro ? 4 : 16,
+          ),
           child: Ink(
             decoration: AppMenuModoEstilo.decoracaoItemLateral(
               context,
@@ -449,7 +513,12 @@ class _ItemMenuLateral extends StatelessWidget {
                     ? Row(
                         children: [
                           icone,
-                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: AppMenuModoEstilo.modoAtual(context) ==
+                                    AppMenuModoId.retro
+                                ? 6
+                                : 12,
+                          ),
                           Expanded(
                             child: Text(
                               destino.titulo,
@@ -496,6 +565,7 @@ Color _corSub(BuildContext context, MainMenuSubDestino sub) {
       AppModuloId.funcionariosCadastro,
     MainMenuSubDestino.cadastrosClientes => AppModuloId.clientesCadastro,
     MainMenuSubDestino.cadastrosVendedores => AppModuloId.vendedoresCadastro,
+    MainMenuSubDestino.cadastrosFornecedores => AppModuloId.fornecedoresCadastro,
     MainMenuSubDestino.cadastrosUsuarios => AppModuloId.usuariosCadastro,
     MainMenuSubDestino.fiscalImportarNfe ||
     MainMenuSubDestino.fiscalNotasImportadas ||
@@ -508,6 +578,7 @@ Color _corSub(BuildContext context, MainMenuSubDestino sub) {
     MainMenuSubDestino.financeiroTesouraria => AppModuloId.tesouraria,
     MainMenuSubDestino.financeiroContasReceber => AppModuloId.contasReceber,
     MainMenuSubDestino.financeiroContasPagar => AppModuloId.contasPagar,
+    MainMenuSubDestino.financeiroObrigacoesMensais => AppModuloId.contasPagar,
     MainMenuSubDestino.financeiroRelatorioContasPagar =>
       AppModuloId.relatorioContasPagar,
     MainMenuSubDestino.financeiroRelatorioFiados => AppModuloId.relatorioFiados,

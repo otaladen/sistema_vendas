@@ -42,11 +42,29 @@ class ClienteRepository {
       return const [];
     }
     final lower = t.toLowerCase();
+    final digitos = t.replaceAll(RegExp(r'\D'), '');
     final cond = _condicaoPesquisaCliente(lower);
     final query =
         _db.clienteBox.query(cond).order(Cliente_.nomeRazao).build();
     try {
-      return query.find();
+      final lista = query.find();
+      // CPF/CNPJ digitado sem mascara: ObjectBox contains nao acha "123.456...".
+      if (digitos.length < 3) return lista;
+      final ids = lista.map((c) => c.id).toSet();
+      for (final c in _db.clienteBox.getAll()) {
+        if (ids.contains(c.id)) continue;
+        final docs = [
+          c.documento,
+          c.telefone,
+          c.whatsapp,
+          c.cep,
+        ].map((s) => s.replaceAll(RegExp(r'\D'), ''));
+        if (docs.any((d) => d.contains(digitos))) {
+          lista.add(c);
+          ids.add(c.id);
+        }
+      }
+      return lista;
     } finally {
       query.close();
     }

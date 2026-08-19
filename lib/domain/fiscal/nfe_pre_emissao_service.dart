@@ -3,8 +3,11 @@ import 'fiscal_regime_padrao.dart';
 import '../../services/fiscal_config_store.dart';
 import '../../data/nfe_saida_fiscal_store.dart';
 import '../../model/cliente.dart';
+import '../../model/item_venda.dart';
+import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../../services/focus_nfe_service.dart';
+import '../entregas/romaneio_carga_merge.dart';
 import '../pagamento_orcamento.dart';
 import 'endereco_fiscal_ibge_resolver.dart';
 import 'fiscal_emissao_lock.dart';
@@ -72,20 +75,37 @@ abstract final class NfePreEmissaoService {
     NfeSaidaFiscalRegistro? nfeAutorizada,
     NfeSaidaFiscalRegistro? nfeUltima,
     String? deviceIdAtual,
+    /// Terminal leve: Focus/SEFAZ rodam no PC servidor.
+    bool emissaoNoServidor = false,
+    List<ItemVenda>? itens,
+    Produto? Function(int produtoId)? resolverProduto,
   }) {
     final checklist = <NfeChecklistItem>[];
     FocusNfeDestinatarioNfe? destPreview;
     var ufDest = FiscalConfig.ufEmitente;
     var consumidorFinal = true;
+    final listaItens =
+        itens ?? RomaneioCargaMerge.itensDaVendaSafe(venda);
 
     if (!FiscalConfigStore.configurado) {
-      checklist.add(
-        const NfeChecklistItem(
-          titulo: 'Focus NFe / emitente',
-          detalhe: 'Configure token, CNPJ e IE em Configuracoes > Fiscal.',
-          severidade: NfeChecklistSeveridade.bloqueio,
-        ),
-      );
+      if (emissaoNoServidor) {
+        checklist.add(
+          const NfeChecklistItem(
+            titulo: 'Focus NFe / emitente',
+            detalhe:
+                'Emissao sera executada no PC servidor (token Focus local nao e necessario).',
+            severidade: NfeChecklistSeveridade.ok,
+          ),
+        );
+      } else {
+        checklist.add(
+          const NfeChecklistItem(
+            titulo: 'Focus NFe / emitente',
+            detalhe: 'Configure token, CNPJ e IE em Configuracoes > Fiscal.',
+            severidade: NfeChecklistSeveridade.bloqueio,
+          ),
+        );
+      }
     } else {
       checklist.add(
         NfeChecklistItem(
@@ -255,7 +275,7 @@ abstract final class NfePreEmissaoService {
       );
     }
 
-    if (venda.itens.where((i) => i.quantidade > 0).isEmpty) {
+    if (listaItens.where((i) => i.quantidade > 0).isEmpty) {
       checklist.add(
         const NfeChecklistItem(
           titulo: 'Itens da venda',
@@ -310,9 +330,11 @@ abstract final class NfePreEmissaoService {
       venda,
       consumidorFinal: consumidorFinal,
       ufDestinatario: ufDest,
+      itens: listaItens,
+      resolverProduto: resolverProduto,
     );
 
-    if (linhasFiscais.isEmpty && venda.itens.isNotEmpty) {
+    if (linhasFiscais.isEmpty && listaItens.isNotEmpty) {
       checklist.add(
         const NfeChecklistItem(
           titulo: 'Itens fiscais',

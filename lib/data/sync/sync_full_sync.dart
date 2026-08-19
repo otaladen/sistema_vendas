@@ -15,7 +15,6 @@ import '../../model/promocao_combo_item.dart';
 import '../../model/promocao_item.dart';
 import '../../model/vendedor.dart';
 import '../app_config_repository.dart';
-import '../mensageria_repository.dart';
 import '../objectbox.dart';
 import '../caixa_sessao_repository.dart';
 import '../conferencia_carga_repository.dart';
@@ -60,7 +59,6 @@ class SyncFullSync {
   final VendaRepository _vendaRepo;
 
   static const _kUsuarios = 'usuarios_sistema_v1';
-  static const _kTemplates = 'mensageria_templates_v1';
 
   /// ID remoto (payload) → ID local preservado por unique (CNPJ).
   final Map<int, int> _fornecedorNfeIdAlias = {};
@@ -169,10 +167,10 @@ class SyncFullSync {
     'conferencia_carga_romaneio',
     'registro_devolucao',
     'empresa_config',
-    'mensageria_templates',
     'usuarios_sistema',
     'caixa_sessoes',
     'movimento_estoque',
+    'lote_produto',
     'conta_pagar',
     'reajuste_preco',
     'auditoria_evento',
@@ -329,14 +327,6 @@ class SyncFullSync {
           1,
           SyncEntityCodecExtras.empresaConfigParaMap(cfg),
         );
-      case 'mensageria_templates':
-        final templates = await MensageriaRepository().listarTemplates();
-        _add(
-          m,
-          entity,
-          1,
-          SyncEntityCodecExtras.mensageriaTemplatesParaMap(templates),
-        );
       case 'usuarios_sistema':
         final usuarios = await UsuarioRepository().listarTodos();
         _add(
@@ -361,6 +351,16 @@ class SyncFullSync {
             entity,
             mv.id,
             SyncEntityCodecOperacional.movimentoEstoqueParaMap(mv),
+          );
+        }
+      case 'lote_produto':
+        for (final l in _db.loteProdutoBox.getAll()) {
+          l.produto.target;
+          _add(
+            m,
+            entity,
+            l.id,
+            SyncEntityCodecOperacional.loteProdutoParaMap(l),
           );
         }
       case 'conta_pagar':
@@ -597,14 +597,6 @@ class SyncFullSync {
           1,
           SyncEntityCodecExtras.empresaConfigParaMap(cfg),
         );
-      case 'mensageria_templates':
-        final templates = await MensageriaRepository().listarTemplates();
-        _add(
-          m,
-          entity,
-          1,
-          SyncEntityCodecExtras.mensageriaTemplatesParaMap(templates),
-        );
       case 'usuarios_sistema':
         final usuarios = await UsuarioRepository().listarTodos();
         _add(
@@ -630,6 +622,17 @@ class SyncFullSync {
             entity,
             mv.id,
             SyncEntityCodecOperacional.movimentoEstoqueParaMap(mv),
+          );
+        }
+      case 'lote_produto':
+        final lote = _db.loteProdutoBox.get(localId);
+        if (lote != null) {
+          lote.produto.target;
+          _add(
+            m,
+            entity,
+            lote.id,
+            SyncEntityCodecOperacional.loteProdutoParaMap(lote),
           );
         }
       case 'conta_pagar':
@@ -821,9 +824,6 @@ class SyncFullSync {
       case 'empresa_config':
         await _aplicarEmpresaConfig(payload);
         break;
-      case 'mensageria_templates':
-        await _aplicarMensageriaTemplates(payload);
-        break;
       case 'usuarios_sistema':
         await _aplicarUsuarios(payload);
         break;
@@ -834,6 +834,9 @@ class SyncFullSync {
         _db.movimentoEstoqueBox.put(
           SyncEntityCodecOperacional.movimentoEstoqueDeMap(payload),
         );
+        break;
+      case 'lote_produto':
+        await _aplicarLoteProduto(payload);
         break;
       case 'conta_pagar':
         await _aplicarContaPagar(payload);
@@ -1156,6 +1159,9 @@ class SyncFullSync {
       case 'movimento_estoque':
         _db.movimentoEstoqueBox.remove(id);
         break;
+      case 'lote_produto':
+        _db.loteProdutoBox.remove(id);
+        break;
       case 'conta_pagar':
         _db.contaPagarBox.remove(id);
         break;
@@ -1188,6 +1194,16 @@ class SyncFullSync {
       if (p != null) item.produto.target = p;
     }
     _db.itemListaCompraBox.put(item);
+  }
+
+  Future<void> _aplicarLoteProduto(Map<String, dynamic> payload) async {
+    final lote = SyncEntityCodecOperacional.loteProdutoDeMap(payload);
+    final pid = (payload['produtoId'] as num?)?.toInt() ?? 0;
+    if (pid > 0) {
+      final p = _db.produtoBox.get(pid);
+      if (p != null) lote.produto.target = p;
+    }
+    _db.loteProdutoBox.put(lote);
   }
 
   Future<void> _aplicarRecadoLoja(Map<String, dynamic> payload) async {
@@ -1293,7 +1309,38 @@ class SyncFullSync {
       if (incoming.nomeFantasia.trim().isNotEmpty) {
         existente.nomeFantasia = incoming.nomeFantasia.trim();
       }
+      if (incoming.inscricaoEstadual.trim().isNotEmpty) {
+        existente.inscricaoEstadual = incoming.inscricaoEstadual.trim();
+      }
+      if (incoming.telefone.trim().isNotEmpty) {
+        existente.telefone = incoming.telefone.trim();
+      }
+      if (incoming.whatsapp.trim().isNotEmpty) {
+        existente.whatsapp = incoming.whatsapp.trim();
+      }
+      if (incoming.email.trim().isNotEmpty) {
+        existente.email = incoming.email.trim();
+      }
+      if (incoming.cep.trim().isNotEmpty) existente.cep = incoming.cep.trim();
+      if (incoming.endereco.trim().isNotEmpty) {
+        existente.endereco = incoming.endereco.trim();
+      }
+      if (incoming.numero.trim().isNotEmpty) {
+        existente.numero = incoming.numero.trim();
+      }
+      if (incoming.bairro.trim().isNotEmpty) {
+        existente.bairro = incoming.bairro.trim();
+      }
+      if (incoming.cidade.trim().isNotEmpty) {
+        existente.cidade = incoming.cidade.trim();
+      }
+      if (incoming.uf.trim().isNotEmpty) existente.uf = incoming.uf.trim();
+      if (incoming.observacoes.trim().isNotEmpty) {
+        existente.observacoes = incoming.observacoes.trim();
+      }
+      existente.ativo = incoming.ativo;
       existente.cnpj = cnpj;
+      existente.atualizadoEm = DateTime.now().toUtc();
       _db.fornecedorNfeBox.put(existente);
       return;
     }
@@ -1625,15 +1672,6 @@ class SyncFullSync {
     // Token/impressora/rede local ja sao preservados no merge do codec.
     // Nao pede "Aceitar remoto" — so limpa dirty se houver.
     await SyncDirtyOutbox.remover(entity: 'empresa_config', entityId: 1);
-  }
-
-  Future<void> _aplicarMensageriaTemplates(Map<String, dynamic> payload) async {
-    final lista = SyncEntityCodecExtras.mensageriaTemplatesDeMap(payload);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _kTemplates,
-      jsonEncode(lista.map((t) => t.toMap()).toList()),
-    );
   }
 
   Future<void> _aplicarUsuarios(Map<String, dynamic> payload) async {

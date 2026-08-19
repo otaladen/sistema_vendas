@@ -16,7 +16,7 @@ import 'pdf_relatorio_texto.dart';
 class ListaCompraExportService {
   ListaCompraExportService(this._repo);
 
-  final ListaCompraRepository _repo;
+  final dynamic _repo;
   static final _moeda = NumberFormat('#,##0.00', 'pt_BR');
   static final _data = DateFormat('dd/MM/yyyy HH:mm', 'pt_BR');
 
@@ -53,9 +53,7 @@ class ListaCompraExportService {
   }
 
   Future<void> compartilharWhatsApp(String texto) async {
-    final uri = Uri.parse(
-      'https://wa.me/?text=${Uri.encodeComponent(texto)}',
-    );
+    final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(texto)}');
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       await launchUrl(uri);
     }
@@ -65,7 +63,8 @@ class ListaCompraExportService {
     required List<ItemListaCompra> itens,
     String? pastaDestino,
   }) async {
-    final pasta = pastaDestino ??
+    final pasta =
+        pastaDestino ??
         await FilePicker.platform.getDirectoryPath(
           dialogTitle: 'Pasta para salvar lista de compras (CSV)',
         );
@@ -78,18 +77,20 @@ class ListaCompraExportService {
     ];
     for (final item in itens) {
       final prod = _repo.produtoDe(item);
-      linhas.add([
-        _csv(item.fornecedorTexto),
-        _csv(prod?.codigoInterno ?? ''),
-        _csv(item.nomeExibicao(prod)),
-        '${item.quantidadePendenteRecebimento}',
-        _csv(item.unidade),
-        _csv(ListaCompraItemPrioridade.rotulo(item.prioridade)),
-        _csv(ListaCompraItemStatus.rotulo(item.status)),
-        _csv(ListaCompraItemOrigem.rotulo(item.origem)),
-        _csv(item.observacao),
-        _csv(_data.format(item.criadoEm.toLocal())),
-      ].join(';'));
+      linhas.add(
+        [
+          _csv(item.fornecedorTexto),
+          _csv(prod?.codigoInterno ?? ''),
+          _csv(item.nomeExibicao(prod)),
+          '${item.quantidadePendenteRecebimento}',
+          _csv(item.unidade),
+          _csv(ListaCompraItemPrioridade.rotulo(item.prioridade)),
+          _csv(ListaCompraItemStatus.rotulo(item.status)),
+          _csv(ListaCompraItemOrigem.rotulo(item.origem)),
+          _csv(item.observacao),
+          _csv(_data.format(item.criadoEm.toLocal())),
+        ].join(';'),
+      );
     }
     await arquivo.writeAsString('\uFEFF${linhas.join('\n')}', encoding: utf8);
     return arquivo.path;
@@ -121,7 +122,10 @@ class ListaCompraExportService {
     return arquivo.path;
   }
 
-  String _montarTextoPdf(List<ItemListaCompra> itens, {required String titulo}) {
+  String _montarTextoPdf(
+    List<ItemListaCompra> itens, {
+    required String titulo,
+  }) {
     final buf = StringBuffer();
     buf.writeln(titulo.toUpperCase());
     buf.writeln('Gerado em ${_data.format(DateTime.now())}');

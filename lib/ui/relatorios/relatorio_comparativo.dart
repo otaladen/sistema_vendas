@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../data/venda_repository.dart';
 import 'relatorio_helpers.dart';
 import 'relatorio_periodo.dart';
 
@@ -51,7 +50,7 @@ LimitesPeriodo relatorioPeriodoAnterior(LimitesPeriodo atual) {
 }
 
 RelatorioTotaisPeriodo relatorioTotaisPeriodo(
-  VendaRepository repo,
+  dynamic repo,
   LimitesPeriodo limites,
 ) {
   final vendas = relatorioVendasFinalizadasPeriodo(repo, limites);

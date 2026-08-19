@@ -1,12 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../data/api/lan_api_client.dart';
 import '../../data/caixa_auditoria_repository.dart';
+import '../widgets/lan_api_feedback.dart';
 import 'relatorio_export_util.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
 
 class RelatorioHistoricoFechamentoPage extends StatefulWidget {
-  const RelatorioHistoricoFechamentoPage({super.key});
+  const RelatorioHistoricoFechamentoPage({
+    super.key,
+    this.lanApiClient,
+  });
+
+  /// Terminal leve: le do PC servidor (`/api/relatorios/historico-fechamento-caixa`).
+  final LanApiClient? lanApiClient;
 
   @override
   State<RelatorioHistoricoFechamentoPage> createState() =>
@@ -15,11 +23,15 @@ class RelatorioHistoricoFechamentoPage extends StatefulWidget {
 
 class _RelatorioHistoricoFechamentoPageState
     extends State<RelatorioHistoricoFechamentoPage> {
-  final _repo = CaixaAuditoriaRepository();
+  final _repoLocal = CaixaAuditoriaRepository();
   final _fmtData = DateFormat('dd/MM/yyyy HH:mm');
   final _fmtMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   List<CaixaAuditoriaRegistro> _fechamentos = [];
   bool _carregando = true;
+  String? _erro;
+
+  bool get _viaApi =>
+      widget.lanApiClient != null && widget.lanApiClient!.configurado;
 
   @override
   void initState() {
@@ -28,13 +40,31 @@ class _RelatorioHistoricoFechamentoPageState
   }
 
   Future<void> _carregar() async {
-    setState(() => _carregando = true);
-    final lista = await _repo.listarFechamentos();
-    if (!mounted) return;
     setState(() {
-      _fechamentos = lista;
-      _carregando = false;
+      _carregando = true;
+      _erro = null;
     });
+    try {
+      final List<CaixaAuditoriaRegistro> lista;
+      if (_viaApi) {
+        final raw = await widget.lanApiClient!.listarHistoricoFechamentoCaixa();
+        lista = raw.map(CaixaAuditoriaRegistro.fromMap).toList(growable: false);
+      } else {
+        lista = await _repoLocal.listarFechamentos();
+      }
+      if (!mounted) return;
+      setState(() {
+        _fechamentos = lista;
+        _carregando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _fechamentos = [];
+        _carregando = false;
+        _erro = LanApiFeedback.mensagem(e);
+      });
+    }
   }
 
   double _num(Map<String, dynamic> d, String k) {
@@ -103,8 +133,10 @@ class _RelatorioHistoricoFechamentoPageState
                 Text('Suprimentos: ${_fmtMoeda.format(_num(d, 'suprimentos'))}'),
                 Text('Sangrias: ${_fmtMoeda.format(_num(d, 'sangrias'))}'),
                 const SizedBox(height: 8),
-                const Text('Conferencia por forma',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Conferencia por forma',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 Text(
                   'Dinheiro: esp ${_fmtMoeda.format(_num(d, 'esperadoDinheiro'))} · '
                   'dec ${_fmtMoeda.format(_num(d, 'declaradoDinheiro'))}',
@@ -135,12 +167,6 @@ class _RelatorioHistoricoFechamentoPageState
                   const SizedBox(height: 8),
                   Text('Obs: ${d['observacao']}'),
                 ],
-                const SizedBox(height: 12),
-                Text(
-                  'Para gerar PDF novamente, feche um novo turno no Caixa ou '
-                  'exporte esta lista em CSV/PDF.',
-                  style: Theme.of(ctx).textTheme.bodySmall,
-                ),
               ],
             ),
           ),
@@ -169,55 +195,77 @@ class _RelatorioHistoricoFechamentoPageState
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _carregar,
+            onPressed: _carregando ? null : _carregar,
             tooltip: 'Atualizar',
           ),
         ],
       ),
       body: _carregando
           ? const Center(child: CircularProgressIndicator())
-          : _fechamentos.isEmpty
-              ? const Center(
+          : _erro != null
+              ? Center(
                   child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'Nenhum fechamento de caixa na auditoria local.\n'
-                      'Os registros aparecem apos fechar o caixa em Vendas > Caixa.',
-                      textAlign: TextAlign.center,
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_erro!, textAlign: TextAlign.center),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: _carregar,
+                          child: const Text('Tentar novamente'),
+                        ),
+                      ],
                     ),
                   ),
                 )
-              : ListView.builder(
-                  itemCount: _fechamentos.length,
-                  itemBuilder: (context, i) {
-                    final r = _fechamentos[i];
-                    final dif = r.diferencaTotal ?? 0;
-                    final operador =
-                        r.detalhes['operador']?.toString() ?? r.operadorCaixa;
-                    return ListTile(
-                      leading: Icon(
-                        dif.abs() > 0.01
-                            ? Icons.warning_amber
-                            : Icons.check_circle_outline,
-                        color: dif.abs() > 0.01
-                            ? Theme.of(context).colorScheme.error
-                            : Colors.green.shade700,
-                      ),
-                      title: Text(_fmtData.format(r.em.toLocal())),
-                      subtitle: Text('Operador: $operador'),
-                      trailing: Text(
-                        _fmtMoeda.format(dif),
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: dif.abs() > 0.01
-                              ? Theme.of(context).colorScheme.error
-                              : null,
+              : _fechamentos.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          _viaApi
+                              ? 'Nenhum fechamento de caixa no PC servidor.\n'
+                                  'Os registros aparecem apos fechar o caixa '
+                                  '(sincronizado via API).'
+                              : 'Nenhum fechamento de caixa na auditoria local.\n'
+                                  'Os registros aparecem apos fechar o caixa '
+                                  'em Vendas > Caixa.',
+                          textAlign: TextAlign.center,
                         ),
                       ),
-                      onTap: () => _detalhe(r),
-                    );
-                  },
-                ),
+                    )
+                  : ListView.builder(
+                      itemCount: _fechamentos.length,
+                      itemBuilder: (context, i) {
+                        final r = _fechamentos[i];
+                        final dif = r.diferencaTotal ?? 0;
+                        final operador = r.detalhes['operador']?.toString() ??
+                            r.operadorCaixa;
+                        return ListTile(
+                          leading: Icon(
+                            dif.abs() > 0.01
+                                ? Icons.warning_amber
+                                : Icons.check_circle_outline,
+                            color: dif.abs() > 0.01
+                                ? Theme.of(context).colorScheme.error
+                                : Colors.green.shade700,
+                          ),
+                          title: Text(_fmtData.format(r.em.toLocal())),
+                          subtitle: Text('Operador: $operador'),
+                          trailing: Text(
+                            _fmtMoeda.format(dif),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: dif.abs() > 0.01
+                                  ? Theme.of(context).colorScheme.error
+                                  : null,
+                            ),
+                          ),
+                          onTap: () => _detalhe(r),
+                        );
+                      },
+                    ),
     );
   }
 }

@@ -4,27 +4,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../domain/pdv_consulta_detalhe_linha.dart';
+import 'estoque/estoque_lista_metricas.dart';
 import '../domain/pdv_estoque_semaforo_util.dart';
 import '../domain/pdv_consulta_insights_service.dart';
 import '../domain/pdv_consulta_multi_deposito_util.dart';
 import '../domain/pdv_busca_inteligente.dart';
 import '../domain/lista_compra_item_constantes.dart';
 import '../domain/pdv_tabela_preco_util.dart';
-import '../data/kit_orcamento_repository.dart';
+import '../data/api/lista_compra_api_repository.dart';
+import '../data/api/lan_api_event_hub.dart';
+import '../data/api/produto_api_repository.dart';
+import '../data/api/venda_api_repository.dart';
 import '../data/lista_compra_repository.dart';
 import '../data/produto_busca_util.dart';
-import '../data/produto_repository.dart';
 import '../data/produto_sugestao_venda_repository.dart';
 import '../data/sugestao_venda_metrica_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
+import '../data/sync/estoque_local_refresh_hub.dart';
 import '../domain/sugestao_venda_metrica_constantes.dart';
-import '../data/venda_repository.dart';
 import '../domain/promocao_info_vigente.dart';
 import '../domain/promocao_preco_result.dart';
 import '../model/produto.dart';
 import 'pdv_consulta_preview_panel.dart';
 import 'pdv_pesquisa_comando.dart';
 import 'produto_detalhe_venda_page.dart';
+import 'shell/main_menu_deps.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'widgets/consulta_lista_vazia.dart';
 import 'widgets/pdv_atalhos_ajuda.dart';
@@ -87,8 +91,8 @@ class PdvConsultaProdutosPage extends StatefulWidget {
     this.produtosNoOrcamentoIdsDe,
   });
 
-  final ProdutoRepository produtoRepository;
-  final VendaRepository vendaRepository;
+  final dynamic produtoRepository;
+  final dynamic vendaRepository;
   final String termoInicial;
   final String precoListaAtivoInicial;
   final int? clienteId;
@@ -97,12 +101,12 @@ class PdvConsultaProdutosPage extends StatefulWidget {
   final String Function(String) rotuloPreco;
   final double Function(Produto produto, String precoTipo) precoUnitarioDe;
   final PromocaoPrecoResult Function(Produto produto, String precoTipo)?
-      resolverPromocao;
+  resolverPromocao;
   final List<PromocaoInfoVigente> Function(Produto produto)?
-      campanhasVigentesDe;
+  campanhasVigentesDe;
   final num Function(int produtoId)? quantidadeNoOrcamentoDe;
   final String criadoPorListaCompra;
-  final KitOrcamentoRepository? kitOrcamentoRepository;
+  final dynamic kitOrcamentoRepository;
   final ProdutoSugestaoVendaRepository? sugestaoVendaRepository;
   final bool mostrarMargemGerente;
   final double margemMinimaPadrao;
@@ -125,7 +129,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   late final ScrollController _scrollController;
   Timer? _debounce;
   Timer? _debouncePreview;
-  late final SugestaoVendaMetricaRepository _sugestaoMetricaRepo;
+  SugestaoVendaMetricaRepository? _sugestaoMetricaRepo;
 
   late String _precoListaAtivo;
   int _quantidadeAdicionar = 1;
@@ -133,9 +137,11 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       GlobalKey<PdvConsultaControlesAdicionarState>();
   List<Produto> _produtosBase = [];
   List<Produto> _produtos = [];
+
   /// Preco/promo/estoque precalculados por linha (evita trabalho no itemBuilder).
   List<_PdvConsultaLinhaVm> _linhasVm = const [];
   int? _indiceSelecionado;
+
   /// Painel lateral atualizado com debounce no teclado (evita piscar foto/layout).
   Produto? _produtoPreviewPainel;
   bool _painelPreviewVisivel = true;
@@ -154,13 +160,66 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   @override
   void initState() {
     super.initState();
-    _precoListaAtivo = PdvTabelaPrecoUtil.normalizar(widget.precoListaAtivoInicial);
+    _precoListaAtivo = PdvTabelaPrecoUtil.normalizar(
+      widget.precoListaAtivoInicial,
+    );
     _pesquisaController = TextEditingController(text: widget.termoInicial);
     _pesquisaFocus = FocusNode(debugLabel: 'pdvConsultaPesquisa');
     _listaFocus = FocusNode(debugLabel: 'pdvConsultaLista');
     _scrollController = ScrollController();
-    _sugestaoMetricaRepo =
-        SugestaoVendaMetricaRepository(widget.produtoRepository.objectBox);
+    try {
+      _sugestaoMetricaRepo = SugestaoVendaMetricaRepository(
+        widget.produtoRepository.objectBox,
+      );
+    } catch (_) {
+      _sugestaoMetricaRepo = null;
+    }
+    widget.produtoRepository.addListener(_onProdutoRepositoryChanged);
+    LanApiEventHub.instance.addListener(_onLanApiEstoqueChanged);
+    EstoqueLocalRefreshHub.instance.addListener(_onEstoqueLocalRefresh);
+  }
+
+  void _onProdutoRepositoryChanged() {
+    if (!mounted) return;
+    _cacheSugestoes = null;
+    _atualizarLista(manterFocoNaPesquisa: true);
+  }
+
+  void _onLanApiEstoqueChanged() {
+    if (!mounted) return;
+    if (LanApiEventHub.instance.ultimaEntidade != 'produto' &&
+        LanApiEventHub.instance.ultimaEntidade != 'estoque' &&
+        LanApiEventHub.instance.ultimaEntidade != 'lote_produto') {
+      return;
+    }
+    unawaited(_aplicarEventoCatalogoNaConsulta());
+  }
+
+  Future<void> _aplicarEventoCatalogoNaConsulta() async {
+    final repo = widget.produtoRepository;
+    if (repo is ProdutoApiRepository) {
+      final ids = List<int>.from(LanApiEventHub.instance.ultimaEntidadeIds);
+      final rev = LanApiEventHub.instance.ultimaCatalogoRevision;
+      try {
+        await repo.aplicarEventoRede(
+          ids: ids,
+          revision: rev > 0 ? rev : null,
+        );
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    _cacheSugestoes = null;
+    _atualizarLista(manterFocoNaPesquisa: true);
+  }
+
+  void _onEstoqueLocalRefresh() {
+    if (!mounted) return;
+    try {
+      widget.produtoRepository.atualizarCacheAposMovimentoEstoque();
+    } catch (_) {}
+    // Sempre remonta a lista/preview — o painel guarda instancia antiga do Produto.
+    _cacheSugestoes = null;
+    _atualizarLista(manterFocoNaPesquisa: true);
   }
 
   @override
@@ -178,6 +237,9 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   void dispose() {
     _debounce?.cancel();
     _debouncePreview?.cancel();
+    widget.produtoRepository.removeListener(_onProdutoRepositoryChanged);
+    LanApiEventHub.instance.removeListener(_onLanApiEstoqueChanged);
+    EstoqueLocalRefreshHub.instance.removeListener(_onEstoqueLocalRefresh);
     _pesquisaController.dispose();
     _pesquisaFocus.dispose();
     _listaFocus.dispose();
@@ -192,10 +254,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     if (consultaEanProvavelCompleto(termo)) {
       _debounce = Timer(const Duration(milliseconds: 120), () {
         if (!mounted) return;
-        _atualizarLista(
-          forcarAutoSeUnico: true,
-          manterFocoNaPesquisa: true,
-        );
+        _atualizarLista(forcarAutoSeUnico: true, manterFocoNaPesquisa: true);
       });
       return;
     }
@@ -238,8 +297,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
             codigoLido = termo;
             comandoLido = comando;
 
-            final porBarras =
-                widget.produtoRepository.resolverLeitorCodigoBarras(termo);
+            final porBarras = widget.produtoRepository
+                .resolverLeitorCodigoBarras(termo);
             if (porBarras != null) {
               produtoEncontrado = porBarras;
               return PdvBarcodeScanFeedback(
@@ -254,8 +313,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
               termo,
               clienteId: widget.clienteId,
             );
-            if (resolvido.deveAutoSelecionar &&
-                resolvido.produtoAuto != null) {
+            if (resolvido.deveAutoSelecionar && resolvido.produtoAuto != null) {
               produtoEncontrado = resolvido.produtoAuto;
               return PdvBarcodeScanFeedback(
                 sucesso: true,
@@ -263,6 +321,22 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                     ? termo
                     : resolvido.produtoAuto!.nome.trim(),
               );
+            }
+
+            final repo = widget.produtoRepository;
+            if (repo is ProdutoApiRepository) {
+              try {
+                final remoto = await repo.buscarPorCodigoBarrasRemoto(termo);
+                if (remoto != null) {
+                  produtoEncontrado = remoto;
+                  return PdvBarcodeScanFeedback(
+                    sucesso: true,
+                    mensagem: remoto.nome.trim().isEmpty
+                        ? termo
+                        : remoto.nome.trim(),
+                  );
+                }
+              } catch (_) {}
             }
 
             mensagemErro = 'Produto nao encontrado: $termo';
@@ -293,10 +367,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     if (mensagemErro != null) {
       OperacaoFeedback.erro(context, mensagemErro!);
     }
-    _atualizarLista(
-      forcarAutoSeUnico: true,
-      focarListaSeTiverItens: true,
-    );
+    _atualizarLista(forcarAutoSeUnico: true, focarListaSeTiverItens: true);
   }
 
   bool _deveAutoConfirmarResolvido(
@@ -360,9 +431,10 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       nucleo = switch (_modoSugestao) {
         PdvConsultaModoSugestao.recentes => 'Produtos recentes nesta sessao',
         PdvConsultaModoSugestao.maisVendidos => 'Mais vendidos (30 dias)',
-        PdvConsultaModoSugestao.misto => base.isEmpty
-            ? 'Nenhum produto ativo cadastrado'
-            : 'Recentes e mais vendidos (30 dias)',
+        PdvConsultaModoSugestao.misto =>
+          base.isEmpty
+              ? 'Nenhum produto ativo cadastrado'
+              : 'Recentes e mais vendidos (30 dias)',
       };
     } else if (base.isEmpty) {
       nucleo = 'Nenhum resultado para "$termo"';
@@ -421,8 +493,9 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
         produto: item,
         precoFormatado: widget.formatarMoeda(preco),
         emPromocao: emPromo,
-        precoDeFormatado:
-            emPromo ? widget.formatarMoeda(res!.precoBasePreco1) : null,
+        precoDeFormatado: emPromo
+            ? widget.formatarMoeda(res!.precoBasePreco1)
+            : null,
         estoqueNivel: PdvEstoqueSemaforoUtil.nivelDe(item),
       );
     }, growable: false);
@@ -464,14 +537,30 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   }
 
   Future<void> _puxarProdutosDaRede() async {
+    if (widget.produtoRepository is ProdutoApiRepository) {
+      try {
+        await (widget.produtoRepository as ProdutoApiRepository).hidratar();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('API: $e')),
+        );
+        return;
+      }
+      if (!mounted) return;
+      widget.produtoRepository.invalidarCacheBusca();
+      _atualizarLista(manterFocoNaPesquisa: true);
+      return;
+    }
+
     final erro = await LanSyncScheduler.solicitarSyncCompleto();
     if (!mounted) return;
     widget.produtoRepository.invalidarCacheBusca();
     _atualizarLista(manterFocoNaPesquisa: true);
     if (erro != null && erro.trim().isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sync: $erro')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Sync: $erro')));
     }
   }
 
@@ -521,6 +610,18 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
 
     if (_produtos.isNotEmpty) {
       _reposicionarListaAposBusca();
+    } else if (termo.isNotEmpty &&
+        widget.produtoRepository is ProdutoApiRepository) {
+      unawaited(
+        _completarBuscaRemota(
+          termo,
+          comando: comando,
+          forcarAutoSeUnico: forcarAutoSeUnico,
+          autoSeUnicoEnquantoDigita: autoSeUnicoEnquantoDigita,
+          manterFocoNaPesquisa: manterFocoNaPesquisa,
+          focarListaSeTiverItens: focarListaSeTiverItens,
+        ),
+      );
     }
 
     if (manterFocoNaPesquisa) return;
@@ -531,6 +632,77 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
         _listaFocus.requestFocus();
       });
     }
+  }
+
+  int _buscaRemotaSeq = 0;
+
+  Future<void> _completarBuscaRemota(
+    String termo, {
+    required PdvPesquisaComando comando,
+    required bool forcarAutoSeUnico,
+    required bool autoSeUnicoEnquantoDigita,
+    required bool manterFocoNaPesquisa,
+    required bool focarListaSeTiverItens,
+  }) async {
+    final seq = ++_buscaRemotaSeq;
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoApiRepository) return;
+    try {
+      var remotos = await repo.pesquisarRemoto(termo, limite: 40);
+      if (remotos.isEmpty) {
+        final porBarras = await repo.buscarPorCodigoBarrasRemoto(termo);
+        if (porBarras != null) remotos = [porBarras];
+      }
+      if (!mounted || seq != _buscaRemotaSeq) return;
+      if (PdvPesquisaComando.parse(_pesquisaController.text).termoBusca !=
+          termo) {
+        return;
+      }
+      if (remotos.isEmpty) return;
+
+      final resolvido = remotos.length == 1
+          ? PdvPesquisaResolvida(
+              produtos: remotos,
+              totalCorrespondencias: 1,
+              produtoAuto: remotos.first,
+              motivoAuto: PdvBuscaAutoMotivo.unicoResultado,
+            )
+          : PdvPesquisaResolvida(
+              produtos: remotos,
+              totalCorrespondencias: remotos.length,
+            );
+      if (_deveAutoConfirmarResolvido(
+        resolvido,
+        forcarAutoSeUnico: forcarAutoSeUnico,
+        autoSeUnicoEnquantoDigita: autoSeUnicoEnquantoDigita,
+        termo: termo,
+      )) {
+        _confirmarProduto(resolvido.produtoAuto!, comando: comando);
+        return;
+      }
+
+      final filtrada = _filtrarProdutos(remotos);
+      setState(() {
+        _produtosBase = remotos;
+        _produtos = filtrada;
+        _remontarLinhasVm();
+        _termoBuscaAtual = termo;
+        _subtituloLista = _montarSubtituloLista(remotos, termo);
+        _indiceSelecionado = filtrada.isEmpty ? null : 0;
+        _produtoPreviewPainel = filtrada.isEmpty ? null : filtrada.first;
+        _quantidadeAdicionar = 1;
+      });
+      if (_produtos.isNotEmpty) {
+        _reposicionarListaAposBusca();
+      }
+      if (manterFocoNaPesquisa) return;
+      if (focarListaSeTiverItens && _produtos.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _listaFocus.requestFocus();
+        });
+      }
+    } catch (_) {}
   }
 
   List<Produto> _listaSugestoes() {
@@ -736,11 +908,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
               }
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  campoBusca,
-                  const SizedBox(height: 4),
-                  chips,
-                ],
+                children: [campoBusca, const SizedBox(height: 4), chips],
               );
             },
           ),
@@ -761,7 +929,11 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
               if (!_filtrosExpandidos && _temFiltrosAtivos)
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
-                  child: Icon(Icons.filter_alt, size: 16, color: scheme.primary),
+                  child: Icon(
+                    Icons.filter_alt,
+                    size: 16,
+                    color: scheme.primary,
+                  ),
                 ),
               const Spacer(),
               TextButton(
@@ -796,10 +968,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-          child: Text(
-            _subtituloLista,
-            style: theme.textTheme.titleSmall,
-          ),
+          child: Text(_subtituloLista, style: theme.textTheme.titleSmall),
         ),
       ],
     );
@@ -879,20 +1048,48 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   Future<void> _anotarSelecionadoParaCompra() async {
     final p = _produtoSelecionado;
     if (p == null) return;
-    final repo = ListaCompraRepository(widget.produtoRepository.objectBox);
+    final repo = _listaCompraRepositoryOuNull();
+    if (repo == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Use o PC servidor para anotar compras.'),
+          ),
+        );
+      }
+      return;
+    }
     await mostrarAnotarListaCompraDialog(
       context,
       repository: repo,
       produto: p,
-      quantidadeInicial: p.quantidadeMinima > p.estoqueAtual
-          ? (p.quantidadeMinima - p.estoqueAtual).clamp(1, 99999)
-          : 1,
+      quantidadeInicial:
+          EstoqueListaMetricas.quantidadeSugeridaAnotarCompra(p),
       origem: ListaCompraItemOrigem.manual,
       criadoPor: widget.criadoPorListaCompra,
-      urgente: p.estoqueAtual <= 0,
+      urgente: p.estoqueExibicao <= 0,
     );
     if (!mounted) return;
     _listaFocus.requestFocus();
+  }
+
+  dynamic _listaCompraRepositoryOuNull() {
+    final deps = MainMenuDeps.maybeOf(context);
+    if (deps?.listaCompraRepository != null) {
+      return deps!.listaCompraRepository;
+    }
+    final client = deps?.lanApiClient;
+    if (client != null) {
+      return ListaCompraApiRepository(
+        client,
+        produtoRepository: widget.produtoRepository,
+      );
+    }
+    try {
+      return ListaCompraRepository(widget.produtoRepository.objectBox);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _abrirDetalhesProduto() async {
@@ -911,7 +1108,9 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   void _focarCampoBusca() {
     _pesquisaFocus.requestFocus();
     final texto = _pesquisaController.text;
-    _pesquisaController.selection = TextSelection.collapsed(offset: texto.length);
+    _pesquisaController.selection = TextSelection.collapsed(
+      offset: texto.length,
+    );
   }
 
   void _focarListaPrimeiroItem() {
@@ -1178,7 +1377,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   void _adicionarAgregadoSugerido(PdvConsultaAgregadoVenda agregado) {
     final origem = _produtoSelecionado;
     if (origem != null && origem.id > 0) {
-      _sugestaoMetricaRepo.registrarAceite(
+      _sugestaoMetricaRepo?.registrarAceite(
         produtoOrigemId: origem.id,
         produtoSugeridoId: agregado.produtoId,
         canal: SugestaoVendaMetricaCanal.insights,
@@ -1203,24 +1402,33 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   }
 
   PdvConsultaInsightsPacote _montarInsights(Produto produto) {
-    final promo = widget.resolverPromocao?.call(produto, _precoListaAtivo);
-    return PdvConsultaInsightsService.montar(
-      produto: produto,
-      produtoRepository: widget.produtoRepository,
-      vendaRepository: widget.vendaRepository,
-      kitOrcamentoRepository: widget.kitOrcamentoRepository,
-      sugestaoVendaRepository: widget.sugestaoVendaRepository,
-      clienteId: widget.clienteId,
-      precoListaAtivo: _precoListaAtivo,
-      precoUnitarioDe: widget.precoUnitarioDe,
-      margemMinimaPadrao: widget.margemMinimaPadrao,
-      margemMinimaPromocao: promo?.margemMinimaPercentual ?? 0,
-      mostrarMargemGerente: widget.mostrarMargemGerente,
-      termoBusca: _termoBuscaAtual,
-      rotulosDeposito: widget.rotulosDeposito,
-      excluirProdutoIdsAgregados:
-          widget.produtosNoOrcamentoIdsDe?.call() ?? const {},
-    );
+    // Terminal leve: repos API nao sao ProdutoRepository/VendaRepository.
+    if (widget.produtoRepository is ProdutoApiRepository ||
+        widget.vendaRepository is VendaApiRepository) {
+      return const PdvConsultaInsightsPacote();
+    }
+    try {
+      final promo = widget.resolverPromocao?.call(produto, _precoListaAtivo);
+      return PdvConsultaInsightsService.montar(
+        produto: produto,
+        produtoRepository: widget.produtoRepository,
+        vendaRepository: widget.vendaRepository,
+        kitOrcamentoRepository: widget.kitOrcamentoRepository,
+        sugestaoVendaRepository: widget.sugestaoVendaRepository,
+        clienteId: widget.clienteId,
+        precoListaAtivo: _precoListaAtivo,
+        precoUnitarioDe: widget.precoUnitarioDe,
+        margemMinimaPadrao: widget.margemMinimaPadrao,
+        margemMinimaPromocao: promo?.margemMinimaPercentual ?? 0,
+        mostrarMargemGerente: widget.mostrarMargemGerente,
+        termoBusca: _termoBuscaAtual,
+        rotulosDeposito: widget.rotulosDeposito,
+        excluirProdutoIdsAgregados:
+            widget.produtosNoOrcamentoIdsDe?.call() ?? const {},
+      );
+    } catch (_) {
+      return const PdvConsultaInsightsPacote();
+    }
   }
 
   Widget _buildPainelPreview(Produto produto, {required bool compacto}) {
@@ -1260,8 +1468,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   Widget _buildBarraProdutoSelecionado(Produto produto) {
     final scheme = Theme.of(context).colorScheme;
     final res = widget.resolverPromocao?.call(produto, _precoListaAtivo);
-    final preco = res?.precoFinal ??
-        widget.precoUnitarioDe(produto, _precoListaAtivo);
+    final preco =
+        res?.precoFinal ?? widget.precoUnitarioDe(produto, _precoListaAtivo);
 
     return Material(
       elevation: 6,
@@ -1282,15 +1490,15 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     Text(
                       '${widget.rotuloPreco(_precoListaAtivo)} · '
                       '${widget.formatarMoeda(preco)}',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -1328,61 +1536,62 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                 cacheExtent: 280,
                 itemCount: _linhasVm.length,
                 itemBuilder: (context, index) {
-                final vm = _linhasVm[index];
-                final item = vm.produto;
-                final selecionado = _indiceSelecionado == index;
-                final qtdOrcamento =
-                    widget.quantidadeNoOrcamentoDe?.call(item.id) ?? 0;
-                final scheme = Theme.of(context).colorScheme;
-                return Material(
-                  key: ValueKey<int>(item.id),
-                  color: selecionado
-                      ? scheme.primaryContainer.withValues(alpha: 0.55)
-                      : (index.isOdd
-                          ? scheme.surfaceContainerLow
-                          : scheme.surface),
-                  child: InkWell(
-                    onTap: () => _selecionarIndice(index),
-                    onDoubleTap: () =>
-                        _confirmarProduto(item, adicionarDireto: true),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(
-                            color:
-                                scheme.outlineVariant.withValues(alpha: 0.55),
+                  final vm = _linhasVm[index];
+                  final item = vm.produto;
+                  final selecionado = _indiceSelecionado == index;
+                  final qtdOrcamento =
+                      widget.quantidadeNoOrcamentoDe?.call(item.id) ?? 0;
+                  final scheme = Theme.of(context).colorScheme;
+                  return Material(
+                    key: ValueKey<int>(item.id),
+                    color: selecionado
+                        ? scheme.primaryContainer.withValues(alpha: 0.55)
+                        : (index.isOdd
+                              ? scheme.surfaceContainerLow
+                              : scheme.surface),
+                    child: InkWell(
+                      onTap: () => _selecionarIndice(index),
+                      onDoubleTap: () =>
+                          _confirmarProduto(item, adicionarDireto: true),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: scheme.outlineVariant.withValues(
+                                alpha: 0.55,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                      child: PdvConsultaLinhaProduto(
-                        produto: item,
-                        termoBusca: _termoBuscaAtual,
-                        precoFormatado: vm.precoFormatado,
-                        emPromocao: vm.emPromocao,
-                        precoDeFormatado: vm.precoDeFormatado,
-                        estoqueNivel: vm.estoqueNivel,
-                        selecionado: selecionado,
-                        quantidadeNoOrcamento: qtdOrcamento,
-                        tooltipAdicionar:
-                            'Adicionar 1 (${widget.rotuloPreco(_precoListaAtivo)})',
-                        onAdicionar: () {
-                          Navigator.of(context).pop(
-                            PdvConsultaProdutoResult(
-                              produto: item,
-                              precoListaAtivo: _precoListaAtivo,
-                              adicaoDireta: true,
-                              abrirDialogoAdicionar: false,
-                            ),
-                          );
-                        },
+                        child: PdvConsultaLinhaProduto(
+                          produto: item,
+                          termoBusca: _termoBuscaAtual,
+                          precoFormatado: vm.precoFormatado,
+                          emPromocao: vm.emPromocao,
+                          precoDeFormatado: vm.precoDeFormatado,
+                          estoqueNivel: vm.estoqueNivel,
+                          selecionado: selecionado,
+                          quantidadeNoOrcamento: qtdOrcamento,
+                          tooltipAdicionar:
+                              'Adicionar 1 (${widget.rotuloPreco(_precoListaAtivo)})',
+                          onAdicionar: () {
+                            Navigator.of(context).pop(
+                              PdvConsultaProdutoResult(
+                                produto: item,
+                                precoListaAtivo: _precoListaAtivo,
+                                adicaoDireta: true,
+                                abrirDialogoAdicionar: false,
+                              ),
+                            );
+                          },
+                        ),
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
-        ),
         ),
       ],
     );
@@ -1427,21 +1636,29 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   Widget build(BuildContext context) {
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.f1): _PdvConsultaPrecoIntent('preco1'),
-        SingleActivator(LogicalKeyboardKey.f2): _PdvConsultaPrecoIntent('preco2'),
-        SingleActivator(LogicalKeyboardKey.f3): _PdvConsultaPrecoIntent('preco3'),
-        SingleActivator(LogicalKeyboardKey.f7): _PdvConsultaTogglePainelIntent(),
+        SingleActivator(LogicalKeyboardKey.f1): _PdvConsultaPrecoIntent(
+          'preco1',
+        ),
+        SingleActivator(LogicalKeyboardKey.f2): _PdvConsultaPrecoIntent(
+          'preco2',
+        ),
+        SingleActivator(LogicalKeyboardKey.f3): _PdvConsultaPrecoIntent(
+          'preco3',
+        ),
+        SingleActivator(LogicalKeyboardKey.f7):
+            _PdvConsultaTogglePainelIntent(),
         SingleActivator(LogicalKeyboardKey.f8): _PdvConsultaFocoBuscaIntent(),
         SingleActivator(LogicalKeyboardKey.escape): _PdvConsultaFecharIntent(),
       },
       child: Actions(
         actions: {
-          _PdvConsultaFocoBuscaIntent: CallbackAction<_PdvConsultaFocoBuscaIntent>(
-            onInvoke: (_) {
-              _focarCampoBusca();
-              return null;
-            },
-          ),
+          _PdvConsultaFocoBuscaIntent:
+              CallbackAction<_PdvConsultaFocoBuscaIntent>(
+                onInvoke: (_) {
+                  _focarCampoBusca();
+                  return null;
+                },
+              ),
           _PdvConsultaPrecoIntent: CallbackAction<_PdvConsultaPrecoIntent>(
             onInvoke: (intent) {
               _selecionarTabelaPreco(intent.precoTipo);
@@ -1456,11 +1673,11 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           ),
           _PdvConsultaTogglePainelIntent:
               CallbackAction<_PdvConsultaTogglePainelIntent>(
-            onInvoke: (_) {
-              _togglePainelPreview();
-              return null;
-            },
-          ),
+                onInvoke: (_) {
+                  _togglePainelPreview();
+                  return null;
+                },
+              ),
         },
         child: Builder(
           builder: (context) {
@@ -1482,48 +1699,50 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                 if (!aberto) _listaFocus.requestFocus();
               },
               appBar: AppBar(
-            leading: IconButton(
-              tooltip: 'Voltar ao carrinho (Esc)',
-              icon: const Icon(Icons.arrow_back),
-              onPressed: _fecharConsulta,
-            ),
-            title: const Text('Consulta de produtos'),
-            actions: [
-              if (selecionado != null)
-                IconButton(
-                  tooltip: 'Painel do produto (F7)',
-                  onPressed: _togglePainelPreview,
-                  icon: Icon(
-                    usarDrawer && (_scaffoldKey.currentState?.isEndDrawerOpen ?? false)
-                        ? Icons.view_sidebar
-                        : Icons.view_sidebar_outlined,
-                  ),
+                leading: IconButton(
+                  tooltip: 'Voltar ao carrinho (Esc)',
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: _fecharConsulta,
                 ),
-              IconButton(
-                tooltip: 'Anotar para comprar',
-                onPressed: _produtoSelecionado == null
-                    ? null
-                    : _anotarSelecionadoParaCompra,
-                icon: const Icon(Icons.playlist_add_outlined),
+                title: const Text('Consulta de produtos'),
+                actions: [
+                  if (selecionado != null)
+                    IconButton(
+                      tooltip: 'Painel do produto (F7)',
+                      onPressed: _togglePainelPreview,
+                      icon: Icon(
+                        usarDrawer &&
+                                (_scaffoldKey.currentState?.isEndDrawerOpen ??
+                                    false)
+                            ? Icons.view_sidebar
+                            : Icons.view_sidebar_outlined,
+                      ),
+                    ),
+                  IconButton(
+                    tooltip: 'Anotar para comprar',
+                    onPressed: _produtoSelecionado == null
+                        ? null
+                        : _anotarSelecionadoParaCompra,
+                    icon: const Icon(Icons.playlist_add_outlined),
+                  ),
+                ],
               ),
-            ],
-          ),
-          body: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildCabecalhoConsulta(),
-              Expanded(
-                child: _produtos.isEmpty
-                    ? ConsultaListaVazia(
-                        mensagem: _subtituloLista,
-                        dica: _termoBuscaAtual.trim().isEmpty
-                            ? 'Digite para buscar ou use F4 no PDV.'
-                            : 'Ajuste os filtros ou o termo de busca.',
-                      )
-                    : _buildAreaListaComPreview(),
+              body: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildCabecalhoConsulta(),
+                  Expanded(
+                    child: _produtos.isEmpty
+                        ? ConsultaListaVazia(
+                            mensagem: _subtituloLista,
+                            dica: _termoBuscaAtual.trim().isEmpty
+                                ? 'Digite para buscar ou use F4 no PDV.'
+                                : 'Ajuste os filtros ou o termo de busca.',
+                          )
+                        : _buildAreaListaComPreview(),
+                  ),
+                ],
               ),
-            ],
-          ),
             );
           },
         ),

@@ -1,19 +1,25 @@
 import 'package:flutter/material.dart';
 
-import '../../data/motorista_repository.dart';
+import '../../domain/motorista_lista_safe.dart';
 
-/// Escolhe um motorista ativo (retorna nome ou null se cancelar).
+/// Escolhe um motorista ativo (retorna nome, '' se limpar, ou null se cancelar).
 Future<String?> showSelecionarMotoristaDialog(
   BuildContext context,
-  MotoristaRepository motoristaRepository, {
+  dynamic motoristaRepository, {
   String titulo = 'Motorista',
   String? textoAuxiliar,
   String? motoristaSugerido,
   String rotuloConfirmar = 'Confirmar',
+  bool permitirLimpar = false,
 }) {
-  final motoristas = motoristaRepository.listarAtivos();
-  var escolhido = motoristaSugerido ??
-      (motoristas.isNotEmpty ? motoristas.first.nome : null);
+  final opcoes = MotoristaListaSafe.opcoesDropdown(
+    motoristaRepository: motoristaRepository,
+    atual: motoristaSugerido,
+  );
+  var escolhido = MotoristaListaSafe.valorInicialDropdown(
+    opcoes: opcoes,
+    preferido: motoristaSugerido,
+  );
 
   return showDialog<String>(
     context: context,
@@ -29,21 +35,23 @@ Future<String?> showSelecionarMotoristaDialog(
                 Text(textoAuxiliar),
                 const SizedBox(height: 12),
               ],
-              if (motoristas.isEmpty)
+              if (opcoes.isEmpty)
                 const Text(
                   'Nenhum motorista ativo. Cadastre em Cadastros > Motoristas.',
                 )
               else
                 DropdownButtonFormField<String>(
+                  key: ValueKey('mot_${opcoes.join('|')}'),
                   initialValue: escolhido,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Motorista',
                   ),
-                  items: motoristas
+                  items: opcoes
                       .map(
-                        (m) => DropdownMenuItem(
-                          value: m.nome,
-                          child: Text(m.nome),
+                        (nome) => DropdownMenuItem(
+                          value: nome,
+                          child: Text(nome),
                         ),
                       )
                       .toList(),
@@ -56,8 +64,13 @@ Future<String?> showSelecionarMotoristaDialog(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancelar'),
             ),
+            if (permitirLimpar)
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, ''),
+                child: const Text('Limpar'),
+              ),
             ElevatedButton(
-              onPressed: motoristas.isEmpty || escolhido == null
+              onPressed: opcoes.isEmpty || escolhido == null
                   ? null
                   : () => Navigator.pop(ctx, escolhido),
               child: Text(rotuloConfirmar),

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/cliente_repository.dart';
 import '../../data/titulo_receber_repository.dart';
-import '../../data/venda_repository.dart';
+import '../../data/api/lan_api_event_hub.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../domain/dashboard_alertas.dart';
 import '../../domain/filtro_contas_receber.dart';
 import '../../model/cliente.dart';
@@ -11,10 +11,14 @@ import '../../model/usuario_sistema.dart';
 import '../theme/app_semantic_helper.dart';
 import '../relatorios/relatorio_export_util.dart';
 import '../relatorios/widgets/relatorio_exportacoes_menu.dart';
+import '../widgets/lan_api_feedback.dart';
 import '../widgets/receber_fiado_panel.dart';
 import 'widgets/grafico_vencimentos.dart';
 
-final NumberFormat _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$');
+final NumberFormat _moeda = NumberFormat.currency(
+  locale: 'pt_BR',
+  symbol: r'R$',
+);
 final DateFormat _dataFmt = DateFormat('dd/MM/yyyy');
 
 /// Listagem de titulos a receber (fiado) com KPIs, filtros e recebimento.
@@ -28,8 +32,8 @@ class ContasReceberPage extends StatefulWidget {
     this.filtroInicial = FiltroContasReceber.todos,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
   final UsuarioSistema usuarioLogado;
   final bool podeRegistrarRecebimento;
   final FiltroContasReceber filtroInicial;
@@ -50,16 +54,33 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
     _recarregar();
   }
 
-  void _recarregar() {
-    widget.vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
-    final todas = widget.vendaRepository.titulos.listarTodosAbertos();
-    final filtradas =
-        todas.where((l) => ContasReceberHelper.atendeFiltro(l, _filtro)).toList();
-    if (!mounted) return;
-    setState(() {
-      _todas = todas;
-      _linhas = filtradas;
-    });
+  Future<void> _recarregar() async {
+    try {
+      if (widget.vendaRepository is VendaApiRepository) {
+        if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+          return;
+        }
+        await widget.vendaRepository.hidratarTitulos();
+      } else {
+        widget.vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+      }
+      final todas = widget.vendaRepository.titulos.listarTodosAbertos();
+      final filtradas = todas
+          .where((l) => ContasReceberHelper.atendeFiltro(l, _filtro))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _todas = todas;
+        _linhas = filtradas;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Falha ao carregar contas a receber',
+      );
+    }
   }
 
   double _soma(Iterable<TituloReceberResumoLinha> lista) =>
@@ -67,8 +88,7 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
 
   double get _kpiTotal => _soma(_todas);
 
-  double get _kpiVencido =>
-      _soma(_todas.where(ContasReceberHelper.ehVencido));
+  double get _kpiVencido => _soma(_todas.where(ContasReceberHelper.ehVencido));
 
   double get _kpiVenceHoje =>
       _soma(_todas.where(ContasReceberHelper.ehVenceHoje));
@@ -105,14 +125,7 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
       titulo: 'CONTAS A RECEBER (FIADO)',
       subtitulo:
           '${_linhas.length} titulo(s) · Total ${_moeda.format(total)} · ${_filtro.rotulo}',
-      cabecalho: [
-        'Cliente',
-        'Venda',
-        'Parc',
-        'Vencimento',
-        'Atraso',
-        'Saldo',
-      ],
+      cabecalho: ['Cliente', 'Venda', 'Parc', 'Vencimento', 'Atraso', 'Saldo'],
       linhas: _linhas
           .map(
             (l) => [
@@ -239,10 +252,14 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
   }
 
   Cliente? _clienteDaLinha(TituloReceberResumoLinha l) {
+    // Terminal: ToOne detached — nunca acessar .target.
     final cid = l.titulo.cliente.targetId;
-    if (cid <= 0) return l.titulo.cliente.target;
-    return l.titulo.cliente.target ??
-        widget.clienteRepository.obterPorId(cid);
+    if (cid <= 0) return null;
+    try {
+      return widget.clienteRepository.obterPorId(cid) as Cliente?;
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -374,8 +391,7 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
             child: GraficoVencimentosContasPagar(
               buckets: computeTitulosReceberVencimentosBuckets(_todas),
               titulo: 'Recebimentos previstos (fiado em aberto)',
-              subtituloVazio:
-                  'Nenhum fiado nas faixas de vencimento exibidas.',
+              subtituloVazio: 'Nenhum fiado nas faixas de vencimento exibidas.',
               altura: 220,
             ),
           ),
@@ -438,8 +454,8 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
                                 backgroundColor: vencido
                                     ? errBg
                                     : venceHoje
-                                        ? warnBg
-                                        : infoBg,
+                                    ? warnBg
+                                    : infoBg,
                                 child: Icon(
                                   vencido
                                       ? Icons.warning_amber_rounded
@@ -447,8 +463,8 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
                                   color: vencido
                                       ? errFg
                                       : venceHoje
-                                          ? warnFg
-                                          : infoFg,
+                                      ? warnFg
+                                      : infoFg,
                                   size: 22,
                                 ),
                               ),
@@ -469,14 +485,16 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
                                     Text(
                                       'Venda ${l.numeroOrcamento > 0 ? l.numeroOrcamento : l.titulo.venda.targetId} · '
                                       'Parc. ${l.titulo.numeroParcela}/${l.titulo.totalParcelas}',
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall,
                                     ),
                                     Text(
                                       'Venc.: ${_dataFmt.format(l.titulo.vencimento.toLocal())}'
                                       '${l.diasAtraso > 0 ? ' · ${l.diasAtraso} dia(s) atraso' : ''}',
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall,
                                     ),
                                   ],
                                 ),

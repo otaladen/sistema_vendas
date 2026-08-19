@@ -25,12 +25,16 @@ Future<void> abrirDanfeFocus(
       : (venda != null ? FocusNfeService.referenciaVendaNfce(venda) : '');
 
   if (!FocusDocumentoFiscalUrl.urlAbsolutaValida(url) && ref.isNotEmpty) {
-    final consulta = await focusNfe.consultarNfce(ref);
-    if (consulta.urlDanfe.trim().isNotEmpty) {
-      url = FocusDocumentoFiscalUrl.normalizar(
-        consulta.urlDanfe,
-        apiBaseUrl: base,
-      );
+    try {
+      final consulta = await focusNfe.consultarNfce(ref);
+      if (consulta.urlDanfe.trim().isNotEmpty) {
+        url = FocusDocumentoFiscalUrl.normalizar(
+          consulta.urlDanfe,
+          apiBaseUrl: base,
+        );
+      }
+    } catch (_) {
+      // Sem Focus local (terminal): segue com URL salva / navegador.
     }
   }
 
@@ -50,7 +54,12 @@ Future<void> abrirDanfeFocus(
 
   Uint8List? pdf;
   if (url.toLowerCase().contains('focusnfe.com.br')) {
-    pdf = await focusNfe.baixarDocumentoPdf(Uri.parse(url));
+    try {
+      pdf = await focusNfe.baixarDocumentoPdf(Uri.parse(url));
+    } catch (_) {
+      // Terminal sem token Focus local: abre URL no navegador abaixo.
+      pdf = null;
+    }
   }
 
   if (pdf != null && pdf.isNotEmpty) {

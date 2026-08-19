@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/app_config_repository.dart';
-import '../../data/produto_repository.dart';
+import '../../data/api/lan_api_client.dart';
 import 'nfe_importacao_xml_flow.dart';
 import '../widgets/hub_nav_button.dart';
 
@@ -12,30 +12,31 @@ class FiscalImportarNfePage extends StatelessWidget {
     super.key,
     required this.produtoRepository,
     required this.appConfigRepository,
+    this.lanApiClient,
   });
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
   final AppConfigRepository appConfigRepository;
+  final LanApiClient? lanApiClient;
+
+  void _importar(BuildContext context) {
+    NfeImportacaoXmlFlow.executar(
+      context,
+      produtoRepository: produtoRepository,
+      appConfigRepository: appConfigRepository,
+      lanApiClient: lanApiClient,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.f1): () =>
-            NfeImportacaoXmlFlow.executar(
-              context,
-              produtoRepository: produtoRepository,
-              appConfigRepository: appConfigRepository,
-            ),
+        const SingleActivator(LogicalKeyboardKey.f1): () => _importar(context),
         const SingleActivator(
           LogicalKeyboardKey.keyO,
           control: true,
-        ): () =>
-            NfeImportacaoXmlFlow.executar(
-              context,
-              produtoRepository: produtoRepository,
-              appConfigRepository: appConfigRepository,
-            ),
+        ): () => _importar(context),
       },
       child: Scaffold(
           appBar: AppBar(
@@ -78,11 +79,7 @@ class FiscalImportarNfePage extends StatelessWidget {
                     ),
                     const SizedBox(height: 24),
                     FilledButton.icon(
-                      onPressed: () => NfeImportacaoXmlFlow.executar(
-                        context,
-                        produtoRepository: produtoRepository,
-                        appConfigRepository: appConfigRepository,
-                      ),
+                      onPressed: () => _importar(context),
                       icon: const Icon(Icons.upload_file_outlined),
                       label: const Text('Selecionar XML (F1)'),
                     ),

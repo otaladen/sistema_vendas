@@ -23,4 +23,17 @@ void main() {
     expect(r, hasLength(1));
     expect(r.first.id, 42);
   });
+
+  test('filtro Pendente inclui roteirizada (mesmo balde do patio)', () {
+    expect(EntregaFiltroUtil.atendeStatusFiltro('pendente', 'pendente'), isTrue);
+    expect(
+      EntregaFiltroUtil.atendeStatusFiltro('roteirizada', 'pendente'),
+      isTrue,
+    );
+    expect(
+      EntregaFiltroUtil.atendeStatusFiltro('saiu_entrega', 'pendente'),
+      isFalse,
+    );
+    expect(EntregaFiltroUtil.atendeStatusFiltro('roteirizada', 'todos'), isTrue);
+  });
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,17 +7,24 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
+import '../data/api/lan_api_client.dart';
+import '../data/api/produto_api_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/sugestao_compra_repository.dart';
 import '../domain/produto_embalagem.dart';
-import '../main.dart';
 import '../services/compras_preditivas_service.dart';
+import 'theme/app_semantic_colors.dart';
 
 /// Relatorio de reposicao: giro recente, minimo, ponto de pedido e ultima entrada por NF-e.
 class SugestaoCompraPage extends StatefulWidget {
-  const SugestaoCompraPage({super.key, required this.produtoRepository});
+  const SugestaoCompraPage({
+    super.key,
+    required this.produtoRepository,
+    this.lanApiClient,
+  });
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
+  final LanApiClient? lanApiClient;
 
   @override
   State<SugestaoCompraPage> createState() => _SugestaoCompraPageState();
@@ -26,11 +34,90 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
   int _diasPeriodo = 60;
   int _diasCoberturaAlvo = 30;
   bool _apenasPrioritarios = true;
+  bool _carregando = false;
+  String? _erro;
+  List<LinhaSugestaoCompra> _linhas = const [];
   static final _dataFmt = DateFormat('dd/MM/yyyy', 'pt_BR');
   static final _dec1 = NumberFormat('#,##0.0', 'pt_BR');
 
-  SugestaoCompraRepository get _repo =>
-      SugestaoCompraRepository(widget.produtoRepository.objectBox);
+  bool get _modoRemoto =>
+      widget.produtoRepository is ProdutoApiRepository ||
+      widget.lanApiClient != null;
+
+  LanApiClient? get _client {
+    if (widget.lanApiClient != null) return widget.lanApiClient;
+    final repo = widget.produtoRepository;
+    if (repo is ProdutoApiRepository) return repo.client;
+    return null;
+  }
+
+  SugestaoCompraRepository? get _repoLocal {
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoRepository) return null;
+    try {
+      return SugestaoCompraRepository(repo.objectBox);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_carregarLinhas());
+  }
+
+  Future<void> _carregarLinhas() async {
+    setState(() {
+      _carregando = true;
+      _erro = null;
+    });
+    try {
+      if (_modoRemoto) {
+        final client = _client;
+        if (client == null) {
+          throw StateError('Sem conexao com o PC servidor.');
+        }
+        final raw = await client.listarSugestaoCompra(
+          diasPeriodo: _diasPeriodo,
+          diasCobertura: _diasCoberturaAlvo,
+          apenasPrioritarios: _apenasPrioritarios,
+        );
+        final linhas = <LinhaSugestaoCompra>[];
+        for (final m in raw) {
+          final l = LinhaSugestaoCompra.fromApiMap(m);
+          if (l != null) linhas.add(l);
+        }
+        if (!mounted) return;
+        setState(() {
+          _linhas = linhas;
+          _carregando = false;
+        });
+        return;
+      }
+      final repo = _repoLocal;
+      if (repo == null) {
+        throw StateError('Sugestao de compra indisponivel neste terminal.');
+      }
+      final linhas = repo.montarLinhas(
+        diasPeriodoConsumo: _diasPeriodo,
+        diasCoberturaAlvo: _diasCoberturaAlvo,
+        apenasComSugestaoOuRisco: _apenasPrioritarios,
+      );
+      if (!mounted) return;
+      setState(() {
+        _linhas = linhas;
+        _carregando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _carregando = false;
+        _erro = '$e';
+        _linhas = const [];
+      });
+    }
+  }
 
   String _csvSeguro(String valor) {
     final texto = valor.replaceAll('"', '""');
@@ -43,11 +130,7 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
     );
     if (pasta == null || pasta.trim().isEmpty) return;
 
-    final linhas = _repo.montarLinhas(
-      diasPeriodoConsumo: _diasPeriodo,
-      diasCoberturaAlvo: _diasCoberturaAlvo,
-      apenasComSugestaoOuRisco: _apenasPrioritarios,
-    );
+    final linhas = _linhas;
     final ts = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
     final arquivo = File(p.join(pasta, 'sugestao_compra_$ts.csv'));
 
@@ -74,10 +157,13 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
         '${pr.quantidadeMinima}',
         _dec1.format(l.pontoPedido).replaceAll('.', ','),
         l.estoqueCritico ? 'SIM' : 'NAO',
-        _dec1.format(l.mediaUnidadesPorDia).replaceAll('.', ','),
+        ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+          pr,
+          l.mediaUnidadesPorDia,
+        ),
         '${pr.leadTimeDias}',
         '${pr.estoqueSeguranca}',
-        '${l.consumoNoPeriodoUnidades}',
+        ProdutoEmbalagem.formatarEstoque(pr, l.consumoNoPeriodoUnidades),
         diasStr.replaceAll('.', ','),
         ult,
         '${l.quantidadeSugerida}',
@@ -100,6 +186,19 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
   }
 
   Future<void> _recalcularMediasTodosProdutos() async {
+    if (_modoRemoto) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Recalculo de medias deve ser feito no PC servidor.',
+          ),
+        ),
+      );
+      return;
+    }
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoRepository) return;
     if (!mounted) return;
     showDialog<void>(
       context: context,
@@ -124,12 +223,13 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
       ),
     );
 
-    final svc = ComprasPreditivasService(widget.produtoRepository.objectBox);
+    final svc = ComprasPreditivasService(repo.objectBox);
     final atualizados = await svc.recalcularTodosProdutosAtivosAsync();
 
     if (!mounted) return;
     Navigator.of(context, rootNavigator: true).pop();
-    setState(() {});
+    await _carregarLinhas();
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 3),
@@ -140,28 +240,35 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
     );
   }
 
+  void _onFiltroChanged(VoidCallback apply) {
+    apply();
+    unawaited(_carregarLinhas());
+  }
+
   @override
   Widget build(BuildContext context) {
-    final linhas = _repo.montarLinhas(
-      diasPeriodoConsumo: _diasPeriodo,
-      diasCoberturaAlvo: _diasCoberturaAlvo,
-      apenasComSugestaoOuRisco: _apenasPrioritarios,
-    );
-    final qtdCriticosPp =
-        linhas.where((l) => l.estoqueCritico).length;
+    final linhas = _linhas;
+    final qtdCriticosPp = linhas.where((l) => l.estoqueCritico).length;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sugestao de compra'),
         actions: [
           IconButton(
+            tooltip: 'Atualizar',
+            onPressed: _carregando ? null : () => unawaited(_carregarLinhas()),
+            icon: const Icon(Icons.sync_outlined),
+          ),
+          IconButton(
             tooltip: 'Recalcular media diaria de todos os produtos',
-            onPressed: () => _recalcularMediasTodosProdutos(),
+            onPressed: _modoRemoto || _carregando
+                ? null
+                : () => _recalcularMediasTodosProdutos(),
             icon: const Icon(Icons.refresh_outlined),
           ),
           IconButton(
             tooltip: 'Exportar CSV',
-            onPressed: linhas.isEmpty ? null : _exportarCsv,
+            onPressed: linhas.isEmpty || _carregando ? null : _exportarCsv,
             icon: const Icon(Icons.file_download_outlined),
           ),
         ],
@@ -181,6 +288,15 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                 ),
+                if (_modoRemoto) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Dados calculados no PC servidor via API.',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 12,
@@ -195,10 +311,14 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                         ButtonSegment(value: 90, label: Text('90 d')),
                       ],
                       selected: {_diasPeriodo},
-                      onSelectionChanged: (s) {
-                        if (s.isEmpty) return;
-                        setState(() => _diasPeriodo = s.first);
-                      },
+                      onSelectionChanged: _carregando
+                          ? null
+                          : (s) {
+                              if (s.isEmpty) return;
+                              _onFiltroChanged(
+                                () => setState(() => _diasPeriodo = s.first),
+                              );
+                            },
                     ),
                     const Text('Meta cobertura:'),
                     SegmentedButton<int>(
@@ -208,166 +328,208 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                         ButtonSegment(value: 45, label: Text('45 d')),
                       ],
                       selected: {_diasCoberturaAlvo},
-                      onSelectionChanged: (s) {
-                        if (s.isEmpty) return;
-                        setState(() => _diasCoberturaAlvo = s.first);
-                      },
+                      onSelectionChanged: _carregando
+                          ? null
+                          : (s) {
+                              if (s.isEmpty) return;
+                              _onFiltroChanged(
+                                () => setState(
+                                  () => _diasCoberturaAlvo = s.first,
+                                ),
+                              );
+                            },
                     ),
                     FilterChip(
                       label: const Text('So prioritarios'),
                       selected: _apenasPrioritarios,
-                      onSelected: (s) => setState(() => _apenasPrioritarios = s),
+                      onSelected: _carregando
+                          ? null
+                          : (s) => _onFiltroChanged(
+                                () => setState(() => _apenasPrioritarios = s),
+                              ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${linhas.length} produto(s) · $qtdCriticosPp em PP critico',
+                  _carregando
+                      ? 'Carregando...'
+                      : '${linhas.length} produto(s) · $qtdCriticosPp em PP critico',
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
+                if (_erro != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _erro!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
           const Divider(height: 1),
           Expanded(
-            child: linhas.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        _apenasPrioritarios
-                            ? 'Nenhum produto em alerta com os filtros atuais.\n'
-                                'Desative "So prioritarios" para ver todos os cadastros ativos.'
-                            : 'Nenhum produto ativo no cadastro.',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                      ),
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: linhas.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 8),
-                    itemBuilder: (context, i) {
-                      final l = linhas[i];
-                      final pr = l.produto;
-                      final livre = pr.estoqueLivreExibicao;
-                      final abaixoMin = livre <= pr.quantidadeMinima;
-                      final dias = l.diasCoberturaComEstoqueAtual;
-                      final giroBaixo =
-                          dias != null && dias < _diasCoberturaAlvo;
-                      final semantic =
-                          Theme.of(context).extension<AppSemanticColors>();
-
-                      return Card(
-                        color: l.estoqueCritico
-                            ? (semantic?.errorBg ?? Theme.of(context)
-                                    .colorScheme.errorContainer)
-                                .withValues(alpha: 0.25)
-                            : null,
+            child: _carregando
+                ? const Center(child: CircularProgressIndicator())
+                : linhas.isEmpty
+                    ? Center(
                         child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      pr.nome,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                  if (l.estoqueCritico)
-                                    Chip(
-                                      label: Text(
-                                        l.alertaPorEstoqueSeguranca
-                                            ? 'Seguranca'
-                                            : 'PP critico',
-                                      ),
-                                      visualDensity: VisualDensity.compact,
-                                      backgroundColor: Theme.of(context)
-                                          .colorScheme
-                                          .errorContainer,
-                                    ),
-                                  if (!l.estoqueCritico && abaixoMin)
-                                    Chip(
-                                      label: const Text('Minimo'),
-                                      visualDensity: VisualDensity.compact,
-                                      backgroundColor: Theme.of(context)
-                                          .colorScheme
-                                          .errorContainer,
-                                    ),
-                                  if (!l.estoqueCritico &&
-                                      !abaixoMin &&
-                                      giroBaixo)
-                                    Chip(
-                                      label: const Text('Giro'),
-                                      visualDensity: VisualDensity.compact,
-                                      backgroundColor: Theme.of(context)
-                                          .colorScheme
-                                          .tertiaryContainer,
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'SKU ${pr.codigoInterno} · ${pr.unidade} · '
-                                'Atual ${ProdutoEmbalagem.formatarEstoque(pr, pr.estoqueAtual, comUnidade: true)} · '
-                                'Livre ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(pr, livre)} ${pr.unidade} · '
-                                'Min ${pr.quantidadeMinima}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                l.alertaPorEstoqueSeguranca
-                                    ? 'Limiar seguranca: ${_dec1.format(l.pontoPedido)} un '
-                                        '(produto novo ou sem giro no periodo)'
-                                    : 'PP ${_dec1.format(l.pontoPedido)} un '
-                                        '(media ${_dec1.format(l.mediaUnidadesPorDia)}/dia x '
-                                        '${pr.leadTimeDias}d + seg ${pr.estoqueSeguranca})',
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(fontWeight: FontWeight.w500),
-                              ),
-                              Text(
-                                'Vendido ($_diasPeriodo d): ${l.consumoNoPeriodoUnidades} un',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              Text(
-                                dias == null
-                                    ? 'Cobertura: — (sem venda no periodo)'
-                                    : 'Cobertura estimada: ${_dec1.format(dias)} dias de estoque livre',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              Text(
-                                l.ultimaEntradaNfe == null
-                                    ? 'Ultima NF-e: —'
-                                    : 'Ultima NF-e: ${_dataFmt.format(l.ultimaEntradaNfe!.toLocal())}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Sugerido comprar: ${l.quantidadeSugerida} ${pr.unidade}'
-                                '${l.quantidadeSugeridaPorPp > 0 ? ' (ate PP: ${l.quantidadeSugeridaPorPp})' : ''}',
-                                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                      color: Theme.of(context).colorScheme.primary,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                            ],
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            _erro != null
+                                ? 'Nao foi possivel carregar a sugestao.'
+                                : _apenasPrioritarios
+                                    ? 'Nenhum produto em alerta com os filtros atuais.\n'
+                                        'Desative "So prioritarios" para ver todos os cadastros ativos.'
+                                    : 'Nenhum produto ativo no cadastro.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
                           ),
                         ),
-                      );
-                    },
-                  ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(12),
+                        itemCount: linhas.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 8),
+                        itemBuilder: (context, i) {
+                          final l = linhas[i];
+                          final pr = l.produto;
+                          final livre = pr.estoqueLivreExibicao;
+                          final abaixoMin = livre <= pr.quantidadeMinima;
+                          final dias = l.diasCoberturaComEstoqueAtual;
+                          final giroBaixo =
+                              dias != null && dias < _diasCoberturaAlvo;
+                          final semantic = Theme.of(context)
+                              .extension<AppSemanticColors>();
+
+                          return Card(
+                            color: l.estoqueCritico
+                                ? (semantic?.errorBg ??
+                                        Theme.of(context)
+                                            .colorScheme
+                                            .errorContainer)
+                                    .withValues(alpha: 0.25)
+                                : null,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          pr.nome,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                      if (l.estoqueCritico)
+                                        Chip(
+                                          label: Text(
+                                            l.alertaPorEstoqueSeguranca
+                                                ? 'Seguranca'
+                                                : 'PP critico',
+                                          ),
+                                          visualDensity: VisualDensity.compact,
+                                          backgroundColor: Theme.of(context)
+                                              .colorScheme
+                                              .errorContainer,
+                                        ),
+                                      if (!l.estoqueCritico && abaixoMin)
+                                        Chip(
+                                          label: const Text('Minimo'),
+                                          visualDensity: VisualDensity.compact,
+                                          backgroundColor: Theme.of(context)
+                                              .colorScheme
+                                              .errorContainer,
+                                        ),
+                                      if (!l.estoqueCritico &&
+                                          !abaixoMin &&
+                                          giroBaixo)
+                                        Chip(
+                                          label: const Text('Giro'),
+                                          visualDensity: VisualDensity.compact,
+                                          backgroundColor: Theme.of(context)
+                                              .colorScheme
+                                              .tertiaryContainer,
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'SKU ${pr.codigoInterno} · ${pr.unidade} · '
+                                    'Atual ${ProdutoEmbalagem.formatarEstoque(pr, pr.estoqueAtual, comUnidade: true)} · '
+                                    'Livre ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(pr, livre)} ${pr.unidade} · '
+                                    'Min ${pr.quantidadeMinima}',
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    l.alertaPorEstoqueSeguranca
+                                        ? 'Limiar seguranca: ${_dec1.format(l.pontoPedido)} un '
+                                            '(produto novo ou sem giro no periodo)'
+                                        : 'PP ${_dec1.format(l.pontoPedido)} un '
+                                            '(media ${_dec1.format(l.mediaUnidadesPorDia)}/dia x '
+                                            '${pr.leadTimeDias}d + seg ${pr.estoqueSeguranca})',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(fontWeight: FontWeight.w500),
+                                  ),
+                                  Text(
+                                    'Vendido ($_diasPeriodo d): ${l.consumoNoPeriodoUnidades} un',
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                  Text(
+                                    dias == null
+                                        ? 'Cobertura: — (sem venda no periodo)'
+                                        : 'Cobertura estimada: ${_dec1.format(dias)} dias de estoque livre',
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                  Text(
+                                    l.ultimaEntradaNfe == null
+                                        ? 'Ultima NF-e: —'
+                                        : 'Ultima NF-e: ${_dataFmt.format(l.ultimaEntradaNfe!.toLocal())}',
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Sugerido comprar: ${l.quantidadeSugerida} ${pr.unidade}'
+                                    '${l.quantidadeSugeridaPorPp > 0 ? ' (ate PP: ${l.quantidadeSugeridaPorPp})' : ''}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
           ),
         ],
       ),

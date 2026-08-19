@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/objectbox.dart';
-import '../../data/produto_repository.dart';
-import '../../data/venda_repository.dart';
-import '../../data/vendedor_repository.dart';
 import '../../domain/loja_ao_vivo_service.dart';
 import '../../model/usuario_sistema.dart';
+import '../../data/api/lan_api_client.dart';
+import 'relatorio_export_util.dart';
+import 'widgets/relatorio_exportacoes_menu.dart';
 
 /// Acompanhamento diario das metas de vendedores (meta mensal / dias do mes).
 class RelatorioMetasVendedoresPage extends StatefulWidget {
@@ -17,15 +17,17 @@ class RelatorioMetasVendedoresPage extends StatefulWidget {
     required this.vendaRepository,
     required this.vendedorRepository,
     required this.produtoRepository,
-    required this.objectBox,
+    this.objectBox,
     required this.usuarioLogado,
+    this.lanApiClient,
   });
 
-  final VendaRepository vendaRepository;
-  final VendedorRepository vendedorRepository;
-  final ProdutoRepository produtoRepository;
-  final ObjectBox objectBox;
+  final dynamic vendaRepository;
+  final dynamic vendedorRepository;
+  final dynamic produtoRepository;
+  final ObjectBox? objectBox;
   final UsuarioSistema usuarioLogado;
+  final LanApiClient? lanApiClient;
 
   @override
   State<RelatorioMetasVendedoresPage> createState() =>
@@ -56,11 +58,55 @@ class _RelatorioMetasVendedoresPageState
   Future<void> _carregar() async {
     if (!mounted) return;
     setState(() => _carregando = true);
+    final client = widget.lanApiClient;
+    if (widget.objectBox == null && client != null) {
+      try {
+        final items = await client.listarMetasVendedores();
+        if (!mounted) return;
+        setState(() {
+          _metas = items
+              .map(
+                (m) => MetaVendedorDiaria(
+                  vendedorId: (m['vendedorId'] as num?)?.toInt() ?? 0,
+                  nome: (m['nome'] ?? '').toString(),
+                  metaDiaria: (m['metaDiaria'] as num?)?.toDouble() ?? 0,
+                  realizadoHoje:
+                      (m['realizadoHoje'] as num?)?.toDouble() ?? 0,
+                ),
+              )
+              .toList()
+            ..sort((a, b) => b.percentual.compareTo(a.percentual));
+          _atualizadoEm = DateTime.now();
+          _carregando = false;
+        });
+        return;
+      } on LanApiException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Metas: $e')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Metas: $e')),
+          );
+        }
+      }
+    }
+    if (widget.objectBox == null) {
+      if (!mounted) return;
+      setState(() {
+        _metas = const [];
+        _carregando = false;
+      });
+      return;
+    }
     final svc = LojaAoVivoService(
       vendaRepository: widget.vendaRepository,
       produtoRepository: widget.produtoRepository,
       vendedorRepository: widget.vendedorRepository,
-      objectBox: widget.objectBox,
+      objectBox: widget.objectBox!,
     );
     final snap = await svc.carregar(usuario: widget.usuarioLogado);
     if (!mounted) return;
@@ -74,6 +120,49 @@ class _RelatorioMetasVendedoresPageState
 
   String _fmt(double v) => 'R\$ ${_moeda.format(v)}';
 
+  List<List<String>> _linhasCsv() => [
+        [
+          'Vendedor',
+          'Realizado hoje',
+          'Meta diaria',
+          'Percentual',
+          'Falta',
+        ],
+        ..._metas.map(
+          (m) => [
+            m.nome,
+            _moeda.format(m.realizadoHoje),
+            _moeda.format(m.metaDiaria),
+            (m.percentual * 100).toStringAsFixed(1),
+            _moeda.format(
+              (m.metaDiaria - m.realizadoHoje).clamp(0, double.infinity),
+            ),
+          ],
+        ),
+      ];
+
+  List<String> _paginasPdf() => relatorioMontarPaginasTabela(
+        titulo: 'METAS DE VENDEDORES — HOJE',
+        subtitulo: _atualizadoEm == null
+            ? 'Realizado liquido de devolucao/troca do dia'
+            : 'Atualizado ${DateFormat('dd/MM/yyyy HH:mm').format(_atualizadoEm!)} · '
+                'Realizado liquido de devolucao/troca do dia',
+        cabecalho: ['Vendedor', 'Realizado', 'Meta dia', '%', 'Falta'],
+        linhas: _metas
+            .map(
+              (m) => [
+                m.nome,
+                _fmt(m.realizadoHoje),
+                _fmt(m.metaDiaria),
+                '${(m.percentual * 100).toStringAsFixed(0)}%',
+                _fmt(
+                  (m.metaDiaria - m.realizadoHoje).clamp(0, double.infinity),
+                ),
+              ],
+            )
+            .toList(),
+      );
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -83,6 +172,11 @@ class _RelatorioMetasVendedoresPageState
       appBar: AppBar(
         title: const Text('Metas de vendedores — hoje'),
         actions: [
+          RelatorioExportacoesMenu(
+            nomeArquivo: 'metas_vendedores_hoje',
+            paginasPdf: _paginasPdf,
+            linhasCsv: _linhasCsv,
+          ),
           IconButton(
             tooltip: 'Atualizar',
             onPressed: _carregando ? null : _carregar,
@@ -97,7 +191,8 @@ class _RelatorioMetasVendedoresPageState
           children: [
             Text(
               'Meta diaria = meta mensal do cadastro ÷ dias do mes. '
-              'Realizado = vendas finalizadas hoje.',
+              'Realizado = vendas finalizadas hoje, liquido de '
+              'devolucao/troca do dia.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),

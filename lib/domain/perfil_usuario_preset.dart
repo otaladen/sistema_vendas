@@ -75,6 +75,7 @@ class PerfilUsuarioPresetAplicador {
       admin: flags.admin,
       podeCadastros: flags.podeCadastros,
       podeEstoque: flags.podeEstoque,
+      podeFiscal: flags.podeFiscal,
       podeVendas: flags.podeVendas,
       podeCaixa: flags.podeCaixa,
       podeAcessarPdv: flags.podeAcessarPdv,
@@ -118,6 +119,7 @@ class PerfilUsuarioPresetAplicador {
           admin: true,
           podeCadastros: true,
           podeEstoque: true,
+          podeFiscal: true,
           podeVendas: true,
           podeCaixa: true,
           podeAcessarPdv: true,
@@ -153,6 +155,7 @@ class PerfilUsuarioPresetAplicador {
         return const _FlagsPerfil(
           podeCadastros: true,
           podeEstoque: true,
+          podeFiscal: true,
           podeVendas: true,
           podeCaixa: true,
           podeAcessarPdv: true,
@@ -225,6 +228,7 @@ class _FlagsPerfil {
     this.admin = false,
     this.podeCadastros = false,
     this.podeEstoque = false,
+    this.podeFiscal = false,
     this.podeVendas = false,
     this.podeCaixa = false,
     this.podeAcessarPdv = false,
@@ -262,6 +266,7 @@ class _FlagsPerfil {
   final bool admin;
   final bool podeCadastros;
   final bool podeEstoque;
+  final bool podeFiscal;
   final bool podeVendas;
   final bool podeCaixa;
   final bool podeAcessarPdv;

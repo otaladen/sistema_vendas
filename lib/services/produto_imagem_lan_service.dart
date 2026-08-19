@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../data/api/lan_api_event_hub.dart';
 import '../data/app_config_repository.dart';
 import '../data/sync/sync_api_client.dart';
 import '../domain/produto_imagem_nome_arquivo.dart';
@@ -21,13 +22,25 @@ class ProdutoImagemLanService {
 
   static final Map<String, Future<String?>> _emAndamento = {};
 
-  Future<SyncApiClient?> _cliente() async {
+  Future<SyncApiClient?> _clienteSync() async {
     if (_apiClientOverride != null) return _apiClientOverride;
     final config = await _configRepository.carregarEmpresaConfig();
     if (!config.redeSincronizacaoAtiva) return null;
     final url = config.redeServidorUrl.trim();
     if (url.isEmpty) return null;
     return SyncApiClient(baseUrl: url, syncToken: config.redeSyncToken);
+  }
+
+  /// Preferencia: API 8788 (terminais) → sync hub 8787 (mobile legado).
+  Future<List<int>?> _baixarBytes(String nome) async {
+    final lan = LanApiEventHub.instance.client;
+    if (lan != null && lan.configurado) {
+      final viaApi = await lan.downloadProdutoImagem(nome);
+      if (viaApi != null && viaApi.isNotEmpty) return viaApi;
+    }
+    final sync = await _clienteSync();
+    if (sync == null) return null;
+    return sync.downloadProductImage(fileName: nome);
   }
 
   /// Resolve arquivo local (absoluto ou na pasta de imagens) ou baixa da rede.
@@ -71,6 +84,7 @@ class ProdutoImagemLanService {
     if (_pareceCaminhoEstrangeiro(raw)) {
       final nome = ProdutoImagemNomeArquivo.extrairNomeParaLan(raw);
       if (nome == null) return null;
+      if (imagesDirectoryPath.trim().isEmpty) return null;
       final rel = File(p.join(imagesDirectoryPath, nome));
       if (rel.existsSync()) return p.normalize(rel.path);
       return null;
@@ -81,7 +95,7 @@ class ProdutoImagemLanService {
 
     final nome = ProdutoImagemNomeArquivo.extrairNomeParaLan(raw) ??
         p.basename(raw.replaceAll(r'\', '/'));
-    if (nome.isEmpty) return null;
+    if (nome.isEmpty || imagesDirectoryPath.trim().isEmpty) return null;
     final rel = File(p.join(imagesDirectoryPath, nome));
     if (rel.existsSync()) return p.normalize(rel.path);
     return null;
@@ -96,17 +110,15 @@ class ProdutoImagemLanService {
   }
 
   Future<String?> _baixarArquivo(String nome) async {
+    if (imagesDirectoryPath.trim().isEmpty) return null;
     final destino = p.join(imagesDirectoryPath, nome);
     if (File(destino).existsSync()) return p.normalize(destino);
 
-    final client = await _cliente();
-    if (client == null) return null;
-
-    var bytes = await client.downloadProductImage(fileName: nome);
+    var bytes = await _baixarBytes(nome);
     // Uma retentativa curta (servidor ainda subindo / Wi-Fi oscilando).
     if (bytes == null || bytes.isEmpty) {
       await Future<void>.delayed(const Duration(milliseconds: 700));
-      bytes = await client.downloadProductImage(fileName: nome);
+      bytes = await _baixarBytes(nome);
     }
     if (bytes == null || bytes.isEmpty) return null;
 
@@ -132,11 +144,19 @@ class ProdutoImagemLanService {
       );
     }
 
-    final client = await _cliente();
-    if (client == null) {
+    if (imagesDirectoryPath.trim().isEmpty) {
       return (
         path: null,
-        erro: 'Rede desligada ou sem endereco do servidor.',
+        erro: 'Pasta de cache de fotos nao configurada neste terminal.',
+      );
+    }
+
+    final lan = LanApiEventHub.instance.client;
+    final sync = lan != null && lan.configurado ? null : await _clienteSync();
+    if ((lan == null || !lan.configurado) && sync == null) {
+      return (
+        path: null,
+        erro: 'Sem conexao com o PC servidor para baixar a foto.',
       );
     }
 
@@ -147,10 +167,9 @@ class ProdutoImagemLanService {
     return (
       path: null,
       erro:
-          'Arquivo nao encontrado no servidor LAN. '
-          'No PC: feche o sync_server.exe se estiver aberto a parte, '
-          'abra o sistema e deixe ele iniciar o servidor (usa a mesma pasta das fotos). '
-          'Depois toque de novo.',
+          'Foto nao encontrada no PC servidor. '
+          'Confirme que o produto tem imagem no cadastro do servidor '
+          'e que a API (porta 8788) esta ativa.',
     );
   }
 
@@ -164,11 +183,23 @@ class ProdutoImagemLanService {
     final nome = ProdutoImagemNomeArquivo.extrairNomeParaLan(local);
     if (nome == null) return false;
 
-    final client = await _cliente();
-    if (client == null) return false;
-
     final bytes = await arquivo.readAsBytes();
     if (bytes.isEmpty) return false;
+
+    // Preferencia: API 8788 (Terminal Leve) → sync hub 8787.
+    final lan = LanApiEventHub.instance.client;
+    if (lan != null && lan.configurado) {
+      try {
+        final path = await lan.uploadProdutoImagem(
+          fileName: nome,
+          bytes: bytes,
+        );
+        if (path != null && path.isNotEmpty) return true;
+      } catch (_) {}
+    }
+
+    final client = await _clienteSync();
+    if (client == null) return false;
     final path = await client.uploadProductImage(
       fileName: nome,
       jpegBytes: bytes,
@@ -221,7 +252,7 @@ class ProdutoImagemLanService {
       );
     }
 
-    final client = await _cliente();
+    final client = await _clienteSync();
     if (client == null) {
       return (
         enviados: 0,
@@ -316,7 +347,7 @@ class ProdutoImagemLanService {
     int limitePorCiclo = 60,
     void Function(String motivo)? onPrimeiroErro,
   }) async {
-    final client = await _cliente();
+    final client = await _clienteSync();
     if (client == null) {
       onPrimeiroErro?.call('Rede desligada ou sem URL do servidor.');
       return (enviados: 0, ignorados: 0, falhas: 0);

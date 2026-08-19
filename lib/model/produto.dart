@@ -53,8 +53,11 @@ class Produto {
     this.embalagemMultiplica = true,
     this.permiteQuantidadeFracionada = false,
     this.ultimaVendaEm,
+    this.precoAlteradoEm,
     DateTime? criadoEm,
     this.ativo = true,
+    this.controlaLoteValidade = false,
+    this.percentualBotaFora = 0,
   }) : estoqueReal = estoqueReal ?? estoque ?? 0,
        estoqueAtual = estoqueAtual ?? estoqueReal ?? estoque ?? 0,
        criadoEm = criadoEm ?? DateTime.now();
@@ -165,6 +168,10 @@ class Produto {
   @Property(type: PropertyType.dateUtc)
   DateTime? ultimaVendaEm;
 
+  /// Ultima vez que preco de venda/custo foi alterado (cadastro ou reajuste).
+  @Property(type: PropertyType.dateUtc)
+  DateTime? precoAlteradoEm;
+
   double get lucroValor => precoVenda - precoCusto;
   double get markupPercentual {
     if (precoCusto <= 0) {
@@ -186,6 +193,12 @@ class Produto {
   /// Quando `false`, o produto nao aparece no PDV/pesquisa de venda, mas permanece no cadastro e no historico.
   @Index()
   bool ativo;
+
+  /// Quando true, entradas/baixas usam [LoteProduto] com FEFO e Bota-Fora.
+  bool controlaLoteValidade;
+
+  /// % de desconto Bota-Fora (0 = usa padrao global da loja).
+  double percentualBotaFora;
 
   // Mantem compatibilidade com o codigo legado enquanto a migracao
   // para estoqueReal/estoqueReservado e finalizada.
@@ -214,6 +227,10 @@ class Produto {
   /// Estoque livre em unidade de venda para exibicao e comparacao com o carrinho.
   double get estoqueLivreExibicao =>
       ProdutoEmbalagem.valorEstoqueExibicao(this, estoqueLivreParaVenda);
+
+  /// Media diaria na unidade de venda (ex.: 2,41 m²/dia), nao em milésimos.
+  double get vendaMediaDiariaExibicao =>
+      ProdutoEmbalagem.valorMediaDiariaExibicao(this, vendaMediaDiaria);
 
   String get unidadeCompraEfetiva {
     final u = unidadeCompra.trim();

@@ -203,4 +203,51 @@ void main() {
       );
     });
   });
+
+  group('pesquisarProdutosEmMemoria (terminal)', () {
+    Produto p(String nome, {String codigo = '', bool ativo = true}) => Produto(
+          codigoInterno: codigo.isEmpty ? nome : codigo,
+          nome: nome,
+          quantidadeMinima: 0,
+          precoCusto: 0,
+          precoVenda: 10,
+          ativo: ativo,
+        );
+
+    test('curinga % casa trechos no nome', () {
+      final lista = [
+        p('Tubo Sod Fortlev 25mm'),
+        p('Tubo PVC 50mm esgoto'),
+        p('Cimento CP II 50kg'),
+      ];
+      final r = pesquisarProdutosEmMemoria(lista, 'tub%sod%25');
+      expect(r.map((e) => e.nome), ['Tubo Sod Fortlev 25mm']);
+    });
+
+    test('literal % nao casa sem modo curinga valido', () {
+      final lista = [p('Produto 100% original')];
+      // "100%" sozinho: segmento curto apos split pode invalidar
+      final r = pesquisarProdutosEmMemoria(lista, 'original');
+      expect(r, hasLength(1));
+    });
+
+    test('busca normal ignora acento', () {
+      final lista = [p('Conexão Joelho 90')];
+      final r = pesquisarProdutosEmMemoria(lista, 'conexao');
+      expect(r, hasLength(1));
+    });
+
+    test('exclui produtos internos do sistema', () {
+      final lista = [
+        p('Frete', codigo: kCodigoInternoFreteRetiradaFutura),
+        p('Tubo PVC'),
+      ];
+      final r = pesquisarProdutosEmMemoria(
+        lista,
+        'tubo',
+        excluirProdutosInternos: true,
+      );
+      expect(r.map((e) => e.nome), ['Tubo PVC']);
+    });
+  });
 }

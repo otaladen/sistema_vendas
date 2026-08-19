@@ -82,4 +82,41 @@ class FechamentoFiscalResumo {
       alertasVendaCancelada: alertas,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'mes': mes,
+        'ano': ano,
+        'totalSaidas': totalSaidas,
+        'saidasAutorizadas': saidasAutorizadas,
+        'saidasCanceladas': saidasCanceladas,
+        'saidasRejeitadas': saidasRejeitadas,
+        'nfce65': nfce65,
+        'nfe55': nfe55,
+        'valorSaidasAutorizadas': valorSaidasAutorizadas,
+        'valorSaidasCanceladas': valorSaidasCanceladas,
+        'totalEntradas': totalEntradas,
+        'valorEntradas': valorEntradas,
+        'alertasVendaCancelada': alertasVendaCancelada,
+      };
+
+  factory FechamentoFiscalResumo.fromJson(Map<String, dynamic> json) {
+    return FechamentoFiscalResumo(
+      mes: (json['mes'] as num?)?.toInt() ?? 0,
+      ano: (json['ano'] as num?)?.toInt() ?? 0,
+      totalSaidas: (json['totalSaidas'] as num?)?.toInt() ?? 0,
+      saidasAutorizadas: (json['saidasAutorizadas'] as num?)?.toInt() ?? 0,
+      saidasCanceladas: (json['saidasCanceladas'] as num?)?.toInt() ?? 0,
+      saidasRejeitadas: (json['saidasRejeitadas'] as num?)?.toInt() ?? 0,
+      nfce65: (json['nfce65'] as num?)?.toInt() ?? 0,
+      nfe55: (json['nfe55'] as num?)?.toInt() ?? 0,
+      valorSaidasAutorizadas:
+          (json['valorSaidasAutorizadas'] as num?)?.toDouble() ?? 0,
+      valorSaidasCanceladas:
+          (json['valorSaidasCanceladas'] as num?)?.toDouble() ?? 0,
+      totalEntradas: (json['totalEntradas'] as num?)?.toInt() ?? 0,
+      valorEntradas: (json['valorEntradas'] as num?)?.toDouble() ?? 0,
+      alertasVendaCancelada:
+          (json['alertasVendaCancelada'] as num?)?.toInt() ?? 0,
+    );
+  }
 }

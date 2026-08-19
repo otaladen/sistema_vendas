@@ -28,7 +28,6 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
     final scheme = theme.colorScheme;
     final disponivel = produto.estoqueLivreParaVenda;
     final disponivelExib = produto.estoqueLivreExibicao;
-    final fisicoExib = produto.estoqueExibicao;
     final reservadoExib = ProdutoEmbalagem.valorEstoqueExibicao(
       produto,
       produto.estoqueReservado,

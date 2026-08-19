@@ -19,6 +19,8 @@ class ItemNotaTemporario {
     this.icmsAliquotaSt = 0,
     this.icmsValorSt = 0,
     this.ipiValor = 0,
+    this.numeroLote = '',
+    this.dataValidade,
   });
 
   final int numeroItem;
@@ -43,6 +45,42 @@ class ItemNotaTemporario {
   final double icmsAliquotaSt;
   final double icmsValorSt;
   final double ipiValor;
+
+  /// Rastro NF-e (`prod/rastro/nLote`) quando informado.
+  final String numeroLote;
+
+  /// Rastro NF-e (`prod/rastro/dVal`) quando informado.
+  final DateTime? dataValidade;
+
+  ItemNotaTemporario copyWith({
+    String? numeroLote,
+    DateTime? dataValidade,
+    bool limparDataValidade = false,
+  }) {
+    return ItemNotaTemporario(
+      numeroItem: numeroItem,
+      codigo: codigo,
+      descricao: descricao,
+      unidadeComercial: unidadeComercial,
+      quantidadeComercial: quantidadeComercial,
+      valorUnitarioComercial: valorUnitarioComercial,
+      codigoBarras: codigoBarras,
+      ncm: ncm,
+      cfop: cfop,
+      icmsOrigem: icmsOrigem,
+      icmsSituacaoTributaria: icmsSituacaoTributaria,
+      icmsBaseCalculo: icmsBaseCalculo,
+      icmsAliquota: icmsAliquota,
+      icmsValor: icmsValor,
+      icmsBaseCalculoSt: icmsBaseCalculoSt,
+      icmsAliquotaSt: icmsAliquotaSt,
+      icmsValorSt: icmsValorSt,
+      ipiValor: ipiValor,
+      numeroLote: numeroLote ?? this.numeroLote,
+      dataValidade:
+          limparDataValidade ? null : (dataValidade ?? this.dataValidade),
+    );
+  }
 }
 
 /// Dados do emitente extraidos do XML.

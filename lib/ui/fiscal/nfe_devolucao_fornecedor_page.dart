@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -6,24 +7,36 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../data/api/lan_api_event_hub.dart';
+import '../../data/api/nfe_importada_api_repository.dart';
+import '../../data/api/produto_api_repository.dart';
+import '../../data/devolucao_fornecedor_fiscal_store.dart';
 import '../../data/produto_repository.dart';
+import '../../data/sync/sync_refresh_hub.dart';
 import '../../domain/produto_nome_exibicao.dart';
 import '../../model/nfe_importada_registro.dart';
 import '../../services/devolucao_fornecedor_fiscal_service.dart';
 import '../../services/fiscal_config_store.dart';
+import '../shell/main_menu_deps.dart';
+import '../widgets/lan_api_feedback.dart';
+import 'abrir_documento_fiscal.dart';
 
 /// Emite NF-e de devolucao de compra (CFOP 5202/6202) ao fornecedor/fabrica.
 ///
 /// Valores e impostos partem do XML da compra e podem ser ajustados para
 /// bater com o espelho enviado pela fabrica.
+/// Terminal Leve: listagem/linhas/emissao via API :8788 (Focus no PC1).
 class NfeDevolucaoFornecedorPage extends StatefulWidget {
   const NfeDevolucaoFornecedorPage({
     super.key,
     required this.produtoRepository,
+    this.nfeImportadaRepository,
     this.chaveNotaInicial,
   });
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
+  /// [NfeImportadaApiRepository] no Terminal Leve.
+  final dynamic nfeImportadaRepository;
   final String? chaveNotaInicial;
 
   @override
@@ -34,64 +47,208 @@ class NfeDevolucaoFornecedorPage extends StatefulWidget {
 class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage> {
   static final _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   static final _data = DateFormat('dd/MM/yyyy', 'pt_BR');
+  static final _dataHora = DateFormat('dd/MM/yyyy HH:mm', 'pt_BR');
   static final _num = NumberFormat('#,##0.##', 'pt_BR');
 
-  late final DevolucaoFornecedorFiscalService _svc;
+  DevolucaoFornecedorFiscalService? _svcLocal;
   final TextEditingController _motivoCtrl = TextEditingController();
   final TextEditingController _buscaCtrl = TextEditingController();
 
   List<NfeImportadaRegistro> _notas = const [];
   NfeImportadaRegistro? _selecionada;
   List<DevolucaoFornecedorLinha> _linhas = const [];
+  List<DevolucaoFornecedorFiscalRegistro> _historico = const [];
   bool _carregando = false;
+  bool _carregandoLinhas = false;
   bool _emitindo = false;
+  bool _reconsultando = false;
+  VoidCallback? _syncHubListener;
+  bool? _apiOnlineAnterior;
+
+  bool get _terminalLeve =>
+      MainMenuDeps.maybeOf(context)?.terminalLeve == true;
+
+  NfeImportadaApiRepository? get _repoRemoto {
+    final inj = widget.nfeImportadaRepository;
+    if (inj is NfeImportadaApiRepository) return inj;
+    final deps = MainMenuDeps.maybeOf(context)?.nfeImportadaRepository;
+    if (deps is NfeImportadaApiRepository) return deps;
+    return null;
+  }
+
+  /// So PC servidor (ObjectBox). Terminal usa API — nao chamar aqui.
+  DevolucaoFornecedorFiscalService get _svc {
+    if (_svcLocal != null) return _svcLocal!;
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoRepository) {
+      throw StateError(
+        'Devolucao local exige ObjectBox do PC servidor.',
+      );
+    }
+    return _svcLocal ??= DevolucaoFornecedorFiscalService(
+      produtoRepository: repo,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
-    _svc = DevolucaoFornecedorFiscalService(
-      produtoRepository: widget.produtoRepository,
-    );
     _motivoCtrl.text = 'Devolucao de mercadoria ao fornecedor';
-    WidgetsBinding.instance.addPostFrameCallback((_) => _carregarNotas());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_terminalLeve) {
+        _apiOnlineAnterior = LanApiEventHub.instance.online;
+        LanApiEventHub.instance.addListener(_onLanApiEvento);
+      } else {
+        _syncHubListener = () {
+          if (!mounted) return;
+          unawaited(_recarregarAposMutacaoRede());
+        };
+        SyncRefreshHub.instance.addListener(_syncHubListener!);
+      }
+      unawaited(_carregarNotas());
+      unawaited(_reconsultarPendentes(silencioso: true));
+    });
   }
 
   @override
   void dispose() {
     _motivoCtrl.dispose();
     _buscaCtrl.dispose();
+    LanApiEventHub.instance.removeListener(_onLanApiEvento);
+    if (_syncHubListener != null) {
+      SyncRefreshHub.instance.removeListener(_syncHubListener!);
+      _syncHubListener = null;
+    }
     super.dispose();
   }
 
-  Future<void> _carregarNotas() async {
+  void _onLanApiEvento() {
+    if (!_terminalLeve) return;
+    final hub = LanApiEventHub.instance;
+    final online = hub.online;
+    final ficouOnline = online && _apiOnlineAnterior == false;
+    _apiOnlineAnterior = online;
+    if (hub.deveBloquearOperacoes) return;
+    final ent = hub.ultimaEntidade;
+    if (!ficouOnline &&
+        ent != 'nfe_importada' &&
+        ent != 'produto' &&
+        ent != 'historico_entrada') {
+      return;
+    }
+    unawaited(_recarregarAposMutacaoRede());
+  }
+
+  Future<void> _recarregarAposMutacaoRede() async {
+    final sel = _selecionada;
+    await _carregarNotas(manterSelecao: true);
+    if (!mounted || sel == null) return;
+    final ainda = _notas.where((n) => n.id == sel.id).toList();
+    if (ainda.isEmpty) {
+      setState(() {
+        _selecionada = null;
+        _linhas = const [];
+        _historico = const [];
+      });
+      return;
+    }
+    await _selecionarNota(ainda.first);
+  }
+
+  Future<void> _carregarNotas({bool manterSelecao = false}) async {
+    if (_terminalLeve &&
+        !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+      return;
+    }
     setState(() => _carregando = true);
-    final notas = _svc.listarNotasCompra();
-    NfeImportadaRegistro? inicial;
-    final chaveIni =
-        (widget.chaveNotaInicial ?? '').replaceAll(RegExp(r'\D'), '');
-    if (chaveIni.length == 44) {
-      for (final n in notas) {
-        if (n.chaveAcesso.replaceAll(RegExp(r'\D'), '') == chaveIni) {
-          inicial = n;
-          break;
+    try {
+      List<NfeImportadaRegistro> notas;
+      if (_terminalLeve) {
+        final repo = _repoRemoto;
+        if (repo == null) {
+          throw StateError('Repositorio remoto de NF-e indisponivel.');
+        }
+        final result = await repo.listarImportadasRemoto(
+          ordenacao: 'importacaoDesc',
+        );
+        notas = result.items;
+      } else {
+        notas = _svc.listarNotasCompra();
+      }
+      NfeImportadaRegistro? inicial;
+      if (!manterSelecao) {
+        final chaveIni =
+            (widget.chaveNotaInicial ?? '').replaceAll(RegExp(r'\D'), '');
+        if (chaveIni.length == 44) {
+          for (final n in notas) {
+            if (n.chaveAcesso.replaceAll(RegExp(r'\D'), '') == chaveIni) {
+              inicial = n;
+              break;
+            }
+          }
         }
       }
-    }
-    if (!mounted) return;
-    setState(() {
-      _notas = notas;
-      _carregando = false;
-    });
-    if (inicial != null) {
-      await _selecionarNota(inicial);
+      if (!mounted) return;
+      setState(() {
+        _notas = notas;
+        _carregando = false;
+      });
+      if (inicial != null) {
+        await _selecionarNota(inicial);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _carregando = false);
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Falha ao carregar NF-e de compra',
+      );
     }
   }
 
   Future<void> _selecionarNota(NfeImportadaRegistro nota) async {
+    if (_terminalLeve &&
+        !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+      return;
+    }
     setState(() {
       _selecionada = nota;
-      _linhas = _svc.carregarLinhas(nota.chaveAcesso);
+      _linhas = const [];
+      _historico = const [];
+      _carregandoLinhas = true;
     });
+    try {
+      List<DevolucaoFornecedorLinha> linhas;
+      List<DevolucaoFornecedorFiscalRegistro> historico;
+      if (_terminalLeve) {
+        final repo = _repoRemoto;
+        if (repo == null) {
+          throw StateError('Repositorio remoto de NF-e indisponivel.');
+        }
+        final r = await repo.obterDevolucaoFornecedorRemoto(nota.id);
+        linhas = r.linhas;
+        historico = r.historico;
+      } else {
+        linhas = _svc.carregarLinhas(nota.chaveAcesso);
+        historico = _svc.listarHistoricoPorChave(nota.chaveAcesso);
+      }
+      if (!mounted) return;
+      setState(() {
+        _linhas = linhas;
+        _historico = historico;
+        _carregandoLinhas = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _carregandoLinhas = false);
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Falha ao carregar itens da devolucao',
+      );
+    }
   }
 
   List<NfeImportadaRegistro> get _notasFiltradas {
@@ -112,7 +269,10 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
   Future<void> _aplicarXmlEspelho(String xml) async {
     if (_selecionada == null || _linhas.isEmpty) return;
     try {
-      final res = _svc.aplicarEspelhoXml(xmlTexto: xml, linhas: _linhas);
+      final res = DevolucaoFornecedorFiscalService.aplicarEspelhoXml(
+        xmlTexto: xml,
+        linhas: _linhas,
+      );
       if (!mounted) return;
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
@@ -467,7 +627,9 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
   Future<void> _emitir() async {
     final nota = _selecionada;
     if (nota == null) return;
-    if (!FiscalConfigStore.configurado) {
+    if (_terminalLeve) {
+      if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
+    } else if (!FiscalConfigStore.configurado) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Configure o Focus NFe em Configuracoes.'),
@@ -484,7 +646,9 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
           'Sera emitida NF-e de saida (finalidade 4) com os valores do espelho '
           '(CFOP, unitario e impostos que voce conferiu), referenciando a NF '
           '${nota.numeroNota > 0 ? "#${nota.numeroNota}" : "de compra"}.\n\n'
-          'Se autorizada, o estoque sera baixado.',
+          'Se autorizada, o estoque sera baixado'
+          '${_terminalLeve ? ' no PC servidor' : ''}. '
+          'Se ficar processando, reconsulte no historico desta tela.',
         ),
         actions: [
           TextButton(
@@ -501,32 +665,167 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
     if (ok != true || !mounted) return;
 
     setState(() => _emitindo = true);
-    final res = await _svc.emitir(
-      chaveNotaCompra: nota.chaveAcesso,
-      linhasSelecionadas: _linhas,
-      motivo: _motivoCtrl.text,
-    );
-    if (!mounted) return;
-    setState(() {
-      _emitindo = false;
-      if (res.sucesso) {
-        _linhas = _svc.carregarLinhas(nota.chaveAcesso);
+    try {
+      final idsBaixa = <int>[
+        for (final l in _linhas)
+          if (l.quantidade > 0 && l.produto.id > 0) l.produto.id,
+      ];
+      final DevolucaoFornecedorOperacaoResultado res;
+      if (_terminalLeve) {
+        final repo = _repoRemoto;
+        if (repo == null) {
+          throw StateError('Repositorio remoto de NF-e indisponivel.');
+        }
+        res = await repo.emitirDevolucaoRemoto(
+          importacaoId: nota.id,
+          motivo: _motivoCtrl.text,
+          linhas: _linhas,
+        );
+      } else {
+        res = await _svc.emitir(
+          chaveNotaCompra: nota.chaveAcesso,
+          linhasSelecionadas: _linhas,
+          motivo: _motivoCtrl.text,
+        );
       }
-    });
+      if (!mounted) return;
+      setState(() => _emitindo = false);
+      if (res.sucesso) {
+        try {
+          final prodRepo = widget.produtoRepository;
+          if (prodRepo is ProdutoApiRepository && idsBaixa.isNotEmpty) {
+            await prodRepo.atualizarEstoquePorIds(idsBaixa);
+          } else {
+            prodRepo.invalidarCacheBusca();
+          }
+        } catch (_) {}
+        await _selecionarNota(nota);
+      }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(res.mensagem),
-        backgroundColor: res.sucesso
-            ? Theme.of(context).colorScheme.primary
-            : Theme.of(context).colorScheme.error,
-      ),
-    );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res.mensagem),
+          backgroundColor: res.sucesso
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.error,
+        ),
+      );
 
-    if (res.sucesso && res.urlDanfe.trim().isNotEmpty) {
-      final uri = Uri.tryParse(res.urlDanfe.trim());
-      if (uri != null) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (res.sucesso && res.urlDanfe.trim().isNotEmpty) {
+        final uri = Uri.tryParse(res.urlDanfe.trim());
+        if (uri != null) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _emitindo = false);
+      LanApiFeedback.snackErro(context, e, prefixo: 'Falha ao emitir devolucao');
+    }
+  }
+
+  Future<void> _atualizarEstoqueLocal(List<int> ids) async {
+    if (ids.isEmpty) return;
+    try {
+      final prodRepo = widget.produtoRepository;
+      if (prodRepo is ProdutoApiRepository) {
+        await prodRepo.atualizarEstoquePorIds(ids);
+      } else {
+        prodRepo.invalidarCacheBusca();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _reconsultarUma(DevolucaoFornecedorFiscalRegistro reg) async {
+    if (_reconsultando) return;
+    if (_terminalLeve &&
+        !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+      return;
+    }
+    setState(() => _reconsultando = true);
+    try {
+      final DevolucaoFornecedorReconsultaResultado res;
+      if (_terminalLeve) {
+        final repo = _repoRemoto;
+        if (repo == null) {
+          throw StateError('Repositorio remoto de NF-e indisponivel.');
+        }
+        res = await repo.reconsultarDevolucaoRemoto(reg.referenciaFocus);
+      } else {
+        res = await _svc.reconsultar(reg.referenciaFocus);
+      }
+      if (!mounted) return;
+      setState(() => _reconsultando = false);
+      await _atualizarEstoqueLocal(res.produtoIds);
+      final nota = _selecionada;
+      if (nota != null) await _selecionarNota(nota);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            res.sucesso
+                ? (res.mensagem.isNotEmpty
+                    ? res.mensagem
+                    : 'Status atualizado.')
+                : res.mensagem,
+          ),
+          backgroundColor: res.sucesso
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.error,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _reconsultando = false);
+      LanApiFeedback.snackErro(context, e, prefixo: 'Falha na reconsulta');
+    }
+  }
+
+  Future<void> _reconsultarPendentes({bool silencioso = false}) async {
+    if (_reconsultando) return;
+    if (_terminalLeve) {
+      if (!LanApiEventHub.instance.online) return;
+      if (!silencioso &&
+          !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+        return;
+      }
+    } else if (!FiscalConfigStore.configurado) {
+      return;
+    }
+    setState(() => _reconsultando = true);
+    try {
+      final DevolucaoFornecedorReconsultaLote lote;
+      if (_terminalLeve) {
+        final repo = _repoRemoto;
+        if (repo == null) {
+          setState(() => _reconsultando = false);
+          return;
+        }
+        lote = await repo.reconsultarDevolucaoProcessandoRemoto();
+      } else {
+        lote = await _svc.reconsultarPendentes();
+      }
+      if (!mounted) return;
+      setState(() => _reconsultando = false);
+      await _atualizarEstoqueLocal(lote.produtoIds);
+      final nota = _selecionada;
+      if (nota != null) {
+        await _selecionarNota(nota);
+      }
+      if (!mounted || silencioso) return;
+      final msg = lote.total == 0
+          ? 'Nenhuma devolucao aguardando autorizacao.'
+          : lote.autorizadas > 0
+              ? '${lote.autorizadas} nota(s) autorizada(s)'
+                  '${lote.estoqueBaixado > 0 ? " · estoque baixado" : ""}.'
+              : 'Nenhuma autorizacao nova (${lote.total} consultada(s)).';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _reconsultando = false);
+      if (!silencioso) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Falha na reconsulta');
       }
     }
   }
@@ -628,6 +927,10 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
       );
     }
 
+    if (_carregandoLinhas) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     final totalSel = _linhas.fold<double>(
       0,
       (s, l) => s + (l.quantidade * l.espelho.valorUnitario),
@@ -687,6 +990,19 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
                     icon: const Icon(Icons.notes_outlined, size: 18),
                     label: const Text('Colar texto…'),
                   ),
+                  OutlinedButton.icon(
+                    onPressed: _reconsultando
+                        ? null
+                        : () => unawaited(_reconsultarPendentes()),
+                    icon: _reconsultando
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh, size: 18),
+                    label: const Text('Reconsultar pendentes'),
+                  ),
                 ],
               ),
             ],
@@ -703,6 +1019,7 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
             maxLines: 2,
           ),
         ),
+        if (_historico.isNotEmpty) _buildHistorico(theme),
         const SizedBox(height: 8),
         Expanded(
           child: _linhas.isEmpty
@@ -803,6 +1120,81 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildHistorico(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 180),
+          child: ListView.separated(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            itemCount: _historico.length + 1,
+            separatorBuilder: (_, _) => const Divider(height: 12),
+            itemBuilder: (context, i) {
+              if (i == 0) {
+                return Text(
+                  'Emissoes desta NF',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                );
+              }
+              final r = _historico[i - 1];
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${r.rotuloStatus}'
+                          '${r.numero.isNotEmpty ? " · NF-e ${r.numero}" : ""}'
+                          '${r.estoqueBaixado ? " · estoque baixado" : ""}',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          _dataHora.format(r.emitidaEm.toLocal()),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        if (r.referenciaFocus.isNotEmpty)
+                          Text(
+                            r.referenciaFocus,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (r.urlDanfe.trim().isNotEmpty)
+                    IconButton(
+                      tooltip: 'Abrir DANFE',
+                      onPressed: () => abrirUrlDocumentoFiscal(
+                        context,
+                        r.urlDanfe,
+                        mensagemSeVazio: 'DANFE indisponivel.',
+                      ),
+                      icon: const Icon(Icons.picture_as_pdf_outlined),
+                    ),
+                  if (r.pendenteReconsulta)
+                    TextButton(
+                      onPressed: _reconsultando
+                          ? null
+                          : () => unawaited(_reconsultarUma(r)),
+                      child: const Text('Reconsultar'),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 }

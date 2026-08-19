@@ -19,7 +19,6 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     required this.tipoEntregaItem,
     required this.precoTipo,
     required this.selecionado,
-    this.linhaImpar = false,
     required this.onTap,
     required this.onAlternarTipoEntrega,
     required this.onAlternarTabelaPreco,
@@ -29,6 +28,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     required this.onAlterarPreco,
     required this.onRemover,
     this.emPromocao = false,
+    this.botaFora = false,
     this.estoqueInsuficiente = false,
     this.precoManual = false,
     this.alvosTouchAmplos = false,
@@ -36,6 +36,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
 
   final String nomeProduto;
   final bool emPromocao;
+  final bool botaFora;
   final bool estoqueInsuficiente;
   final bool precoManual;
   final String rotuloPreco;
@@ -47,7 +48,6 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final String tipoEntregaItem;
   final String precoTipo;
   final bool selecionado;
-  final bool linhaImpar;
   final VoidCallback onTap;
   final VoidCallback onAlternarTipoEntrega;
   final VoidCallback onAlternarTabelaPreco;
@@ -73,12 +73,17 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final fundoTipo = PdvBotaoTipoEntregaItem.fundoPara(context, tipoEntregaItem);
+    final bordaTipo = PdvBotaoTipoEntregaItem.bordaPara(context, tipoEntregaItem);
     final bg = selecionado
-        ? scheme.primaryContainer.withValues(alpha: 0.45)
-        : (linhaImpar ? scheme.surfaceContainerLow : scheme.surface);
+        ? Color.alphaBlend(
+            scheme.primary.withValues(alpha: 0.14),
+            fundoTipo,
+          )
+        : fundoTipo;
     final borda = selecionado
-        ? scheme.primary.withValues(alpha: 0.4)
-        : scheme.outlineVariant.withValues(alpha: 0.35);
+        ? scheme.primary.withValues(alpha: 0.45)
+        : bordaTipo.withValues(alpha: 0.85);
     final celular = pdvPlataformaCelular;
     final minAcao = celular ? 36.0 : (alvosTouchAmplos ? 44.0 : 40.0);
     final altura = alturaParaLista(alvosTouchAmplos: alvosTouchAmplos);
@@ -91,9 +96,10 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(color: borda),
-              left: selecionado
-                  ? BorderSide(color: scheme.primary, width: 3)
-                  : BorderSide.none,
+              left: BorderSide(
+                color: selecionado ? scheme.primary : bordaTipo,
+                width: selecionado ? 3 : 4,
+              ),
             ),
           ),
           child: SizedBox(
@@ -119,6 +125,27 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
       children: [
         if (emPromocao) ...[
           const PromocaoBadge(compacto: true),
+          const SizedBox(width: 4),
+        ],
+        if (botaFora) ...[
+          Tooltip(
+            message: 'Desconto automatico Bota-Fora (lote critico)',
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: scheme.tertiaryContainer,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'Bota-fora',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: scheme.onTertiaryContainer,
+                ),
+              ),
+            ),
+          ),
           const SizedBox(width: 4),
         ],
         if (estoqueInsuficiente) ...[

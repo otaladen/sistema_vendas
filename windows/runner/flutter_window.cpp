@@ -4,8 +4,8 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
-FlutterWindow::FlutterWindow(const flutter::DartProject& project)
-    : project_(project) {}
+FlutterWindow::FlutterWindow(const flutter::DartProject& project, bool headless)
+    : project_(project), headless_(headless) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -28,7 +28,10 @@ bool FlutterWindow::OnCreate() {
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
+    // Servidor headless: sem janela (como o ERP antigo so com o PC ligado).
+    if (!headless_) {
+      this->Show();
+    }
   });
 
   // Flutter can complete the first frame before the "show window" callback is

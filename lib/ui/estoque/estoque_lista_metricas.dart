@@ -19,14 +19,29 @@ abstract final class EstoqueListaMetricas {
 
   /// Dias de estoque livre com base na media diaria. `null` = sem giro confiavel.
   static double? coberturaDias(Produto produto) {
-    final media = produto.vendaMediaDiaria;
+    final media = produto.vendaMediaDiariaExibicao;
     if (media <= 0.001) return null;
-    final disp = ProdutoEmbalagem.valorEstoqueExibicao(
-      produto,
-      produto.estoqueLivreParaVenda,
-    );
+    final disp = produto.estoqueLivreExibicao;
     if (disp <= 0) return 0;
     return disp / media;
+  }
+
+  /// Media diaria na unidade de venda (m², CX, UN).
+  static double vendaMediaDiariaExibicao(Produto produto) =>
+      produto.vendaMediaDiariaExibicao;
+
+  static String formatarMediaDiaria(Produto produto) =>
+      ProdutoEmbalagem.formatarMediaDiaria(
+        produto,
+        produto.vendaMediaDiaria,
+        comUnidade: true,
+      );
+
+  /// Quantidade sugerida ao anotar compra, na unidade de exibicao da loja.
+  static int quantidadeSugeridaAnotarCompra(Produto produto) {
+    final falta = produto.quantidadeMinima - produto.estoqueExibicao;
+    if (falta <= 1e-9) return 1;
+    return falta.ceil().clamp(1, 99999);
   }
 
   static String formatarMargem(Produto produto) {

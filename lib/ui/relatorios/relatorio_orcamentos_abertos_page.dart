@@ -1,14 +1,16 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/cliente_repository.dart';
-import '../../data/venda_repository.dart';
+import '../../data/api/lan_api_client.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../model/cliente.dart';
 import '../../model/usuario_sistema.dart';
 import '../../model/venda.dart';
 import 'relatorio_drill_down.dart';
 import 'relatorio_export_util.dart';
+import 'relatorio_helpers.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
+import '../widgets/lan_api_feedback.dart';
 
 class RelatorioOrcamentosAbertosPage extends StatefulWidget {
   const RelatorioOrcamentosAbertosPage({
@@ -24,8 +26,8 @@ class RelatorioOrcamentosAbertosPage extends StatefulWidget {
     this.usuarioExecutor,
   });
 
-  final VendaRepository vendaRepository;
-  final ClienteRepository clienteRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
   final String tituloAppBar;
   final String? textoResumo;
   final bool exibirExportacoesRelatorio;
@@ -46,6 +48,7 @@ class _RelatorioOrcamentosAbertosPageState
   DateTime? _dataInicioFiltro;
   DateTime? _dataFimFiltro;
   final DateFormat _dataDia = DateFormat('dd/MM/yyyy');
+  bool _carregando = true;
 
   @override
   void initState() {
@@ -63,10 +66,62 @@ class _RelatorioOrcamentosAbertosPageState
 
   void _onBuscaChanged() => setState(() {});
 
-  void _carregar() {
+  Future<void> _garantirClientesNoCache(List<Venda> orcs) async {
+    final repo = widget.clienteRepository;
+    final ids = <int>{};
+    for (final v in orcs) {
+      final id = v.cliente.targetId;
+      if (id > 0) ids.add(id);
+    }
+    if (ids.isEmpty) return;
+    for (final id in ids) {
+      try {
+        if (repo.obterPorId(id) != null) continue;
+      } catch (_) {}
+      try {
+        await repo.obterPorIdRemoto(id);
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _carregar() async {
+    setState(() => _carregando = true);
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      try {
+        await repo.hidratarOrcamentos(limit: 500);
+      } on LanApiException catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackAviso(context, e, prefixo: 'Orcamentos');
+        }
+      } catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackAviso(context, e, prefixo: 'Orcamentos');
+        }
+      }
+    }
+    if (!mounted) return;
+    final lista = List<Venda>.from(
+      widget.vendaRepository.listarOrcamentosPendentes(),
+    );
+    await _garantirClientesNoCache(lista);
+    if (!mounted) return;
     setState(() {
-      _todos = widget.vendaRepository.listarOrcamentosPendentes();
+      _todos = lista;
+      _carregando = false;
     });
+  }
+
+  String _nomeCliente(Venda v) => relatorioNomeCliente(
+        v,
+        clienteRepository: widget.clienteRepository,
+      );
+
+  Cliente? _cliente(Venda v) {
+    return relatorioClienteDaVenda(
+      v,
+      clienteRepository: widget.clienteRepository,
+    );
   }
 
   List<Venda> get _filtrados {
@@ -112,6 +167,8 @@ class _RelatorioOrcamentosAbertosPageState
     }
     final c = _cliente(v);
     if (c != null && c.nomeRazao.toLowerCase().contains(termo)) return true;
+    final nome = _nomeCliente(v).toLowerCase();
+    if (nome.contains(termo)) return true;
     final totalFmt = NumberFormat('#,##0.00', 'pt_BR').format(v.total);
     if (totalFmt.contains(termo)) return true;
     final dataFmt = DateFormat('dd/MM/yyyy').format(v.data.toLocal());
@@ -185,14 +242,6 @@ class _RelatorioOrcamentosAbertosPageState
     return '${_dataDia.format(inicio)} — ${_dataDia.format(fim)}';
   }
 
-  Cliente? _cliente(Venda v) {
-    final t = v.cliente.target;
-    if (t != null) return t;
-    final id = v.cliente.targetId;
-    if (id == 0) return null;
-    return widget.clienteRepository.obterPorId(id);
-  }
-
   int _diasAberto(Venda v) {
     final hoje = DateTime.now();
     final d = v.data.toLocal();
@@ -244,13 +293,22 @@ class _RelatorioOrcamentosAbertosPageState
     if (confirmar != true || !mounted) return;
 
     try {
-      widget.vendaRepository.cancelarVenda(
-        venda.id,
-        motivo: 'Exclusao manual na lista de orcamentos em aberto',
-        canceladaPor: widget.usuarioExecutor!.login,
-        usuarioExecutor: widget.usuarioExecutor,
-      );
-      _carregar();
+      final repo = widget.vendaRepository;
+      if (repo is VendaApiRepository) {
+        await repo.cancelarVendaRemoto(
+          venda.id,
+          motivo: 'Exclusao manual na lista de orcamentos em aberto',
+          canceladaPor: widget.usuarioExecutor!.login,
+        );
+      } else {
+        repo.cancelarVenda(
+          venda.id,
+          motivo: 'Exclusao manual na lista de orcamentos em aberto',
+          canceladaPor: widget.usuarioExecutor!.login,
+          usuarioExecutor: widget.usuarioExecutor,
+        );
+      }
+      await _carregar();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -259,9 +317,7 @@ class _RelatorioOrcamentosAbertosPageState
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel apagar: $e')),
-      );
+      LanApiFeedback.snackErro(context, e, prefixo: 'Nao foi possivel apagar');
     }
   }
 
@@ -377,20 +433,29 @@ class _RelatorioOrcamentosAbertosPageState
     if (confirmarApagar != true || !mounted) return;
 
     try {
-      final apagados = widget.vendaRepository.cancelarOrcamentosPendentesAte(
-        dataLimite,
-        motivo: 'Manutencao: orcamentos em aberto ate $dataFmt',
-      );
-      _carregar();
+      final repo = widget.vendaRepository;
+      int apagados;
+      if (repo is VendaApiRepository) {
+        apagados = await repo.cancelarOrcamentosPendentesAteRemoto(
+          dataLimite,
+          motivo: 'Manutencao: orcamentos em aberto ate $dataFmt',
+          canceladaPor: widget.usuarioExecutor!.login,
+        );
+      } else {
+        apagados = repo.cancelarOrcamentosPendentesAte(
+          dataLimite,
+          motivo: 'Manutencao: orcamentos em aberto ate $dataFmt',
+          canceladaPor: widget.usuarioExecutor!.login,
+        ) as int;
+      }
+      await _carregar();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$apagados orcamento(s) apagado(s).')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro na manutencao: $e')),
-      );
+      LanApiFeedback.snackErro(context, e, prefixo: 'Erro na manutencao');
     }
   }
 
@@ -399,13 +464,12 @@ class _RelatorioOrcamentosAbertosPageState
     return [
       ['Orcamento', 'Data', 'Cliente', 'Dias aberto', 'Itens', 'Total'],
       ...lista.map((v) {
-        final c = _cliente(v);
         return [
           '${v.numeroOrcamento}',
           DateFormat('dd/MM/yyyy HH:mm').format(v.data.toLocal()),
-          c?.nomeRazao ?? 'Sem cliente',
+          _nomeCliente(v),
           '${_diasAberto(v)}',
-          '${v.itens.length}',
+          '${relatorioItensDaVenda(widget.vendaRepository, v).length}',
           moeda.format(v.total),
         ];
       }),
@@ -421,11 +485,10 @@ class _RelatorioOrcamentosAbertosPageState
           '${lista.length} orcamento(s) · Total R\$ ${moeda.format(total)}',
       cabecalho: ['Orc', 'Data', 'Cliente', 'Dias', 'Total'],
       linhas: lista.map((v) {
-        final c = _cliente(v);
         return [
           '${v.numeroOrcamento}',
           DateFormat('dd/MM/yyyy').format(v.data.toLocal()),
-          c?.nomeRazao ?? '-',
+          _nomeCliente(v),
           '${_diasAberto(v)}',
           'R\$ ${moeda.format(v.total)}',
         ];
@@ -559,7 +622,9 @@ class _RelatorioOrcamentosAbertosPageState
           ),
           const Divider(height: 1),
           Expanded(
-            child: visiveis.isEmpty
+            child: _carregando
+                ? const Center(child: CircularProgressIndicator())
+                : visiveis.isEmpty
                 ? Center(
                     child: Text(
                       _todos.isEmpty
@@ -571,7 +636,6 @@ class _RelatorioOrcamentosAbertosPageState
                     itemCount: visiveis.length,
                     itemBuilder: (context, i) {
                       final v = visiveis[i];
-                      final c = _cliente(v);
                       final dias = _diasAberto(v);
                       return ListTile(
                         title: Text.rich(
@@ -592,8 +656,8 @@ class _RelatorioOrcamentosAbertosPageState
                         ),
                         subtitle: Text(
                           '${DateFormat('dd/MM/yyyy HH:mm').format(v.data.toLocal())} · '
-                          '${c?.nomeRazao ?? 'Sem cliente'} · '
-                          '${v.itens.length} item(ns) · $dias dia(s) em aberto',
+                          '${_nomeCliente(v)} · '
+                          '${relatorioItensDaVenda(widget.vendaRepository, v).length} item(ns) · $dias dia(s) em aberto',
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -617,8 +681,10 @@ class _RelatorioOrcamentosAbertosPageState
                                   Icons.edit_note_outlined,
                                   color: Theme.of(context).colorScheme.primary,
                                 ),
-                                onPressed: () =>
-                                    widget.onEditarNoPdv!(context, v),
+                                onPressed: () async {
+                                  await widget.onEditarNoPdv!(context, v);
+                                  if (mounted) await _carregar();
+                                },
                               ),
                             if (widget.podeApagarOrcamentos)
                               IconButton(
@@ -636,6 +702,7 @@ class _RelatorioOrcamentosAbertosPageState
                           context,
                           vendaRepository: widget.vendaRepository,
                           vendaId: v.id,
+                          clienteRepository: widget.clienteRepository,
                         ),
                       );
                     },

@@ -90,6 +90,7 @@ class ReajustePrecoRepository {
           parametros,
         );
         produto.estoqueAtual = produto.estoqueReal;
+        produto.precoAlteradoEm = DateTime.now().toUtc();
         _db.produtoBox.put(produto);
 
         final item = ReajustePrecoItem(
@@ -186,6 +187,7 @@ class ReajustePrecoRepository {
           ),
         );
         produto.estoqueAtual = produto.estoqueReal;
+        produto.precoAlteradoEm = DateTime.now().toUtc();
         _db.produtoBox.put(produto);
         gravados++;
       }

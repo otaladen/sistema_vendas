@@ -1,37 +1,35 @@
 import 'package:path/path.dart' as p;
 
+import '../data/api/venda_api_repository.dart';
 import '../data/app_config_repository.dart';
 import '../data/venda_repository.dart';
 import '../domain/entrega_pod_nome_arquivo.dart';
 import '../model/historico_entrega.dart';
 import 'entrega_pod_lan_service.dart';
 
-/// Registra POD no banco e replica foto no servidor LAN (fase 2).
+/// Registra POD no banco (PC1) ou via API (Terminal Leve) e replica foto na rede.
 class EntregaPodFinalizacao {
   EntregaPodFinalizacao({
     AppConfigRepository? configRepository,
     EntregaPodLanService? lanService,
-  })  : _configRepository = configRepository ?? AppConfigRepository(),
-        _lanService = lanService;
+  }) : _lanService = lanService;
 
-  final AppConfigRepository _configRepository;
   final EntregaPodLanService? _lanService;
 
   Future<void> registrarPod({
-    required VendaRepository vendaRepository,
+    required dynamic vendaRepository,
     required int vendaId,
     required String recebidoPor,
     required String usuarioLogin,
     String fotoPathLocal = '',
     String fotoPathServidor = '',
+    String ocorrenciaMotivo = '',
   }) async {
     var pathServidor = fotoPathServidor.trim();
     final pathLocal = fotoPathLocal.trim();
 
     if (pathLocal.isNotEmpty) {
-      final lan = _lanService ?? EntregaPodLanService(
-        configRepository: _configRepository,
-      );
+      final lan = _lanService ?? EntregaPodLanService();
       final enviado = await lan.enviarFotoSeRedeAtiva(
         arquivoLocal: pathLocal,
         nomeArquivo: EntregaPodNomeArquivo.extrairNomeArquivo(pathServidor) ??
@@ -39,12 +37,22 @@ class EntregaPodFinalizacao {
       );
       if (enviado != null && enviado.isNotEmpty) {
         pathServidor = enviado;
-      } else if (pathServidor.isEmpty) {
-        pathServidor = 'pod_entrega/${p.basename(pathLocal)}';
       }
     }
 
-    vendaRepository.registrarPodEntrega(
+    if (vendaRepository is VendaApiRepository) {
+      await vendaRepository.registrarPodEntregaRemoto(
+        vendaId: vendaId,
+        recebidoPor: recebidoPor,
+        usuarioLogin: usuarioLogin,
+        fotoPathLocal: pathLocal,
+        fotoPathServidor: pathServidor,
+        ocorrenciaMotivo: ocorrenciaMotivo,
+      );
+      return;
+    }
+
+    (vendaRepository as VendaRepository).registrarPodEntrega(
       vendaId: vendaId,
       recebidoPor: recebidoPor,
       usuarioLogin: usuarioLogin,
@@ -54,7 +62,7 @@ class EntregaPodFinalizacao {
   }
 
   Future<void> registrarPodComHistorico({
-    required VendaRepository vendaRepository,
+    required dynamic vendaRepository,
     required int vendaId,
     required String recebidoPor,
     required String usuarioLogin,
@@ -62,6 +70,8 @@ class EntregaPodFinalizacao {
     String fotoPathServidor = '',
     bool comFotoNoHistorico = false,
   }) async {
+    final motivo =
+        'Recebido por: $recebidoPor${comFotoNoHistorico ? ' (com foto)' : ''}';
     await registrarPod(
       vendaRepository: vendaRepository,
       vendaId: vendaId,
@@ -69,12 +79,16 @@ class EntregaPodFinalizacao {
       usuarioLogin: usuarioLogin,
       fotoPathLocal: fotoPathLocal,
       fotoPathServidor: fotoPathServidor,
+      ocorrenciaMotivo: vendaRepository is VendaApiRepository ? motivo : '',
     );
-    vendaRepository.registrarOcorrenciaEntrega(
+    if (vendaRepository is VendaApiRepository) {
+      // Ocorrencia ja enviada no payload do POD quando motivo nao vazio.
+      return;
+    }
+    (vendaRepository as VendaRepository).registrarOcorrenciaEntrega(
       vendaId: vendaId,
       status: HistoricoEntregaEventos.podEntrega,
-      motivo:
-          'Recebido por: $recebidoPor${comFotoNoHistorico ? ' (com foto)' : ''}',
+      motivo: motivo,
       usuario: usuarioLogin,
     );
   }

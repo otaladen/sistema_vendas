@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/venda_repository.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../model/historico_entrega.dart';
+import '../../model/venda.dart';
 import 'relatorio_entregas_helper.dart';
 import 'relatorio_export_util.dart';
+import 'relatorio_helpers.dart';
 import 'relatorio_periodo.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
 import 'widgets/relatorio_periodo_painel.dart';
@@ -13,9 +17,11 @@ class RelatorioHistoricoEntregasPage extends StatefulWidget {
   const RelatorioHistoricoEntregasPage({
     super.key,
     required this.vendaRepository,
+    this.clienteRepository,
   });
 
-  final VendaRepository vendaRepository;
+  final dynamic vendaRepository;
+  final dynamic clienteRepository;
 
   @override
   State<RelatorioHistoricoEntregasPage> createState() =>
@@ -37,15 +43,56 @@ class _RelatorioHistoricoEntregasPageState
   }
 
   void _carregar(LimitesPeriodo limites) {
-    final lista = widget.vendaRepository.listarHistoricoEntregaGlobal(
+    unawaited(_carregarAsync(limites));
+  }
+
+  Future<void> _carregarAsync(LimitesPeriodo limites) async {
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      try {
+        await repo.garantirPeriodoRelatorioCarregado(limites.$1, limites.$2);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Historico de entregas: $e')),
+          );
+        }
+      }
+    }
+    if (!mounted) return;
+    final lista = (widget.vendaRepository.listarHistoricoEntregaGlobal(
       inicio: limites.$1,
       fim: limites.$2,
       termoBusca: _buscaController.text,
-    );
+    ) as List)
+        .cast<HistoricoEntrega>();
     setState(() {
       _limites = limites;
       _eventos = lista;
     });
+  }
+
+  Venda? _vendaDoHistorico(HistoricoEntrega h) {
+    try {
+      final ligado = h.venda.target;
+      if (ligado != null) return ligado;
+    } catch (_) {}
+    final id = h.venda.targetId;
+    if (id <= 0) return null;
+    try {
+      return widget.vendaRepository.obterPorId(id) as Venda?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _clienteDoHistorico(HistoricoEntrega h) {
+    final v = _vendaDoHistorico(h);
+    if (v == null) return '-';
+    return relatorioNomeCliente(
+      v,
+      clienteRepository: widget.clienteRepository,
+    );
   }
 
   List<List<String>> _linhasCsv() => [
@@ -59,11 +106,11 @@ class _RelatorioHistoricoEntregasPageState
           'Usuario',
         ],
         ..._eventos.map((h) {
-          final v = h.venda.target;
+          final v = _vendaDoHistorico(h);
           return [
             _fmtDataHora.format(h.dataHora.toLocal()),
             '${v?.numeroOrcamento ?? ''}',
-            v?.cliente.target?.nomeRazao ?? '',
+            _clienteDoHistorico(h),
             HistoricoEntregaEventos.rotulo(h.statusNovo),
             HistoricoEntregaEventos.rotulo(h.statusAnterior),
             HistoricoEntregaEventos.rotulo(h.statusNovo),
@@ -81,11 +128,11 @@ class _RelatorioHistoricoEntregasPageState
       linhas: _eventos
           .take(500)
           .map((h) {
-            final v = h.venda.target;
+            final v = _vendaDoHistorico(h);
             return [
               _fmtDataHora.format(h.dataHora.toLocal()),
               '${v?.numeroOrcamento ?? ''}',
-              v?.cliente.target?.nomeRazao ?? '-',
+              _clienteDoHistorico(h),
               HistoricoEntregaEventos.rotulo(h.statusNovo),
               h.usuario,
             ];
@@ -112,6 +159,7 @@ class _RelatorioHistoricoEntregasPageState
       body: Column(
         children: [
           RelatorioPeriodoPainel(
+            vendaRepository: widget.vendaRepository,
             onPeriodoChanged: _carregar,
             onAtualizar: lim != null ? () => _carregar(lim) : null,
             filtrosExtras: [
@@ -153,15 +201,16 @@ class _RelatorioHistoricoEntregasPageState
                     separatorBuilder: (_, index) => const Divider(height: 1),
                     itemBuilder: (context, i) {
                       final h = _eventos[i];
-                      final v = h.venda.target;
-                      final cliente = v?.cliente.target?.nomeRazao ?? 'Sem cliente';
+                      final v = _vendaDoHistorico(h);
+                      final cliente = _clienteDoHistorico(h);
                       final evento = HistoricoEntregaEventos.rotulo(h.statusNovo);
                       final anterior = h.statusAnterior.trim().isEmpty
                           ? null
                           : HistoricoEntregaEventos.rotulo(h.statusAnterior);
                       return ListTile(
                         title: Text(
-                          'Nota ${v?.numeroOrcamento ?? '?'} · $cliente',
+                          'Nota ${v?.numeroOrcamento ?? '?'} · '
+                          '${cliente == '-' ? 'Sem cliente' : cliente}',
                         ),
                         subtitle: Text(
                           '${_fmtDataHora.format(h.dataHora.toLocal())} · $evento'

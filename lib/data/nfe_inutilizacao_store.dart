@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-/// Registro de inutilizacao de numeracao NF-e (historico local).
+/// Registro de inutilizacao de numeracao NF-e (55) ou NFC-e (65).
 class NfeInutilizacaoRegistro {
   NfeInutilizacaoRegistro({
     required this.id,
@@ -13,6 +13,7 @@ class NfeInutilizacaoRegistro {
     required this.justificativa,
     required this.usuarioLogin,
     required this.sucesso,
+    this.modelo = '55',
     this.protocolo = '',
     this.mensagemSefaz = '',
     this.urlXml = '',
@@ -20,6 +21,8 @@ class NfeInutilizacaoRegistro {
   }) : registradaEm = registradaEm ?? DateTime.now();
 
   final String id;
+  /// `55` = NF-e, `65` = NFC-e.
+  final String modelo;
   final String serie;
   final int numeroInicial;
   final int numeroFinal;
@@ -31,11 +34,18 @@ class NfeInutilizacaoRegistro {
   final String urlXml;
   final DateTime registradaEm;
 
-  String get nomeArquivoXml =>
-      'inutilizacao_serie${serie}_$numeroInicial-$numeroFinal.xml';
+  bool get isNfce => modelo == '65';
+
+  String get rotuloModelo => isNfce ? 'NFC-e' : 'NF-e';
+
+  String get nomeArquivoXml {
+    final prefix = isNfce ? 'inutilizacao_NFCe' : 'inutilizacao_NFe';
+    return '${prefix}_serie${serie}_$numeroInicial-$numeroFinal.xml';
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'modelo': modelo,
         'serie': serie,
         'numeroInicial': numeroInicial,
         'numeroFinal': numeroFinal,
@@ -49,8 +59,10 @@ class NfeInutilizacaoRegistro {
       };
 
   factory NfeInutilizacaoRegistro.fromJson(Map<String, dynamic> json) {
+    final modeloRaw = (json['modelo'] ?? '55').toString().trim();
     return NfeInutilizacaoRegistro(
       id: (json['id'] ?? '').toString(),
+      modelo: modeloRaw == '65' ? '65' : '55',
       serie: (json['serie'] ?? '1').toString(),
       numeroInicial: ((json['numeroInicial'] as num?) ?? 0).toInt(),
       numeroFinal: ((json['numeroFinal'] as num?) ?? 0).toInt(),
@@ -67,7 +79,7 @@ class NfeInutilizacaoRegistro {
   }
 }
 
-/// Persistencia JSON do historico de inutilizacoes NF-e.
+/// Persistencia JSON do historico de inutilizacoes NF-e / NFC-e.
 class NfeInutilizacaoStore {
   NfeInutilizacaoStore(this._storeDirectoryPath);
 

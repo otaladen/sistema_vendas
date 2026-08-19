@@ -1,4 +1,9 @@
+import 'package:flutter/material.dart';
+
 import 'tipo_movimento_estoque.dart';
+
+/// Agrupa o kardex para filtro visual (entrada, saida, so reserva).
+enum NaturezaKardex { entrada, saida, reserva, neutro }
 
 /// Rotulos e utilidades do kardex de estoque.
 abstract final class MovimentoEstoqueHelper {
@@ -55,5 +60,47 @@ abstract final class MovimentoEstoqueHelper {
   static String formatarDelta(int delta) {
     if (delta > 0) return '+$delta';
     return '$delta';
+  }
+
+  static NaturezaKardex natureza({
+    required int deltaFisico,
+    required int deltaReserva,
+  }) {
+    if (deltaFisico > 0) return NaturezaKardex.entrada;
+    if (deltaFisico < 0) return NaturezaKardex.saida;
+    if (deltaReserva != 0) return NaturezaKardex.reserva;
+    return NaturezaKardex.neutro;
+  }
+
+  static IconData iconeTipo(String tipoMovimento) {
+    switch (tipoMovimento) {
+      case 'entradaNfeCompra':
+        return Icons.move_to_inbox_outlined;
+      case 'estornoEntradaNfeCompra':
+      case 'cancelamentoVendaEstorno':
+      case 'carretoEstornoSaida':
+        return Icons.undo_rounded;
+      case 'carretoSaida':
+        return Icons.local_shipping_outlined;
+      case 'cupomNaoFiscalVenda':
+      case 'retiradaParcialCliente':
+      case 'retiradaTotalImediata':
+      case 'vendaDiretaLegada':
+        return Icons.point_of_sale_outlined;
+      case 'orcamentoReserva':
+      case 'orcamentoLiberaReserva':
+      case 'finalizacaoAjustaReserva':
+        return Icons.bookmark_outline;
+      case 'ajusteManual':
+        return Icons.tune;
+      case 'devolucaoCliente':
+      case 'devolucaoFornecedor':
+        return Icons.assignment_return_outlined;
+      case 'complementoEntregaFalta':
+      case 'complementoEntregaBaixa':
+        return Icons.add_shopping_cart_outlined;
+      default:
+        return Icons.swap_vert_rounded;
+    }
   }
 }

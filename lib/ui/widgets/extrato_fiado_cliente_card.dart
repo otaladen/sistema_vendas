@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 
-import '../../data/venda_repository.dart';
+import '../../data/api/venda_api_repository.dart';
 import '../../domain/recebimento_fiado_codec.dart';
 import '../../model/cliente.dart';
 import '../../model/recebimento_fiado.dart';
@@ -14,7 +14,7 @@ import '../../model/titulo_receber.dart';
 import '../../services/cliente_extrato_fiado_pdf.dart';
 
 /// Extrato de fiado na aba Comercial do cadastro de clientes.
-class ExtratoFiadoClienteCard extends StatelessWidget {
+class ExtratoFiadoClienteCard extends StatefulWidget {
   const ExtratoFiadoClienteCard({
     super.key,
     required this.vendaRepository,
@@ -22,12 +22,52 @@ class ExtratoFiadoClienteCard extends StatelessWidget {
     this.limiteCredito = 0,
   });
 
-  final VendaRepository vendaRepository;
+  final dynamic vendaRepository;
   final Cliente cliente;
   final double limiteCredito;
 
+  @override
+  State<ExtratoFiadoClienteCard> createState() =>
+      _ExtratoFiadoClienteCardState();
+}
+
+class _ExtratoFiadoClienteCardState extends State<ExtratoFiadoClienteCard> {
   static final _fmtData = DateFormat('dd/MM/yyyy');
   static final _fmtMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+
+  bool _carregandoRemoto = false;
+
+  dynamic get vendaRepository => widget.vendaRepository;
+  Cliente get cliente => widget.cliente;
+  double get limiteCredito => widget.limiteCredito;
+
+  @override
+  void initState() {
+    super.initState();
+    _hidratarSeRemoto();
+  }
+
+  @override
+  void didUpdateWidget(covariant ExtratoFiadoClienteCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cliente.id != widget.cliente.id) {
+      _hidratarSeRemoto();
+    }
+  }
+
+  Future<void> _hidratarSeRemoto() async {
+    if (vendaRepository is! VendaApiRepository) return;
+    setState(() => _carregandoRemoto = true);
+    try {
+      final api = vendaRepository as VendaApiRepository;
+      await api.hidratarTitulos();
+      await api.listarTitulosQuitadosPorClienteRemoto(cliente.id, limite: 20);
+      await api.listarRecebimentosPorClienteRemoto(cliente.id);
+    } catch (_) {
+      // Mantem o que houver no cache.
+    }
+    if (mounted) setState(() => _carregandoRemoto = false);
+  }
 
   static String _rotuloForma(String forma) {
     switch (forma) {
@@ -47,12 +87,53 @@ class ExtratoFiadoClienteCard extends StatelessWidget {
   }
 
   Future<void> _exportarPdf(BuildContext context) async {
+    if (vendaRepository is VendaApiRepository) {
+      final api = vendaRepository as VendaApiRepository;
+      try {
+        await api.hidratarTitulos();
+        await api.listarTitulosQuitadosPorClienteRemoto(cliente.id, limite: 100);
+        await api.listarRecebimentosPorClienteRemoto(cliente.id);
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Falha ao carregar titulos: $e')),
+        );
+        return;
+      }
+    }
     vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
-    final abertos = vendaRepository.titulos.listarAbertosPorCliente(cliente.id);
-    final quitados =
-        vendaRepository.titulos.listarQuitadosPorCliente(cliente.id, limite: 100);
-    final recebimentos = vendaRepository.recebimentos.listarPorCliente(cliente.id);
-    final saldo = vendaRepository.saldoFiadoEmAbertoCliente(cliente.id);
+    final abertos = List<TituloReceber>.from(
+      vendaRepository.titulos.listarAbertosPorCliente(cliente.id) as List,
+    );
+    List<TituloReceber> quitados = const [];
+    try {
+      quitados = List<TituloReceber>.from(
+        vendaRepository.titulos.listarQuitadosPorCliente(
+              cliente.id,
+              limite: 100,
+            )
+            as List,
+      );
+    } catch (_) {}
+    List<RecebimentoFiado> recebimentos = const [];
+    try {
+      recebimentos = List<RecebimentoFiado>.from(
+        vendaRepository.recebimentos.listarPorCliente(cliente.id) as List,
+      );
+    } catch (_) {}
+    double saldo;
+    if (vendaRepository is VendaApiRepository) {
+      try {
+        saldo = await (vendaRepository as VendaApiRepository)
+            .saldoFiadoEmAbertoClienteRemoto(cliente.id);
+      } catch (_) {
+        saldo = (vendaRepository.saldoFiadoEmAbertoCliente(cliente.id) as num)
+            .toDouble();
+      }
+    } else {
+      saldo = (vendaRepository.saldoFiadoEmAbertoCliente(cliente.id) as num)
+          .toDouble();
+    }
 
     if (abertos.isEmpty && quitados.isEmpty && recebimentos.isEmpty) {
       if (!context.mounted) return;
@@ -155,12 +236,35 @@ class ExtratoFiadoClienteCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
-    final abertos = vendaRepository.titulos.listarAbertosPorCliente(cliente.id);
-    final quitados =
-        vendaRepository.titulos.listarQuitadosPorCliente(cliente.id, limite: 20);
-    final recebimentos =
-        vendaRepository.recebimentos.listarPorCliente(cliente.id).take(20).toList();
+    if (_carregandoRemoto) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 10),
+        child: LinearProgressIndicator(minHeight: 2),
+      );
+    }
+    try {
+      vendaRepository.titulos.migrarTitulosLegadoSeNecessario();
+    } catch (_) {}
+    final abertos = List<TituloReceber>.from(
+      vendaRepository.titulos.listarAbertosPorCliente(cliente.id) as List,
+    );
+    List<TituloReceber> quitados = const [];
+    try {
+      quitados = List<TituloReceber>.from(
+        vendaRepository.titulos.listarQuitadosPorCliente(
+              cliente.id,
+              limite: 20,
+            )
+            as List,
+      );
+    } catch (_) {}
+    List<RecebimentoFiado> recebimentos = const [];
+    try {
+      recebimentos = List<RecebimentoFiado>.from(
+        (vendaRepository.recebimentos.listarPorCliente(cliente.id) as List)
+            .take(20),
+      );
+    } catch (_) {}
 
     if (abertos.isEmpty && quitados.isEmpty && recebimentos.isEmpty) {
       return const SizedBox.shrink();

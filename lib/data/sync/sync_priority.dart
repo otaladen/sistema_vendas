@@ -30,6 +30,7 @@ abstract final class SyncPriorityCatalogo {
     'venda',
     'orcamento', // alias de auditoria/legado; sync usa entity venda
     'movimento_estoque',
+    'lote_produto',
     'titulo_receber',
     'recebimento_fiado',
     'caixa_sessoes',
@@ -62,7 +63,6 @@ abstract final class SyncPriorityCatalogo {
     'promocao',
     'reajuste_preco',
     'empresa_config',
-    'mensageria_templates',
     'auditoria_evento',
     'item_lista_compra',
     'produto_sugestao_venda',

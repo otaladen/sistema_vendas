@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/domain/perfil_usuario_preset.dart';
 import 'package:sistema_vendas/domain/permissao_usuario.dart';
+import 'package:sistema_vendas/domain/main_menu_destino.dart';
 import 'package:sistema_vendas/domain/usuario_permissao_helper.dart';
 import 'package:sistema_vendas/domain/usuario_senha_codec.dart';
 import 'package:sistema_vendas/model/usuario_sistema.dart';
@@ -18,14 +19,20 @@ void main() {
     expect(u.descontoMaximoPercentualPdv, 8);
   });
 
-  test('motorista: so visualiza entregas', () {
+  test('motorista: so modo campo, sem modulo Entregas', () {
     final u = PerfilUsuarioPresetAplicador.aplicar(
       UsuarioSistema(id: '2', nome: 'M', login: 'm', senha: 'x'),
       PerfilUsuarioPreset.motorista,
     );
     expect(UsuarioPermissaoHelper.podeVisualizarEntregas(u), isTrue);
     expect(UsuarioPermissaoHelper.podeGerenciarEntregas(u), isFalse);
+    expect(UsuarioPermissaoHelper.ehMotoristaCampoSomente(u), isTrue);
+    expect(UsuarioPermissaoHelper.podeAcessarModuloEntregas(u), isFalse);
+    expect(UsuarioPermissaoHelper.podeUsarModoMotorista(u), isTrue);
     expect(UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarPdv), isFalse);
+    expect(MainMenuDestino.entregas.podeAcessar(u), isFalse);
+    expect(MainMenuDestino.motorista.podeAcessar(u), isTrue);
+    expect(MainMenuDestino.inicialAposLogin(u), MainMenuDestino.motorista);
   });
 
   test('gerente: reajuste e cancelar', () {

@@ -90,4 +90,58 @@ class NotaFiscalFechamentoItem {
     if (chave.length >= 44) return 'evento_cancelamento_$chave.xml';
     return 'evento_cancelamento_${referenciaFocus.isNotEmpty ? referenciaFocus : vendaId}.xml';
   }
+
+  Map<String, dynamic> toJson() => {
+        'modelo': modelo,
+        'dataEmissao': dataEmissao.toUtc().toIso8601String(),
+        'numero': numero,
+        'serie': serie,
+        'chaveAcesso': chaveAcesso,
+        'documentoDestinatario': documentoDestinatario,
+        'valorTotal': valorTotal,
+        'status': status,
+        'statusFocus': statusFocus,
+        'urlXml': urlXml,
+        'referenciaFocus': referenciaFocus,
+        'vendaId': vendaId,
+        'razaoSocialDestinatario': razaoSocialDestinatario,
+        'protocoloSefaz': protocoloSefaz,
+        'mensagemSefaz': mensagemSefaz,
+        'urlXmlEventoCancelamento': urlXmlEventoCancelamento,
+        'tributos': tributos.toJson(),
+        'vendaOperacionalCancelada': vendaOperacionalCancelada,
+        'incluirNoZip': incluirNoZip,
+      };
+
+  factory NotaFiscalFechamentoItem.fromJson(Map<String, dynamic> json) {
+    final tributosRaw = json['tributos'];
+    return NotaFiscalFechamentoItem(
+      modelo: (json['modelo'] ?? '').toString(),
+      dataEmissao: DateTime.tryParse((json['dataEmissao'] ?? '').toString()) ??
+          DateTime.now().toUtc(),
+      numero: (json['numero'] ?? '').toString(),
+      serie: (json['serie'] ?? '').toString(),
+      chaveAcesso: (json['chaveAcesso'] ?? '').toString(),
+      documentoDestinatario: (json['documentoDestinatario'] ?? '').toString(),
+      valorTotal: (json['valorTotal'] as num?)?.toDouble() ?? 0,
+      status: (json['status'] ?? '').toString(),
+      statusFocus: (json['statusFocus'] ?? '').toString(),
+      urlXml: (json['urlXml'] ?? '').toString(),
+      referenciaFocus: (json['referenciaFocus'] ?? '').toString(),
+      vendaId: (json['vendaId'] as num?)?.toInt() ?? 0,
+      razaoSocialDestinatario:
+          (json['razaoSocialDestinatario'] ?? '').toString(),
+      protocoloSefaz: (json['protocoloSefaz'] ?? '').toString(),
+      mensagemSefaz: (json['mensagemSefaz'] ?? '').toString(),
+      urlXmlEventoCancelamento:
+          (json['urlXmlEventoCancelamento'] ?? '').toString(),
+      tributos: FechamentoTributosXml.fromJson(
+        tributosRaw is Map
+            ? Map<String, dynamic>.from(tributosRaw)
+            : null,
+      ),
+      vendaOperacionalCancelada: json['vendaOperacionalCancelada'] == true,
+      incluirNoZip: json['incluirNoZip'] != false,
+    );
+  }
 }

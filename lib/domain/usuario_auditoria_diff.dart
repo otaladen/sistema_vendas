@@ -10,6 +10,7 @@ class UsuarioAuditoriaDiff {
     'admin': 'Administrador',
     'podeCadastros': 'Cadastros',
     'podeEstoque': 'Estoque',
+    'podeFiscal': 'Fiscal (NFC-e/NF-e)',
     'podeVendas': 'Hub vendas',
     'podeAcessarPdv': 'PDV',
     'podeAcessarCaixa': 'Caixa',

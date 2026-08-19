@@ -9,10 +9,8 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../data/app_config_repository.dart';
-import '../data/produto_repository.dart';
 import '../data/reajuste_preco_repository.dart';
-import '../data/sync/safe_sync_refresh_mixin.dart';
-import '../data/usuario_repository.dart';
+import '../data/sync/estoque_local_refresh_hub.dart';
 import '../data/venda_repository.dart';
 import 'theme/app_semantic_helper.dart';
 import '../domain/estoque/estoque_diagnostico_models.dart';
@@ -30,6 +28,7 @@ import 'reajuste_preco_autorizacao.dart';
 import 'reajuste_preco_historico_page.dart';
 import 'reajuste_preco_lote_page.dart';
 import 'estoque/ajuste_estoque_dialog.dart';
+import 'estoque/inventario_sessoes_page.dart';
 import 'estoque/estoque_alerta_strip.dart';
 import 'estoque/estoque_diagnostico_sheet.dart';
 import 'estoque/estoque_card_linha.dart';
@@ -39,47 +38,92 @@ import 'estoque/estoque_lista_metricas.dart';
 import 'estoque/estoque_tabela_cabecalho.dart';
 import 'estoque/estoque_tabela_colunas.dart';
 import 'estoque/estoque_tabela_linha.dart';
+import 'estoque/estoque_validade_panel.dart';
 import 'estoque/extrato_movimento_estoque_panel.dart';
+import '../data/lote_produto_repository.dart';
 import 'lista_compra_page.dart';
 import 'sugestao_compra_page.dart';
 import '../data/lista_compra_repository.dart';
+import '../data/inventario_repository.dart';
+import '../data/inventario_gateway.dart';
+import '../data/api/lista_compra_api_repository.dart';
+import '../data/api/inventario_api_repository.dart';
+import '../data/api/reajuste_preco_api_repository.dart';
+import '../data/api/lan_api_client.dart';
+import '../data/api/lan_api_event_hub.dart';
+import '../data/api/produto_api_repository.dart';
+import '../data/ponto_pedido_api_dto.dart';
+import 'shell/app_shell_aba_visibilidade.dart';
+import 'shell/main_menu_deps.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
+import 'widgets/lan_api_feedback.dart';
 import 'widgets/produto_busca_input.dart';
 
 final NumberFormat _moedaBRL = NumberFormat('#,##0.00', 'pt_BR');
 const int _estoqueLoteScroll = 80;
 const double _estoqueScrollAntecipacaoPx = 360;
 
+class _ComprasPreditivasTerminalStub {
+  Map<int, int> montarConsumoPorProdutoNoPeriodo({int dias = 60}) => const {};
+  Map<int, bool> mapaProdutosAtivosCriticos({
+    Map<int, int>? consumoPrecalculado,
+  }) => const {};
+  double calcularPontoPedidoExibicao(Produto produto) =>
+      ComprasPreditivasService.pontoPedidoExibicaoDeCadastro(produto);
+}
+
 class EstoquePage extends StatefulWidget {
   const EstoquePage({
     super.key,
     required this.produtoRepository,
     required this.usuarioLogado,
+    this.lanApiClient,
+    this.listaCompraRepository,
   });
 
-  final ProdutoRepository produtoRepository;
+  final dynamic produtoRepository;
   final UsuarioSistema usuarioLogado;
+  final dynamic lanApiClient;
+  final dynamic listaCompraRepository;
 
   @override
   State<EstoquePage> createState() => _EstoquePageState();
 }
 
-class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
-  final _usuarioRepository = UsuarioRepository();
+class _EstoquePageState extends State<EstoquePage>
+    with SingleTickerProviderStateMixin {
+  late dynamic _usuarioRepository;
   final _appConfigRepository = AppConfigRepository();
-  late final VendaRepository _vendaRepository = VendaRepository(
-    widget.produtoRepository.objectBox,
-  );
-  late final EstoqueDiagnosticoService _diagnosticoService =
-      EstoqueDiagnosticoService(widget.produtoRepository.objectBox);
+  late final TabController _abasController;
+  int _lotesCriticosOuVencidos = 0;
+  bool get _temObjectBox => widget.produtoRepository is! ProdutoApiRepository;
+  LanApiClient? get _lanClient =>
+      widget.lanApiClient is LanApiClient
+          ? widget.lanApiClient as LanApiClient
+          : MainMenuDeps.maybeOf(context)?.lanApiClient;
+  bool get _temLanApi => _lanClient != null;
+  late final dynamic _vendaRepository = _temObjectBox
+      ? VendaRepository(widget.produtoRepository.objectBox)
+      : null;
+  late final dynamic _diagnosticoService = _temObjectBox
+      ? EstoqueDiagnosticoService(widget.produtoRepository.objectBox)
+      : null;
 
   bool _permitirVendaSemEstoque = true;
   EstoqueDiagnosticoResultado? _diagnosticoResultado;
 
-  ReajustePrecoRepository get _reajusteRepo => ReajustePrecoRepository(
+  dynamic get _reajusteRepo {
+    if (!_temObjectBox && _temLanApi) {
+      return ReajustePrecoApiRepository(_lanClient!, widget.produtoRepository);
+    }
+    if (_temObjectBox) {
+      return ReajustePrecoRepository(
         widget.produtoRepository.objectBox,
         widget.produtoRepository,
       );
+    }
+    return null;
+  }
 
   final TextEditingController _buscaController = TextEditingController();
   Timer? _debounceBusca;
@@ -93,6 +137,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   List<String> _fornecedoresDisponiveis = [];
   Map<int, bool> _criticoPpPorProdutoId = {};
   Map<int, int> _consumo60dPorProdutoId = {};
+  Map<int, double> _ppExibicaoPorProdutoId = {};
   int _qtdCriticosPp = 0;
   int _produtosAtivosCount = 0;
   int _totalAbaixoMinimo = 0;
@@ -113,22 +158,111 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       _filtroCategoria != null ||
       _filtroFornecedor != null;
 
-  ComprasPreditivasService get _comprasSvc =>
-      ComprasPreditivasService(widget.produtoRepository.objectBox);
+  dynamic get _comprasSvc => _temObjectBox
+      ? ComprasPreditivasService(widget.produtoRepository.objectBox)
+      : _ComprasPreditivasTerminalStub();
 
   @override
   void initState() {
     super.initState();
+    _abasController = TabController(length: 2, vsync: this);
+    _usuarioRepository =
+        MainMenuDeps.resolverUsuarioRepository(context);
     _listaVerticalScrollController.addListener(_onScrollListaVertical);
     _recarregarProdutos();
     _carregarDiagnosticoInicial();
-    initSafeSyncRefresh(
-      onReload: () {
-        _recarregarProdutos();
-        _atualizarDiagnostico();
-      },
-      aoConcluir: _snackbarDadosAtualizados,
+    unawaited(_atualizarContagemLotes());
+    LanApiEventHub.instance.addListener(_onLanApiEstoqueChanged);
+    EstoqueLocalRefreshHub.instance.addListener(_onEstoqueLocalRefresh);
+  }
+
+  bool? _abaEstoqueAtivaAnterior;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ativa = AppShellAbaVisibilidade.estaAtiva(context);
+    if (_abaEstoqueAtivaAnterior == false && ativa) {
+      unawaited(_sincronizarCatalogoAoFocarAbaEstoque());
+    }
+    _abaEstoqueAtivaAnterior = ativa;
+  }
+
+  Future<void> _sincronizarCatalogoAoFocarAbaEstoque() async {
+    final repo = widget.produtoRepository;
+    if (repo is! ProdutoApiRepository) return;
+    try {
+      final mudou = await repo.sincronizarSeDesatualizado();
+      if (mudou && mounted) await _recarregarProdutos();
+    } catch (_) {}
+  }
+
+  Future<void> _atualizarContagemLotes() async {
+    try {
+      if (_temObjectBox) {
+        final c = LoteProdutoRepository(widget.produtoRepository.objectBox)
+            .contarSemaforo();
+        if (!mounted) return;
+        setState(() => _lotesCriticosOuVencidos = c.criticosOuVencidos);
+        return;
+      }
+      final client = _lanClient;
+      if (client == null) return;
+      final m = await client.contarLotesValidade();
+      if (!mounted) return;
+      setState(() {
+        _lotesCriticosOuVencidos =
+            (m['criticosOuVencidos'] as num?)?.toInt() ?? 0;
+      });
+    } catch (_) {}
+  }
+
+  void _onLanApiEstoqueChanged() {
+    if (!mounted) return;
+    if (LanApiEventHub.instance.ultimaEntidade != 'produto') return;
+    unawaited(
+      _refreshAposEventoProduto(LanApiEventHub.instance.ultimaEntidadeIds),
     );
+  }
+
+  void _onEstoqueLocalRefresh() {
+    if (!mounted) return;
+    try {
+      widget.produtoRepository.atualizarCacheAposMovimentoEstoque();
+    } catch (_) {}
+    unawaited(_recarregarProdutos());
+    if (_temObjectBox) {
+      _atualizarDiagnostico();
+    } else {
+      unawaited(_buscarDiagnosticoRemoto(silencioso: true));
+    }
+  }
+
+  Future<void> _refreshAposEventoProduto(List<int> ids) async {
+    final repo = widget.produtoRepository;
+    if (repo is ProdutoApiRepository && ids.isNotEmpty) {
+      try {
+        await repo.atualizarEstoquePorIds(ids);
+        if (!mounted) return;
+        final produtos = repo.listarTodos();
+        _atualizarResumosProdutos(produtos);
+        setState(() {
+          _produtos = produtos;
+          _atualizarListaFiltrada(resetarScroll: false);
+        });
+        unawaited(_buscarDiagnosticoRemoto(silencioso: true));
+        return;
+      } catch (_) {
+        // fallback full reload abaixo
+      }
+    }
+    await _recarregarProdutos();
+    if (!mounted) return;
+    if (_temObjectBox) {
+      _atualizarDiagnostico();
+    } else {
+      unawaited(_buscarDiagnosticoRemoto(silencioso: true));
+    }
   }
 
   Future<void> _carregarConfigEstoque() async {
@@ -138,6 +272,13 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   }
 
   void _carregarDiagnosticoInicial() {
+    if (!_temObjectBox) {
+      if (_temLanApi) {
+        unawaited(_buscarDiagnosticoRemoto(silencioso: true));
+      }
+      _carregarConfigEstoque();
+      return;
+    }
     _diagnosticoResultado =
         EstoqueDiagnosticoStartup.ultimoResultado ??
         _diagnosticoService.executar();
@@ -146,13 +287,53 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   }
 
   void _atualizarDiagnostico() {
+    if (!_temObjectBox) return;
     final novo = _diagnosticoService.executar();
     EstoqueDiagnosticoStartup.ultimoResultado = novo;
     if (!mounted) return;
     setState(() => _diagnosticoResultado = novo);
   }
 
+  Future<EstoqueDiagnosticoResultado?> _buscarDiagnosticoRemoto({
+    bool silencioso = false,
+  }) async {
+    final client = _lanClient;
+    if (client == null) return null;
+    try {
+      final m = await client.obterDiagnosticoEstoque();
+      final resultado = EstoqueDiagnosticoResultado.fromApiMap(m);
+      if (resultado != null && mounted) {
+        setState(() => _diagnosticoResultado = resultado);
+      }
+      return resultado;
+    } on LanApiException catch (e) {
+      if (!silencioso && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Diagnostico: $e')),
+        );
+      }
+      return null;
+    } catch (e) {
+      if (!silencioso && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Diagnostico: $e')),
+        );
+      }
+      return null;
+    }
+  }
+
   Future<void> _abrirDiagnosticoEstoque() async {
+    if (!_temObjectBox && !_temLanApi) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Sem conexao com o PC servidor. Verifique a rede e tente novamente.',
+          ),
+        ),
+      );
+      return;
+    }
     await mostrarEstoqueDiagnosticoSheet(
       context: context,
       diagnosticoService: _diagnosticoService,
@@ -160,18 +341,34 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       usuarioLogado: widget.usuarioLogado,
       permitirVendaSemEstoque: _permitirVendaSemEstoque,
       resultadoInicial: _diagnosticoResultado,
-      aoAtualizarExterno: _atualizarDiagnostico,
+      aoAtualizarExterno: () {
+        if (_temObjectBox) {
+          _atualizarDiagnostico();
+        }
+        unawaited(_recarregarProdutos());
+      },
+      buscarRemoto: _temLanApi ? () => _buscarDiagnosticoRemoto() : null,
+      reprocessarBaixaRemoto: _temLanApi
+          ? (vendaId) => _lanClient!.reprocessarBaixaEstoque(
+                vendaId: vendaId,
+                permitirVendaSemEstoque: _permitirVendaSemEstoque,
+              )
+          : null,
     );
     if (!mounted) return;
-    setState(() {
-      _diagnosticoResultado = EstoqueDiagnosticoStartup.ultimoResultado;
-    });
+    if (_temObjectBox) {
+      setState(() {
+        _diagnosticoResultado = EstoqueDiagnosticoStartup.ultimoResultado;
+      });
+    }
   }
 
   @override
   void dispose() {
-    disposeSafeSyncRefresh();
+    LanApiEventHub.instance.removeListener(_onLanApiEstoqueChanged);
+    EstoqueLocalRefreshHub.instance.removeListener(_onEstoqueLocalRefresh);
     _debounceBusca?.cancel();
+    _abasController.dispose();
     _listaVerticalScrollController.dispose();
     _listaHorizontalScrollController.dispose();
     _buscaController.dispose();
@@ -269,15 +466,19 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       case EstoqueColunaOrdenacao.disponivel:
         cmp = a.estoqueLivreParaVenda.compareTo(b.estoqueLivreParaVenda);
       case EstoqueColunaOrdenacao.margem:
-        cmp = EstoqueListaMetricas.margemPercentual(a)
-            .compareTo(EstoqueListaMetricas.margemPercentual(b));
+        cmp = EstoqueListaMetricas.margemPercentual(
+          a,
+        ).compareTo(EstoqueListaMetricas.margemPercentual(b));
       case EstoqueColunaOrdenacao.cobertura:
-        cmp = _valorOrdenacaoCobertura(a).compareTo(_valorOrdenacaoCobertura(b));
+        cmp = _valorOrdenacaoCobertura(
+          a,
+        ).compareTo(_valorOrdenacaoCobertura(b));
       case EstoqueColunaOrdenacao.media:
-        cmp = a.vendaMediaDiaria.compareTo(b.vendaMediaDiaria);
+        cmp = a.vendaMediaDiariaExibicao.compareTo(b.vendaMediaDiariaExibicao);
       case EstoqueColunaOrdenacao.venda:
-        cmp = EstoqueListaMetricas.precoVendaExibicao(a)
-            .compareTo(EstoqueListaMetricas.precoVendaExibicao(b));
+        cmp = EstoqueListaMetricas.precoVendaExibicao(
+          a,
+        ).compareTo(EstoqueListaMetricas.precoVendaExibicao(b));
     }
     if (cmp != 0) return cmp;
     return a.nome.toLowerCase().compareTo(b.nome.toLowerCase());
@@ -333,32 +534,119 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     if (!mounted) return;
     setState(() => _carregandoProdutos = true);
 
-    final resultado = await Future(() {
-      final produtos = widget.produtoRepository.listarTodos();
-      final consumo = _comprasSvc.montarConsumoPorProdutoNoPeriodo(dias: 60);
-      final criticos = _comprasSvc.mapaProdutosAtivosCriticos(
-        consumoPrecalculado: consumo,
-      );
-      return (produtos, consumo, criticos);
-    });
-
-    if (!mounted) return;
-
-    final (produtos, consumo, criticos) = resultado;
-    _atualizarResumosProdutos(produtos);
-
-    setState(() {
-      _produtos = produtos;
-      _consumo60dPorProdutoId = consumo;
-      _criticoPpPorProdutoId = criticos;
-      _qtdCriticosPp = criticos.length;
-      if (_filtroOperacional == FiltroEstoqueOperacional.ppCritico &&
-          _qtdCriticosPp == 0) {
-        _filtroOperacional = FiltroEstoqueOperacional.todos;
+    try {
+      // Terminal: garante catalogo completo via API (nao so o lote parcial em cache).
+      final repo = widget.produtoRepository;
+      if (repo is ProdutoApiRepository) {
+        try {
+          await repo.hidratar();
+        } on LanApiException catch (e) {
+          if (mounted) {
+            LanApiFeedback.snackAviso(context, e, prefixo: 'Catalogo');
+          }
+        }
       }
-      _atualizarListaFiltrada(resetarScroll: true);
-      _carregandoProdutos = false;
-    });
+
+      final List<Produto> produtos;
+      final Map<int, int> consumo;
+      final Map<int, bool> criticos;
+      final Map<int, double> pps;
+
+      if (_temObjectBox) {
+        final resultado = await Future(() {
+          final lista = widget.produtoRepository.listarTodos();
+          final cons = _comprasSvc.montarConsumoPorProdutoNoPeriodo(dias: 60);
+          final crit = _comprasSvc.mapaProdutosAtivosCriticos(
+            consumoPrecalculado: cons,
+          );
+          return (lista, cons, crit);
+        });
+        produtos = resultado.$1;
+        consumo = resultado.$2;
+        criticos = resultado.$3;
+        pps = const {};
+      } else {
+        produtos = widget.produtoRepository.listarTodos();
+        final remoto = await _carregarPontoPedidoDaApi();
+        consumo = remoto.consumo;
+        criticos = remoto.criticos;
+        pps = remoto.pps;
+      }
+
+      if (!mounted) return;
+
+      _atualizarResumosProdutos(produtos);
+
+      setState(() {
+        _produtos = produtos;
+        _consumo60dPorProdutoId = consumo;
+        _criticoPpPorProdutoId = criticos;
+        _ppExibicaoPorProdutoId = pps;
+        _qtdCriticosPp = criticos.length;
+        if (_filtroOperacional == FiltroEstoqueOperacional.ppCritico &&
+            _qtdCriticosPp == 0) {
+          _filtroOperacional = FiltroEstoqueOperacional.todos;
+        }
+        _atualizarListaFiltrada(resetarScroll: true);
+        _carregandoProdutos = false;
+      });
+      unawaited(_atualizarContagemLotes());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _carregandoProdutos = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Falha ao carregar estoque: $e'),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
+  Future<({
+    Map<int, int> consumo,
+    Map<int, bool> criticos,
+    Map<int, double> pps,
+  })> _carregarPontoPedidoDaApi() async {
+    final vazio = (
+      consumo: <int, int>{},
+      criticos: <int, bool>{},
+      pps: <int, double>{},
+    );
+    final client = _lanClient;
+    if (client == null) return vazio;
+    try {
+      final raw = await client.listarPontoPedido();
+      final consumo = <int, int>{};
+      final criticos = <int, bool>{};
+      final pps = <int, double>{};
+      for (final m in raw) {
+        final item = PontoPedidoApiItem.fromApiMap(m);
+        if (item == null) continue;
+        consumo[item.produtoId] = item.consumo60d;
+        pps[item.produtoId] = item.pontoPedido;
+        if (item.critico) criticos[item.produtoId] = true;
+      }
+      return (consumo: consumo, criticos: criticos, pps: pps);
+    } on LanApiException catch (e) {
+      if (mounted) {
+        LanApiFeedback.snackAviso(context, e, prefixo: 'Ponto de pedido');
+      }
+      return vazio;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ponto de pedido: $e')),
+        );
+      }
+      return vazio;
+    }
+  }
+
+  double _ppExibicaoDe(Produto produto) {
+    final cached = _ppExibicaoPorProdutoId[produto.id];
+    if (cached != null) return cached;
+    return _comprasSvc.calcularPontoPedidoExibicao(produto);
   }
 
   bool _produtoSemGiro(Produto p, int dias) {
@@ -375,27 +663,54 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     );
     if (resultado == null || !mounted) return;
     try {
-      widget.produtoRepository.ajustarEstoqueManual(
-        produtoId: produto.id,
-        novaQuantidadeFisica: resultado.novaQuantidadeFisica,
-        motivo: resultado.motivo,
-        usuarioLogin: widget.usuarioLogado.login,
-      );
-      _recarregarProdutos();
+      final repo = widget.produtoRepository;
+      if (repo is ProdutoApiRepository) {
+        await repo.ajustarEstoqueManualRemoto(
+          produtoId: produto.id,
+          novaQuantidadeFisica: resultado.novaQuantidadeFisica,
+          motivo: resultado.motivo,
+          usuarioLogin: widget.usuarioLogado.login,
+          usuarioId: widget.usuarioLogado.id,
+          numeroLote: resultado.numeroLote,
+          dataValidade: resultado.dataValidade,
+        );
+        // Ajuste remoto ja mescla o item; evita hidratar catalogo inteiro.
+        try {
+          await repo.atualizarEstoquePorIds([produto.id]);
+        } catch (_) {}
+        if (!mounted) return;
+        final fresco = repo.obterPorId(produto.id);
+        setState(() {
+          _produtos = [
+            for (final p in _produtos)
+              if (p.id == produto.id) (fresco ?? p) else p,
+          ];
+          _atualizarListaFiltrada(resetarScroll: false);
+        });
+      } else {
+        repo.ajustarEstoqueManual(
+          produtoId: produto.id,
+          novaQuantidadeFisica: resultado.novaQuantidadeFisica,
+          motivo: resultado.motivo,
+          usuarioLogin: widget.usuarioLogado.login,
+          numeroLote: resultado.numeroLote,
+          dataValidade: resultado.dataValidade,
+        );
+        await _recarregarProdutos();
+        _atualizarDiagnostico();
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             'Estoque de "${produto.nome}" ajustado para '
-            '${resultado.novaQuantidadeFisica}.',
+            '${ProdutoEmbalagem.formatarEstoque(produto, resultado.novaQuantidadeFisica, comUnidade: true)}.',
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao ajustar estoque: $e')),
-      );
+      LanApiFeedback.snackErro(context, e, prefixo: 'Erro ao ajustar estoque');
     }
   }
 
@@ -434,9 +749,17 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
 
   List<Widget> _acoesAppBarEstoque({required bool verCusto}) {
     final compact = EstoqueLayout.isCompact(context);
-    final largo = !compact &&
-        MediaQuery.sizeOf(context).width >= EstoqueLayout.breakpointDesktopLargo;
+    final largo =
+        !compact &&
+        MediaQuery.sizeOf(context).width >=
+            EstoqueLayout.breakpointDesktopLargo;
     final acoes = <Widget>[
+      if (compact)
+        IconButton(
+          tooltip: 'Balanço / Inventário',
+          icon: const Icon(Icons.fact_check_outlined),
+          onPressed: _abrirInventario,
+        ),
       if (!compact) ...[
         if (largo)
           TextButton.icon(
@@ -449,6 +772,18 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             tooltip: 'Lista de compras',
             icon: const Icon(Icons.playlist_add_check_outlined),
             onPressed: _abrirListaCompra,
+          ),
+        if (largo)
+          TextButton.icon(
+            onPressed: _abrirInventario,
+            icon: const Icon(Icons.fact_check_outlined, size: 20),
+            label: const Text('Balanço'),
+          )
+        else
+          IconButton(
+            tooltip: 'Balanço / Inventário',
+            icon: const Icon(Icons.fact_check_outlined),
+            onPressed: _abrirInventario,
           ),
         if (largo)
           FilledButton.tonalIcon(
@@ -470,6 +805,8 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           switch (value) {
             case 'lista_compra':
               await _abrirListaCompra();
+            case 'inventario':
+              await _abrirInventario();
             case 'sugestao':
               await _abrirSugestaoCompra();
             case 'diagnostico':
@@ -513,6 +850,14 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
               ),
               const PopupMenuDivider(),
             ],
+            const PopupMenuItem<String>(
+              value: 'inventario',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.fact_check_outlined),
+                title: Text('Balanço / Inventário'),
+              ),
+            ),
             PopupMenuItem<String>(
               value: 'diagnostico',
               child: ListTile(
@@ -614,10 +959,10 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
         faixaCompacta: faixa,
         onTap: _qtdCriticosPp > 0
             ? () => setState(() {
-                  _filtroOperacional = FiltroEstoqueOperacional.ppCritico;
-                  _filtrosExpandidos = true;
-                  _atualizarListaFiltrada(resetarScroll: true);
-                })
+                _filtroOperacional = FiltroEstoqueOperacional.ppCritico;
+                _filtrosExpandidos = true;
+                _atualizarListaFiltrada(resetarScroll: true);
+              })
             : null,
       ),
       if (verCusto)
@@ -669,6 +1014,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       MaterialPageRoute<void>(
         builder: (_) => SugestaoCompraPage(
           produtoRepository: widget.produtoRepository,
+          lanApiClient: _lanClient,
         ),
       ),
     );
@@ -681,6 +1027,47 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
         builder: (_) => ListaCompraPage(
           produtoRepository: widget.produtoRepository,
           usuarioLogado: widget.usuarioLogado,
+          listaCompraRepository:
+              widget.listaCompraRepository ??
+              (MainMenuDeps.maybeOf(context)?.lanApiClient != null
+                  ? ListaCompraApiRepository(
+                      widget.lanApiClient ??
+                          MainMenuDeps.maybeOf(context)!.lanApiClient!,
+                      produtoRepository: widget.produtoRepository,
+                    )
+                  : null),
+        ),
+      ),
+    );
+    if (mounted) _recarregarProdutos();
+  }
+
+  Future<void> _abrirInventario() async {
+    final client = _lanClient;
+    final InventarioGateway? repo = _temObjectBox
+        ? InventarioRepository(widget.produtoRepository.objectBox)
+        : (client != null
+            ? InventarioApiRepository(
+                client,
+                produtoRepository: widget.produtoRepository,
+              )
+            : null);
+    if (repo == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Balanço requer o PC servidor ou conexão com a API da loja.',
+          ),
+        ),
+      );
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => InventarioSessoesPage(
+          gateway: repo,
+          usuarioLogado: widget.usuarioLogado,
         ),
       ),
     );
@@ -688,19 +1075,36 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
   }
 
   Future<void> _anotarProdutoListaCompra(Produto produto) async {
-    final repo = ListaCompraRepository(widget.produtoRepository.objectBox);
+    final deps = MainMenuDeps.maybeOf(context);
+    final client = widget.lanApiClient ?? deps?.lanApiClient;
+    final repo = widget.listaCompraRepository ??
+        (_temObjectBox
+            ? ListaCompraRepository(widget.produtoRepository.objectBox)
+            : (client != null
+                ? ListaCompraApiRepository(
+                    client,
+                    produtoRepository: widget.produtoRepository,
+                  )
+                : null));
+    if (repo == null) {
+      await _abrirListaCompra();
+      return;
+    }
     await mostrarAnotarListaCompraDialog(
       context,
       repository: repo,
       produto: produto,
-      quantidadeInicial: produto.quantidadeMinima > produto.estoqueAtual
-          ? (produto.quantidadeMinima - produto.estoqueAtual).clamp(1, 99999)
-          : 1,
+      quantidadeInicial:
+          EstoqueListaMetricas.quantidadeSugeridaAnotarCompra(produto),
       criadoPor: widget.usuarioLogado.login,
     );
   }
 
   Future<void> _abrirReajustePrecos(List<Produto> escopo) async {
+    if (_reajusteRepo == null) {
+      _mostrarReajusteIndisponivel();
+      return;
+    }
     if (!usuarioPodeReajustePrecoLote(widget.usuarioLogado)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -743,11 +1147,17 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     if (aplicou == true && mounted) _recarregarProdutos();
   }
 
-  void _abrirHistoricoReajustes() {
+  Future<void> _abrirHistoricoReajustes() async {
+    final repo = _reajusteRepo;
+    if (repo == null) {
+      _mostrarReajusteIndisponivel();
+      return;
+    }
+    if (!mounted) return;
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => ReajustePrecoHistoricoPage(
-          reajusteRepository: _reajusteRepo,
+          reajusteRepository: repo,
           usuarioRepository: _usuarioRepository,
           usuarioLogado: widget.usuarioLogado,
         ),
@@ -755,12 +1165,12 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     );
   }
 
-  void _snackbarDadosAtualizados({required bool daRede}) {
-    if (!daRede || !mounted) return;
+  void _mostrarReajusteIndisponivel() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        duration: Duration(seconds: 2),
-        content: Text('Dados atualizados da rede'),
+        content: Text(
+          'Sem conexao com o PC servidor para reajuste em lote.',
+        ),
       ),
     );
   }
@@ -818,8 +1228,12 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     try {
       final produtos = widget.produtoRepository.listarTodos();
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final tipoArquivo = incluirCustos ? 'tabela_preco_custo' : 'tabela_precos';
-      final arquivo = File(p.join(pastaDestino, '${tipoArquivo}_$timestamp.csv'));
+      final tipoArquivo = incluirCustos
+          ? 'tabela_preco_custo'
+          : 'tabela_precos';
+      final arquivo = File(
+        p.join(pastaDestino, '${tipoArquivo}_$timestamp.csv'),
+      );
       final linhas = <String>[];
       linhas.add(
         incluirCustos
@@ -828,29 +1242,33 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
       );
       for (final produto in produtos) {
         if (incluirCustos) {
-          linhas.add([
-            _csvSeguro(produto.codigoInterno),
-            _csvSeguro(produto.nome),
-            _csvSeguro(produto.unidade),
-            _csvSeguro(produto.categoria),
-            ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReal),
-            '${produto.quantidadeMinima}',
-            _formatarNumeroCsv(produto.precoCusto),
-            _formatarNumeroCsv(produto.custoMedio),
-            _formatarNumeroCsv(produto.precoVenda),
-            _formatarNumeroCsv(_precoAVista(produto)),
-          ].join(';'));
+          linhas.add(
+            [
+              _csvSeguro(produto.codigoInterno),
+              _csvSeguro(produto.nome),
+              _csvSeguro(produto.unidade),
+              _csvSeguro(produto.categoria),
+              ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReal),
+              '${produto.quantidadeMinima}',
+              _formatarNumeroCsv(produto.precoCusto),
+              _formatarNumeroCsv(produto.custoMedio),
+              _formatarNumeroCsv(produto.precoVenda),
+              _formatarNumeroCsv(_precoAVista(produto)),
+            ].join(';'),
+          );
         } else {
-          linhas.add([
-            _csvSeguro(produto.codigoInterno),
-            _csvSeguro(produto.nome),
-            _csvSeguro(produto.unidade),
-            _csvSeguro(produto.categoria),
-            ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReal),
-            '${produto.quantidadeMinima}',
-            _formatarNumeroCsv(produto.precoVenda),
-            _formatarNumeroCsv(_precoAVista(produto)),
-          ].join(';'));
+          linhas.add(
+            [
+              _csvSeguro(produto.codigoInterno),
+              _csvSeguro(produto.nome),
+              _csvSeguro(produto.unidade),
+              _csvSeguro(produto.categoria),
+              ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReal),
+              '${produto.quantidadeMinima}',
+              _formatarNumeroCsv(produto.precoVenda),
+              _formatarNumeroCsv(_precoAVista(produto)),
+            ].join(';'),
+          );
         }
       }
       await arquivo.writeAsString('\uFEFF${linhas.join('\n')}', encoding: utf8);
@@ -890,10 +1308,15 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     try {
       final produtos = widget.produtoRepository.listarTodos();
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final tipoArquivo = incluirCustos ? 'tabela_preco_custo' : 'tabela_precos';
-      final arquivo = File(p.join(pastaDestino, '${tipoArquivo}_$timestamp.pdf'));
-      final titulo =
-          incluirCustos ? 'Tabela de precos e custos' : 'Tabela de precos';
+      final tipoArquivo = incluirCustos
+          ? 'tabela_preco_custo'
+          : 'tabela_precos';
+      final arquivo = File(
+        p.join(pastaDestino, '${tipoArquivo}_$timestamp.pdf'),
+      );
+      final titulo = incluirCustos
+          ? 'Tabela de precos e custos'
+          : 'Tabela de precos';
       final bytes = await gerarPdfTabelaProdutosTexto(
         produtos: produtos,
         incluirCustos: incluirCustos,
@@ -932,8 +1355,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             somenteAtivos: false,
           );
     return porBusca.where((p) {
-      if (_filtroCategoria != null &&
-          p.categoria.trim() != _filtroCategoria) {
+      if (_filtroCategoria != null && p.categoria.trim() != _filtroCategoria) {
         return false;
       }
       if (_filtroFornecedor != null &&
@@ -961,10 +1383,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
     }).toList();
   }
 
-  String _montarResumoCardMobile(
-    Produto produto, {
-    required bool verCusto,
-  }) {
+  String _montarResumoCardMobile(Produto produto, {required bool verCusto}) {
     final cobertura = EstoqueListaMetricas.formatarCobertura(produto);
     if (!verCusto) return 'Cobertura $cobertura';
     return 'Cob $cobertura · Marg ${EstoqueListaMetricas.formatarMargem(produto)} · '
@@ -984,8 +1403,8 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             totalItens == 0
                 ? 'Nenhum item'
                 : exibidos >= totalItens
-                    ? 'Mostrando todos os $totalItens itens'
-                    : 'Mostrando $exibidos de $totalItens · role para ver mais',
+                ? 'Mostrando todos os $totalItens itens'
+                : 'Mostrando $exibidos de $totalItens · role para ver mais',
             style: estiloRodape?.copyWith(color: corMuted),
           ),
         ),
@@ -993,10 +1412,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           SizedBox(
             width: 16,
             height: 16,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: corMuted,
-            ),
+            child: CircularProgressIndicator(strokeWidth: 2, color: corMuted),
           ),
       ],
     );
@@ -1029,7 +1445,9 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           children: [
             Text(
               'Estoque',
-              style: compact ? theme.textTheme.titleMedium : theme.textTheme.titleLarge,
+              style: compact
+                  ? theme.textTheme.titleMedium
+                  : theme.textTheme.titleLarge,
             ),
             Text(
               compact
@@ -1045,48 +1463,80 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           ],
         ),
         actions: _acoesAppBarEstoque(verCusto: verCusto),
+        bottom: TabBar(
+          controller: _abasController,
+          tabs: const [
+            Tab(text: 'Operacional'),
+            Tab(text: 'Controle de Validades'),
+          ],
+        ),
       ),
       body: Column(
         children: [
-          if (_carregandoProdutos)
-            const LinearProgressIndicator(minHeight: 2),
+          if (_carregandoProdutos) const LinearProgressIndicator(minHeight: 2),
           if (!_alertaStripOculto)
             EstoqueAlertaStrip(
               criticosDiagnostico:
                   _diagnosticoResultado?.quantidadeCriticos ?? 0,
-              alertasDiagnostico:
-                  _diagnosticoResultado?.quantidadeAlertas ?? 0,
+              alertasDiagnostico: _diagnosticoResultado?.quantidadeAlertas ?? 0,
               qtdCriticosPp: _qtdCriticosPp,
+              lotesCriticosOuVencidos: _lotesCriticosOuVencidos,
               onVerDiagnostico: _abrirDiagnosticoEstoque,
               onFiltrarPp: _qtdCriticosPp > 0
-                  ? () => setState(() {
-                        _filtroOperacional =
-                            FiltroEstoqueOperacional.ppCritico;
+                  ? () {
+                      _abasController.index = 0;
+                      setState(() {
+                        _filtroOperacional = FiltroEstoqueOperacional.ppCritico;
                         _atualizarListaFiltrada(resetarScroll: true);
-                      })
+                      });
+                    }
                   : null,
               onListaCompra: _qtdCriticosPp > 0 ? _abrirListaCompra : null,
+              onVerValidades: _lotesCriticosOuVencidos > 0
+                  ? () => _abasController.animateTo(1)
+                  : null,
               onDismiss: () => setState(() => _alertaStripOculto = true),
             ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(padH, compact ? 8 : 12, padH, compact ? 6 : 8),
-            child: _painelKpisEstoque(verCusto: verCusto),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(padH, 0, padH, compact ? 6 : 8),
-            child: _painelFiltrosEstoque(
-              produtos: produtos,
-              produtosFiltrados: produtosFiltrados,
-              categorias: categorias,
-              fornecedores: fornecedores,
-            ),
-          ),
           Expanded(
-            child: _conteudoListaProdutos(
-              produtosFiltrados: produtosFiltrados,
-              itensExibidos: itensExibidos,
-              temMaisItens: temMaisItens,
-              verCusto: verCusto,
+            child: TabBarView(
+              controller: _abasController,
+              children: [
+                Column(
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        padH,
+                        compact ? 8 : 12,
+                        padH,
+                        compact ? 6 : 8,
+                      ),
+                      child: _painelKpisEstoque(verCusto: verCusto),
+                    ),
+                    Padding(
+                      padding:
+                          EdgeInsets.fromLTRB(padH, 0, padH, compact ? 6 : 8),
+                      child: _painelFiltrosEstoque(
+                        produtos: produtos,
+                        produtosFiltrados: produtosFiltrados,
+                        categorias: categorias,
+                        fornecedores: fornecedores,
+                      ),
+                    ),
+                    Expanded(
+                      child: _conteudoListaProdutos(
+                        produtosFiltrados: produtosFiltrados,
+                        itensExibidos: itensExibidos,
+                        temMaisItens: temMaisItens,
+                        verCusto: verCusto,
+                      ),
+                    ),
+                  ],
+                ),
+                EstoqueValidadePanel(
+                  produtoRepository: widget.produtoRepository,
+                  lanApiClient: _lanClient,
+                ),
+              ],
             ),
           ),
         ],
@@ -1147,20 +1597,18 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           Row(
             children: [
               TextButton.icon(
-                onPressed: () => setState(
-                  () => _filtrosExpandidos = !_filtrosExpandidos,
-                ),
+                onPressed: () =>
+                    setState(() => _filtrosExpandidos = !_filtrosExpandidos),
                 style: TextButton.styleFrom(
-                  visualDensity:
-                      compact ? VisualDensity.compact : VisualDensity.standard,
+                  visualDensity: compact
+                      ? VisualDensity.compact
+                      : VisualDensity.standard,
                 ),
                 icon: Icon(
                   _filtrosExpandidos ? Icons.expand_less : Icons.tune,
                   size: 18,
                 ),
-                label: Text(
-                  _filtrosExpandidos ? 'Ocultar filtros' : 'Filtros',
-                ),
+                label: Text(_filtrosExpandidos ? 'Ocultar filtros' : 'Filtros'),
               ),
               if (!_filtrosExpandidos && _temFiltrosAvancadosAtivos)
                 Padding(
@@ -1224,10 +1672,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                           label: 'Todas',
                         ),
                         for (final c in categorias)
-                          DropdownMenuEntry<String?>(
-                            value: c,
-                            label: c,
-                          ),
+                          DropdownMenuEntry<String?>(value: c, label: c),
                       ],
                       onSelected: (v) => setState(() {
                         _filtroCategoria = v;
@@ -1245,10 +1690,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                           label: 'Todos',
                         ),
                         for (final f in fornecedores)
-                          DropdownMenuEntry<String?>(
-                            value: f,
-                            label: f,
-                          ),
+                          DropdownMenuEntry<String?>(value: f, label: f),
                       ],
                       onSelected: (v) => setState(() {
                         _filtroFornecedor = v;
@@ -1284,7 +1726,10 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
             const SizedBox(height: 6),
             _rodapeStatusLista(
               totalItens: produtosFiltrados.length,
-              exibidos: math.min(_limiteExibicaoLista, produtosFiltrados.length),
+              exibidos: math.min(
+                _limiteExibicaoLista,
+                produtosFiltrados.length,
+              ),
               estiloRodape: estiloRodape,
               corMuted: corMuted,
             ),
@@ -1353,11 +1798,8 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
           }
           final produto = produtosFiltrados[index];
           final criticoPp = _criticoPpPorProdutoId[produto.id] ?? false;
-          final ppExibicao = _comprasSvc.calcularPontoPedidoExibicao(produto);
-          final resumo = _montarResumoCardMobile(
-            produto,
-            verCusto: verCusto,
-          );
+          final ppExibicao = _ppExibicaoDe(produto);
+          final resumo = _montarResumoCardMobile(produto, verCusto: verCusto);
           return EstoqueCardLinha(
             produto: produto,
             indice: index,
@@ -1379,8 +1821,8 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
         child: Text(
           'Carregando mais produtos...',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
       ),
     );
@@ -1421,7 +1863,7 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
               produto: produto,
               indice: index,
               criticoPp: criticoPp,
-              ppExibicao: _comprasSvc.calcularPontoPedidoExibicao(produto),
+              ppExibicao: _ppExibicaoDe(produto),
               verCusto: verCusto,
               vendaFormatada: _formatarMoedaBRL(
                 EstoqueListaMetricas.precoVendaExibicao(produto),
@@ -1430,8 +1872,9 @@ class _EstoquePageState extends State<EstoquePage> with SafeSyncRefreshMixin {
                 EstoqueListaMetricas.custoExibicao(produto),
               ),
               margemFormatada: EstoqueListaMetricas.formatarMargem(produto),
-              coberturaFormatada:
-                  EstoqueListaMetricas.formatarCobertura(produto),
+              coberturaFormatada: EstoqueListaMetricas.formatarCobertura(
+                produto,
+              ),
               onAcao: _onAcaoProdutoTabela,
             );
           },

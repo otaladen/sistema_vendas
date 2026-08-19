@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/cliente_repository.dart';
-import '../../data/produto_repository.dart';
-import '../../data/venda_repository.dart';
-import '../../data/vendedor_repository.dart';
+import '../../data/api/venda_api_repository.dart';
+import '../../model/cliente.dart';
+import '../../model/produto.dart';
+import '../../model/venda.dart';
 import '../clientes_page.dart';
 import '../produto_detalhe_venda_page.dart';
 import 'relatorio_helpers.dart';
@@ -17,10 +17,22 @@ String _fmtMoeda(double v) => 'R\$ ${_moeda.format(v)}';
 /// Dialogo com itens e totais de uma venda finalizada.
 Future<void> mostrarDetalheVendaRelatorio(
   BuildContext context, {
-  required VendaRepository vendaRepository,
+  required dynamic vendaRepository,
   required int vendaId,
+  dynamic clienteRepository,
 }) async {
-  final v = vendaRepository.obterPorId(vendaId);
+  Venda? v = vendaRepository.obterPorId(vendaId) as Venda?;
+  if (v == null && vendaRepository is VendaApiRepository) {
+    try {
+      v = await vendaRepository.atualizarVendaFinalizadaNoCache(vendaId);
+    } catch (_) {}
+  }
+  // Orcamentos no terminal: se so temos o id no cache de orcamentos.
+  if (v == null) {
+    try {
+      v = vendaRepository.obterPorId(vendaId) as Venda?;
+    } catch (_) {}
+  }
   if (v == null) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -29,14 +41,24 @@ Future<void> mostrarDetalheVendaRelatorio(
     }
     return;
   }
-  v.cliente.target;
-  v.vendedor.target;
-  final nota = v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '${v.id}';
+  if (vendaRepository is VendaApiRepository) {
+    final itens = relatorioItensDaVenda(vendaRepository, v);
+    if (itens.isEmpty) {
+      try {
+        await vendaRepository.carregarItensRemoto(vendaId);
+      } catch (_) {}
+    }
+  }
+  final clienteNome = relatorioNomeCliente(
+    v,
+    clienteRepository: clienteRepository,
+  );
+  final venda = v;
+  final nota = venda.numeroOrcamento > 0 ? '${venda.numeroOrcamento}' : '${venda.id}';
   if (!context.mounted) return;
   await showDialog<void>(
     context: context,
     builder: (ctx) {
-      final cliente = v.cliente.target?.nomeRazao ?? 'Sem cliente';
       return AlertDialog(
         title: Text('Venda $nota'),
         content: SizedBox(
@@ -46,12 +68,12 @@ Future<void> mostrarDetalheVendaRelatorio(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Data: ${_dh.format(v.data.toLocal())}'),
-                Text('Cliente: $cliente'),
-                Text('Total: ${_fmtMoeda(v.total)}'),
-                Text('Lucro: ${_fmtMoeda(v.lucroTotal)}'),
+                Text('Data: ${_dh.format(venda.data.toLocal())}'),
+                Text('Cliente: $clienteNome'),
+                Text('Total: ${_fmtMoeda(venda.total)}'),
+                Text('Lucro: ${_fmtMoeda(venda.lucroTotal)}'),
                 Text(
-                  'Pagamento: ${relatorioRotuloFormaPagamento(v.formaPagamento)}',
+                  'Pagamento: ${relatorioRotuloFormaPagamento(venda.formaPagamento)}',
                 ),
                 const SizedBox(height: 12),
                 const Text(
@@ -59,7 +81,7 @@ Future<void> mostrarDetalheVendaRelatorio(
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
-                ...v.itens.map(
+                ...relatorioItensDaVenda(vendaRepository, venda).map(
                   (i) => Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
@@ -86,10 +108,10 @@ Future<void> mostrarDetalheVendaRelatorio(
 /// Abre cadastro de clientes no registro informado.
 Future<void> abrirClienteRelatorio(
   BuildContext context, {
-  required ClienteRepository clienteRepository,
-  required VendaRepository vendaRepository,
+  required dynamic clienteRepository,
+  required dynamic vendaRepository,
   required int clienteId,
-  VendedorRepository? vendedorRepository,
+  dynamic vendedorRepository,
 }) async {
   if (clienteId <= 0) return;
   await Navigator.push<void>(
@@ -108,11 +130,11 @@ Future<void> abrirClienteRelatorio(
 /// Modal de detalhe do produto (mesmo do PDV).
 Future<void> abrirProdutoRelatorio(
   BuildContext context, {
-  required ProdutoRepository produtoRepository,
+  required dynamic produtoRepository,
   required int produtoId,
 }) async {
   if (produtoId <= 0) return;
-  final p = produtoRepository.obterPorId(produtoId);
+  final p = produtoRepository.obterPorId(produtoId) as Produto?;
   if (p == null) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -127,12 +149,12 @@ Future<void> abrirProdutoRelatorio(
 /// Resumo rapido do cliente antes de abrir cadastro.
 Future<void> mostrarResumoClienteRelatorio(
   BuildContext context, {
-  required ClienteRepository clienteRepository,
-  required VendaRepository vendaRepository,
+  required dynamic clienteRepository,
+  required dynamic vendaRepository,
   required int clienteId,
-  VendedorRepository? vendedorRepository,
+  dynamic vendedorRepository,
 }) async {
-  final c = clienteRepository.obterPorId(clienteId);
+  final c = clienteRepository.obterPorId(clienteId) as Cliente?;
   if (c == null) return;
   if (!context.mounted) return;
   await showDialog<void>(

@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 
 import '../domain/auditoria_catalogo.dart';
-import '../data/usuario_repository.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../services/auditoria_registrar.dart';
+
+class AutorizacaoDescontoResultado {
+  const AutorizacaoDescontoResultado({
+    required this.login,
+    required this.senha,
+  });
+
+  final String login;
+  final String senha;
+}
 
 class _CredenciaisAutorizacao {
   const _CredenciaisAutorizacao({required this.login, required this.senha});
@@ -19,9 +28,12 @@ bool usuarioPodeAutorizarDescontoAcimaTetoPdv(UsuarioSistema u) {
 }
 
 /// Login/senha de gerente para desconto acima do teto configurado no PDV.
-Future<String?> solicitarAutorizacaoDescontoAcimaTetoPdv(
+///
+/// [usuarioRepository] aceita [UsuarioRepository] ou [UsuarioApiRepository]
+/// (Terminal Leve) — ambos expoe `autenticar`.
+Future<AutorizacaoDescontoResultado?> solicitarAutorizacaoDescontoAcimaTetoPdv(
   BuildContext context,
-  UsuarioRepository usuarioRepository, {
+  dynamic usuarioRepository, {
   required UsuarioSistema usuarioLogado,
   required double maximoPermitidoReais,
   required double descontoSolicitadoReais,
@@ -71,7 +83,10 @@ Future<String?> solicitarAutorizacaoDescontoAcimaTetoPdv(
       'autorizadoPor': usuario.login,
     },
   );
-  return usuario.login;
+  return AutorizacaoDescontoResultado(
+    login: cred.login,
+    senha: cred.senha,
+  );
 }
 
 class _DialogoAutorizacaoDescontoPdv extends StatefulWidget {

@@ -166,3 +166,46 @@ void aplicarMascaraTelefone(TextEditingController c, TelefoneInputFormatter fmt)
     TextEditingValue(text: d),
   );
 }
+
+/// Mascara `dd/MM/yyyy` (8 digitos).
+class DataDdMmYyyyInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = somenteDigitos(newValue.text);
+    final truncated = digits.length > 8 ? digits.substring(0, 8) : digits;
+    final masked = _mask(truncated);
+    return TextEditingValue(
+      text: masked,
+      selection: TextSelection.collapsed(offset: masked.length),
+    );
+  }
+
+  static String _mask(String value) {
+    if (value.length <= 2) return value;
+    if (value.length <= 4) {
+      return '${value.substring(0, 2)}/${value.substring(2)}';
+    }
+    return '${value.substring(0, 2)}/${value.substring(2, 4)}/${value.substring(4)}';
+  }
+}
+
+/// Interpreta `dd/MM/yyyy`. Retorna null se incompleto ou invalido.
+DateTime? parseDataDdMmYyyy(String texto, {DateTime? naoDepoisDe}) {
+  final d = somenteDigitos(texto);
+  if (d.length != 8) return null;
+  final dia = int.tryParse(d.substring(0, 2));
+  final mes = int.tryParse(d.substring(2, 4));
+  final ano = int.tryParse(d.substring(4, 8));
+  if (dia == null || mes == null || ano == null) return null;
+  if (ano < 1900 || mes < 1 || mes > 12 || dia < 1) return null;
+  final dt = DateTime(ano, mes, dia);
+  if (dt.year != ano || dt.month != mes || dt.day != dia) return null;
+  final limite = naoDepoisDe ?? DateTime.now();
+  final limiteDia = DateTime(limite.year, limite.month, limite.day);
+  if (dt.isAfter(limiteDia)) return null;
+  return dt;
+}
+

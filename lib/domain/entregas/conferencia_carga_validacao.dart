@@ -31,7 +31,7 @@ abstract final class ConferenciaCargaValidacao {
     if (pendentes.isEmpty) return;
 
     throw StateError(
-      'Nao foi possivel marcar "Saiu": conferencia de separacao incompleta.\n'
+      'Nao foi possivel liberar a saida: conferencia de separacao incompleta.\n'
       'Marque todos os itens do romaneio no patio antes da saida do caminhao.\n'
       '${pendentes.join('\n')}',
     );

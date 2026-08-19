@@ -87,8 +87,8 @@ class SyncService {
     _vendaRemapLocalParaGlobal[localId] = globalId;
   }
 
-  /// Carga inicial dedicada (tela [PrimeiraCargaPage]): pull completo com
-  /// progresso em % e yields frequentes (evita ANR "nao esta respondendo").
+  /// Carga inicial dedicada (legado; tela PrimeiraCargaPage removida): pull
+  /// completo com progresso. Mantido para celular / testes; Windows nao usa.
   ///
   /// Retorna null se OK; mensagem de erro caso contrario.
   Future<String?> executarBootstrapInicial({
@@ -335,6 +335,12 @@ class SyncService {
     if (!config.redeSincronizacaoAtiva || config.redeServidorUrl.trim().isEmpty) {
       return null;
     }
+    // PC servidor e a fonte dos dados: hub (8787) + API (8788). Nao deve
+    // puxar/empurrar contra si mesmo (travava UI com bootstrap em banco vazio
+    // ou changelog antigo do sync_server).
+    if (config.redeModoServidor) {
+      return null;
+    }
 
     // Repara loop causado por remarcar todos os produtos com foto a cada sync.
     if (!_plataformaCelular) {
@@ -376,17 +382,23 @@ class SyncService {
         final maxPaginasCelular = bootstrapCatchup
             ? 40
             : (modo == SyncModo.completo ? 8 : 3);
+        // Desktop: NUNCA paginas ilimitadas — travava a UI no "Sync agora".
+        final maxPaginasDesktop = bootstrapCatchup
+            ? 24
+            : (modo == SyncModo.completo ? 8 : 4);
         // Bootstrap com pruning no servidor: lotes grandes (menos round-trips).
         final limitCelular = bootstrapCatchup ? 1000 : 60;
+        final limitDesktop = bootstrapCatchup ? 200 : 80;
 
         await executarPullCatchup(
           sinceInicial: sinceInicial,
-          maxPaginas: _plataformaCelular ? maxPaginasCelular : null,
+          maxPaginas:
+              _plataformaCelular ? maxPaginasCelular : maxPaginasDesktop,
           buscarPagina: (since) async {
             final pullData = await client.pull(
               since: since,
               deviceId: deviceId,
-              limit: _plataformaCelular ? limitCelular : 500,
+              limit: _plataformaCelular ? limitCelular : limitDesktop,
               bootstrap: bootstrapCatchup,
             );
             final changes = pullData['changes'];
@@ -413,12 +425,12 @@ class SyncService {
                   );
                 }
                 i++;
-                // Bootstrap: pausa menor; em uso normal protege a UI.
+                // Cede a UI com frequencia (PC e celular).
                 if (_plataformaCelular) {
                   final ms = bootstrapCatchup ? 4 : 12;
                   await Future<void>.delayed(Duration(milliseconds: ms));
-                } else if (i % 25 == 0) {
-                  await Future<void>.delayed(Duration.zero);
+                } else if (i % 8 == 0) {
+                  await Future<void>.delayed(const Duration(milliseconds: 1));
                 }
               }
               houveAlteracaoRemota = true;
@@ -485,7 +497,8 @@ class SyncService {
           // Mescla dirty novo (ex.: orcamento 342) que chegou enquanto o
           // batch antigo ainda estava pendente — senao ele nunca sobe.
           final frescas = await _fullSync.montarMutacoes(
-            evitarSnapshotCompleto: _plataformaCelular,
+            // Snapshot completo no PC tambem congela (mesmo padrao do celular).
+            evitarSnapshotCompleto: true,
           );
           final chaves = <String>{};
           for (final m in mutations) {
@@ -513,7 +526,7 @@ class SyncService {
           }
         } else {
           var montadas = await _fullSync.montarMutacoes(
-            evitarSnapshotCompleto: _plataformaCelular,
+            evitarSnapshotCompleto: true,
           );
           if (montadas.isEmpty) {
             // Mesmo sem mutacoes de dados, sobe fotos locais (PC servidor/caixa).

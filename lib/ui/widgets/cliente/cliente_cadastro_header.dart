@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../domain/cliente_cadastro.dart';
-
 /// Cabecalho fixo do cadastro de clientes com identidade e KPIs comerciais.
 class ClienteCadastroHeader extends StatelessWidget {
   const ClienteCadastroHeader({
@@ -12,7 +10,6 @@ class ClienteCadastroHeader extends StatelessWidget {
     required this.tipoPessoa,
     required this.documento,
     required this.ativo,
-    required this.segmento,
     required this.codigoInterno,
     this.totalGasto,
     this.ultimaCompraTexto,
@@ -27,7 +24,6 @@ class ClienteCadastroHeader extends StatelessWidget {
   final String tipoPessoa;
   final String documento;
   final bool ativo;
-  final String segmento;
   final String codigoInterno;
   final String? totalGasto;
   final String? ultimaCompraTexto;
@@ -46,73 +42,48 @@ class ClienteCadastroHeader extends StatelessWidget {
         : (clienteId != null ? '#$clienteId' : 'Novo');
     final docRotulo = tipoPessoa == 'juridica' ? 'CNPJ' : 'CPF';
     final doc = documento.trim().isEmpty ? '-' : documento.trim();
-    final seg = segmento.trim().isEmpty
-        ? null
-        : ClienteCadastro.rotuloSegmento(segmento);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Row(
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.badge_outlined, color: theme.colorScheme.primary),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      titulo,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: [
-                        _ChipInfo(label: codigo, theme: theme),
-                        _ChipInfo(
-                          label: tipoPessoa == 'juridica' ? 'PJ' : 'PF',
-                          theme: theme,
-                        ),
-                        _ChipInfo(
-                          label: ativo ? 'Ativo' : 'Inativo',
-                          theme: theme,
-                          destaque: ativo
-                              ? theme.colorScheme.primaryContainer
-                              : theme.colorScheme.errorContainer,
-                        ),
-                        if (seg != null) _ChipInfo(label: seg, theme: theme),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '$docRotulo: $doc',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ],
-                ),
+          Icon(Icons.badge_outlined, size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              titulo,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
               ),
-            ],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-          if (emEdicao && clienteId != null && clienteId! > 0) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
+          const SizedBox(width: 6),
+          Wrap(
+            spacing: 4,
+            runSpacing: 2,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _ChipInfo(label: codigo, theme: theme),
+              _ChipInfo(
+                label: tipoPessoa == 'juridica' ? 'PJ' : 'PF',
+                theme: theme,
+              ),
+              _ChipInfo(
+                label: ativo ? 'Ativo' : 'Inativo',
+                theme: theme,
+                destaque: ativo
+                    ? theme.colorScheme.primaryContainer
+                    : theme.colorScheme.errorContainer,
+              ),
+              Text(
+                '$docRotulo: $doc',
+                style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+              ),
+              if (emEdicao && clienteId != null && clienteId! > 0) ...[
                 if (totalGasto != null)
                   _KpiChip(
                     icon: Icons.shopping_cart_outlined,
@@ -123,30 +94,23 @@ class ClienteCadastroHeader extends StatelessWidget {
                 if (ultimaCompraTexto != null)
                   _KpiChip(
                     icon: Icons.schedule_outlined,
-                    rotulo: 'Ultima compra',
+                    rotulo: 'Ultima',
                     valor: ultimaCompraTexto!,
                     theme: theme,
                   ),
-                if (limiteCredito != null && limiteCredito! > 0) ...[
-                  if (fiadoAberto != null)
-                    _KpiChip(
-                      icon: Icons.receipt_long_outlined,
-                      rotulo: 'Fiado aberto',
-                      valor: fiadoAberto!,
-                      theme: theme,
-                    ),
-                  if (creditoDisponivel != null)
-                    _KpiChip(
-                      icon: Icons.account_balance_wallet_outlined,
-                      rotulo: 'Disponivel',
-                      valor: creditoDisponivel!,
-                      theme: theme,
-                      destaque: theme.colorScheme.primaryContainer,
-                    ),
-                ],
+                if (limiteCredito != null &&
+                    limiteCredito! > 0 &&
+                    creditoDisponivel != null)
+                  _KpiChip(
+                    icon: Icons.account_balance_wallet_outlined,
+                    rotulo: 'Disp.',
+                    valor: creditoDisponivel!,
+                    theme: theme,
+                    destaque: theme.colorScheme.primaryContainer,
+                  ),
               ],
-            ),
-          ],
+            ],
+          ),
         ],
       ),
     );
@@ -167,15 +131,18 @@ class _ChipInfo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(
         color: destaque ?? theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(3),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Text(
         label,
-        style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w600,
+          fontSize: 10.5,
+        ),
       ),
     );
   }
@@ -199,25 +166,26 @@ class _KpiChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: destaque ?? theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(3),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: theme.colorScheme.primary),
-          const SizedBox(width: 6),
+          Icon(icon, size: 13, color: theme.colorScheme.primary),
+          const SizedBox(width: 3),
           Text(
             '$rotulo: ',
-            style: theme.textTheme.labelSmall,
+            style: theme.textTheme.labelSmall?.copyWith(fontSize: 10),
           ),
           Text(
             valor,
             style: theme.textTheme.labelSmall?.copyWith(
               fontWeight: FontWeight.w700,
+              fontSize: 10.5,
             ),
           ),
         ],
