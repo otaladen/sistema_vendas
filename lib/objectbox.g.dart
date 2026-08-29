@@ -48,6 +48,8 @@ import 'model/registro_devolucao.dart';
 import 'model/sessao_inventario.dart';
 import 'model/sugestao_venda_metrica_evento.dart';
 import 'model/titulo_receber.dart';
+import 'model/uso_vale_credito.dart';
+import 'model/vale_credito.dart';
 import 'model/venda.dart';
 import 'model/vendedor.dart';
 import 'model/vinculo_fornecedor_produto.dart';
@@ -4049,6 +4051,186 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(39, 6890467159081290619),
+    name: 'UsoValeCredito',
+    lastPropertyId: const obx_int.IdUid(7, 478391272446530179),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 6457691801848419633),
+        name: 'id',
+        type: 6,
+        flags: 129,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 2577317500760855404),
+        name: 'valor',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 6924692900854392958),
+        name: 'registradoPor',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 3243513067882062572),
+        name: 'numeroVenda',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 6135781093268725948),
+        name: 'data',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 745848321053429521),
+        name: 'valeId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(80, 6875053209284984879),
+        relationField: 'vale',
+        relationTarget: 'ValeCredito',
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 478391272446530179),
+        name: 'vendaId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(81, 4054854685923311019),
+        relationField: 'venda',
+        relationTarget: 'Venda',
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(40, 4237822245225587881),
+    name: 'ValeCredito',
+    lastPropertyId: const obx_int.IdUid(16, 897112482120457543),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 4333902661455602317),
+        name: 'id',
+        type: 6,
+        flags: 129,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 7859781528658393249),
+        name: 'codigo',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(82, 1889048507852351338),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 311906416387127072),
+        name: 'valorOriginal',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 6652353562686422226),
+        name: 'valorUtilizado',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 8610726095104556308),
+        name: 'cancelado',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 8510655998588951835),
+        name: 'motivoCancelamento',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 225175136193310747),
+        name: 'canceladoPor',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 3811712534749294482),
+        name: 'emitidoPor',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 4780983534983703097),
+        name: 'observacao',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 7286364178521698720),
+        name: 'numeroVendaOrigem',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 2224749299621618150),
+        name: 'dataEmissao',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 8500668542811018445),
+        name: 'dataValidade',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(13, 3871924973041797860),
+        name: 'dataCancelamento',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(14, 6607661117194545543),
+        name: 'clienteId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(83, 6229160727232957700),
+        relationField: 'cliente',
+        relationTarget: 'Cliente',
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(15, 5787315239102342755),
+        name: 'vendaOrigemId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(84, 5681515675086890961),
+        relationField: 'vendaOrigem',
+        relationTarget: 'Venda',
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(16, 897112482120457543),
+        name: 'registroDevolucaoId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(85, 8121898667377937475),
+        relationField: 'registroDevolucao',
+        relationTarget: 'RegistroDevolucao',
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[
+      obx_int.ModelBacklink(
+        name: 'usos',
+        srcEntity: 'UsoValeCredito',
+        srcField: 'vale',
+      ),
+    ],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -4094,8 +4276,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(38, 827949580553706855),
-    lastIndexId: const obx_int.IdUid(79, 8119576664302985405),
+    lastEntityId: const obx_int.IdUid(40, 4237822245225587881),
+    lastIndexId: const obx_int.IdUid(85, 8121898667377937475),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -9198,6 +9380,247 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    UsoValeCredito: obx_int.EntityDefinition<UsoValeCredito>(
+      model: _entities[38],
+      toOneRelations: (UsoValeCredito object) => [object.vale, object.venda],
+      toManyRelations: (UsoValeCredito object) => {},
+      getId: (UsoValeCredito object) => object.id,
+      setId: (UsoValeCredito object, int id) {
+        object.id = id;
+      },
+      objectToFB: (UsoValeCredito object, fb.Builder fbb) {
+        final registradoPorOffset = fbb.writeString(object.registradoPor);
+        fbb.startTable(8);
+        fbb.addInt64(0, object.id);
+        fbb.addFloat64(1, object.valor);
+        fbb.addOffset(2, registradoPorOffset);
+        fbb.addInt64(3, object.numeroVenda);
+        fbb.addInt64(4, object.data.millisecondsSinceEpoch);
+        fbb.addInt64(5, object.vale.targetId);
+        fbb.addInt64(6, object.venda.targetId);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final valorParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          6,
+          0,
+        );
+        final registradoPorParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final numeroVendaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          10,
+          0,
+        );
+        final dataParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 12, 0),
+          isUtc: true,
+        );
+        final object = UsoValeCredito(
+          id: idParam,
+          valor: valorParam,
+          registradoPor: registradoPorParam,
+          numeroVenda: numeroVendaParam,
+          data: dataParam,
+        );
+        object.vale.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          14,
+          0,
+        );
+        object.vale.attach(store);
+        object.venda.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        object.venda.attach(store);
+        return object;
+      },
+    ),
+    ValeCredito: obx_int.EntityDefinition<ValeCredito>(
+      model: _entities[39],
+      toOneRelations: (ValeCredito object) => [
+        object.cliente,
+        object.vendaOrigem,
+        object.registroDevolucao,
+      ],
+      toManyRelations: (ValeCredito object) => {
+        obx_int.RelInfo<UsoValeCredito>.toOneBacklink(
+          6,
+          object.id,
+          (UsoValeCredito srcObject) => srcObject.vale,
+        ): object.usos,
+      },
+      getId: (ValeCredito object) => object.id,
+      setId: (ValeCredito object, int id) {
+        object.id = id;
+      },
+      objectToFB: (ValeCredito object, fb.Builder fbb) {
+        final codigoOffset = fbb.writeString(object.codigo);
+        final motivoCancelamentoOffset = fbb.writeString(
+          object.motivoCancelamento,
+        );
+        final canceladoPorOffset = fbb.writeString(object.canceladoPor);
+        final emitidoPorOffset = fbb.writeString(object.emitidoPor);
+        final observacaoOffset = fbb.writeString(object.observacao);
+        fbb.startTable(17);
+        fbb.addInt64(0, object.id);
+        fbb.addOffset(1, codigoOffset);
+        fbb.addFloat64(2, object.valorOriginal);
+        fbb.addFloat64(3, object.valorUtilizado);
+        fbb.addBool(4, object.cancelado);
+        fbb.addOffset(5, motivoCancelamentoOffset);
+        fbb.addOffset(6, canceladoPorOffset);
+        fbb.addOffset(7, emitidoPorOffset);
+        fbb.addOffset(8, observacaoOffset);
+        fbb.addInt64(9, object.numeroVendaOrigem);
+        fbb.addInt64(10, object.dataEmissao.millisecondsSinceEpoch);
+        fbb.addInt64(11, object.dataValidade?.millisecondsSinceEpoch);
+        fbb.addInt64(12, object.dataCancelamento?.millisecondsSinceEpoch);
+        fbb.addInt64(13, object.cliente.targetId);
+        fbb.addInt64(14, object.vendaOrigem.targetId);
+        fbb.addInt64(15, object.registroDevolucao.targetId);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final dataValidadeValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          26,
+        );
+        final dataCancelamentoValue = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          28,
+        );
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final codigoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 6, '');
+        final valorOriginalParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          8,
+          0,
+        );
+        final valorUtilizadoParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          10,
+          0,
+        );
+        final canceladoParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          12,
+          false,
+        );
+        final motivoCancelamentoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 14, '');
+        final canceladoPorParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 16, '');
+        final emitidoPorParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 18, '');
+        final observacaoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 20, '');
+        final numeroVendaOrigemParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          22,
+          0,
+        );
+        final dataEmissaoParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 24, 0),
+          isUtc: true,
+        );
+        final dataValidadeParam = dataValidadeValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                dataValidadeValue,
+                isUtc: true,
+              );
+        final dataCancelamentoParam = dataCancelamentoValue == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                dataCancelamentoValue,
+                isUtc: true,
+              );
+        final object = ValeCredito(
+          id: idParam,
+          codigo: codigoParam,
+          valorOriginal: valorOriginalParam,
+          valorUtilizado: valorUtilizadoParam,
+          cancelado: canceladoParam,
+          motivoCancelamento: motivoCancelamentoParam,
+          canceladoPor: canceladoPorParam,
+          emitidoPor: emitidoPorParam,
+          observacao: observacaoParam,
+          numeroVendaOrigem: numeroVendaOrigemParam,
+          dataEmissao: dataEmissaoParam,
+          dataValidade: dataValidadeParam,
+          dataCancelamento: dataCancelamentoParam,
+        );
+        object.cliente.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          30,
+          0,
+        );
+        object.cliente.attach(store);
+        object.vendaOrigem.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          32,
+          0,
+        );
+        object.vendaOrigem.attach(store);
+        object.registroDevolucao.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          34,
+          0,
+        );
+        object.registroDevolucao.attach(store);
+        obx_int.InternalToManyAccess.setRelInfo<ValeCredito>(
+          object.usos,
+          store,
+          obx_int.RelInfo<UsoValeCredito>.toOneBacklink(
+            6,
+            object.id,
+            (UsoValeCredito srcObject) => srcObject.vale,
+          ),
+        );
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -12233,5 +12656,132 @@ class SessaoInventario_ {
   /// See [SessaoInventario.observacao].
   static final observacao = obx.QueryStringProperty<SessaoInventario>(
     _entities[37].properties[15],
+  );
+}
+
+/// [UsoValeCredito] entity fields to define ObjectBox queries.
+class UsoValeCredito_ {
+  /// See [UsoValeCredito.id].
+  static final id = obx.QueryIntegerProperty<UsoValeCredito>(
+    _entities[38].properties[0],
+  );
+
+  /// See [UsoValeCredito.valor].
+  static final valor = obx.QueryDoubleProperty<UsoValeCredito>(
+    _entities[38].properties[1],
+  );
+
+  /// See [UsoValeCredito.registradoPor].
+  static final registradoPor = obx.QueryStringProperty<UsoValeCredito>(
+    _entities[38].properties[2],
+  );
+
+  /// See [UsoValeCredito.numeroVenda].
+  static final numeroVenda = obx.QueryIntegerProperty<UsoValeCredito>(
+    _entities[38].properties[3],
+  );
+
+  /// See [UsoValeCredito.data].
+  static final data = obx.QueryDateProperty<UsoValeCredito>(
+    _entities[38].properties[4],
+  );
+
+  /// See [UsoValeCredito.vale].
+  static final vale = obx.QueryRelationToOne<UsoValeCredito, ValeCredito>(
+    _entities[38].properties[5],
+  );
+
+  /// See [UsoValeCredito.venda].
+  static final venda = obx.QueryRelationToOne<UsoValeCredito, Venda>(
+    _entities[38].properties[6],
+  );
+}
+
+/// [ValeCredito] entity fields to define ObjectBox queries.
+class ValeCredito_ {
+  /// See [ValeCredito.id].
+  static final id = obx.QueryIntegerProperty<ValeCredito>(
+    _entities[39].properties[0],
+  );
+
+  /// See [ValeCredito.codigo].
+  static final codigo = obx.QueryStringProperty<ValeCredito>(
+    _entities[39].properties[1],
+  );
+
+  /// See [ValeCredito.valorOriginal].
+  static final valorOriginal = obx.QueryDoubleProperty<ValeCredito>(
+    _entities[39].properties[2],
+  );
+
+  /// See [ValeCredito.valorUtilizado].
+  static final valorUtilizado = obx.QueryDoubleProperty<ValeCredito>(
+    _entities[39].properties[3],
+  );
+
+  /// See [ValeCredito.cancelado].
+  static final cancelado = obx.QueryBooleanProperty<ValeCredito>(
+    _entities[39].properties[4],
+  );
+
+  /// See [ValeCredito.motivoCancelamento].
+  static final motivoCancelamento = obx.QueryStringProperty<ValeCredito>(
+    _entities[39].properties[5],
+  );
+
+  /// See [ValeCredito.canceladoPor].
+  static final canceladoPor = obx.QueryStringProperty<ValeCredito>(
+    _entities[39].properties[6],
+  );
+
+  /// See [ValeCredito.emitidoPor].
+  static final emitidoPor = obx.QueryStringProperty<ValeCredito>(
+    _entities[39].properties[7],
+  );
+
+  /// See [ValeCredito.observacao].
+  static final observacao = obx.QueryStringProperty<ValeCredito>(
+    _entities[39].properties[8],
+  );
+
+  /// See [ValeCredito.numeroVendaOrigem].
+  static final numeroVendaOrigem = obx.QueryIntegerProperty<ValeCredito>(
+    _entities[39].properties[9],
+  );
+
+  /// See [ValeCredito.dataEmissao].
+  static final dataEmissao = obx.QueryDateProperty<ValeCredito>(
+    _entities[39].properties[10],
+  );
+
+  /// See [ValeCredito.dataValidade].
+  static final dataValidade = obx.QueryDateProperty<ValeCredito>(
+    _entities[39].properties[11],
+  );
+
+  /// See [ValeCredito.dataCancelamento].
+  static final dataCancelamento = obx.QueryDateProperty<ValeCredito>(
+    _entities[39].properties[12],
+  );
+
+  /// See [ValeCredito.cliente].
+  static final cliente = obx.QueryRelationToOne<ValeCredito, Cliente>(
+    _entities[39].properties[13],
+  );
+
+  /// See [ValeCredito.vendaOrigem].
+  static final vendaOrigem = obx.QueryRelationToOne<ValeCredito, Venda>(
+    _entities[39].properties[14],
+  );
+
+  /// See [ValeCredito.registroDevolucao].
+  static final registroDevolucao =
+      obx.QueryRelationToOne<ValeCredito, RegistroDevolucao>(
+        _entities[39].properties[15],
+      );
+
+  /// see [ValeCredito.usos]
+  static final usos = obx.QueryBacklinkToMany<UsoValeCredito, ValeCredito>(
+    UsoValeCredito_.vale,
   );
 }

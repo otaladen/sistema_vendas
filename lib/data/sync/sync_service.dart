@@ -22,7 +22,8 @@ import '../../model/promocao_combo_item.dart';
 import '../../model/promocao_item.dart';
 import '../../model/vendedor.dart';
 import '../../services/produto_imagem_lan_service.dart';
-import '../../services/lan_sync_server_manager.dart';
+import '../../services/lan_rede_helper.dart';
+import '../../data/api/lan_api_url.dart';
 import 'sync_api_client.dart';
 import 'sync_cursor_storage.dart';
 import 'sync_apply_order.dart';
@@ -128,7 +129,7 @@ class SyncService {
       return 'Ative a sincronizacao de rede nas configuracoes.';
     }
     if (config.redeServidorUrl.trim().isEmpty) {
-      return 'Informe o endereco do PC servidor (ex.: http://192.168.0.10:8787).';
+      return 'Informe o endereco do PC servidor (ex.: http://192.168.0.10:${LanApiUrl.portaPadrao}).';
     }
 
     final client = SyncApiClient(
@@ -335,9 +336,8 @@ class SyncService {
     if (!config.redeSincronizacaoAtiva || config.redeServidorUrl.trim().isEmpty) {
       return null;
     }
-    // PC servidor e a fonte dos dados: hub (8787) + API (8788). Nao deve
-    // puxar/empurrar contra si mesmo (travava UI com bootstrap em banco vazio
-    // ou changelog antigo do sync_server).
+    // PC servidor e a fonte dos dados (API :8788). Nao deve
+    // puxar/empurrar contra si mesmo (travava UI com bootstrap em banco vazio).
     if (config.redeModoServidor) {
       return null;
     }
@@ -711,7 +711,7 @@ class SyncService {
     );
     ProdutoImagemLanService.limparCacheEnviosSessao();
     final fallback =
-        await LanSyncServerManager.caminhoPadraoProductImages();
+        await LanRedeHelper.caminhoPadraoProductImages();
     final r = await lan.publicarFotosNoServidor(
       limitePorCiclo: 300,
       pastaServidorFallback: fallback,

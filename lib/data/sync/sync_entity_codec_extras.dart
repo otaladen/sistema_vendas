@@ -14,6 +14,8 @@ import '../../model/recebimento_fiado.dart';
 import '../../model/titulo_receber.dart';
 import '../../model/nfe_importada_registro.dart';
 import '../../model/registro_devolucao.dart';
+import '../../model/uso_vale_credito.dart';
+import '../../model/vale_credito.dart';
 import '../../model/usuario_sistema.dart';
 import '../../model/vinculo_fornecedor_produto.dart';
 import '../../domain/auditoria_retencao.dart';
@@ -537,6 +539,65 @@ class SyncEntityCodecExtras {
         precoCustoUnitario: (m['precoCustoUnitario'] as num?)?.toDouble() ?? 0,
         precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
         nomeProdutoSnapshot: (m['nomeProdutoSnapshot'] ?? '').toString(),
+      );
+
+  // --- Vale de credito (usos embutidos) ---
+  static Map<String, dynamic> valeCreditoParaMap(ValeCredito v) {
+    final usos = <Map<String, dynamic>>[];
+    for (final u in v.usos) {
+      usos.add({
+        'id': u.id,
+        'valor': u.valor,
+        'registradoPor': u.registradoPor,
+        'numeroVenda': u.numeroVenda,
+        'data': _dt(u.data),
+        'vendaId': u.venda.targetId,
+      });
+    }
+    return {
+      'id': v.id,
+      'codigo': v.codigo,
+      'valorOriginal': v.valorOriginal,
+      'valorUtilizado': v.valorUtilizado,
+      'cancelado': v.cancelado,
+      'motivoCancelamento': v.motivoCancelamento,
+      'canceladoPor': v.canceladoPor,
+      'emitidoPor': v.emitidoPor,
+      'observacao': v.observacao,
+      'numeroVendaOrigem': v.numeroVendaOrigem,
+      'dataEmissao': _dt(v.dataEmissao),
+      'dataValidade': _dt(v.dataValidade),
+      'dataCancelamento': _dt(v.dataCancelamento),
+      'clienteId': v.cliente.targetId,
+      'vendaOrigemId': v.vendaOrigem.targetId,
+      'registroDevolucaoId': v.registroDevolucao.targetId,
+      'usos': usos,
+    };
+  }
+
+  static ValeCredito valeCreditoDeMap(Map<String, dynamic> m) => ValeCredito(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        codigo: (m['codigo'] ?? '').toString(),
+        valorOriginal: (m['valorOriginal'] as num?)?.toDouble() ?? 0,
+        valorUtilizado: (m['valorUtilizado'] as num?)?.toDouble() ?? 0,
+        cancelado: m['cancelado'] == true,
+        motivoCancelamento: (m['motivoCancelamento'] ?? '').toString(),
+        canceladoPor: (m['canceladoPor'] ?? '').toString(),
+        emitidoPor: (m['emitidoPor'] ?? '').toString(),
+        observacao: (m['observacao'] ?? '').toString(),
+        numeroVendaOrigem: (m['numeroVendaOrigem'] as num?)?.toInt() ?? 0,
+        dataEmissao: _parseDt((m['dataEmissao'] ?? '').toString()),
+        dataValidade: _parseDt((m['dataValidade'] ?? '').toString()),
+        dataCancelamento: _parseDt((m['dataCancelamento'] ?? '').toString()),
+      );
+
+  static UsoValeCredito usoValeCreditoDeMap(Map<String, dynamic> m) =>
+      UsoValeCredito(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        valor: (m['valor'] as num?)?.toDouble() ?? 0,
+        registradoPor: (m['registradoPor'] ?? '').toString(),
+        numeroVenda: (m['numeroVenda'] as num?)?.toInt() ?? 0,
+        data: _parseDt((m['data'] ?? '').toString()),
       );
 
   // --- Config empresa (registro unico id=1) ---

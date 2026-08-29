@@ -21,12 +21,18 @@ class ListagemVendasTabela extends StatefulWidget {
     required this.onTapItem,
     required this.onAcaoMenu,
     required this.menuBuilder,
+    this.temMais = false,
+    this.carregandoMais = false,
+    this.onChegouAoFim,
   });
 
   final List<ListagemVendaItemUi> itens;
   final ValueChanged<ListagemVendaItemUi> onTapItem;
   final ListagemVendaAcaoCallback onAcaoMenu;
   final ListagemVendaMenuBuilder menuBuilder;
+  final bool temMais;
+  final bool carregandoMais;
+  final VoidCallback? onChegouAoFim;
 
   @override
   State<ListagemVendasTabela> createState() => _ListagemVendasTabelaState();
@@ -36,6 +42,15 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
   ListagemVendasColuna _coluna = ListagemVendasColuna.data;
   bool _ascendente = false;
   final ScrollController _scrollController = ScrollController();
+
+  static const double _prefetchPx = 520;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _tentarPrefetch());
+  }
 
   @override
   void didUpdateWidget(covariant ListagemVendasTabela oldWidget) {
@@ -52,14 +67,35 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
         if (_scrollController.offset > max) {
           _scrollController.jumpTo(max < 0 ? 0 : max);
         }
+        _tentarPrefetch();
       });
+    } else if (oldWidget.carregandoMais &&
+        !widget.carregandoMais &&
+        widget.temMais) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _tentarPrefetch());
     }
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() => _tentarPrefetch();
+
+  void _tentarPrefetch() {
+    final cb = widget.onChegouAoFim;
+    if (cb == null || !widget.temMais || widget.carregandoMais) return;
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    if (!pos.hasContentDimensions) return;
+    // Lista curta (cabe na tela) ou perto do fim → puxa o próximo lote.
+    if (pos.maxScrollExtent <= 0 ||
+        pos.pixels >= pos.maxScrollExtent - _prefetchPx) {
+      cb();
+    }
   }
 
   void _alternarOrdenacao(ListagemVendasColuna coluna) {
@@ -211,8 +247,13 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 itemBuilder: (context, index) {
                   final item = itens[index];
+                  // Faixa neutra sobre a superficie: precisa aparecer no claro
+                  // e no escuro para o olho atravessar a linha inteira.
                   final zebra = index.isOdd
-                      ? scheme.surfaceContainerLowest.withValues(alpha: 0.65)
+                      ? Color.alphaBlend(
+                          scheme.onSurface.withValues(alpha: 0.045),
+                          scheme.surface,
+                        )
                       : scheme.surface;
 
                   return Material(
@@ -221,9 +262,19 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                         : zebra,
                     child: InkWell(
                       onTap: () => widget.onTapItem(item),
-                      hoverColor: scheme.primary.withValues(alpha: 0.07),
-                      child: Padding(
+                      hoverColor: scheme.primary.withValues(alpha: 0.14),
+                      child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
+                        // Pintada por cima: a linha tem altura fixa e uma
+                        // borda no box roubaria 1px do conteudo.
+                        foregroundDecoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: scheme.outlineVariant
+                                  .withValues(alpha: 0.45),
+                            ),
+                          ),
+                        ),
                         child: Row(
                           children: [
                             SizedBox(
@@ -356,6 +407,8 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
               ),
             ),
           ),
+          if (widget.carregandoMais)
+            const LinearProgressIndicator(minHeight: 2),
         ],
       ),
     );
@@ -501,6 +554,23 @@ class _StatusChip extends StatelessWidget {
     if (msg == null || msg.isEmpty || msg == texto) {
       return chip;
     }
-    return Tooltip(message: msg, child: chip);
+    final scheme = Theme.of(context).colorScheme;
+    // Balao escuro e afastado: solto sobre a linha de baixo, ele era lido como
+    // se fosse o status daquela outra venda.
+    return Tooltip(
+      message: msg,
+      verticalOffset: 24,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: scheme.inverseSurface,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      textStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: scheme.onInverseSurface,
+            fontWeight: FontWeight.w600,
+          ),
+      child: chip,
+    );
   }
 }

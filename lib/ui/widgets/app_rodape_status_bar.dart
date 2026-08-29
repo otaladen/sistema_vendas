@@ -12,6 +12,7 @@ import '../../data/sync/sync_presence_hub.dart';
 import '../../domain/modo_terminal_leve.dart';
 import '../../services/lan_api_server.dart';
 import 'chat/chat_interno_drawer.dart';
+import 'seletor_fundo_app.dart';
 import 'seletor_menu_modo_app.dart';
 import 'seletor_tema_app.dart';
 
@@ -145,7 +146,7 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
       return;
     }
     if (modoServidor) {
-      // PC1: conta terminais no WebSocket da API :8788 (nao no hub :8787).
+      // PC1: conta terminais no WebSocket da API :8788.
       _aplicarPresencaServidorLocal();
       _presencaTimer = Timer.periodic(
         const Duration(seconds: 30),
@@ -442,6 +443,7 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
               children: [
                 const SeletorMenuModoApp(compacto: true),
                 const SeletorTemaApp(compacto: true),
+                const SeletorFundoApp(compacto: true),
                 const ChatInternoTopBarButton(),
                 if (_syncAtiva && !celular) ...[
                   const SizedBox(width: 8),

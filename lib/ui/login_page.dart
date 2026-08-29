@@ -4,6 +4,7 @@ import '../domain/auditoria_catalogo.dart';
 import '../model/usuario_sistema.dart';
 import '../services/auditoria_registrar.dart';
 import 'layout/app_layout.dart';
+import 'theme/app_fundo_scope.dart';
 import 'widgets/app_rodape_status_bar.dart';
 
 class LoginPage extends StatefulWidget {
@@ -233,6 +234,7 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     final scheme = Theme.of(context).colorScheme;
+    final fundo = AppFundoScope.maybeOf(context)?.fundoAtual;
     final acaoLogin = _primeiroAcesso ? _criarAdministrador : _entrar;
 
     final corMarca = Color.alphaBlend(
@@ -243,17 +245,19 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       bottomNavigationBar: const AppRodapeStatusBar(),
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              corMarca,
-              scheme.surface,
-              scheme.tertiary.withValues(alpha: 0.08),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
+        decoration: (fundo != null && fundo.pintaCamada)
+            ? null
+            : BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    corMarca,
+                    scheme.surface,
+                    scheme.tertiary.withValues(alpha: 0.08),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
         child: SafeArea(
           child: Center(
             child: ConstrainedBox(

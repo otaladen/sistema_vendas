@@ -37,6 +37,7 @@ import 'shell/hub_navigation.dart';
 import 'theme/app_modulo_cores.dart';
 import 'widgets/conta_sessao_app_bar_actions.dart';
 import 'widgets/hub_nav_button.dart';
+import 'widgets/seletor_fundo_app.dart';
 import 'widgets/seletor_tema_app.dart';
 import 'recados_loja_page.dart';
 import 'widgets/recados_loja_faixa.dart';
@@ -227,7 +228,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       if (widget.onIniciarSync != null) {
         await widget.onIniciarSync!();
       } else if (deps.lanSyncScheduler != null) {
-        // Celular legado: hub 8787.
+        // Celular legado: scheduler de catalogo (sem API terminal).
         await deps.lanSyncScheduler!.iniciar();
       }
     } catch (_) {
@@ -1136,12 +1137,18 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         automaticallyImplyLeading: widget.onAbrirMenu == null,
         title: Text(tituloAppBar),
         actions: [
-          if (SeletorTemaApp.uiCompacta(context))
+          if (SeletorTemaApp.uiCompacta(context)) ...[
             IconButton(
               tooltip: 'Temas',
               icon: const Icon(Icons.palette_outlined),
               onPressed: () => SeletorTemaApp.mostrarFolha(context),
             ),
+            IconButton(
+              tooltip: 'Plano de fundo',
+              icon: const Icon(Icons.wallpaper_outlined),
+              onPressed: () => SeletorFundoApp.mostrarFolha(context),
+            ),
+          ],
           IconButton(
             tooltip: 'Atualizar painel',
             onPressed: _carregarPainel,

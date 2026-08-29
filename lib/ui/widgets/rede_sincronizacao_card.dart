@@ -16,7 +16,7 @@ import '../../data/sync/sync_teste_conexao.dart';
 import '../../domain/sync_rede_ajuda.dart';
 import '../../domain/sync_token_util.dart';
 import '../../services/lan_api_server.dart';
-import '../../services/lan_sync_server_manager.dart';
+import '../../services/lan_rede_helper.dart';
 import '../../services/lan_servidor_bootstrap.dart';
 import '../../services/windows_app_startup_helper.dart';
 import '../../data/api/lan_api_url.dart';
@@ -43,7 +43,6 @@ class RedeSincronizacaoCard extends StatefulWidget {
 
 class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   final _urlController = TextEditingController();
-  final _portaController = TextEditingController();
   final _tokenController = TextEditingController();
 
   bool _modoServidor = false;
@@ -56,8 +55,6 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   bool _testandoRede = false;
   bool _sincronizando = false;
   bool _enviandoFotos = false;
-  bool _iniciandoServidor = false;
-  bool _parandoServidor = false;
   bool _tokenVisivel = false;
   bool? _tokenAceitoPeloServidor;
   bool _erroAjudaExpandido = false;
@@ -81,17 +78,8 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   @override
   void dispose() {
     _urlController.dispose();
-    _portaController.dispose();
     _tokenController.dispose();
     super.dispose();
-  }
-
-  int get _porta {
-    final p = int.tryParse(_portaController.text.trim());
-    if (p == null || p < 1024 || p > 65535) {
-      return LanSyncServerManager.portaPadrao;
-    }
-    return p;
   }
 
   String get _tokenAtual => _tokenController.text.trim();
@@ -103,15 +91,15 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     final config = await widget.configRepository.carregarEmpresaConfig();
     final modoImplantacao =
         await widget.configRepository.carregarModoImplantacaoLocal();
-    final ip = await LanSyncServerManager.obterIpv4Local();
-    final porta = config.redePortaServidor;
+    final ip = await LanRedeHelper.obterIpv4Local();
     var url = config.redeServidorUrl.trim();
     if (config.redeModoServidor && ip != null && url.isEmpty) {
-      url = LanSyncServerManager.montarUrlServidor(ip, porta);
+      url = LanRedeHelper.montarUrlServidor(ip);
     }
-    final online = url.isNotEmpty
-        ? await LanSyncServerManager.servidorRespondendo(url)
-        : await LanSyncServerManager.servidorRespondendoNaPorta(porta);
+    final online = await LanRedeHelper.apiRespondendo(
+      baseUrl: url,
+      syncToken: config.redeSyncToken,
+    );
     final iniciarWin = Platform.isWindows
         ? await WindowsAppStartupHelper.estaAtivo()
         : false;
@@ -122,7 +110,6 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       _syncAtiva = config.redeSincronizacaoAtiva;
       _modoImplantacao = modoImplantacao;
       _ipLocal = ip;
-      _portaController.text = '$porta';
       _urlController.text = url;
       _tokenController.text = config.redeSyncToken;
       _servidorOnline = online;
@@ -209,8 +196,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       _modoServidor = servidor;
       _tokenAceitoPeloServidor = null;
       if (servidor && _ipLocal != null) {
-        _urlController.text =
-            LanSyncServerManager.montarUrlServidor(_ipLocal!, _porta);
+        _urlController.text = LanRedeHelper.montarUrlServidor(_ipLocal!);
       }
     });
     _atualizarStatusServidor();
@@ -219,7 +205,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   void _preencherUrlServidorLocal() {
     final ip = _ipLocal;
     if (ip == null || ip.isEmpty) return;
-    _urlController.text = LanSyncServerManager.montarUrlServidor(ip, _porta);
+    _urlController.text = LanRedeHelper.montarUrlServidor(ip);
   }
 
   String get _enderecoApiTerminais {
@@ -232,14 +218,14 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
 
   Future<void> _atualizarStatusServidor() async {
     final url = _urlController.text.trim();
-    final hubOnline = url.isNotEmpty
-        ? await LanSyncServerManager.servidorRespondendo(url)
-        : await LanSyncServerManager.servidorRespondendoNaPorta(_porta);
-    final apiOnline = _ehWindows && LanApiServerHub.instance.ativo;
+    final apiOnline = await LanRedeHelper.apiRespondendo(
+      baseUrl: url.isNotEmpty ? url : null,
+      syncToken: _tokenAtual,
+    );
     if (mounted) {
       setState(() {
-        _servidorOnline = hubOnline;
-        _apiAtiva = apiOnline;
+        _servidorOnline = apiOnline;
+        _apiAtiva = _ehWindows && LanApiServerHub.instance.ativo;
       });
     }
   }
@@ -297,7 +283,6 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       final config = atual.copyWith(
         redeSincronizacaoAtiva: _syncAtiva,
         redeModoServidor: modoServidor,
-        redePortaServidor: _porta,
         redeServidorUrl: _urlController.text.trim(),
         redeSyncToken: token,
       );
@@ -319,21 +304,9 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       }
 
       if (modoServidor && iniciarServidorSeModoServidor && Platform.isWindows) {
-        final err = await LanSyncServerManager.iniciarServidor(
-          porta: _porta,
-          syncToken: token,
-          productImagesPath:
-              await LanSyncServerManager.caminhoPadraoProductImages(),
-        );
-        if (err != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(err)),
-          );
-        }
         if (!mounted) return;
         final ob = MainMenuDeps.maybeOf(context)?.objectBox;
         if (ob != null) {
-          // garantirAtivo sobe a API :8788; evita reiniciar o hub 2x (travava).
           await LanServidorBootstrap.garantirAtivo(
             objectBox: ob,
             configRepository: widget.configRepository,
@@ -370,7 +343,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
 
   Future<void> _configurarRedeCompleta() async {
     if (_modoServidor) {
-      final ip = _ipLocal ?? await LanSyncServerManager.obterIpv4Local();
+      final ip = _ipLocal ?? await LanRedeHelper.obterIpv4Local();
       if (ip == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -384,7 +357,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         return;
       }
       setState(() => _ipLocal = ip);
-      _urlController.text = LanSyncServerManager.montarUrlServidor(ip, _porta);
+      _urlController.text = LanRedeHelper.montarUrlServidor(ip);
     } else if (_urlController.text.trim().isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -520,58 +493,16 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     }
   }
 
-  Future<void> _iniciarServidor() async {
-    setState(() => _iniciandoServidor = true);
-    try {
-        final err = await LanSyncServerManager.iniciarServidor(
-          porta: _porta,
-          syncToken: _tokenAtual,
-          productImagesPath: await LanSyncServerManager.caminhoPadraoProductImages(),
-        );
-      if (!mounted) return;
-      if (err != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
-      } else {
-        _preencherUrlServidorLocal();
-        setState(() => _servidorOnline = true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Hub mobile iniciado na porta configurada.')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _iniciandoServidor = false);
-    }
-  }
-
-  Future<void> _pararServidor() async {
-    setState(() => _parandoServidor = true);
-    try {
-      await LanSyncServerManager.pararServidor();
-      await _atualizarStatusServidor();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Comando de parada enviado ao servidor.')),
-      );
-    } finally {
-      if (mounted) setState(() => _parandoServidor = false);
-    }
-  }
-
   Future<void> _liberarFirewall() async {
-    final errSync =
-        await LanSyncServerManager.tentarLiberarFirewall(_porta);
-    final errApi = await LanSyncServerManager.tentarLiberarFirewall(
-      LanApiUrl.portaPadrao,
-    );
+    final errApi = await LanRedeHelper.tentarLiberarFirewall();
     if (!mounted) return;
-    final ok = errSync == null && errApi == null;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          ok
-              ? 'Regras de firewall criadas para as portas $_porta (sync) e '
-                  '${LanApiUrl.portaPadrao} (terminais), se permitido pelo Windows.'
-              : (errSync ?? errApi)!,
+          errApi ??
+              'Regra de firewall criada para a porta '
+                  '${LanApiUrl.portaPadrao} (API dos terminais), '
+                  'se permitido pelo Windows.',
         ),
       ),
     );
@@ -944,7 +875,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
                 IconButton(
                   tooltip: 'Atualizar IP',
                   onPressed: () async {
-                    final ip = await LanSyncServerManager.obterIpv4Local();
+                    final ip = await LanRedeHelper.obterIpv4Local();
                     setState(() => _ipLocal = ip);
                     if (ip != null) _preencherUrlServidorLocal();
                     await _atualizarStatusServidor();
@@ -1056,8 +987,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         const SizedBox(height: 4),
         Text(
           'Quem esta no WebSocket :${LanApiUrl.portaPadrao} '
-          '(terminais Windows e celular no chat). '
-          'O “online” do hub mobile :8787 e outra contagem.',
+          '(terminais Windows e celular).',
           style: tema.textTheme.bodySmall?.copyWith(color: onVar),
         ),
         const SizedBox(height: 8),
@@ -1111,7 +1041,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         style: tema.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
       ),
       subtitle: Text(
-        'Papel, token, firewall, hub mobile e diagnóstico',
+        'Papel, token, firewall e diagnóstico',
         style: tema.textTheme.bodySmall?.copyWith(color: onVar),
       ),
       children: [
@@ -1177,9 +1107,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         ],
         if (_modoServidor) ...[
           const SizedBox(height: 16),
-          _buildHubMobileAvancado(tema),
-          const SizedBox(height: 8),
-          _buildControlesServidorAvancado(tema),
+          _buildControlesServidorAvancado(),
           const SizedBox(height: 12),
           _buildTerminaisConectados(tema),
         ],
@@ -1281,102 +1209,18 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     );
   }
 
-  Widget _buildHubMobileAvancado(ThemeData tema) {
-    final erro = tema.colorScheme.error;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Hub mobile (:$_porta)',
-          style: tema.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _portaController,
-          decoration: InputDecoration(
-            labelText: 'Porta do hub mobile',
-            helperText: 'Padrao ${LanSyncServerManager.portaPadrao} — so para celular',
-            border: const OutlineInputBorder(),
-            isDense: true,
-          ),
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          onChanged: (_) => _preencherUrlServidorLocal(),
-        ),
-        const SizedBox(height: 8),
-        _InfoLinha(
-          rotulo: 'Endereco do hub',
-          valor: _urlController.text.isEmpty ? '—' : _urlController.text,
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Icon(
-              _servidorOnline ? Icons.check_circle : Icons.error_outline,
-              size: 18,
-              color: _servidorOnline ? Colors.green.shade700 : erro,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _servidorOnline
-                    ? 'Hub mobile respondendo neste PC'
-                    : 'Hub mobile parado ou inacessivel',
-                style: tema.textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildControlesServidorAvancado(ThemeData tema) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            FilledButton.icon(
-              onPressed:
-                  (_iniciandoServidor || _servidorOnline) ? null : _iniciarServidor,
-              icon: _iniciandoServidor
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.play_arrow_outlined, size: 20),
-              label: const Text('Iniciar hub mobile'),
-            ),
-            OutlinedButton.icon(
-              onPressed: _parandoServidor || !_servidorOnline
-                  ? null
-                  : _pararServidor,
-              icon: const Icon(Icons.stop_outlined, size: 20),
-              label: const Text('Parar hub'),
-            ),
-          ],
-        ),
-        if (Platform.isWindows) ...[
-          const SizedBox(height: 8),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            value: _iniciarComWindows,
-            onChanged: _alternarIniciarComWindows,
-            title: const Text('Servidor ao ligar o PC'),
-            subtitle: const Text(
-              'Recomendado: sobe a API em segundo plano ao ligar o Windows '
-              '(sem abrir o programa). Terminais passam a funcionar so de '
-              'ligar este PC. Ativado automaticamente ao salvar como servidor.',
-            ),
-          ),
-        ],
-      ],
+  Widget _buildControlesServidorAvancado() {
+    if (!Platform.isWindows) return const SizedBox.shrink();
+    return SwitchListTile.adaptive(
+      contentPadding: EdgeInsets.zero,
+      value: _iniciarComWindows,
+      onChanged: _alternarIniciarComWindows,
+      title: const Text('Servidor ao ligar o PC'),
+      subtitle: const Text(
+        'Recomendado: sobe a API em segundo plano ao ligar o Windows '
+        '(sem abrir o programa). Terminais passam a funcionar so de '
+        'ligar este PC. Ativado automaticamente ao salvar como servidor.',
+      ),
     );
   }
 
@@ -1663,40 +1507,6 @@ class _CheckItem extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _InfoLinha extends StatelessWidget {
-  const _InfoLinha({
-    required this.rotulo,
-    required this.valor,
-  });
-
-  final String rotulo;
-  final String valor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(rotulo, style: Theme.of(context).textTheme.labelSmall),
-              const SizedBox(height: 2),
-              Text(
-                valor,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

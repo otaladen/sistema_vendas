@@ -95,6 +95,12 @@ class _RelatorioSeletorPeriodoState extends State<RelatorioSeletorPeriodo> {
         DropdownButtonFormField<String>(
           key: ValueKey(_preset),
           initialValue: _preset,
+          dropdownColor: Color.alphaBlend(
+            Theme.of(context).colorScheme.surfaceContainerHighest,
+            Theme.of(context).brightness == Brightness.dark
+                ? const Color(0xFF121212)
+                : const Color(0xFFFFFFFF),
+          ),
           decoration: InputDecoration(labelText: widget.label, isDense: true),
           items: const [
             DropdownMenuItem(value: 'hoje', child: Text('Hoje')),

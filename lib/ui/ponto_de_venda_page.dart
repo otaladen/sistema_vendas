@@ -23,6 +23,7 @@ import '../domain/pdv_obra_calculadora_insercao.dart';
 import '../domain/pdv_kit_orcamento_insercao.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/uuid_v4.dart';
+import '../domain/vale_credito.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../domain/permissao_usuario.dart';
 import '../model/usuario_sistema.dart';
@@ -57,7 +58,9 @@ import '../data/produto_busca_util.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/sync/sync_service.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
+import '../data/vale_credito_service.dart';
 import '../data/venda_repository.dart';
+import 'vales/vale_credito_busca_dialog.dart';
 import '../domain/cliente_cadastro.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
@@ -117,6 +120,18 @@ class _LinhaPagamentoMistoPdV {
   String meio;
   final TextEditingController valorController;
   int parcelas;
+
+  /// Preenchidos quando [meio] e `vale`: sem o id nao daria para dar baixa
+  /// no vale certo depois que a venda fecha.
+  int valeId = 0;
+  String codigoVale = '';
+  double saldoVale = 0;
+
+  void limparVale() {
+    valeId = 0;
+    codigoVale = '';
+    saldoVale = 0;
+  }
 
   void dispose() => valorController.dispose();
 }
@@ -1395,7 +1410,26 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       if (l.meio == 'cartao_debito' && par != 1) {
         throw StateError('Cartao de debito so a vista.');
       }
-      out.add(PagamentoOrcamentoLinha(meio: l.meio, valor: v, parcelas: par));
+      if (l.meio == 'vale') {
+        if (l.valeId <= 0) {
+          throw StateError('Escolha o vale de credito da parte em vale.');
+        }
+        if (v > l.saldoVale + 0.004) {
+          throw StateError(
+            'O vale ${ValeCreditoCodigo.formatar(l.codigoVale)} tem apenas '
+            '${_formatarMoeda(l.saldoVale)} de saldo.',
+          );
+        }
+      }
+      out.add(
+        PagamentoOrcamentoLinha(
+          meio: l.meio,
+          valor: v,
+          parcelas: par,
+          valeId: l.valeId,
+          codigoVale: l.codigoVale,
+        ),
+      );
     }
     if (out.length < 2) {
       throw StateError(
@@ -4599,6 +4633,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       icone: Icons.account_balance_outlined,
     ),
     (id: 'fiado', rotulo: 'Fiado', icone: Icons.receipt_long_outlined),
+    (
+      id: 'vale',
+      rotulo: 'Vale',
+      icone: Icons.confirmation_number_outlined,
+    ),
   ];
 
   static const Map<String, List<String>> _meiosPagamentoPorTabelaPdv = {
@@ -4615,6 +4654,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     final opcoes = <({String id, String rotulo, IconData icone})>[];
     for (final id in ids) {
       if (id == 'fiado' && !_podeVenderFiado) continue;
+      // Vale so pelo painel misto: la da para pedir o codigo e saber qual e.
+      if (id == 'vale') continue;
       for (final op in _opcoesFormaPagamentoPdV) {
         if (op.id == id) {
           opcoes.add(op);
@@ -4637,6 +4678,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     final opcoes = <({String id, String rotulo, IconData icone})>[];
     for (final id in ids) {
       if (id == 'fiado' && !_podeVenderFiado) continue;
+      // Vale so pelo painel misto: la da para pedir o codigo e saber qual e.
+      if (id == 'vale') continue;
       for (final op in _opcoesFormaPagamentoPdV) {
         if (op.id == id) {
           opcoes.add(op);
@@ -4683,9 +4726,62 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       );
       return;
     }
+    if (meio == 'vale') {
+      unawaited(_escolherValeNaLinhaMisto(linha, setDialogState));
+      return;
+    }
     _atualizarCheckoutFechamento(setDialogState, () {
       linha.meio = meio;
+      linha.limparVale();
       if (meio != 'cartao_credito') linha.parcelas = 1;
+    });
+  }
+
+  /// Pede o codigo do vale antes de marcar a linha: sem vale escolhido a
+  /// linha nao teria como ser baixada no fechamento.
+  Future<void> _escolherValeNaLinhaMisto(
+    _LinhaPagamentoMistoPdV linha,
+    StateSetter setDialogState,
+  ) async {
+    final servico = ValeCreditoService.deVendaRepository(widget.vendaRepository);
+    if (!servico.disponivel) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sem conexao com o servidor para consultar o vale.'),
+        ),
+      );
+      return;
+    }
+    final restante =
+        _totalLiquidoPagamentoPdV() - _somaDigitadaMistoPdV() +
+            _parseValorMonetario(linha.valorController.text);
+    final total = _totalLiquidoPagamentoPdV();
+    final alvo = restante > 0.004 ? restante : total;
+
+    final vale = await selecionarValeCredito(
+      context,
+      servico: servico,
+      totalAPagar: alvo,
+      clienteId: _clienteSelecionadoId ?? 0,
+      jaUsados: _linhasPagamentoMisto
+          .where((l) => l != linha && l.valeId > 0)
+          .map((l) => l.valeId)
+          .toSet(),
+    );
+    if (vale == null || !mounted) return;
+
+    final aplicar = vale.avaliar(alvo).valorAplicavel;
+    _atualizarCheckoutFechamento(setDialogState, () {
+      linha.meio = 'vale';
+      linha.parcelas = 1;
+      linha.valeId = vale.id;
+      linha.codigoVale = vale.codigo;
+      linha.saldoVale = vale.saldo;
+      linha.valorController.text = aplicar.toStringAsFixed(2).replaceAll(
+            '.',
+            ',',
+          );
     });
   }
 
@@ -4974,6 +5070,33 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                     linha: linha,
                     setDialogState: setDialogState,
                   ),
+                  if (linha.meio == 'vale' && linha.valeId > 0) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.confirmation_number_outlined,
+                          size: 16,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '${ValeCreditoCodigo.formatar(linha.codigoVale)} · '
+                            'saldo ${_formatarMoeda(linha.saldoVale)}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => _escolherValeNaLinhaMisto(
+                            linha,
+                            setDialogState,
+                          ),
+                          child: const Text('Trocar'),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,

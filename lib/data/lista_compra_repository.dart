@@ -153,7 +153,9 @@ class ListaCompraRepository {
       produto: linha.produto,
       quantidadeSugerida: qtd > 0 ? qtd : 1,
       unidade: linha.produto.unidade,
-      fornecedorTexto: linha.produto.fornecedor,
+      fornecedorTexto: linha.fornecedorUltimaNfe.trim().isNotEmpty
+          ? linha.fornecedorUltimaNfe.trim()
+          : linha.produto.fornecedor,
       prioridade: linha.estoqueCritico
           ? ListaCompraItemPrioridade.urgente
           : ListaCompraItemPrioridade.normal,

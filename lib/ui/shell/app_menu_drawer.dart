@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import '../../domain/main_menu_destino.dart';
 import '../../domain/main_menu_sub_destino.dart';
 import '../../model/usuario_sistema.dart';
+import '../theme/app_fundo_scope.dart';
 import '../theme/app_menu_modo_scope.dart';
 import '../theme/app_modulo_cores.dart';
 import '../theme/app_tema_scope.dart';
+import '../widgets/seletor_fundo_app.dart';
 import '../widgets/seletor_menu_modo_app.dart';
 import '../widgets/seletor_tema_app.dart';
 
@@ -109,7 +111,8 @@ class _DrawerPersonalizacao extends StatelessWidget {
   Widget build(BuildContext context) {
     final temaScope = AppTemaScope.maybeOf(context);
     final menuScope = AppMenuModoScope.maybeOf(context);
-    if (temaScope == null && menuScope == null) {
+    final fundoScope = AppFundoScope.maybeOf(context);
+    if (temaScope == null && menuScope == null && fundoScope == null) {
       return const SizedBox.shrink();
     }
 
@@ -131,6 +134,13 @@ class _DrawerPersonalizacao extends StatelessWidget {
                 ),
               ),
               onTap: () => SeletorTemaApp.mostrarFolha(context),
+            ),
+          if (fundoScope != null)
+            ListTile(
+              leading: Icon(fundoScope.fundoAtual.icone),
+              title: const Text('Plano de fundo'),
+              subtitle: Text(fundoScope.fundoAtual.rotulo),
+              onTap: () => SeletorFundoApp.mostrarFolha(context),
             ),
           if (menuScope != null)
             ListTile(

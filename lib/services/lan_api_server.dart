@@ -27,7 +27,7 @@ import 'lan_api/routes/register_all_routes.dart';
 
 /// API HTTP embutida no Flutter do PC Servidor (ObjectBox local).
 ///
-/// Porta padrao 8788 (hub de sync continua em 8787).
+/// Porta padrao 8788.
 class LanApiServer {
   LanApiServer({
     required this.objectBox,

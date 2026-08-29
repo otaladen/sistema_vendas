@@ -8,7 +8,7 @@ void main() {
       nomeLoja: 'Loja Teste',
       backupSegundoDestinoAtivo: true,
       backupSegundoDestinoPasta: r'D:\BackupRede\PC-Caixa',
-      redeServidorUrl: 'http://192.168.1.10:8787',
+      redeServidorUrl: 'http://192.168.1.10:8788',
       redeSyncToken: 'token-secreto',
       impressoraPadrao: 'EPSON TM',
     );
@@ -27,13 +27,13 @@ void main() {
     const local = EmpresaConfig(
       nomeLoja: 'Antiga',
       backupSegundoDestinoPasta: r'C:\BackupLocal',
-      redeServidorUrl: 'http://192.168.1.10:8787',
+      redeServidorUrl: 'http://192.168.1.10:8788',
     );
     final remoto = {
       'nomeLoja': 'Nova Loja',
       'backupSegundoDestinoAtivo': true,
       'backupSegundoDestinoPasta': r'\\servidor\outra_pasta',
-      'redeServidorUrl': 'http://hacker:8787',
+      'redeServidorUrl': 'http://hacker:8788',
     };
 
     final merged = SyncEntityCodecExtras.empresaConfigDeMap(local, remoto);
@@ -41,6 +41,6 @@ void main() {
     expect(merged.nomeLoja, 'Nova Loja');
     expect(merged.backupSegundoDestinoAtivo, isTrue);
     expect(merged.backupSegundoDestinoPasta, r'C:\BackupLocal');
-    expect(merged.redeServidorUrl, 'http://192.168.1.10:8787');
+    expect(merged.redeServidorUrl, 'http://192.168.1.10:8788');
   });
 }

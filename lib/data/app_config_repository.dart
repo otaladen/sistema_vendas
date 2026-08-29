@@ -58,7 +58,7 @@ class EmpresaConfig {
     this.permitirVendaSemEstoque = true,
     this.redeSincronizacaoAtiva = false,
     this.redeModoServidor = false,
-    this.redePortaServidor = 8787,
+    this.redePortaServidor = 8788,
     this.redeServidorUrl = '',
     this.redeSyncToken = '',
     this.backupAutomaticoAtivo = false,
@@ -183,14 +183,14 @@ class EmpresaConfig {
   /// Verdadeiro = este PC hospeda o servidor de sync; falso = conecta a outro PC.
   final bool redeModoServidor;
 
-  /// Porta TCP do servidor de sync neste PC (padrao 8787).
+  /// Campo legado (hub mobile removido). A API dos terminais usa sempre 8788.
   final int redePortaServidor;
 
-    /// Ex.: `http://192.168.0.15:8787` — servidor de sincronizacao na LAN.
-    final String redeServidorUrl;
+  /// Ex.: `http://192.168.0.15:8788` — API do PC servidor na LAN.
+  final String redeServidorUrl;
 
-    /// Segredo compartilhado na LAN (header [SyncAuth.headerName]). Vazio = sem auth no servidor.
-    final String redeSyncToken;
+  /// Segredo compartilhado na LAN (header [SyncAuth.headerName]). Vazio = sem auth no servidor.
+  final String redeSyncToken;
 
     /// Copia periodica dos dados locais para [backupAutomaticoPasta] (quando ativo).
   final bool backupAutomaticoAtivo;
@@ -655,7 +655,7 @@ class AppConfigRepository {
       redeModoServidor: prefs.getBool(_kRedeModoServidor) ?? false,
       redePortaServidor: () {
         final p = prefs.getInt(_kRedePortaServidor);
-        if (p == null || p < 1024 || p > 65535) return 8787;
+        if (p == null || p < 1024 || p > 65535) return 8788;
         return p;
       }(),
       redeServidorUrl: prefs.getString(_kRedeServidorUrl) ?? '',

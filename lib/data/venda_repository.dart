@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../domain/auditoria_catalogo.dart';
+import '../domain/cancelada_por_rotulo.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/entrega_filtro_util.dart';
 import '../domain/entrega_lista_api.dart';
@@ -28,10 +29,13 @@ import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/produto_coocorrencia_venda.dart';
 import '../domain/promocao_cadastro.dart';
+import '../domain/retirada_parcial_evento.dart';
+import '../domain/saldo_retirada_item.dart';
 import '../domain/promocao_preco_service.dart';
 import '../domain/ultimas_vendas_finalizadas_ordenacao.dart';
 import '../domain/venda_finalizacao_caixa_helper.dart';
 import '../domain/caixa_meio_pagamento_fechamento.dart';
+import '../domain/troca_diferenca_caixa.dart';
 import 'promocao_repository.dart';
 import '../services/auditoria_registrar.dart';
 import '../services/compras_preditivas_service.dart';
@@ -50,6 +54,7 @@ import 'nfe_saida_fiscal_store.dart';
 import 'recebimento_fiado_repository.dart';
 import 'sync/sync_write_trigger.dart';
 import 'titulo_receber_repository.dart';
+import 'vale_credito_repository.dart';
 
 /// Totais por meio de pagamento no periodo do caixa.
 class TotaisMeiosPagamentoCaixa {
@@ -58,12 +63,16 @@ class TotaisMeiosPagamentoCaixa {
     required this.pix,
     required this.debito,
     required this.credito,
+    this.vale = 0,
   });
 
   final double dinheiro;
   final double pix;
   final double debito;
   final double credito;
+
+  /// Vale de credito: soma no total de vendas, mas nao na gaveta.
+  final double vale;
 }
 
 /// Resumo de vendas finalizadas no periodo do caixa.
@@ -484,6 +493,7 @@ class VendaRepository {
   late final GerenciadorEstoqueService _estoque = GerenciadorEstoqueService(_db);
   late final ConferenciaCargaRepository _conferenciaCarga =
       ConferenciaCargaRepository(_db);
+  late final ValeCreditoRepository _vales = ValeCreditoRepository(_db);
 
   ObjectBox get objectBox => _db;
 
@@ -744,6 +754,7 @@ class VendaRepository {
     var pix = 0.0;
     var debito = 0.0;
     var credito = 0.0;
+    var vale = 0.0;
     final query = _db.vendaBox
         .query(_condicaoCandidatasCaixaPeriodo(inicio: inicio, fim: fim))
         .build();
@@ -758,6 +769,7 @@ class VendaRepository {
           onPix: (v) => pix += v,
           onDebito: (v) => debito += v,
           onCredito: (v) => credito += v,
+          onVale: (v) => vale += v,
         );
       }
     } finally {
@@ -768,6 +780,7 @@ class VendaRepository {
       pix: pix,
       debito: debito,
       credito: credito,
+      vale: vale,
     );
   }
 
@@ -854,6 +867,7 @@ class VendaRepository {
     required void Function(double valor) onPix,
     required void Function(double valor) onDebito,
     required void Function(double valor) onCredito,
+    void Function(double valor)? onVale,
   }) {
     void aplicar(String? meio, double valor) {
       if (valor <= 0) return;
@@ -869,6 +883,9 @@ class VendaRepository {
           break;
         case CaixaMeioPagamentoFechamento.bucketCredito:
           onCredito(valor);
+          break;
+        case CaixaMeioPagamentoFechamento.bucketVale:
+          onVale?.call(valor);
           break;
         default:
           // fiado / transferencia / outros / desconhecido: fora da gaveta.
@@ -3281,8 +3298,75 @@ class VendaRepository {
         brutoAntes: brutoAntes,
       );
       _reescalarPagamentosMistoAposMudancaTotal(venda, totalAntes);
+      _sincronizarCabecalhoTipoEntregaOrcamento(venda);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  /// Altera [ItemVenda.tipoEntregaItem] no orcamento e atualiza o cabecalho
+  /// (`misto` quando houver tipos diferentes). Mescla com linha igual se existir.
+  void atualizarTipoEntregaItemOrcamento(
+    int vendaId,
+    int itemId,
+    String novoTipoEntregaItem,
+  ) {
+    final tipoNorm =
+        EntregaVendaHelper.normalizarTipoItem(novoTipoEntregaItem);
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Orcamento $vendaId nao encontrado.');
+      }
+      if (venda.status != 'orcamento') {
+        throw StateError('Somente orcamentos podem ser alterados.');
+      }
+      if (venda.cancelada) {
+        throw StateError('Nao e possivel alterar orcamento cancelado.');
+      }
+      final item = _itemPersistidoDaVenda(vendaId, itemId);
+      if (item == null) {
+        throw StateError('Item $itemId nao encontrado no orcamento.');
+      }
+      final tipoAtual =
+          EntregaVendaHelper.normalizarTipoItem(item.tipoEntregaItem);
+      if (tipoAtual == tipoNorm) {
+        _sincronizarCabecalhoTipoEntregaOrcamento(venda);
+        return;
+      }
+
+      ItemVenda? destino;
+      for (final outro in listarItensPorVenda(vendaId)) {
+        if (outro.id == itemId) continue;
+        if (outro.produto.targetId != item.produto.targetId) continue;
+        if (outro.precoTipo != item.precoTipo) continue;
+        if (EntregaVendaHelper.normalizarTipoItem(outro.tipoEntregaItem) !=
+            tipoNorm) {
+          continue;
+        }
+        destino = outro;
+        break;
+      }
+
+      if (destino != null) {
+        destino.quantidade += item.quantidade;
+        _db.itemVendaBox.put(destino);
+        _db.itemVendaBox.remove(itemId);
+      } else {
+        item.tipoEntregaItem = tipoNorm;
+        _db.itemVendaBox.put(item);
+      }
+      _sincronizarCabecalhoTipoEntregaOrcamento(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  void _sincronizarCabecalhoTipoEntregaOrcamento(Venda venda) {
+    final itens = listarItensPorVenda(venda.id);
+    final tipos = itens.map((i) => i.tipoEntregaItem);
+    venda.tipoEntrega = EntregaVendaHelper.resolverTipoEntregaVenda(tipos);
+    venda.entregaPendente =
+        EntregaVendaHelper.iterableTemRetiradaFutura(tipos);
+    _db.vendaBox.put(venda);
   }
 
   void vincularClienteNoOrcamento(int vendaId, int? clienteId) {
@@ -4097,7 +4181,7 @@ class VendaRepository {
   /// parcial ou devolucao) sao marcados cancelados sem estorno — apenas para limpeza de teste.
   ResultadoLimpezaAbaEntregas limparAbaEntregasCancelandoVendas({
     String motivo = 'Limpeza da aba Entregas',
-    String canceladaPor = 'manutencao',
+    String canceladaPor = CanceladaPorRotulo.manutencao,
     bool forcarQuandoBloqueado = false,
   }) {
     final vendas = listarTodas()
@@ -5064,12 +5148,19 @@ class VendaRepository {
     required String statusNovo,
     required String usuario,
   }) {
+    final novo = statusNovo.trim();
+    if (HistoricoEntregaEventos.ehEventoRetirada(novo)) {
+      throw StateError(
+        'Retirada so pode ser registrada pelo documento de expedicao '
+        '(baixa de patio), nao por historico de status.',
+      );
+    }
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
       if (venda == null) return;
       final item = HistoricoEntrega(
         statusAnterior: statusAnterior,
-        statusNovo: statusNovo,
+        statusNovo: novo,
         usuario: usuario.trim().isEmpty ? 'sistema' : usuario.trim(),
         dataHora: DateTime.now(),
       );
@@ -5104,16 +5195,26 @@ class VendaRepository {
     required String status,
     required String motivo,
     required String usuario,
+    String? detalhesEstruturados,
   }) {
     final motivoLimpo = motivo.trim();
     if (motivoLimpo.isEmpty) return;
+    final detalhe = (detalhesEstruturados ?? '').trim();
+    if (HistoricoEntregaEventos.ehEventoRetirada(status)) {
+      if (RetiradaParcialEvento.tryParse(detalhe) == null) {
+        throw StateError(
+          'Retirada so pode ser registrada pelo documento de expedicao '
+          '(baixa de patio).',
+        );
+      }
+    }
     final quem = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
       if (venda == null) return;
       _anexarLinhaObservacaoEntregaEmVenda(venda, status, motivoLimpo, quem);
       final hist = HistoricoEntrega(
-        statusAnterior: motivoLimpo,
+        statusAnterior: detalhe.isNotEmpty ? detalhe : motivoLimpo,
         statusNovo: status,
         usuario: quem,
         dataHora: DateTime.now(),
@@ -5298,18 +5399,12 @@ class VendaRepository {
     String? retiradoPor,
     bool permitirSemConferenciaEstoque = true,
   }) {
-    final filtrado = <int, int>{};
-    for (final e in quantidadePorItemVendaId.entries) {
-      if (e.value > 0) {
-        filtrado[e.key] = e.value;
-      }
-    }
-    if (filtrado.isEmpty) {
-      throw StateError('Informe ao menos uma quantidade a retirar.');
-    }
-
+    final filtrado = _quantidadesRetiradaPositivas(quantidadePorItemVendaId);
     final usuarioLimpo = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
-    final linhasLog = <String>[];
+    final quemRetirou = retiradoPor?.trim() ?? '';
+    final linhasEvento = <RetiradaParcialLinhaEvento>[];
+    var documento = '';
+    var numeroOrcamento = 0;
 
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
@@ -5325,45 +5420,25 @@ class VendaRepository {
       if (!venda.entregaPendente) {
         throw StateError('Esta venda nao esta com retirada futura pendente.');
       }
+      numeroOrcamento = venda.numeroOrcamento;
+      documento = _rotuloDocumentoRetirada(venda);
 
       for (final e in filtrado.entries) {
-        final itemId = e.key;
-        final qRet = e.value;
-        final item = _db.itemVendaBox.get(itemId);
-        if (item == null) {
-          throw StateError('Item de venda $itemId nao encontrado.');
-        }
-        if (item.venda.targetId != vendaId) {
-          throw StateError('Item $itemId nao pertence a esta venda.');
-        }
+        final item = _itemDaVendaParaRetirada(e.key, vendaId);
         if (EntregaVendaHelper.tipoEfetivoItem(item) !=
             EntregaVendaHelper.tipoRetiradaFutura) {
           throw StateError(
             '"${item.nomeProduto}" nao e retirada futura (ja foi leva agora ou carreto).',
           );
         }
-        final pendente = item.quantidadePendenteRetirada;
-        if (qRet > pendente) {
-          throw StateError(
-            'Retirada de $qRet un. de "${item.nomeProduto}" excede o pendente ($pendente).',
-          );
-        }
-
-        final produto = item.produto.target;
-        if (produto == null) {
-          throw StateError('Produto do item ${item.id} nao encontrado.');
-        }
-        _estoque.baixarReservaEFisicoRetirada(
-          item: item,
-          quantidade: qRet,
-          tipo: TipoMovimentoEstoque.retiradaParcialCliente,
-          permitirSemConferenciaEstoque: permitirSemConferenciaEstoque,
+        linhasEvento.add(
+          _baixarItemRetiradaFormal(
+            item: item,
+            qRet: e.value,
+            usuario: usuarioLimpo,
+            permitirSemConferenciaEstoque: permitirSemConferenciaEstoque,
+          ),
         );
-
-        item.quantidadeJaRetirada += qRet;
-        _db.itemVendaBox.put(item);
-
-        linhasLog.add('${item.nomeProduto} x$qRet');
       }
 
       var aindaPendente = false;
@@ -5385,19 +5460,15 @@ class VendaRepository {
       produtoIds: vendaPos == null ? null : _produtoIdsDaVenda(vendaPos),
     );
 
-    final trecho = linhasLog.join('; ');
-    var motivoFinal = trecho.isEmpty
-        ? 'Retirada registrada.'
-        : 'Retirada: $trecho';
-    final quemRetirou = retiradoPor?.trim() ?? '';
-    if (quemRetirou.isNotEmpty) {
-      motivoFinal = '$motivoFinal Quem retirou: $quemRetirou.';
-    }
-    registrarOcorrenciaEntrega(
+    _gravarDocumentoRetirada(
       vendaId: vendaId,
+      numeroOrcamento: numeroOrcamento,
+      documento: documento,
+      tipo: RetiradaParcialEvento.tipoFutura,
       status: HistoricoEntregaEventos.retiradaFutura,
-      motivo: motivoFinal,
       usuario: usuarioLimpo,
+      retiradoPor: quemRetirou,
+      linhas: linhasEvento,
     );
   }
 
@@ -5411,18 +5482,12 @@ class VendaRepository {
     String? retiradoPor,
     bool permitirSemConferenciaEstoque = true,
   }) {
-    final filtrado = <int, int>{};
-    for (final e in quantidadePorItemVendaId.entries) {
-      if (e.value > 0) {
-        filtrado[e.key] = e.value;
-      }
-    }
-    if (filtrado.isEmpty) {
-      throw StateError('Informe ao menos uma quantidade a retirar.');
-    }
-
+    final filtrado = _quantidadesRetiradaPositivas(quantidadePorItemVendaId);
     final usuarioLimpo = usuario.trim().isEmpty ? 'sistema' : usuario.trim();
-    final linhasLog = <String>[];
+    final quemRetirou = retiradoPor?.trim() ?? '';
+    final linhasEvento = <RetiradaParcialLinhaEvento>[];
+    var documento = '';
+    var numeroOrcamento = 0;
 
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
@@ -5450,17 +5515,11 @@ class VendaRepository {
           'O carro ja marcou saida; retirada na loja so e permitida ate antes disso.',
         );
       }
+      numeroOrcamento = venda.numeroOrcamento;
+      documento = _rotuloDocumentoRetirada(venda);
 
       for (final e in filtrado.entries) {
-        final itemId = e.key;
-        final qRet = e.value;
-        final item = _db.itemVendaBox.get(itemId);
-        if (item == null) {
-          throw StateError('Item de venda $itemId nao encontrado.');
-        }
-        if (item.venda.targetId != vendaId) {
-          throw StateError('Item $itemId nao pertence a esta venda.');
-        }
+        final item = _itemDaVendaParaRetirada(e.key, vendaId);
         if (EntregaVendaHelper.tipoEfetivoItem(item) !=
             EntregaVendaHelper.tipoEntregaLoja) {
           throw StateError(
@@ -5472,29 +5531,14 @@ class VendaRepository {
             '"${item.nomeProduto}" migrou de retirada futura: use retirada futura na listagem.',
           );
         }
-        final pendente = item.quantidadeAindaNoCarretoAntesSaida;
-        if (qRet > pendente) {
-          throw StateError(
-            'Retirada de $qRet un. de "${item.nomeProduto}" excede o que ainda '
-            'segue para o carro ($pendente).',
-          );
-        }
-
-        final produto = item.produto.target;
-        if (produto == null) {
-          throw StateError('Produto do item ${item.id} nao encontrado.');
-        }
-        _estoque.baixarReservaEFisicoRetirada(
-          item: item,
-          quantidade: qRet,
-          tipo: TipoMovimentoEstoque.retiradaParcialCliente,
-          permitirSemConferenciaEstoque: permitirSemConferenciaEstoque,
+        linhasEvento.add(
+          _baixarItemRetiradaFormal(
+            item: item,
+            qRet: e.value,
+            usuario: usuarioLimpo,
+            permitirSemConferenciaEstoque: permitirSemConferenciaEstoque,
+          ),
         );
-
-        item.quantidadeJaRetirada += qRet;
-        _db.itemVendaBox.put(item);
-
-        linhasLog.add('${item.nomeProduto} x$qRet');
       }
 
       _db.vendaBox.put(venda);
@@ -5508,19 +5552,126 @@ class VendaRepository {
           : _produtoIdsDaVenda(vendaPosCarreto),
     );
 
-    final trecho = linhasLog.join('; ');
-    var motivoFinal = trecho.isEmpty
-        ? 'Retirada na loja (pre-saida) registrada.'
-        : 'Retirada na loja (pre-saida): $trecho';
-    final quemRetirou = retiradoPor?.trim() ?? '';
-    if (quemRetirou.isNotEmpty) {
-      motivoFinal = '$motivoFinal Quem retirou: $quemRetirou.';
+    _gravarDocumentoRetirada(
+      vendaId: vendaId,
+      numeroOrcamento: numeroOrcamento,
+      documento: documento,
+      tipo: RetiradaParcialEvento.tipoLojaCarreto,
+      status: HistoricoEntregaEventos.retiradaLojaPreSaida,
+      usuario: usuarioLimpo,
+      retiradoPor: quemRetirou,
+      linhas: linhasEvento,
+    );
+  }
+
+  Map<int, int> _quantidadesRetiradaPositivas(Map<int, int> origem) {
+    final filtrado = <int, int>{};
+    for (final e in origem.entries) {
+      if (e.value > 0) filtrado[e.key] = e.value;
     }
+    if (filtrado.isEmpty) {
+      throw StateError('Informe ao menos uma quantidade a retirar.');
+    }
+    return filtrado;
+  }
+
+  ItemVenda _itemDaVendaParaRetirada(int itemId, int vendaId) {
+    final item = _db.itemVendaBox.get(itemId);
+    if (item == null) {
+      throw StateError('Item de venda $itemId nao encontrado.');
+    }
+    if (item.venda.targetId != vendaId) {
+      throw StateError('Item $itemId nao pertence a esta venda.');
+    }
+    return item;
+  }
+
+  String _rotuloDocumentoRetirada(Venda venda) {
+    if (venda.numeroOrcamento > 0) {
+      return 'Orcamento #${venda.numeroOrcamento}';
+    }
+    return 'Venda id ${venda.id}';
+  }
+
+  RetiradaParcialLinhaEvento _baixarItemRetiradaFormal({
+    required ItemVenda item,
+    required int qRet,
+    required String usuario,
+    required bool permitirSemConferenciaEstoque,
+  }) {
+    SaldoRetiradaItem.validarRetirada(
+      nomeProduto: item.nomeProduto,
+      quantidade: item.quantidade,
+      quantidadeJaRetirada: item.quantidadeJaRetirada,
+      quantidadeDevolvida: item.quantidadeDevolvida,
+      quantidadeSolicitada: qRet,
+    );
+    final produto = item.produto.target;
+    if (produto == null) {
+      throw StateError('Produto do item ${item.id} nao encontrado.');
+    }
+    final jaAntes = item.quantidadeJaRetirada;
+    _estoque.baixarReservaEFisicoRetirada(
+      item: item,
+      quantidade: qRet,
+      tipo: TipoMovimentoEstoque.retiradaParcialCliente,
+      permitirSemConferenciaEstoque: permitirSemConferenciaEstoque,
+      usuarioLogin: usuario,
+    );
+    item.quantidadeJaRetirada += qRet;
+    _db.itemVendaBox.put(item);
+    return RetiradaParcialLinhaEvento(
+      itemVendaId: item.id,
+      nomeProduto: item.nomeProduto,
+      quantidade: qRet,
+      vendido: item.quantidade,
+      jaRetiradaAntes: jaAntes,
+      quantidadeDevolvida: item.quantidadeDevolvida,
+    );
+  }
+
+  void _gravarDocumentoRetirada({
+    required int vendaId,
+    required int numeroOrcamento,
+    required String documento,
+    required String tipo,
+    required String status,
+    required String usuario,
+    required String retiradoPor,
+    required List<RetiradaParcialLinhaEvento> linhas,
+  }) {
+    final agora = DateTime.now().toUtc();
+    final evento = RetiradaParcialEvento(
+      vendaId: vendaId,
+      numeroOrcamento: numeroOrcamento,
+      documento: documento,
+      tipo: tipo,
+      usuario: usuario,
+      retiradoPor: retiradoPor,
+      dataHora: agora,
+      linhas: linhas,
+    );
     registrarOcorrenciaEntrega(
       vendaId: vendaId,
-      status: HistoricoEntregaEventos.retiradaLojaPreSaida,
-      motivo: motivoFinal,
-      usuario: usuarioLimpo,
+      status: status,
+      motivo: evento.textoHumano,
+      usuario: usuario,
+      detalhesEstruturados: evento.encode(),
+    );
+    AuditoriaRegistrar.registrar(
+      modulo: AuditoriaModulo.venda,
+      acao: AuditoriaAcao.retiradaParcial,
+      usuarioLogin: usuario,
+      entidade: 'venda',
+      entidadeId: '$vendaId',
+      resumo: evento.textoHumano,
+      detalhes: {
+        'documento': documento,
+        'tipo': tipo,
+        'retiradoPor': retiradoPor,
+        'linhas': linhas.map((l) => l.toJson()).toList(),
+      },
+      dataHora: agora,
     );
   }
 
@@ -5550,10 +5701,9 @@ class VendaRepository {
       }
 
       if (venda.status != 'orcamento' &&
-          venda.entregaPendente &&
           venda.itens.any((i) => i.quantidadeJaRetirada > 0)) {
         throw StateError(
-          'Nao e possivel cancelar: ja houve retirada parcial de mercadoria nesta venda.',
+          'Nao e possivel cancelar: ja houve retirada de mercadoria nesta venda.',
         );
       }
 
@@ -5590,6 +5740,9 @@ class VendaRepository {
       _db.vendaBox.put(venda);
       if (venda.status == 'finalizada') {
         titulos.cancelarPorVenda(vendaId);
+        // O que o cliente pagou com vale volta para o vale, senao ele perde
+        // o credito por causa de uma venda que nem existe mais.
+        _vales.estornarUsosDaVenda(vendaId);
       }
     });
     final vendaPos = _db.vendaBox.get(vendaId);
@@ -5832,6 +5985,119 @@ class VendaRepository {
       },
     );
     return registroId;
+  }
+
+  /// Orcamento na fila do caixa com a diferenca que o cliente paga na troca.
+  /// Nao baixa estoque de novo: as pecas ja sairam no registro da troca.
+  ({int orcamentoId, int numeroOrcamento, bool reutilizado})
+      registrarOrcamentoComplementoTroca({
+    required int vendaOrigemId,
+    required int registroDevolucaoId,
+    required double valor,
+    String formaPagamento = 'dinheiro',
+    int quantidadeParcelas = 1,
+  }) {
+    final valorLimpo = TrocaDiferencaCaixa.arredondar(valor);
+    if (!TrocaDiferencaCaixa.clientePaga(valorLimpo)) {
+      throw StateError('Nao ha diferenca a receber no caixa.');
+    }
+    if (registroDevolucaoId <= 0) {
+      throw StateError('Registro de troca invalido.');
+    }
+    final uuid = TrocaDiferencaCaixa.uuidOrcamento(registroDevolucaoId);
+
+    final resultado = _db.store.runInTransaction(TxMode.write, () {
+      final qExistente = _db.vendaBox
+          .query(Venda_.uuidLocal.equals(uuid, caseSensitive: true))
+          .build();
+      try {
+        final ja = qExistente.findFirst();
+        if (ja != null) {
+          return (
+            orcamentoId: ja.id,
+            numeroOrcamento: ja.numeroOrcamento,
+            reutilizado: true,
+          );
+        }
+      } finally {
+        qExistente.close();
+      }
+
+      final origem = _db.vendaBox.get(vendaOrigemId);
+      if (origem == null) {
+        throw StateError('Venda $vendaOrigemId nao encontrada.');
+      }
+      final produtoId = _estoque.obterOuCriarProdutoComplementoTroca();
+      final produto = _db.produtoBox.get(produtoId);
+      if (produto == null) {
+        throw StateError('Produto interno de complemento de troca nao encontrado.');
+      }
+
+      final refOrigem = origem.numeroOrcamento > 0
+          ? '${origem.numeroOrcamento}'
+          : '$vendaOrigemId';
+      final proximoNumero = _proximoNumeroOrcamento();
+      final venda = Venda(
+        status: 'orcamento',
+        numeroOrcamento: proximoNumero,
+        formaPagamento: 'dinheiro',
+        quantidadeParcelas: 1,
+        tipoEntrega: EntregaVendaHelper.tipoRetirada,
+        valorFrete: 0,
+        entregaPendente: false,
+        uuidLocal: uuid,
+        observacaoEntrega:
+            'Complemento de troca da venda $refOrigem (registro #$registroDevolucaoId).',
+      );
+      final cliId = origem.cliente.targetId;
+      if (cliId != 0) {
+        final cli = origem.cliente.target ?? _db.clienteBox.get(cliId);
+        if (cli != null) {
+          venda.cliente.target = cli;
+        }
+      }
+      final vendId = origem.vendedor.targetId;
+      if (vendId != 0) {
+        final vend = origem.vendedor.target ?? _db.vendedorBox.get(vendId);
+        if (vend != null) {
+          venda.vendedor.target = vend;
+        }
+      }
+
+      final item = ItemVenda(
+        nomeProduto: 'Complemento troca venda $refOrigem',
+        quantidade: 1,
+        precoTipo: 'preco1',
+        precoUnitario: valorLimpo,
+        precoCustoUnitario: 0,
+        tipoEntregaItem: EntregaVendaHelper.tipoRetirada,
+      );
+      item.produto.target = produto;
+      venda.total = valorLimpo;
+      venda.custoTotal = 0;
+      venda.lucroTotal = valorLimpo;
+      final meio = TrocaDiferencaCaixa.normalizarMeio(formaPagamento);
+      _aplicarPagamentoNoOrcamento(
+        venda,
+        DadosPagamentoOrcamento(
+          formaPagamento: meio,
+          quantidadeParcelas:
+              TrocaDiferencaCaixa.parcelasCredito(meio, quantidadeParcelas),
+        ),
+        totalOrcamento: valorLimpo,
+      );
+      final vendaId = _db.vendaBox.put(venda);
+      venda.id = vendaId;
+      item.venda.target = venda;
+      _db.itemVendaBox.put(item);
+      return (
+        orcamentoId: vendaId,
+        numeroOrcamento: proximoNumero,
+        reutilizado: false,
+      );
+    });
+    _notificarRedeAposEscrita(vendaId: resultado.orcamentoId);
+    return resultado;
   }
 
   List<RegistroDevolucao> listarRegistrosDevolucaoPorVenda(int vendaId) {

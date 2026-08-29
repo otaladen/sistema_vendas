@@ -16,6 +16,7 @@ import '../../data/produto_repository.dart';
 import '../../data/promocao_repository.dart';
 import '../../data/recado_loja_repository.dart';
 import '../../data/usuario_repository.dart';
+import '../../data/vale_credito_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../data/vendedor_repository.dart';
 
@@ -42,6 +43,7 @@ class LanApiDeps {
     required this.usuarioRepository,
     required this.recadoLojaRepository,
     required this.mensagemInternaRepository,
+    required this.valeCreditoRepository,
     required this.notificar,
     required this.notificarEvento,
     this.syncToken = '',
@@ -67,6 +69,7 @@ class LanApiDeps {
   final UsuarioRepository usuarioRepository;
   final RecadoLojaRepository recadoLojaRepository;
   final MensagemInternaRepository mensagemInternaRepository;
+  final ValeCreditoRepository valeCreditoRepository;
   final String syncToken;
   final void Function(String entity, {List<int>? ids}) notificar;
   final void Function(String type, Map<String, dynamic> payload) notificarEvento;
@@ -106,6 +109,7 @@ class LanApiDeps {
       mensagemInternaRepository: MensagemInternaRepository(
         storeDirectoryPath: objectBox.storeDirectoryPath,
       ),
+      valeCreditoRepository: ValeCreditoRepository(objectBox),
       syncToken: syncToken,
       notificar: notificar,
       notificarEvento: notificarEvento,

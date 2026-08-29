@@ -7,7 +7,7 @@ import '../data/app_config_repository.dart';
 /// Cliente em modo terminal leve (sem ObjectBox local): Windows, Android ou iOS.
 ///
 /// Arquitetura definitiva:
-/// - PC1 servidor: ObjectBox + LanApi :8788 (+ hub 8787 legado/opcional).
+/// - PC1 servidor: ObjectBox + LanApi :8788.
 /// - Terminais (PC ou celular): so HTTP/WS na API :8788; sem banco local,
 ///   sem SyncService. Se o servidor cair, o terminal para.
 bool modoTerminalLeveAtivo(EmpresaConfig config) {

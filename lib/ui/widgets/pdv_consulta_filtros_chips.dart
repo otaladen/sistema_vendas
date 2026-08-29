@@ -74,6 +74,15 @@ class PdvConsultaFiltrosChips extends StatelessWidget {
                   : PdvConsultaModoSugestao.maisVendidos,
             ),
           ),
+          _FiltroChip(
+            rotulo: 'A–Z',
+            selecionado: modoSugestao == PdvConsultaModoSugestao.catalogoAz,
+            onTap: () => onModoSugestaoChanged(
+              modoSugestao == PdvConsultaModoSugestao.catalogoAz
+                  ? PdvConsultaModoSugestao.misto
+                  : PdvConsultaModoSugestao.catalogoAz,
+            ),
+          ),
         ],
       ],
     );

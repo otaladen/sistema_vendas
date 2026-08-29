@@ -86,7 +86,11 @@ class Produto {
   String subcategoria;
 
   String marca;
+
+  /// Texto livre preenchido por NF-e / vinculo de compra — nao editar na Classificacao.
   String fornecedor;
+
+  /// Legado (Paradox/CSV). A UI usa so [marca]; gravacao espelha a marca.
   String fabricante;
 
   /// Resolucao por EAN na importacao de NF-e e no PDV.

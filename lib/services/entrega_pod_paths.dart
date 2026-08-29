@@ -12,7 +12,7 @@ abstract final class EntregaPodPaths {
   static const subpastaLocal = 'pod_entrega';
   static const subpastaCache = 'pod_entrega_cache';
 
-  /// Subpasta no PC servidor (ao lado do .exe / sync_server).
+  /// Subpasta no PC servidor (ao lado do .exe).
   static const subpastaServidor = 'pod_entrega';
 
   /// Camera/galeria no celular: pre-limite antes do JPEG final.

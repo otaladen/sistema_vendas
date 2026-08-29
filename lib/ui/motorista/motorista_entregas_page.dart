@@ -15,6 +15,7 @@ import '../../domain/entrega_baixa_pendente.dart';
 import '../../domain/entrega_filtro_util.dart';
 import '../../domain/entregas/loja_origem_mercadoria.dart';
 import '../../domain/entregas/buscar_na_loja.dart';
+import '../../domain/entregas/rota_motorista_sequencia.dart';
 import '../../domain/motorista_lista_safe.dart';
 import '../../domain/motorista_usuario_resolver.dart';
 import '../../domain/entrega_nao_entregue.dart';
@@ -765,6 +766,16 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
     }
   }
 
+  Future<void> _abrirRotaCompleta(List<Venda> paradas) async {
+    final ok = await abrirMapaRotaParadas(paradas);
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nao foi possivel abrir o mapa da rota.')),
+      );
+    }
+  }
+
   String _rotuloStatus(String s) {
     switch (s) {
       case 'roteirizada':
@@ -788,9 +799,9 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
       sincronizadasRecentes: sync.sincronizadasRecentes,
       recusadas: sync.falhas,
     );
-    final qtdRota = linhas
-        .where((l) => l.sync != EntregaBaixaUiStatus.sincronizada)
-        .length;
+    final paradas = RotaMotorista.montar(linhas);
+    final qtdRota = RotaMotorista.totalPendentes(paradas);
+    final vendasRota = RotaMotorista.vendasParaMapa(paradas);
     final clienteRepo = MainMenuDeps.maybeOf(context)?.clienteRepository;
     return Scaffold(
       appBar: AppBar(
@@ -831,6 +842,19 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                             '$qtdRota entrega(s) em rota',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
+                          if (vendasRota.length > 1) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: FilledButton.tonalIcon(
+                                onPressed: () => _abrirRotaCompleta(vendasRota),
+                                icon: const Icon(Icons.alt_route, size: 18),
+                                label: Text(
+                                  'Ver rota das ${vendasRota.length} paradas',
+                                ),
+                              ),
+                            ),
+                          ],
                           if (sync.pendentes.isNotEmpty)
                             Text(
                               '${sync.pendentes.length} aguardando sync',
@@ -866,7 +890,8 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                         ),
                       ),
                     ),
-                  ...linhas.map((linha) {
+                  ...paradas.map((parada) {
+                    final linha = parada.linha;
                     final v = linha.venda;
                     final prog = _progressoCarga(v);
                     final atrasada = EntregaFiltroUtil.ehAtrasada(v);
@@ -904,13 +929,69 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                     final podeLiberar = !pendenteOuSync &&
                         !_busyLiberar &&
                         EntregaFluxoService.podeLiberarSaida(v);
+                    final scheme = Theme.of(context).colorScheme;
                     return Card(
                       margin: const EdgeInsets.only(bottom: 10),
+                      shape: parada.destacarProxima
+                          ? RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(
+                                color: scheme.primary,
+                                width: 2,
+                              ),
+                            )
+                          : null,
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            if (parada.mostrarSequencia)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Row(
+                                  children: [
+                                    _NumeroParada(
+                                      numero: parada.posicao,
+                                      proxima: parada.destacarProxima,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        parada.rotulo,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelLarge
+                                            ?.copyWith(
+                                              color: scheme.onSurfaceVariant,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                      ),
+                                    ),
+                                    if (parada.destacarProxima)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: scheme.primary,
+                                          borderRadius:
+                                              BorderRadius.circular(999),
+                                        ),
+                                        child: Text(
+                                          'PROXIMA',
+                                          style: TextStyle(
+                                            color: scheme.onPrimary,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 11,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
                             Text(
                               'Pedido ${v.numeroOrcamento}',
                               style: const TextStyle(
@@ -1085,6 +1166,39 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _NumeroParada extends StatelessWidget {
+  const _NumeroParada({required this.numero, required this.proxima});
+
+  final int numero;
+  final bool proxima;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 30,
+      height: 30,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: proxima ? scheme.primary : scheme.surfaceContainerHighest,
+        border: Border.all(
+          color: proxima
+              ? scheme.primary
+              : scheme.outlineVariant.withValues(alpha: 0.8),
+        ),
+      ),
+      child: Text(
+        '$numero',
+        style: TextStyle(
+          fontWeight: FontWeight.w800,
+          color: proxima ? scheme.onPrimary : scheme.onSurfaceVariant,
+        ),
+      ),
     );
   }
 }

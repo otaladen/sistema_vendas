@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import 'package:sistema_vendas/data/objectbox.dart';
 import 'package:sistema_vendas/data/venda_repository.dart';
+import 'package:sistema_vendas/domain/cancelada_por_rotulo.dart';
 
 /// Uso (na raiz do projeto):
 ///   flutter run -t tool/limpar_entregas_teste.dart -d windows
@@ -21,7 +22,7 @@ Future<void> main() async {
 
   final r = repo.limparAbaEntregasCancelandoVendas(
     motivo: 'Limpeza automatica — teste aba Entregas',
-    canceladaPor: 'ferramenta_limpar_entregas',
+    canceladaPor: CanceladaPorRotulo.ferramentaLimparEntregas,
     forcarQuandoBloqueado: true,
   );
 

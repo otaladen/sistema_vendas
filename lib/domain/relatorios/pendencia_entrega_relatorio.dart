@@ -84,11 +84,7 @@ List<LinhaPendenciaEntregaRelatorio> montarLinhasPendenciaEntrega(
       } else if (tipoItem == EntregaVendaHelper.tipoEntregaLoja) {
         qtd = item.quantidadeNoCarreto;
         if (qtd <= 0) {
-          qtd =
-              item.quantidade -
-              item.quantidadeDevolvida -
-              item.quantidadeJaRetirada;
-          if (qtd < 0) qtd = 0;
+          qtd = item.quantidadeAindaNoCarretoAntesSaida;
         }
       }
       if (qtd <= 0) continue;

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/api/lan_api_client.dart';
@@ -10,6 +10,7 @@ import 'relatorio_drill_down.dart';
 import 'relatorio_export_util.dart';
 import 'relatorio_helpers.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
+import '../vendas/listagem_vendas_layout.dart';
 import '../widgets/lan_api_feedback.dart';
 
 class RelatorioOrcamentosAbertosPage extends StatefulWidget {
@@ -112,10 +113,8 @@ class _RelatorioOrcamentosAbertosPageState
     });
   }
 
-  String _nomeCliente(Venda v) => relatorioNomeCliente(
-        v,
-        clienteRepository: widget.clienteRepository,
-      );
+  String _nomeCliente(Venda v) =>
+      relatorioNomeCliente(v, clienteRepository: widget.clienteRepository);
 
   Cliente? _cliente(Venda v) {
     return relatorioClienteDaVenda(
@@ -144,12 +143,10 @@ class _RelatorioOrcamentosAbertosPageState
           inicio = DateTime(inicio.year, inicio.month, inicio.day);
           fim = DateTime(fim.year, fim.month, fim.day, 23, 59, 59, 999);
         }
-        lista = lista
-            .where((v) {
-              final loc = v.data.toLocal();
-              return !loc.isBefore(inicio!) && !loc.isAfter(fim!);
-            })
-            .toList();
+        lista = lista.where((v) {
+          final loc = v.data.toLocal();
+          return !loc.isBefore(inicio!) && !loc.isAfter(fim!);
+        }).toList();
       }
     }
     final termo = _buscaController.text.trim().toLowerCase();
@@ -263,9 +260,7 @@ class _RelatorioOrcamentosAbertosPageState
     if (!widget.podeApagarOrcamentos || widget.usuarioExecutor == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Sem permissao para apagar orcamentos.'),
-        ),
+        const SnackBar(content: Text('Sem permissao para apagar orcamentos.')),
       );
       return;
     }
@@ -311,9 +306,7 @@ class _RelatorioOrcamentosAbertosPageState
       await _carregar();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Orcamento ${venda.numeroOrcamento} apagado.'),
-        ),
+        SnackBar(content: Text('Orcamento ${venda.numeroOrcamento} apagado.')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -371,8 +364,9 @@ class _RelatorioOrcamentosAbertosPageState
                       if (escolhida == null) return;
                       setDialogState(() {
                         dataLimite = escolhida;
-                        dataController.text =
-                            DateFormat('dd/MM/yyyy').format(escolhida);
+                        dataController.text = DateFormat(
+                          'dd/MM/yyyy',
+                        ).format(escolhida);
                       });
                     },
                   ),
@@ -382,11 +376,11 @@ class _RelatorioOrcamentosAbertosPageState
                         ? 'Nenhum orcamento em aberto ate esta data.'
                         : '$qtd orcamento(s) serao apagados.',
                     style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: qtd == 0
-                              ? Theme.of(ctx).colorScheme.onSurfaceVariant
-                              : Theme.of(ctx).colorScheme.error,
-                        ),
+                      fontWeight: FontWeight.w600,
+                      color: qtd == 0
+                          ? Theme.of(ctx).colorScheme.onSurfaceVariant
+                          : Theme.of(ctx).colorScheme.error,
+                    ),
                   ),
                 ],
               ),
@@ -442,11 +436,13 @@ class _RelatorioOrcamentosAbertosPageState
           canceladaPor: widget.usuarioExecutor!.login,
         );
       } else {
-        apagados = repo.cancelarOrcamentosPendentesAte(
-          dataLimite,
-          motivo: 'Manutencao: orcamentos em aberto ate $dataFmt',
-          canceladaPor: widget.usuarioExecutor!.login,
-        ) as int;
+        apagados =
+            repo.cancelarOrcamentosPendentesAte(
+                  dataLimite,
+                  motivo: 'Manutencao: orcamentos em aberto ate $dataFmt',
+                  canceladaPor: widget.usuarioExecutor!.login,
+                )
+                as int;
       }
       await _carregar();
       if (!mounted) return;
@@ -548,8 +544,8 @@ class _RelatorioOrcamentosAbertosPageState
               child: Text(
                 'Inclui o dia inteiro da data inicial e da final.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
         ],
@@ -561,6 +557,12 @@ class _RelatorioOrcamentosAbertosPageState
   Widget build(BuildContext context) {
     final NumberFormat moeda = NumberFormat('#,##0.00', 'pt_BR');
     String fmt(double v) => 'R\$ ${moeda.format(v)}';
+    final scheme = Theme.of(context).colorScheme;
+    // Faixa neutra sobre a superficie: aparece no tema claro e no escuro.
+    final zebra = Color.alphaBlend(
+      scheme.onSurface.withValues(alpha: 0.045),
+      scheme.surface,
+    );
     final visiveis = _filtrados;
     final total = visiveis.fold<double>(0, (s, v) => s + v.total);
     final totalGeral = _todos.fold<double>(0, (s, v) => s + v.total);
@@ -600,15 +602,15 @@ class _RelatorioOrcamentosAbertosPageState
                   Text(
                     widget.textoResumo!,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 8),
                 ],
                 Text(
                   _filtrosAtivos
                       ? '${visiveis.length} de ${_todos.length} orcamento(s) · '
-                          'Total filtrado ${fmt(total)}'
+                            'Total filtrado ${fmt(total)}'
                       : '${_todos.length} orcamento(s) · Valor total ${fmt(totalGeral)}',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
@@ -634,75 +636,98 @@ class _RelatorioOrcamentosAbertosPageState
                   )
                 : ListView.builder(
                     itemCount: visiveis.length,
+                    // Mesma altura de linha da listagem de vendas.
+                    itemExtent: ListagemVendasLayout.alturaLinhaTabela,
                     itemBuilder: (context, i) {
                       final v = visiveis[i];
                       final dias = _diasAberto(v);
-                      return ListTile(
-                        title: Text.rich(
-                          TextSpan(
-                            style: Theme.of(context).textTheme.titleMedium,
-                            children: [
-                              TextSpan(
-                                text: 'Orc. ${v.numeroOrcamento} · ',
+                      return DecoratedBox(
+                        position: DecorationPosition.foreground,
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: scheme.outlineVariant.withValues(
+                                alpha: 0.45,
                               ),
-                              TextSpan(
-                                text: fmt(v.total),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
-                        subtitle: Text(
-                          '${DateFormat('dd/MM/yyyy HH:mm').format(v.data.toLocal())} · '
-                          '${_nomeCliente(v)} · '
-                          '${relatorioItensDaVenda(widget.vendaRepository, v).length} item(ns) · $dias dia(s) em aberto',
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (dias >= 7)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 4),
-                                child: Chip(
-                                  label: Text('$dias d'),
-                                  visualDensity: VisualDensity.compact,
-                                  backgroundColor: Theme.of(context)
-                                      .colorScheme
-                                      .errorContainer,
+                        child: ListTile(
+                          minTileHeight: ListagemVendasLayout.alturaLinhaTabela,
+                          dense: true,
+                          visualDensity: VisualDensity.compact,
+                          tileColor: i.isOdd ? zebra : scheme.surface,
+                          hoverColor: scheme.primary.withValues(alpha: 0.14),
+                          title: Text.rich(
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            TextSpan(
+                              style: Theme.of(context).textTheme.titleSmall,
+                              children: [
+                                TextSpan(text: 'Orc. ${v.numeroOrcamento} · '),
+                                TextSpan(
+                                  text: fmt(v.total),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
-                              ),
-                            if (widget.podeEditarNoPdv &&
-                                widget.onEditarNoPdv != null)
-                              IconButton(
-                                tooltip: 'Editar no PDV',
-                                icon: Icon(
-                                  Icons.edit_note_outlined,
-                                  color: Theme.of(context).colorScheme.primary,
+                              ],
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${DateFormat('dd/MM/yyyy HH:mm').format(v.data.toLocal())} · '
+                            '${_nomeCliente(v)} · '
+                            '${relatorioItensDaVenda(widget.vendaRepository, v).length} item(ns) · $dias dia(s) em aberto',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (dias >= 7)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 4),
+                                  child: Chip(
+                                    label: Text('$dias d'),
+                                    visualDensity: VisualDensity.compact,
+                                    backgroundColor: Theme.of(
+                                      context,
+                                    ).colorScheme.errorContainer,
+                                  ),
                                 ),
-                                onPressed: () async {
-                                  await widget.onEditarNoPdv!(context, v);
-                                  if (mounted) await _carregar();
-                                },
-                              ),
-                            if (widget.podeApagarOrcamentos)
-                              IconButton(
-                                tooltip: 'Apagar orcamento',
-                                icon: Icon(
-                                  Icons.delete_outline,
-                                  color: Theme.of(context).colorScheme.error,
+                              if (widget.podeEditarNoPdv &&
+                                  widget.onEditarNoPdv != null)
+                                IconButton(
+                                  tooltip: 'Editar no PDV',
+                                  icon: Icon(
+                                    Icons.edit_note_outlined,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                  ),
+                                  onPressed: () async {
+                                    await widget.onEditarNoPdv!(context, v);
+                                    if (mounted) await _carregar();
+                                  },
                                 ),
-                                onPressed: () => _confirmarApagarOrcamento(v),
-                              ),
-                            const Icon(Icons.chevron_right),
-                          ],
-                        ),
-                        onTap: () => mostrarDetalheVendaRelatorio(
-                          context,
-                          vendaRepository: widget.vendaRepository,
-                          vendaId: v.id,
-                          clienteRepository: widget.clienteRepository,
+                              if (widget.podeApagarOrcamentos)
+                                IconButton(
+                                  tooltip: 'Apagar orcamento',
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                  onPressed: () => _confirmarApagarOrcamento(v),
+                                ),
+                              const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                          onTap: () => mostrarDetalheVendaRelatorio(
+                            context,
+                            vendaRepository: widget.vendaRepository,
+                            vendaId: v.id,
+                            clienteRepository: widget.clienteRepository,
+                          ),
                         ),
                       );
                     },

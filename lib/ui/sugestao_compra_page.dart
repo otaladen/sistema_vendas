@@ -4,8 +4,10 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
+import 'package:printing/printing.dart';
 
 import '../data/api/lan_api_client.dart';
 import '../data/api/produto_api_repository.dart';
@@ -13,6 +15,7 @@ import '../data/produto_repository.dart';
 import '../data/sugestao_compra_repository.dart';
 import '../domain/produto_embalagem.dart';
 import '../services/compras_preditivas_service.dart';
+import '../services/pdf_relatorio_texto.dart';
 import 'theme/app_semantic_colors.dart';
 
 /// Relatorio de reposicao: giro recente, minimo, ponto de pedido e ultima entrada por NF-e.
@@ -34,6 +37,8 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
   int _diasPeriodo = 60;
   int _diasCoberturaAlvo = 30;
   bool _apenasPrioritarios = true;
+  String? _fornecedorFiltro;
+  List<String> _fornecedores = const [];
   bool _carregando = false;
   String? _erro;
   List<LinhaSugestaoCompra> _linhas = const [];
@@ -82,15 +87,23 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
           diasPeriodo: _diasPeriodo,
           diasCobertura: _diasCoberturaAlvo,
           apenasPrioritarios: _apenasPrioritarios,
+          fornecedor: _fornecedorFiltro,
         );
         final linhas = <LinhaSugestaoCompra>[];
-        for (final m in raw) {
+        for (final m in raw.items) {
           final l = LinhaSugestaoCompra.fromApiMap(m);
           if (l != null) linhas.add(l);
         }
         if (!mounted) return;
         setState(() {
           _linhas = linhas;
+          if (raw.fornecedores.isNotEmpty) {
+            _fornecedores = raw.fornecedores;
+          }
+          if (_fornecedorFiltro != null &&
+              !_fornecedores.contains(_fornecedorFiltro)) {
+            _fornecedorFiltro = null;
+          }
           _carregando = false;
         });
         return;
@@ -103,10 +116,16 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
         diasPeriodoConsumo: _diasPeriodo,
         diasCoberturaAlvo: _diasCoberturaAlvo,
         apenasComSugestaoOuRisco: _apenasPrioritarios,
+        fornecedorFiltro: _fornecedorFiltro,
       );
       if (!mounted) return;
       setState(() {
         _linhas = linhas;
+        _fornecedores = repo.indiceFornecedoresNfe().nomesOrdenados;
+        if (_fornecedorFiltro != null &&
+            !_fornecedores.contains(_fornecedorFiltro)) {
+          _fornecedorFiltro = null;
+        }
         _carregando = false;
       });
     } catch (e) {
@@ -132,10 +151,13 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
 
     final linhas = _linhas;
     final ts = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    final arquivo = File(p.join(pasta, 'sugestao_compra_$ts.csv'));
+    final sufixo = _fornecedorFiltro == null
+        ? ''
+        : '_${_slugArquivo(_fornecedorFiltro!)}';
+    final arquivo = File(p.join(pasta, 'sugestao_compra${sufixo}_$ts.csv'));
 
     final out = <String>[
-      'SKU;Nome;Unidade;Atual;Livre;Minimo;PP;Critico PP;Media dia;Lead time;Seguranca;Vendido periodo;Cobertura dias;Ultima NF-e;Sugerido comprar;Sugerido PP',
+      'Fornecedor;SKU;Nome;Unidade;Atual;Livre;Minimo;PP;Critico PP;Media dia;Lead time;Seguranca;Vendido periodo;Cobertura dias;Ultima NF-e;Sugerido comprar;Sugerido PP',
     ];
     for (final l in linhas) {
       final pr = l.produto;
@@ -145,6 +167,11 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
           ? ''
           : _dataFmt.format(l.ultimaEntradaNfe!.toLocal());
       out.add([
+        _csvSeguro(
+          l.fornecedorUltimaNfe.isEmpty
+              ? (pr.fornecedor)
+              : l.fornecedorUltimaNfe,
+        ),
         _csvSeguro(pr.codigoInterno),
         _csvSeguro(pr.nome),
         _csvSeguro(pr.unidade),
@@ -240,6 +267,72 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
     );
   }
 
+  String _slugArquivo(String nome) {
+    final t = nome
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+    if (t.isEmpty) return 'fornecedor';
+    return t.length > 40 ? t.substring(0, 40) : t;
+  }
+
+  String _textoPedidoRepresentante() {
+    final buf = StringBuffer();
+    buf.writeln('Pedido de reposicao');
+    if (_fornecedorFiltro != null && _fornecedorFiltro!.trim().isNotEmpty) {
+      buf.writeln('Fornecedor: ${_fornecedorFiltro!.trim()}');
+    }
+    buf.writeln(
+      'Gerado em ${DateFormat('dd/MM/yyyy HH:mm', 'pt_BR').format(DateTime.now())}',
+    );
+    buf.writeln('');
+    var n = 1;
+    for (final l in _linhas) {
+      final pr = l.produto;
+      final forn = l.fornecedorUltimaNfe.trim().isNotEmpty
+          ? l.fornecedorUltimaNfe.trim()
+          : pr.fornecedor.trim();
+      buf.write('$n. ${pr.nome}');
+      if (pr.codigoInterno.trim().isNotEmpty) {
+        buf.write(' (SKU ${pr.codigoInterno.trim()})');
+      }
+      buf.writeln(
+        ' — ${l.quantidadeSugerida} ${ProdutoEmbalagem.normalizarUnidade(pr.unidade)}',
+      );
+      buf.writeln(
+        '   Estoque ${ProdutoEmbalagem.formatarEstoque(pr, pr.estoqueAtual)} · '
+        'min ${pr.quantidadeMinima} · PP ${_dec1.format(l.pontoPedido)}',
+      );
+      if (_fornecedorFiltro == null && forn.isNotEmpty) {
+        buf.writeln('   Fornecedor: $forn');
+      }
+      n++;
+    }
+    return buf.toString().trim();
+  }
+
+  Future<void> _copiarTextoRepresentante() async {
+    final texto = _textoPedidoRepresentante();
+    if (texto.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: texto));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Lista copiada para colar no WhatsApp.')),
+    );
+  }
+
+  Future<void> _exportarPdf() async {
+    final titulo = _fornecedorFiltro == null || _fornecedorFiltro!.trim().isEmpty
+        ? 'Sugestao de compra'
+        : 'Pedido — ${_fornecedorFiltro!.trim()}';
+    final bytes = await gerarPdfRelatorioTextoPaginas([
+      '$titulo\n\n${_textoPedidoRepresentante()}',
+    ]);
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
+  }
+
   void _onFiltroChanged(VoidCallback apply) {
     apply();
     unawaited(_carregarLinhas());
@@ -266,10 +359,23 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                 : () => _recalcularMediasTodosProdutos(),
             icon: const Icon(Icons.refresh_outlined),
           ),
-          IconButton(
-            tooltip: 'Exportar CSV',
-            onPressed: linhas.isEmpty || _carregando ? null : _exportarCsv,
-            icon: const Icon(Icons.file_download_outlined),
+          PopupMenuButton<String>(
+            tooltip: 'Exportar lista',
+            enabled: linhas.isNotEmpty && !_carregando,
+            onSelected: (v) {
+              if (v == 'csv') unawaited(_exportarCsv());
+              if (v == 'pdf') unawaited(_exportarPdf());
+              if (v == 'copiar') unawaited(_copiarTextoRepresentante());
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'csv', child: Text('Exportar CSV')),
+              PopupMenuItem(value: 'pdf', child: Text('Imprimir / PDF')),
+              PopupMenuItem(
+                value: 'copiar',
+                child: Text('Copiar texto para o representante'),
+              ),
+            ],
+            icon: const Icon(Icons.ios_share_outlined),
           ),
         ],
       ),
@@ -348,8 +454,39 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                                 () => setState(() => _apenasPrioritarios = s),
                               ),
                     ),
+                    if (_fornecedores.isNotEmpty)
+                      DropdownMenu<String?>(
+                        key: ValueKey(
+                          'forn_${_fornecedores.length}_${_fornecedorFiltro ?? ''}',
+                        ),
+                        width: 280,
+                        label: const Text('Fornecedor'),
+                        initialSelection: _fornecedorFiltro,
+                        dropdownMenuEntries: [
+                          const DropdownMenuEntry<String?>(
+                            value: null,
+                            label: 'Todos',
+                          ),
+                          for (final f in _fornecedores)
+                            DropdownMenuEntry<String?>(value: f, label: f),
+                        ],
+                        onSelected: _carregando
+                            ? null
+                            : (v) => _onFiltroChanged(
+                                  () => setState(() => _fornecedorFiltro = v),
+                                ),
+                      ),
                   ],
                 ),
+                if (_fornecedorFiltro != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'So SKUs com NF-e/compra desse fornecedor abaixo do ponto de pedido ou do estoque minimo.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Text(
                   _carregando
@@ -380,7 +517,9 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                           child: Text(
                             _erro != null
                                 ? 'Nao foi possivel carregar a sugestao.'
-                                : _apenasPrioritarios
+                                : _fornecedorFiltro != null
+                                    ? 'Nenhum produto desse fornecedor esta abaixo do ponto de pedido ou do estoque minimo.'
+                                    : _apenasPrioritarios
                                     ? 'Nenhum produto em alerta com os filtros atuais.\n'
                                         'Desative "So prioritarios" para ver todos os cadastros ativos.'
                                     : 'Nenhum produto ativo no cadastro.',
@@ -506,7 +645,8 @@ class _SugestaoCompraPageState extends State<SugestaoCompraPage> {
                                   Text(
                                     l.ultimaEntradaNfe == null
                                         ? 'Ultima NF-e: —'
-                                        : 'Ultima NF-e: ${_dataFmt.format(l.ultimaEntradaNfe!.toLocal())}',
+                                        : 'Ultima NF-e: ${_dataFmt.format(l.ultimaEntradaNfe!.toLocal())}'
+                                            '${l.fornecedorUltimaNfe.trim().isEmpty ? '' : ' · ${l.fornecedorUltimaNfe.trim()}'}',
                                     style:
                                         Theme.of(context).textTheme.bodySmall,
                                   ),

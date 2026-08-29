@@ -4,6 +4,7 @@ import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../../model/vendedor.dart';
 import '../../domain/produto_imagem_nome_arquivo.dart';
+import '../../domain/saldo_retirada_item.dart';
 import '../../domain/venda_relacao_safe.dart';
 
 /// Serializacao para sync LAN (JSON).
@@ -451,13 +452,21 @@ class SyncEntityCodec {
   }
 
   static ItemVenda itemDeMap(Map<String, dynamic> m) {
+    final quantidade = (m['quantidade'] as num?)?.toInt() ?? 0;
+    final quantidadeDevolvida =
+        (m['quantidadeDevolvida'] as num?)?.toInt() ?? 0;
     final item = ItemVenda(
-      id: 0,
+      id: (m['id'] as num?)?.toInt() ?? 0,
       nomeProduto: (m['nomeProduto'] ?? '').toString(),
-      quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
-      quantidadeJaRetirada: (m['quantidadeJaRetirada'] as num?)?.toInt() ?? 0,
+      quantidade: quantidade,
+      quantidadeJaRetirada: SaldoRetiradaItem.jaRetiradaCapped(
+        quantidadeJaRetirada:
+            (m['quantidadeJaRetirada'] as num?)?.toInt() ?? 0,
+        quantidade: quantidade,
+        quantidadeDevolvida: quantidadeDevolvida,
+      ),
       quantidadeNoCarreto: (m['quantidadeNoCarreto'] as num?)?.toInt() ?? 0,
-      quantidadeDevolvida: (m['quantidadeDevolvida'] as num?)?.toInt() ?? 0,
+      quantidadeDevolvida: quantidadeDevolvida,
       tipoEntregaItem: (m['tipoEntregaItem'] ?? 'retirada').toString(),
       precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
       precoUnitario: (m['precoUnitario'] as num?)?.toDouble() ?? 0,

@@ -35,4 +35,7 @@ enum PdvConsultaModoSugestao {
   misto,
   recentes,
   maisVendidos,
+
+  /// Catalogo completo A–Z com paginacao (leve).
+  catalogoAz,
 }

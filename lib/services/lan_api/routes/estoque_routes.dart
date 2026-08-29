@@ -93,14 +93,29 @@ void registerEstoqueRoutes(Router router, LanApiDeps d) {
       final apenas = (r.url.queryParameters['apenasPrioritarios'] ?? 'true')
               .toLowerCase() !=
           'false';
-      final linhas = SugestaoCompraRepository(d.objectBox).montarLinhas(
+      final fornecedor =
+          (r.url.queryParameters['fornecedor'] ?? '').trim();
+      final repo = SugestaoCompraRepository(d.objectBox);
+      final linhas = repo.montarLinhas(
         diasPeriodoConsumo: diasPeriodo,
         diasCoberturaAlvo: diasCobertura,
         apenasComSugestaoOuRisco: apenas,
+        fornecedorFiltro: fornecedor.isEmpty ? null : fornecedor,
       );
       return lanApiJson({
         'items': linhas.map(LinhaSugestaoCompra.toApiMap).toList(),
+        'fornecedores': repo.indiceFornecedoresNfe().nomesOrdenados,
       });
+    } catch (e) {
+      return lanApiJson({'error': '$e'}, status: 500);
+    }
+  });
+
+  router.get('/api/estoque/fornecedores-nfe', (Request r) {
+    try {
+      final indice =
+          SugestaoCompraRepository(d.objectBox).indiceFornecedoresNfe();
+      return lanApiJson(indice.toApiMap());
     } catch (e) {
       return lanApiJson({'error': '$e'}, status: 500);
     }

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../model/cliente.dart';
 import '../../model/funcionario.dart';
+import '../../model/historico_entrega.dart';
 import '../../model/kit_orcamento.dart';
 import '../../model/fornecedor_nfe.dart';
 import '../../model/motorista.dart';
@@ -26,6 +27,7 @@ import '../venda_repository.dart';
 import '../vendedor_repository.dart';
 import '../../domain/recado_loja_helper.dart';
 import '../../domain/produto_estoque_sync.dart';
+import '../../domain/saldo_retirada_item.dart';
 import '../../domain/sync/fornecedor_nfe_sync_merge.dart';
 import 'sync_conflict_log.dart';
 import 'sync_cursor_storage.dart';
@@ -166,6 +168,7 @@ class SyncFullSync {
     'historico_entrega',
     'conferencia_carga_romaneio',
     'registro_devolucao',
+    'vale_credito',
     'empresa_config',
     'usuarios_sistema',
     'caixa_sessoes',
@@ -317,6 +320,19 @@ class SyncFullSync {
             entity,
             r.id,
             SyncEntityCodecExtras.registroDevolucaoParaMap(r),
+          );
+        }
+      case 'vale_credito':
+        for (final v in _db.valeCreditoBox.getAll()) {
+          v.cliente.target;
+          v.vendaOrigem.target;
+          v.registroDevolucao.target;
+          v.usos.length;
+          _add(
+            m,
+            entity,
+            v.id,
+            SyncEntityCodecExtras.valeCreditoParaMap(v),
           );
         }
       case 'empresa_config':
@@ -589,6 +605,20 @@ class SyncFullSync {
             SyncEntityCodecExtras.registroDevolucaoParaMap(r),
           );
         }
+      case 'vale_credito':
+        final vale = _db.valeCreditoBox.get(localId);
+        if (vale != null) {
+          vale.cliente.target;
+          vale.vendaOrigem.target;
+          vale.registroDevolucao.target;
+          vale.usos.length;
+          _add(
+            m,
+            entity,
+            vale.id,
+            SyncEntityCodecExtras.valeCreditoParaMap(vale),
+          );
+        }
       case 'empresa_config':
         final cfg = await _configRepository.carregarEmpresaConfig();
         _add(
@@ -820,6 +850,9 @@ class SyncFullSync {
         break;
       case 'registro_devolucao':
         await _aplicarRegistroDevolucao(payload);
+        break;
+      case 'vale_credito':
+        await _aplicarValeCredito(payload);
         break;
       case 'empresa_config':
         await _aplicarEmpresaConfig(payload);
@@ -1080,7 +1113,9 @@ class SyncFullSync {
   }
 
   void _aplicarDelete(String entity, int id) {
-    if (entity == 'venda' || entity == 'registro_devolucao') {
+    if (entity == 'venda' ||
+        entity == 'registro_devolucao' ||
+        entity == 'vale_credito') {
       _aplicarDeleteInterno(entity, id);
       if (entity == 'produto') {
         _produtoRepo.invalidarCacheBusca();
@@ -1148,6 +1183,11 @@ class SyncFullSync {
         _db.recebimentoFiadoBox.remove(id);
         break;
       case 'historico_entrega':
+        final hist = _db.historicoEntregaBox.get(id);
+        if (hist != null &&
+            HistoricoEntregaEventos.ehEventoRetirada(hist.statusNovo)) {
+          break;
+        }
         _db.historicoEntregaBox.remove(id);
         break;
       case 'conferencia_carga_romaneio':
@@ -1155,6 +1195,9 @@ class SyncFullSync {
         break;
       case 'registro_devolucao':
         _removerRegistroDevolucao(id);
+        break;
+      case 'vale_credito':
+        _removerValeCredito(id);
         break;
       case 'movimento_estoque':
         _db.movimentoEstoqueBox.remove(id);
@@ -1590,6 +1633,13 @@ class SyncFullSync {
 
   Future<void> _aplicarHistoricoEntrega(Map<String, dynamic> payload) async {
     final h = SyncEntityCodecExtras.historicoEntregaDeMap(payload);
+    if (h.id != 0) {
+      final existente = _db.historicoEntregaBox.get(h.id);
+      if (existente != null &&
+          HistoricoEntregaEventos.ehEventoRetirada(existente.statusNovo)) {
+        return;
+      }
+    }
     final vid = (payload['vendaId'] as num?)?.toInt() ?? 0;
     if (vid > 0) {
       final v = _db.vendaBox.get(vid);
@@ -1665,6 +1715,58 @@ class SyncFullSync {
     });
   }
 
+  void _removerValeCredito(int id) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final v = _db.valeCreditoBox.get(id);
+      if (v == null) return;
+      for (final u in v.usos.toList()) {
+        if (u.id > 0) _db.usoValeCreditoBox.remove(u.id);
+      }
+      _db.valeCreditoBox.remove(id);
+    });
+  }
+
+  Future<void> _aplicarValeCredito(Map<String, dynamic> payload) async {
+    final vale = SyncEntityCodecExtras.valeCreditoDeMap(payload);
+    _db.store.runInTransaction(TxMode.write, () {
+      if (vale.id != 0) _removerValeCredito(vale.id);
+      final cid = (payload['clienteId'] as num?)?.toInt() ?? 0;
+      if (cid > 0) {
+        final c = _db.clienteBox.get(cid);
+        if (c != null) vale.cliente.target = c;
+      }
+      final vid = (payload['vendaOrigemId'] as num?)?.toInt() ?? 0;
+      if (vid > 0) {
+        final v = _db.vendaBox.get(vid);
+        if (v != null) vale.vendaOrigem.target = v;
+      }
+      final rid = (payload['registroDevolucaoId'] as num?)?.toInt() ?? 0;
+      if (rid > 0) {
+        final r = _db.registroDevolucaoBox.get(rid);
+        if (r != null) vale.registroDevolucao.target = r;
+      }
+      final valeId = _db.valeCreditoBox.put(vale);
+      vale.id = valeId;
+
+      final usos = payload['usos'];
+      if (usos is List) {
+        for (final raw in usos) {
+          if (raw is! Map) continue;
+          final im = Map<String, dynamic>.from(raw);
+          final u = SyncEntityCodecExtras.usoValeCreditoDeMap(im);
+          u.id = 0;
+          u.vale.targetId = valeId;
+          final uvid = (im['vendaId'] as num?)?.toInt() ?? 0;
+          if (uvid > 0) {
+            final v = _db.vendaBox.get(uvid);
+            if (v != null) u.venda.target = v;
+          }
+          _db.usoValeCreditoBox.put(u);
+        }
+      }
+    });
+  }
+
   Future<void> _aplicarEmpresaConfig(Map<String, dynamic> payload) async {
     final atual = await _configRepository.carregarEmpresaConfig();
     final remoto = SyncEntityCodecExtras.empresaConfigDeMap(atual, payload);
@@ -1696,12 +1798,13 @@ class SyncFullSync {
       final vendedorId = (payload['vendedorId'] as num?)?.toInt() ?? 0;
       final itensRaw = payload['itens'];
       final idsAntigos = <int>[];
+      final jaRetiradaLocalPorItemId = <int, int>{};
       final existente = _db.vendaBox.get(venda.id);
       if (existente != null) {
-        idsAntigos.addAll(existente.itens.map((i) => i.id));
-      }
-      if (idsAntigos.isNotEmpty) {
-        _db.itemVendaBox.removeMany(idsAntigos);
+        for (final i in existente.itens) {
+          idsAntigos.add(i.id);
+          jaRetiradaLocalPorItemId[i.id] = i.quantidadeJaRetirada;
+        }
       }
       if (clienteId > 0) {
         final c = _db.clienteBox.get(clienteId);
@@ -1714,11 +1817,23 @@ class SyncFullSync {
       _db.vendaBox.put(venda);
       final salva = _db.vendaBox.get(venda.id);
       if (salva == null) return;
+      final idsNoPayload = <int>{};
+      var payloadTemIds = false;
       if (itensRaw is List) {
         for (final raw in itensRaw) {
           if (raw is! Map) continue;
           final im = Map<String, dynamic>.from(raw);
+          if (((im['id'] as num?)?.toInt() ?? 0) > 0) payloadTemIds = true;
           final item = SyncEntityCodec.itemDeMap(im);
+          final localJa = jaRetiradaLocalPorItemId[item.id];
+          if (localJa != null && localJa > item.quantidadeJaRetirada) {
+            item.quantidadeJaRetirada = localJa;
+          }
+          item.quantidadeJaRetirada = SaldoRetiradaItem.jaRetiradaCapped(
+            quantidadeJaRetirada: item.quantidadeJaRetirada,
+            quantidade: item.quantidade,
+            quantidadeDevolvida: item.quantidadeDevolvida,
+          );
           item.venda.target = salva;
           final pid = (im['produtoId'] as num?)?.toInt() ?? 0;
           if (pid > 0) {
@@ -1726,7 +1841,17 @@ class SyncFullSync {
             if (pr != null) item.produto.target = pr;
           }
           _db.itemVendaBox.put(item);
+          if (item.id > 0) idsNoPayload.add(item.id);
         }
+      }
+      if (payloadTemIds) {
+        final idsRemover =
+            idsAntigos.where((id) => !idsNoPayload.contains(id)).toList();
+        if (idsRemover.isNotEmpty) {
+          _db.itemVendaBox.removeMany(idsRemover);
+        }
+      } else if (idsAntigos.isNotEmpty) {
+        _db.itemVendaBox.removeMany(idsAntigos);
       }
     });
   }

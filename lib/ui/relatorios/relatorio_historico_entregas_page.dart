@@ -112,7 +112,10 @@ class _RelatorioHistoricoEntregasPageState
             '${v?.numeroOrcamento ?? ''}',
             _clienteDoHistorico(h),
             HistoricoEntregaEventos.rotulo(h.statusNovo),
-            HistoricoEntregaEventos.rotulo(h.statusAnterior),
+            HistoricoEntregaEventos.textoStatusAnteriorParaExibicao(
+              h.statusNovo,
+              h.statusAnterior,
+            ),
             HistoricoEntregaEventos.rotulo(h.statusNovo),
             h.usuario,
           ];

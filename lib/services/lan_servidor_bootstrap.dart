@@ -10,13 +10,13 @@ import '../data/sync/estoque_local_refresh_hub.dart';
 import 'entrega_pod_retencao_service.dart';
 import 'lan_api_server.dart';
 import 'lan_api/lan_api_deps.dart';
-import 'lan_sync_server_manager.dart';
+import 'lan_rede_helper.dart';
 import 'windows_app_startup_helper.dart';
 
-/// Sobe hub de sync mobile (8787) + API de terminais Windows (8788) **antes do login**.
+/// Sobe a API de terminais Windows (8788) **antes do login**.
 ///
 /// No PC1 servidor Windows: esta e a unica forma de expor dados na LAN.
-/// Nao inicia SyncService/LanSyncScheduler (sem pull/push contra si mesmo).
+/// Celular e terminal usam a mesma API. Nao inicia SyncService.
 abstract final class LanServidorBootstrap {
   LanServidorBootstrap._();
 
@@ -24,11 +24,9 @@ abstract final class LanServidorBootstrap {
   static bool _ok = false;
   static String? ultimoErro;
   static DateTime? iniciadoEm;
-  static bool _hubProvavelAtivo = false;
   static VoidCallback? _listenerEstoqueLanApi;
 
-  static bool get ativo =>
-      _ok && (LanApiServerHub.instance.ativo || _hubProvavelAtivo);
+  static bool get ativo => _ok && LanApiServerHub.instance.ativo;
 
   static Future<void> garantirAtivo({
     required ObjectBox objectBox,
@@ -69,16 +67,7 @@ abstract final class LanServidorBootstrap {
       };
       EstoqueLocalRefreshHub.instance.addListener(_listenerEstoqueLanApi!);
 
-      final errHub = await LanSyncServerManager.iniciarServidor(
-        porta: config.redePortaServidor,
-        syncToken: config.redeSyncToken,
-        productImagesPath: deps.produtoRepository.productImagesDirPath,
-      );
-      if (errHub != null) {
-        debugPrint('LanServidorBootstrap hub: $errHub');
-      } else {
-        _hubProvavelAtivo = true;
-      }
+      await LanRedeHelper.encerrarHubLegadoSeExistir();
 
       // Sempre recria a API neste processo para carregar rotas novas
       // (ex.: /api/auth/login) e liberar instancia zumbi na 8788.
@@ -127,7 +116,6 @@ abstract final class LanServidorBootstrap {
     required AppConfigRepository configRepository,
   }) async {
     _ok = false;
-    _hubProvavelAtivo = false;
     await LanApiServerHub.instance.parar();
     await garantirAtivo(
       objectBox: objectBox,

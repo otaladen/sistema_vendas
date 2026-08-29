@@ -2658,7 +2658,7 @@ class _EntregasPageState extends State<EntregasPage>
                         ),
                         subtitle: Text(
                           evento && item.statusAnterior.trim().isNotEmpty
-                              ? '$quando\n${item.statusAnterior}'
+                              ? '$quando\n${HistoricoEntregaEventos.textoDetalhe(item.statusNovo, item.statusAnterior)}'
                               : quando,
                         ),
                       );

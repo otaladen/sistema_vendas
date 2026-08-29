@@ -284,7 +284,7 @@ class SyncApiClient {
       }
       if (r.statusCode == 404) {
         onErro?.call(
-          'Servidor sem rota de fotos (exe antigo). Atualize o sync_server.',
+          'Servidor sem rota de fotos. Atualize o app no PC servidor.',
         );
         return null;
       }

@@ -2503,6 +2503,8 @@ class FocusNfeService {
         return '04';
       case 'fiado':
       case 'credito_loja':
+      // Vale de devolucao e credito da propria loja (05), nao "outros".
+      case 'vale':
         return '05';
       case 'pix':
         return '17';

@@ -748,7 +748,10 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
             final rotuloNovo = HistoricoEntregaEventos.rotulo(h.statusNovo);
             final rotuloAnterior = h.statusAnterior.isEmpty
                 ? '-'
-                : HistoricoEntregaEventos.rotulo(h.statusAnterior);
+                : HistoricoEntregaEventos.textoStatusAnteriorParaExibicao(
+                    h.statusNovo,
+                    h.statusAnterior,
+                  );
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(

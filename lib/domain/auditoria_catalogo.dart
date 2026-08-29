@@ -64,6 +64,7 @@ class AuditoriaAcao {
   static const reajustePrecoEstorno = 'reajuste_preco_estorno';
   static const devolucao = 'devolucao';
   static const troca = 'troca';
+  static const retiradaParcial = 'retirada_parcial';
   static const zerarCadastroProdutos = 'zerar_cadastro_produtos';
 }
 
@@ -168,6 +169,8 @@ String auditoriaRotuloAcao(String acao) {
       return 'Devolucao';
     case AuditoriaAcao.troca:
       return 'Troca';
+    case AuditoriaAcao.retiradaParcial:
+      return 'Retirada parcial';
     case AuditoriaAcao.zerarCadastroProdutos:
       return 'Zerar cadastro de produtos';
     default:

@@ -26,6 +26,7 @@ abstract final class SyncApplyOrder {
     'historico_entrega': 230,
     'conferencia_carga_romaneio': 240,
     'registro_devolucao': 250,
+    'vale_credito': 260,
     'usuarios_sistema': 910,
     'caixa_sessoes': 920,
   };

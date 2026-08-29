@@ -154,6 +154,7 @@ class LanApiClient {
     String path, {
     Map<String, String>? query,
     Duration? timeout,
+    bool aceitarErroJson = false,
   }) async {
     try {
       final r = await http
@@ -163,6 +164,15 @@ class LanApiClient {
         throw LanApiException('API recusou o token (HTTP ${r.statusCode}).');
       }
       if (r.statusCode != 200) {
+        if (aceitarErroJson && r.body.trim().isNotEmpty) {
+          try {
+            final d = jsonDecode(r.body);
+            if (d is Map) {
+              onSucessoRede?.call();
+              return Map<String, dynamic>.from(d);
+            }
+          } catch (_) {}
+        }
         throw LanApiException(
           'API GET $path HTTP ${r.statusCode}: ${r.body}',
         );
@@ -1561,6 +1571,20 @@ class LanApiClient {
         'permitirVendaSemEstoque': permitirVendaSemEstoque,
       });
 
+  Future<Map<String, dynamic>> registrarOrcamentoComplementoTroca({
+    required int vendaOrigemId,
+    required int registroId,
+    required double valor,
+    String formaPagamento = 'dinheiro',
+    int quantidadeParcelas = 1,
+  }) =>
+      _postJson('/api/vendas/$vendaOrigemId/complemento-troca', {
+        'registroId': registroId,
+        'valor': valor,
+        'formaPagamento': formaPagamento,
+        'quantidadeParcelas': quantidadeParcelas,
+      });
+
   Future<void> vincularClienteOrcamento(int id, int? clienteId) => _postJson(
         '/api/orcamentos/$id/vincular-cliente',
         {'clienteId': clienteId},
@@ -1627,6 +1651,17 @@ class LanApiClient {
       _postJson('/api/orcamentos/$id/itens/$itemId/quantidade', {
         'quantidade': quantidade,
         'permitirVendaSemEstoque': permitirVendaSemEstoque,
+        ..._authCaixaBody(terminalId: terminalId),
+      });
+
+  Future<void> atualizarTipoEntregaItemOrcamento(
+    int id,
+    int itemId,
+    String tipoEntregaItem, {
+    String? terminalId,
+  }) =>
+      _postJson('/api/orcamentos/$id/itens/$itemId/tipo-entrega', {
+        'tipoEntregaItem': tipoEntregaItem,
         ..._authCaixaBody(terminalId: terminalId),
       });
 
@@ -1949,22 +1984,39 @@ class LanApiClient {
         .toList();
   }
 
-  Future<List<Map<String, dynamic>>> listarSugestaoCompra({
+  Future<({List<Map<String, dynamic>> items, List<String> fornecedores})>
+      listarSugestaoCompra({
     int diasPeriodo = 60,
     int diasCobertura = 30,
     bool apenasPrioritarios = true,
+    String? fornecedor,
   }) async {
     final m = await _getJson('/api/estoque/sugestao-compra', query: {
       'diasPeriodo': '$diasPeriodo',
       'diasCobertura': '$diasCobertura',
       'apenasPrioritarios': '$apenasPrioritarios',
+      if (fornecedor != null && fornecedor.trim().isNotEmpty)
+        'fornecedor': fornecedor.trim(),
     });
     final list = m['items'];
-    if (list is! List) return [];
-    return list
-        .whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList();
+    final items = list is List
+        ? list
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList()
+        : <Map<String, dynamic>>[];
+    final fornRaw = m['fornecedores'];
+    final fornecedores = fornRaw is List
+        ? fornRaw
+            .map((e) => e.toString().trim())
+            .where((s) => s.isNotEmpty)
+            .toList()
+        : <String>[];
+    return (items: items, fornecedores: fornecedores);
+  }
+
+  Future<Map<String, dynamic>> listarFornecedoresNfeEstoque() async {
+    return _getJson('/api/estoque/fornecedores-nfe');
   }
 
   Future<void> reprocessarBaixaEstoque({
@@ -2257,6 +2309,49 @@ class LanApiClient {
 
   Future<Map<String, dynamic>> apagarRecadosArquivados() =>
       _postJson('/api/recados/arquivados/apagar', {});
+
+  Future<Map<String, dynamic>?> buscarValePorCodigo(String codigo) async {
+    final m = await _getJson('/api/vales/codigo/${Uri.encodeComponent(codigo)}');
+    final item = m['item'];
+    return item is Map ? Map<String, dynamic>.from(item) : null;
+  }
+
+  Future<List<Map<String, dynamic>>> listarValesDoCliente(
+    int clienteId, {
+    bool somenteGastaveis = true,
+  }) async {
+    final m = await _getJson('/api/vales/cliente/$clienteId', query: {
+      'gastaveis': somenteGastaveis ? 'true' : 'false',
+    });
+    final list = m['items'];
+    if (list is! List) return [];
+    return list
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> emitirVale(Map<String, dynamic> body) =>
+      _postJson('/api/vales', body);
+
+  Future<Map<String, dynamic>> resgatarVale(
+    int valeId,
+    Map<String, dynamic> body,
+  ) =>
+      _postJson('/api/vales/$valeId/resgatar', body);
+
+  Future<Map<String, dynamic>> cancelarVale(
+    int valeId, {
+    required String motivo,
+    required String canceladoPor,
+  }) =>
+      _postJson('/api/vales/$valeId/cancelar', {
+        'motivo': motivo,
+        'canceladoPor': canceladoPor,
+      });
+
+  Future<Map<String, dynamic>> estornarValesDaVenda(int vendaId) =>
+      _postJson('/api/vales/estornar-venda/$vendaId', {});
 
   Future<List<Map<String, dynamic>>> listarFuncionarios() async {
     final m = await _getJson('/api/funcionarios');
@@ -2629,6 +2724,7 @@ class LanApiClient {
           if (terminalId != null && terminalId.trim().isNotEmpty)
             'terminalId': terminalId.trim(),
         },
+        aceitarErroJson: true,
       );
 
   Future<List<Map<String, dynamic>>> listarAuditoriaCaixa({

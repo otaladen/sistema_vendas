@@ -259,14 +259,24 @@ class ProdutoApiRepository extends ChangeNotifier {
     int limit = 50,
     bool somenteAtivos = true,
     bool somenteInativos = false,
+    String? prefixoNome,
   }) {
     if (_offline) return const [];
-    var base = _lista;
+    var base = List<Produto>.from(_lista);
     if (somenteInativos) {
       base = base.where((p) => !p.ativo).toList();
     } else if (somenteAtivos) {
       base = base.where((p) => p.ativo).toList();
     }
+    final pfx = (prefixoNome ?? '').trim().toLowerCase();
+    if (pfx.isNotEmpty) {
+      base = base
+          .where((p) => p.nome.trim().toLowerCase().startsWith(pfx))
+          .toList();
+    }
+    base.sort(
+      (a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()),
+    );
     if (offset >= base.length) return const [];
     final end = (offset + limit).clamp(0, base.length);
     return base.sublist(offset, end);

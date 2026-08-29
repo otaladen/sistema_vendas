@@ -19,12 +19,18 @@ class ListagemVendasListaCards extends StatefulWidget {
     required this.onTapItem,
     required this.onAcaoMenu,
     required this.menuBuilder,
+    this.temMais = false,
+    this.carregandoMais = false,
+    this.onChegouAoFim,
   });
 
   final List<ListagemVendaItemUi> itens;
   final ValueChanged<ListagemVendaItemUi> onTapItem;
   final ListagemVendaAcaoCallback onAcaoMenu;
   final ListagemVendaMenuBuilder menuBuilder;
+  final bool temMais;
+  final bool carregandoMais;
+  final VoidCallback? onChegouAoFim;
 
   @override
   State<ListagemVendasListaCards> createState() =>
@@ -33,6 +39,15 @@ class ListagemVendasListaCards extends StatefulWidget {
 
 class _ListagemVendasListaCardsState extends State<ListagemVendasListaCards> {
   final ScrollController _scrollController = ScrollController();
+
+  static const double _prefetchPx = 520;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _tentarPrefetch());
+  }
 
   @override
   void didUpdateWidget(covariant ListagemVendasListaCards oldWidget) {
@@ -47,18 +62,39 @@ class _ListagemVendasListaCardsState extends State<ListagemVendasListaCards> {
         if (_scrollController.offset > max) {
           _scrollController.jumpTo(max < 0 ? 0 : max);
         }
+        _tentarPrefetch();
       });
+    } else if (oldWidget.carregandoMais &&
+        !widget.carregandoMais &&
+        widget.temMais) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _tentarPrefetch());
     }
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
   }
 
+  void _onScroll() => _tentarPrefetch();
+
+  void _tentarPrefetch() {
+    final cb = widget.onChegouAoFim;
+    if (cb == null || !widget.temMais || widget.carregandoMais) return;
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    if (!pos.hasContentDimensions) return;
+    if (pos.maxScrollExtent <= 0 ||
+        pos.pixels >= pos.maxScrollExtent - _prefetchPx) {
+      cb();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final mostrarRodape = widget.carregandoMais || widget.temMais;
     return Scrollbar(
       controller: _scrollController,
       thumbVisibility: true,
@@ -67,9 +103,23 @@ class _ListagemVendasListaCardsState extends State<ListagemVendasListaCards> {
         controller: _scrollController,
         primary: false,
         physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: widget.itens.length,
+        itemCount: widget.itens.length + (mostrarRodape ? 1 : 0),
         separatorBuilder: (_, index) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
+          if (index >= widget.itens.length) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: widget.carregandoMais
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const SizedBox(height: 8),
+              ),
+            );
+          }
           final item = widget.itens[index];
           final theme = Theme.of(context);
           final scheme = theme.colorScheme;

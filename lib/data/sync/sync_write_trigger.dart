@@ -38,7 +38,7 @@ bool _propagarViaLanApiServidor() {
 /// Chamado pelos repositorios apos gravacao bem-sucedida para propagar na LAN.
 ///
 /// No PC servidor Windows (LanApi 8788 ativa): notifica terminais via WS.
-/// No celular: marca dirty outbox e agenda pull/push do hub 8787.
+/// No celular em modo antigo: marca dirty outbox e agenda pull/push.
 ///
 /// Com [entidade]/[entidadeId], registra delta no outbox (S4) — so clientes.
 /// [entidadeId] == 0 marca todas as linhas da entidade no proximo push.

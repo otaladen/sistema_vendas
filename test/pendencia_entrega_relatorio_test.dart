@@ -33,6 +33,34 @@ void main() {
     expect(linhas.first.tipo, EntregaVendaHelper.tipoRetiradaFutura);
   });
 
+  test('devolucao reduz pendencia de retirada futura', () {
+    final venda = Venda(
+      id: 11,
+      numeroOrcamento: 101,
+      status: 'finalizada',
+      tipoEntrega: EntregaVendaHelper.tipoRetiradaFutura,
+      entregaPendente: true,
+    );
+    final item = ItemVenda(
+      nomeProduto: 'Areia',
+      quantidade: 10,
+      precoUnitario: 10,
+      precoCustoUnitario: 5,
+      quantidadeJaRetirada: 3,
+      quantidadeDevolvida: 2,
+      tipoEntregaItem: EntregaVendaHelper.tipoRetiradaFutura,
+    );
+    venda.itens.add(item);
+
+    final linhas = montarLinhasPendenciaEntrega(
+      [venda],
+      filtroTipo: TipoPendenciaEntregaRelatorio.retiradaFutura,
+    );
+
+    expect(linhas, hasLength(1));
+    expect(linhas.first.quantidadePendente, 5);
+  });
+
   test('ignora vendas sem pendencia', () {
     final venda = Venda(
       status: 'finalizada',

@@ -26,6 +26,7 @@ import 'data/api/vendedor_api_repository.dart';
 import 'services/entrega_baixa_sync_service.dart';
 import 'services/entrega_pod_lan_service.dart';
 import 'data/app_config_repository.dart';
+import 'data/app_fundo_repository.dart';
 import 'data/app_menu_modo_repository.dart';
 import 'data/app_tema_repository.dart';
 import 'data/auditoria_repository.dart';
@@ -62,6 +63,9 @@ import 'ui/layout/app_layout.dart';
 import 'ui/login_page.dart';
 import 'ui/main_menu_page.dart';
 import 'ui/terminal_config_page.dart';
+import 'ui/theme/app_fundo_camada.dart';
+import 'ui/theme/app_fundo_id.dart';
+import 'ui/theme/app_fundo_scope.dart';
 import 'ui/theme/app_menu_modo_id.dart';
 import 'ui/theme/app_menu_modo_scope.dart';
 import 'ui/theme/app_tema_id.dart';
@@ -269,6 +273,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   UsuarioSistema? _usuarioLogado;
   AppTemaId _temaAtual = AppTemaId.verde;
   AppMenuModoId _menuModoAtual = AppMenuModoId.classico;
+  AppFundoId _fundoAtual = AppFundoId.liso;
   final UsuarioRepository _usuarioRepository = UsuarioRepository();
   Timer? _timerBackupAutomatico;
   Timer? _debounceEventoApi;
@@ -386,11 +391,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     final results = await Future.wait([
       AppTemaRepository.carregar(),
       AppMenuModoRepository.carregar(),
+      AppFundoRepository.carregar(),
     ]);
     if (!mounted) return;
     setState(() {
       _temaAtual = results[0] as AppTemaId;
       _menuModoAtual = results[1] as AppMenuModoId;
+      _fundoAtual = results[2] as AppFundoId;
     });
   }
 
@@ -410,6 +417,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  Future<void> _definirFundo(AppFundoId fundo) async {
+    if (!mounted) return;
+    setState(() => _fundoAtual = fundo);
+    try {
+      await AppFundoRepository.salvar(fundo, login: _usuarioLogado?.login);
+    } catch (_) {}
+  }
+
   Future<void> _entrar(UsuarioSistema usuario) async {
     AuditoriaRegistrar.definirUsuarioSessao(usuario.login);
     AuditoriaRegistrar.registrar(
@@ -421,6 +436,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     final personalizacao = await Future.wait([
       AppTemaRepository.carregar(login: usuario.login),
       AppMenuModoRepository.carregar(login: usuario.login),
+      AppFundoRepository.carregar(login: usuario.login),
     ]);
     if (!mounted) return;
 
@@ -436,6 +452,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       _usuarioLogado = usuario;
       _temaAtual = personalizacao[0] as AppTemaId;
       _menuModoAtual = personalizacao[1] as AppMenuModoId;
+      _fundoAtual = personalizacao[2] as AppFundoId;
     });
   }
 
@@ -844,6 +861,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     final personalizacao = await Future.wait([
       AppTemaRepository.carregar(),
       AppMenuModoRepository.carregar(),
+      AppFundoRepository.carregar(),
     ]);
     if (!mounted) return;
     setState(() {
@@ -871,6 +889,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       }
       _temaAtual = personalizacao[0] as AppTemaId;
       _menuModoAtual = personalizacao[1] as AppMenuModoId;
+      _fundoAtual = personalizacao[2] as AppFundoId;
     });
   }
 
@@ -965,11 +984,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final temaData = AppThemeBuilder.build(_temaAtual);
+    // Só o scaffold fica transparente para o plano de fundo aparecer.
+    // NÃO zerar canvasColor: DropdownButton / menus usam isso e ficam ilegíveis.
+    final temaComFundo = _fundoAtual.pintaCamada
+        ? temaData.copyWith(scaffoldBackgroundColor: Colors.transparent)
+        : temaData;
     return MaterialApp(
       key: const ValueKey<String>('sistema-vendas-app'),
       title: 'Sistema de Vendas',
-      theme: temaData,
-      darkTheme: temaData,
+      theme: temaComFundo,
+      darkTheme: temaComFundo,
       themeMode: ThemeMode.light,
       scaffoldMessengerKey: appScaffoldMessengerKey,
       navigatorKey: appNavigatorKey,
@@ -980,9 +1004,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           child: AppMenuModoScope(
             modoAtual: _menuModoAtual,
             definirModo: _definirMenuModo,
-            child: Theme(
-              data: temaData,
-              child: buildAdaptiveAppShell(context, child),
+            child: AppFundoScope(
+              fundoAtual: _fundoAtual,
+              definirFundo: _definirFundo,
+              child: Theme(
+                data: temaComFundo,
+                child: AppFundoCamada(
+                  child: buildAdaptiveAppShell(context, child),
+                ),
+              ),
             ),
           ),
         );

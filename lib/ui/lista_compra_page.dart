@@ -41,6 +41,7 @@ class _ListaCompraPageState extends State<ListaCompraPage>
   List<ItemListaCompra> _itens = [];
   List<LinhaSugestaoCompra> _sugestoes = [];
   String _filtroStatus = 'ativos';
+  String? _filtroFornecedorSugestao;
   bool _carregandoSugestoes = false;
   static final _dataFmt = DateFormat('dd/MM/yyyy', 'pt_BR');
 
@@ -104,9 +105,44 @@ class _ListaCompraPageState extends State<ListaCompraPage>
     final s = await _repo.listarSugestoesSistemaFiltradas();
     if (!mounted) return;
     setState(() {
-      _sugestoes = s;
+      _sugestoes = s.cast<LinhaSugestaoCompra>();
       _carregandoSugestoes = false;
+      if (_filtroFornecedorSugestao != null &&
+          !_fornecedoresDasSugestoes.contains(_filtroFornecedorSugestao)) {
+        _filtroFornecedorSugestao = null;
+      }
     });
+  }
+
+  List<String> get _fornecedoresDasSugestoes {
+    final unicos = <String, String>{};
+    for (final l in _sugestoes) {
+      for (final n in [
+        ...l.fornecedoresNfe,
+        if (l.fornecedorUltimaNfe.trim().isNotEmpty) l.fornecedorUltimaNfe,
+      ]) {
+        final t = n.trim();
+        if (t.isEmpty) continue;
+        unicos.putIfAbsent(t.toLowerCase(), () => t);
+      }
+    }
+    final lista = unicos.values.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return lista;
+  }
+
+  List<LinhaSugestaoCompra> get _sugestoesFiltradas {
+    final f = _filtroFornecedorSugestao?.trim() ?? '';
+    if (f.isEmpty) return _sugestoes;
+    final k = f.toLowerCase();
+    return _sugestoes.where((l) {
+      final doForn = l.fornecedoresNfe.any((n) => n.trim().toLowerCase() == k) ||
+          l.fornecedorUltimaNfe.trim().toLowerCase() == k;
+      if (!doForn) return false;
+      final abaixoMin =
+          l.produto.estoqueLivreExibicao <= l.produto.quantidadeMinima;
+      return l.estoqueCritico || abaixoMin;
+    }).toList();
   }
 
   List<ItemListaCompra> get _itensFiltrados {
@@ -145,7 +181,7 @@ class _ListaCompraPageState extends State<ListaCompraPage>
   }
 
   Future<void> _aceitarTodasSugestoes() async {
-    for (final linha in _sugestoes) {
+    for (final linha in _sugestoesFiltradas) {
       _repo.aceitarSugestaoSistema(linha: linha, criadoPor: _criadoPor);
     }
     _recarregar();
@@ -655,6 +691,8 @@ class _ListaCompraPageState extends State<ListaCompraPage>
     if (_carregandoSugestoes) {
       return const Center(child: CircularProgressIndicator());
     }
+    final visiveis = _sugestoesFiltradas;
+    final fornecedores = _fornecedoresDasSugestoes;
     if (_sugestoes.isEmpty) {
       return const Center(
         child: Padding(
@@ -671,29 +709,73 @@ class _ListaCompraPageState extends State<ListaCompraPage>
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Row(
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Expanded(
-                child: Text(
-                  '${_sugestoes.length} produto(s) sugerido(s)',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+              Text(
+                '${visiveis.length} produto(s) sugerido(s)',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
+              if (fornecedores.isNotEmpty)
+                DropdownMenu<String?>(
+                  key: ValueKey(
+                    'lc_forn_${fornecedores.length}_${_filtroFornecedorSugestao ?? ''}',
+                  ),
+                  width: 260,
+                  label: const Text('Fornecedor'),
+                  initialSelection: _filtroFornecedorSugestao,
+                  dropdownMenuEntries: [
+                    const DropdownMenuEntry<String?>(
+                      value: null,
+                      label: 'Todos',
+                    ),
+                    for (final f in fornecedores)
+                      DropdownMenuEntry<String?>(value: f, label: f),
+                  ],
+                  onSelected: (v) =>
+                      setState(() => _filtroFornecedorSugestao = v),
+                ),
               TextButton(
-                onPressed: _aceitarTodasSugestoes,
+                onPressed: visiveis.isEmpty ? null : _aceitarTodasSugestoes,
                 child: const Text('Aceitar todos'),
               ),
             ],
           ),
         ),
+        if (_filtroFornecedorSugestao != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'So SKUs com NF-e/compra desse fornecedor abaixo do ponto de pedido ou do minimo.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+          ),
         Expanded(
-          child: ListView.separated(
+          child: visiveis.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                      'Nenhum produto desse fornecedor abaixo do ponto de pedido ou do minimo.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                )
+              : ListView.separated(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
-            itemCount: _sugestoes.length,
+            itemCount: visiveis.length,
             separatorBuilder: (_, _) => const SizedBox(height: 6),
             itemBuilder: (_, i) {
-              final l = _sugestoes[i];
+              final l = visiveis[i];
               final p = l.produto;
+              final forn = l.fornecedorUltimaNfe.trim();
               return Card(
                 color: l.estoqueCritico
                     ? Theme.of(
@@ -707,7 +789,8 @@ class _ListaCompraPageState extends State<ListaCompraPage>
                     'Estoque: ${ProdutoEmbalagem.formatarEstoque(p, p.estoqueReal, comUnidade: true)} · '
                     'PP: ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(p, l.pontoPedido)} '
                     '${ProdutoEmbalagem.normalizarUnidade(p.unidade)}'
-                    '${l.estoqueCritico ? ' · CRITICO' : ''}',
+                    '${l.estoqueCritico ? ' · CRITICO' : ''}'
+                    '${forn.isEmpty ? '' : ' · $forn'}',
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,

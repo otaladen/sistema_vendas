@@ -23,9 +23,32 @@ abstract final class AppThemeBuilder {
     );
     final semantic =
         tema.isDark ? AppSemanticColors.escuro : AppSemanticColors.claro;
+    final scheme = baseTheme.colorScheme;
+    // Menus/dropdowns abertos precisam de fundo 100% opaco: com plano de fundo
+    // pintado, surface tint / translucidez do M3 deixa as opcoes ilegíveis.
+    final menuSurface = Color.alphaBlend(
+      scheme.surfaceContainerHighest,
+      tema.isDark ? const Color(0xFF121212) : const Color(0xFFFFFFFF),
+    );
+    final campoSurface = Color.alphaBlend(
+      scheme.surface,
+      tema.isDark ? const Color(0xFF121212) : const Color(0xFFFFFFFF),
+    );
+    final menuStyle = MenuStyle(
+      backgroundColor: WidgetStatePropertyAll(menuSurface),
+      surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+      shadowColor: WidgetStatePropertyAll(Colors.black.withValues(alpha: 0.35)),
+      elevation: const WidgetStatePropertyAll(10),
+      shape: WidgetStatePropertyAll(globalShape),
+      side: WidgetStatePropertyAll(
+        BorderSide(color: scheme.outlineVariant),
+      ),
+    );
 
     return baseTheme.copyWith(
-      scaffoldBackgroundColor: baseTheme.colorScheme.surface,
+      scaffoldBackgroundColor: scheme.surface,
+      canvasColor: menuSurface,
+      cardColor: campoSurface,
       textTheme: baseTheme.textTheme.copyWith(
         bodyLarge: baseTheme.textTheme.bodyLarge?.copyWith(
           fontSize: (baseTheme.textTheme.bodyLarge?.fontSize ?? 16) * 1.05,
@@ -51,6 +74,8 @@ abstract final class AppThemeBuilder {
       ),
       inputDecorationTheme: baseTheme.inputDecorationTheme.copyWith(
         floatingLabelBehavior: FloatingLabelBehavior.auto,
+        filled: true,
+        fillColor: campoSurface,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
           vertical: 14,
@@ -60,32 +85,34 @@ abstract final class AppThemeBuilder {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_globalRadius),
-          borderSide: BorderSide(color: baseTheme.colorScheme.outlineVariant),
+          borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_globalRadius),
           borderSide: BorderSide(
-            color: baseTheme.colorScheme.primary,
+            color: scheme.primary,
             width: 1.4,
           ),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_globalRadius),
-          borderSide: BorderSide(color: baseTheme.colorScheme.error),
+          borderSide: BorderSide(color: scheme.error),
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_globalRadius),
           borderSide: BorderSide(
-            color: baseTheme.colorScheme.error,
+            color: scheme.error,
             width: 1.4,
           ),
         ),
       ),
       cardTheme: CardThemeData(
         elevation: 0,
+        color: campoSurface,
+        surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(_globalRadius),
-          side: BorderSide(color: baseTheme.colorScheme.outlineVariant),
+          side: BorderSide(color: scheme.outlineVariant),
         ),
         clipBehavior: Clip.antiAlias,
       ),
@@ -100,10 +127,30 @@ abstract final class AppThemeBuilder {
         style: OutlinedButton.styleFrom(
           shape: globalShape,
           minimumSize: const Size(88, 44),
-          side: BorderSide(color: baseTheme.colorScheme.outline),
+          side: BorderSide(color: scheme.outline),
         ),
       ),
-      dialogTheme: DialogThemeData(shape: globalShape),
+      dialogTheme: DialogThemeData(
+        shape: globalShape,
+        backgroundColor: menuSurface,
+        surfaceTintColor: Colors.transparent,
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: menuSurface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 10,
+        shadowColor: Colors.black.withValues(alpha: 0.35),
+        shape: globalShape,
+      ),
+      menuTheme: MenuThemeData(style: menuStyle),
+      dropdownMenuTheme: DropdownMenuThemeData(menuStyle: menuStyle),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: menuSurface,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(_globalRadius)),
+        ),
+      ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
@@ -111,8 +158,8 @@ abstract final class AppThemeBuilder {
         ),
       ),
       navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: baseTheme.colorScheme.surfaceContainerLow,
-        indicatorColor: baseTheme.colorScheme.primaryContainer,
+        backgroundColor: scheme.surfaceContainerLow,
+        indicatorColor: scheme.primaryContainer,
       ),
       extensions: [semantic],
     );

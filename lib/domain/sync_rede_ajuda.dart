@@ -67,9 +67,8 @@ abstract final class SyncRedeAjuda {
               Text(
                 '• PC servidor: guarda o banco e sobe a API dos terminais '
                 'na porta 8788.\n'
-                '• Terminal Leve (PC Windows ou celular): le e grava direto '
-                'na API :8788 (sem banco local). Se o servidor cair, o terminal para.\n'
-                '• Hub :8787 e opcional/legado (nao e o caminho do terminal).',
+                '• Terminal (PC Windows ou celular): le e grava direto '
+                'na API :8788 (sem banco local). Se o servidor cair, o terminal para.',
                 style: TextStyle(fontSize: 13, height: 1.35),
               ),
               SizedBox(height: 14),

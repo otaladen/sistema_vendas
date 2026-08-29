@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import '../domain/fornecedor_entrada_nfe_indice.dart';
 import '../domain/produto_embalagem.dart';
 import '../model/produto.dart';
 import '../services/compras_preditivas_service.dart';
@@ -19,6 +20,8 @@ class LinhaSugestaoCompra {
     required this.estoqueCritico,
     required this.quantidadeSugeridaPorPp,
     this.alertaPorEstoqueSeguranca = false,
+    this.fornecedorUltimaNfe = '',
+    this.fornecedoresNfe = const [],
   });
 
   final Produto produto;
@@ -46,6 +49,12 @@ class LinhaSugestaoCompra {
   /// Produto sem giro confiavel: alerta prioriza estoque de seguranca.
   final bool alertaPorEstoqueSeguranca;
 
+  /// Nome do fornecedor na NF-e de entrada mais recente deste SKU.
+  final String fornecedorUltimaNfe;
+
+  /// Todos os fornecedores com entrada de NF-e deste SKU.
+  final List<String> fornecedoresNfe;
+
   static Map<String, dynamic> toApiMap(LinhaSugestaoCompra l) => {
         'produto': SyncEntityCodec.produtoParaMap(l.produto),
         'consumoNoPeriodoUnidades': l.consumoNoPeriodoUnidades,
@@ -57,6 +66,8 @@ class LinhaSugestaoCompra {
         'estoqueCritico': l.estoqueCritico,
         'quantidadeSugeridaPorPp': l.quantidadeSugeridaPorPp,
         'alertaPorEstoqueSeguranca': l.alertaPorEstoqueSeguranca,
+        'fornecedorUltimaNfe': l.fornecedorUltimaNfe,
+        'fornecedoresNfe': l.fornecedoresNfe,
       };
 
   static LinhaSugestaoCompra? fromApiMap(Map<String, dynamic> m) {
@@ -81,7 +92,17 @@ class LinhaSugestaoCompra {
       quantidadeSugeridaPorPp:
           (m['quantidadeSugeridaPorPp'] as num?)?.toInt() ?? 0,
       alertaPorEstoqueSeguranca: m['alertaPorEstoqueSeguranca'] == true,
+      fornecedorUltimaNfe: (m['fornecedorUltimaNfe'] ?? '').toString(),
+      fornecedoresNfe: _stringsDeLista(m['fornecedoresNfe']),
     );
+  }
+
+  static List<String> _stringsDeLista(Object? raw) {
+    if (raw is! List) return const [];
+    return raw
+        .map((e) => e.toString().trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
   }
 }
 
@@ -94,10 +115,13 @@ class SugestaoCompraRepository {
   /// [diasPeriodoConsumo]: janela para somar saidas (ex.: 60).
   /// [diasCoberturaAlvo]: meta de estoque em dias de venda (ex.: 30).
   /// [apenasComSugestaoOuRisco]: quando true, omite produtos sem alerta.
+  /// [fornecedorFiltro]: so SKUs com entrada NF-e desse fornecedor, abaixo do
+  /// PP ou do estoque minimo.
   List<LinhaSugestaoCompra> montarLinhas({
     required int diasPeriodoConsumo,
     required int diasCoberturaAlvo,
     bool apenasComSugestaoOuRisco = true,
+    String? fornecedorFiltro,
   }) {
     final dias = diasPeriodoConsumo <= 0 ? 1 : diasPeriodoConsumo;
     final cobertura = diasCoberturaAlvo <= 0 ? 30 : diasCoberturaAlvo;
@@ -132,6 +156,8 @@ class SugestaoCompraRepository {
     }
 
     final comprasSvc = ComprasPreditivasService(_db, diasHistoricoVendas: dias);
+    final indiceForn = indiceFornecedoresNfe();
+    final filtroForn = (fornecedorFiltro ?? '').trim();
     final produtos = _db.produtoBox.getAll();
     final linhas = <LinhaSugestaoCompra>[];
 
@@ -175,7 +201,11 @@ class SugestaoCompraRepository {
 
       final ult = ultimaEntrada[pr.id];
 
-      if (apenasComSugestaoOuRisco) {
+      if (filtroForn.isNotEmpty) {
+        if (!indiceForn.produtoDoFornecedor(pr.id, filtroForn)) continue;
+        final abaixoMinimoForn = livre <= minimo;
+        if (!criticoPp && !abaixoMinimoForn) continue;
+      } else if (apenasComSugestaoOuRisco) {
         final abaixoMinimo = livre <= minimo;
         final giroBaixo = media > 1e-9 &&
             diasCobertura != null &&
@@ -203,6 +233,8 @@ class SugestaoCompraRepository {
           estoqueCritico: criticoPp,
           quantidadeSugeridaPorPp: qtdPorPp,
           alertaPorEstoqueSeguranca: porSeguranca && criticoPp,
+          fornecedorUltimaNfe: indiceForn.ultimoFornecedorDe(pr.id) ?? '',
+          fornecedoresNfe: indiceForn.fornecedoresDoProduto(pr.id),
         ),
       );
     }
@@ -216,5 +248,37 @@ class SugestaoCompraRepository {
       return a.produto.nome.compareTo(b.produto.nome);
     });
     return linhas;
+  }
+
+  FornecedorEntradaNfeIndice indiceFornecedoresNfe() {
+    final lancamentos = <FornecedorEntradaNfeLancamento>[];
+    for (final h in _db.historicoEntradaBox.getAll()) {
+      final pid = h.produto.targetId;
+      final nome = h.nomeFornecedor.trim();
+      if (pid <= 0 || nome.isEmpty) continue;
+      lancamentos.add(
+        FornecedorEntradaNfeLancamento(
+          produtoId: pid,
+          nomeFornecedor: nome,
+          data: h.dataEmissao,
+        ),
+      );
+    }
+    for (final v in _db.vinculoFornecedorProdutoBox.getAll()) {
+      final pid = v.produto.targetId;
+      if (pid <= 0) continue;
+      final f = v.fornecedor.target;
+      if (f == null) continue;
+      final nome = f.nomeExibicao.trim();
+      if (nome.isEmpty) continue;
+      lancamentos.add(
+        FornecedorEntradaNfeLancamento(
+          produtoId: pid,
+          nomeFornecedor: nome,
+          data: f.atualizadoEm,
+        ),
+      );
+    }
+    return FornecedorEntradaNfeIndice.deLancamentos(lancamentos);
   }
 }

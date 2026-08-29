@@ -447,11 +447,16 @@ class GerenciadorEstoqueService {
       return;
     }
     final produto = _produtoAtualDoItem(item);
-    _garantirEscalaEstoque(produto);
     final qArmazenado = item.quantidade;
-    final qEstoque = item.quantidadeUnidadeEstoque;
     if (qArmazenado <= 0) return;
     if (item.quantidadeJaRetirada >= qArmazenado) return;
+    if (produtoEhCadastroInternoSistema(produto)) {
+      item.quantidadeJaRetirada = qArmazenado;
+      _db.itemVendaBox.put(item);
+      return;
+    }
+    _garantirEscalaEstoque(produto);
+    final qEstoque = item.quantidadeUnidadeEstoque;
 
     // Livre = fisico - reservado. Em venda mista a reserva (futura/carreto)
     // ja foi aplicada antes desta baixa; validar so o fisico permite
@@ -571,6 +576,35 @@ class GerenciadorEstoqueService {
     final novo = Produto(
       codigoInterno: kCodigoInternoFreteRetiradaFutura,
       nome: 'Servico: Frete carreto (retirada futura)',
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 0,
+      preco1: 0,
+      preco2: 0,
+      preco3: 0,
+      ativo: true,
+    );
+    novo.estoqueReal = 0;
+    novo.estoqueReservado = 0;
+    novo.estoqueAtual = 0;
+    return _db.produtoBox.put(novo);
+  }
+
+  int obterOuCriarProdutoComplementoTroca() {
+    final q = _db.produtoBox
+        .query(Produto_.codigoInterno.equals(kCodigoInternoComplementoTroca))
+        .build();
+    try {
+      final existente = q.findFirst();
+      if (existente != null) {
+        return existente.id;
+      }
+    } finally {
+      q.close();
+    }
+    final novo = Produto(
+      codigoInterno: kCodigoInternoComplementoTroca,
+      nome: 'Servico: Complemento de troca',
       quantidadeMinima: 0,
       precoCusto: 0,
       precoVenda: 0,
@@ -1079,6 +1113,7 @@ class GerenciadorEstoqueService {
     required int quantidade,
     required TipoMovimentoEstoque tipo,
     required bool permitirSemConferenciaEstoque,
+    String usuarioLogin = '',
   }) {
     if (quantidade <= 0) return;
     final produto = _produtoAtualDoItem(item);
@@ -1126,6 +1161,7 @@ class GerenciadorEstoqueService {
       antes: antes,
       documentoReferencia: _refItemVenda(item),
       motivo: 'Retirada de venda futura ${_refItemVenda(item)}',
+      usuarioLogin: usuarioLogin,
     );
   }
 

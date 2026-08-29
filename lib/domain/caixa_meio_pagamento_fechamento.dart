@@ -9,8 +9,9 @@ abstract final class CaixaMeioPagamentoFechamento {
   static const bucketPix = 'pix';
   static const bucketDebito = 'debito';
   static const bucketCredito = 'credito';
+  static const bucketVale = 'vale';
 
-  /// Bucket do fechamento, ou `null` se nao deve somar em nenhum dos quatro.
+  /// Bucket do fechamento, ou `null` se nao deve somar em dinheiro/pix/cartao.
   static String? bucket(String? meio) {
     switch ((meio ?? '').trim().toLowerCase()) {
       case 'dinheiro':
@@ -26,6 +27,9 @@ abstract final class CaixaMeioPagamentoFechamento {
       case 'outros':
       case 'misto':
         return null;
+      // Vale nao entra na gaveta: o dinheiro entrou na compra original.
+      case 'vale':
+        return bucketVale;
       default:
         // Nao assumir dinheiro — evita inflar a gaveta.
         return null;

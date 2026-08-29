@@ -35,6 +35,9 @@ abstract final class SyncPriorityCatalogo {
     'recebimento_fiado',
     'caixa_sessoes',
     'registro_devolucao',
+    // Dinheiro na mao do cliente: o vale precisa chegar antes dele andar
+    // ate outro terminal para gastar.
+    'vale_credito',
     'historico_entrada',
     'nfe_importada',
   };

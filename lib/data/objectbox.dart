@@ -9,6 +9,8 @@ import '../model/item_venda.dart';
 import '../model/linha_devolucao_entrada.dart';
 import '../model/linha_troca_saida.dart';
 import '../model/registro_devolucao.dart';
+import '../model/uso_vale_credito.dart';
+import '../model/vale_credito.dart';
 import '../model/cliente.dart';
 import '../model/fornecedor_nfe.dart';
 import '../model/historico_entrada.dart';
@@ -56,6 +58,8 @@ class ObjectBox {
   late Box<RegistroDevolucao> registroDevolucaoBox;
   late Box<LinhaDevolucaoEntrada> linhaDevolucaoEntradaBox;
   late Box<LinhaTrocaSaida> linhaTrocaSaidaBox;
+  late Box<ValeCredito> valeCreditoBox;
+  late Box<UsoValeCredito> usoValeCreditoBox;
   late Box<HistoricoEntrega> historicoEntregaBox;
   late Box<Motorista> motoristaBox;
   late Box<Vendedor> vendedorBox;
@@ -99,6 +103,8 @@ class ObjectBox {
     registroDevolucaoBox = Box<RegistroDevolucao>(store);
     linhaDevolucaoEntradaBox = Box<LinhaDevolucaoEntrada>(store);
     linhaTrocaSaidaBox = Box<LinhaTrocaSaida>(store);
+    valeCreditoBox = Box<ValeCredito>(store);
+    usoValeCreditoBox = Box<UsoValeCredito>(store);
     historicoEntregaBox = Box<HistoricoEntrega>(store);
     motoristaBox = Box<Motorista>(store);
     vendedorBox = Box<Vendedor>(store);

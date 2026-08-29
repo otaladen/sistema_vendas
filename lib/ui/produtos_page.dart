@@ -23,6 +23,7 @@ import '../domain/importacao/produto_importacao_linha.dart';
 import '../domain/importacao/produto_importacao_util.dart';
 import '../domain/produto_categorias_catalogo.dart';
 import '../domain/produto_embalagem.dart';
+import '../domain/produto_marca.dart';
 import '../data/produto_busca_util.dart';
 import '../domain/produto_substitutos_util.dart';
 import '../domain/usuario_permissao_helper.dart';
@@ -191,8 +192,6 @@ class _ProdutosPageState extends State<ProdutosPage>
   final _nomeImpressaoController = TextEditingController();
   final _descricaoController = TextEditingController();
   final _marcaController = TextEditingController();
-  final _fornecedorController = TextEditingController();
-  final _fabricanteController = TextEditingController();
   final _codigoBarrasController = TextEditingController();
   final _apelidosBuscaController = TextEditingController();
   final _ncmController = TextEditingController();
@@ -525,8 +524,6 @@ class _ProdutosPageState extends State<ProdutosPage>
     _nomeImpressaoController.dispose();
     _descricaoController.dispose();
     _marcaController.dispose();
-    _fornecedorController.dispose();
-    _fabricanteController.dispose();
     _codigoBarrasController.dispose();
     _apelidosBuscaController.dispose();
     _ncmController.dispose();
@@ -641,8 +638,6 @@ class _ProdutosPageState extends State<ProdutosPage>
       _nomeController,
       _descricaoController,
       _marcaController,
-      _fornecedorController,
-      _fabricanteController,
       _codigoBarrasController,
       _apelidosBuscaController,
       _ncmController,
@@ -706,12 +701,131 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
+  Future<void> _abrirAjudaEstoquePontoPedido(BuildContext context) async {
+    final ob = _objectBoxLocalOuNull();
+    final diasGiro = ob != null
+        ? ComprasPreditivasService(ob).diasMinimosCadastroParaGiro
+        : 14;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return AlertDialog(
+          title: const Text('Estoque e compras — como funciona'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Pense assim: o sistema avisa quando é hora de pedir de novo '
+                  'ao fornecedor, para o produto não acabar enquanto a mercadoria '
+                  'está a caminho.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'O que preencher',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _ajudaLinha(
+                  theme,
+                  'Estoque fisico',
+                  'Quanto tem na prateleira / depósito agora.',
+                ),
+                _ajudaLinha(
+                  theme,
+                  'Quantidade minima',
+                  'Alerta clássico de estoque baixo. Também serve de referência '
+                  'quando o produto ainda não tem histórico de vendas.',
+                ),
+                _ajudaLinha(
+                  theme,
+                  'Prazo do fornecedor (lead time)',
+                  'Quantos dias demora entre você pedir e a mercadoria chegar. '
+                  'Ex.: se o fornecedor entrega em 1 semana, coloque 7.',
+                ),
+                _ajudaLinha(
+                  theme,
+                  'Estoque de seguranca (folga)',
+                  'Quantidade extra para cobrir atraso do fornecedor ou pico '
+                  'de venda. Ex.: “sempre quero ter pelo menos 1 LT sobrando”.',
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Ponto de pedido (PP)',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'É o nível em que o sistema diz: “já pode comprar”.\n\n'
+                  'Com vendas regulares:\n'
+                  'PP = (quanto vende por dia × dias até chegar) + folga\n\n'
+                  'Exemplo: vende 2 LT/dia, prazo 7 dias, folga 5 →\n'
+                  'PP = (2 × 7) + 5 = 19 LT. Quando o estoque chegar a 19, peça de novo.\n\n'
+                  'Produto novo ou sem venda (menos de $diasGiro dias de cadastro '
+                  'ou média zero): o alerta usa a folga (ou a quantidade mínima).',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Onde isso aparece',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Sugestão de compra, lista de estoque e alertas de reposição '
+                  'usam esses valores. Você não precisa decorar a fórmula — '
+                  'o painel abaixo dos campos já mostra a conta com os números '
+                  'deste produto.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Entendi'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _ajudaLinha(ThemeData theme, String titulo, String texto) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: RichText(
+        text: TextSpan(
+          style: theme.textTheme.bodyMedium,
+          children: [
+            TextSpan(
+              text: '$titulo: ',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            TextSpan(text: texto),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPainelPontoPedido(BuildContext context) {
     final ctxEmb = _produtoEmbalagemContexto();
     final estoqueRaw = _lerEstoqueDoFormulario();
     final estoqueExibicao =
         ProdutoEmbalagem.valorEstoqueExibicao(ctxEmb, estoqueRaw);
     final leadTime = int.tryParse(_leadTimeDiasController.text) ?? 7;
+    final leadEfetivo = leadTime > 0 ? leadTime : 7;
     final seguranca = int.tryParse(_estoqueSegurancaController.text) ?? 0;
     final minimo = int.tryParse(_quantidadeMinimaController.text) ?? 0;
     final produto = _produtoEmEdicaoId != null
@@ -725,19 +839,28 @@ class _ProdutosPageState extends State<ProdutosPage>
     double pp;
     bool critico;
     bool semGiroConfiavel;
+    double mediaExibicao = 0;
 
     if (produto != null && comprasSvc != null) {
-      produto.leadTimeDias = leadTime > 0 ? leadTime : 7;
+      produto.leadTimeDias = leadEfetivo;
       produto.estoqueSeguranca = seguranca;
       semGiroConfiavel = !comprasSvc.temGiroVendaConfiavel(produto);
       pp = comprasSvc.calcularPontoPedidoExibicao(produto);
       critico = estoqueExibicao <= pp + 1e-9;
+      mediaExibicao = ProdutoEmbalagem.valorMediaDiariaExibicao(
+        produto,
+        produto.vendaMediaDiaria,
+      );
     } else if (produto != null) {
-      produto.leadTimeDias = leadTime > 0 ? leadTime : 7;
+      produto.leadTimeDias = leadEfetivo;
       produto.estoqueSeguranca = seguranca;
       semGiroConfiavel = produto.vendaMediaDiaria <= 1e-9;
       pp = ComprasPreditivasService.pontoPedidoExibicaoDeCadastro(produto);
       critico = estoqueExibicao <= pp + 1e-9;
+      mediaExibicao = ProdutoEmbalagem.valorMediaDiariaExibicao(
+        produto,
+        produto.vendaMediaDiaria,
+      );
     } else {
       semGiroConfiavel = true;
       pp = (seguranca > 0 ? seguranca : minimo).toDouble();
@@ -758,13 +881,19 @@ class _ProdutosPageState extends State<ProdutosPage>
             comUnidade: true,
           );
     final ppTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(ctxEmb, pp);
+    final consumoNoPrazo = mediaExibicao * leadEfetivo;
+    final consumoFmt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+      ctxEmb,
+      consumoNoPrazo,
+    );
 
     final theme = Theme.of(context);
     final semantic = context.semanticColors;
+    final cs = theme.colorScheme;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(_erpGap8),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: critico
             ? semantic.errorBg.withValues(alpha: 0.35)
@@ -779,43 +908,87 @@ class _ProdutosPageState extends State<ProdutosPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Compras preditivas (ponto de pedido)',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            semGiroConfiavel
-                ? 'Produto novo ou sem giro: alerta pelo estoque de seguranca '
-                      '(min. ${comprasSvc?.diasMinimosCadastroParaGiro ?? 14} dias de cadastro + vendas).'
-                : 'PP = (media diaria x lead time) + estoque seguranca',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            semGiroConfiavel
-                ? 'Limiar seguranca: $ppTxt $unidade · Atual: $estoqueTxt'
-                : 'Media diaria: $mediaTxt/dia · PP: $ppTxt $unidade · '
-                      'Atual: $estoqueTxt',
-            style: theme.textTheme.bodyMedium,
-          ),
-          if (critico)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                semGiroConfiavel
-                    ? 'Alerta: estoque no ou abaixo do limiar de seguranca.'
-                    : 'Alerta: estoque no ou abaixo do ponto de pedido.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: semantic.errorFg,
-                  fontWeight: FontWeight.w600,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Quando pedir de novo?',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
+              TextButton.icon(
+                onPressed: () => _abrirAjudaEstoquePontoPedido(context),
+                icon: const Icon(Icons.help_outline, size: 18),
+                label: const Text('Como funciona?'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+            ],
+          ),
+          Text(
+            'O sistema avisa na sugestão de compra quando o estoque chegar '
+            'no ponto de pedido (PP).',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
             ),
+          ),
+          const SizedBox(height: 10),
+          if (semGiroConfiavel) ...[
+            Text(
+              'Por enquanto (produto novo ou sem venda regular): o alerta usa '
+              'a folga${seguranca > 0 ? '' : ' ou a quantidade mínima'}.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Alerta quando estoque ≤ $ppTxt $unidade',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text(
+              'Estoque hoje: $estoqueTxt',
+              style: theme.textTheme.bodyMedium,
+            ),
+          ] else ...[
+            Text(
+              'Conta deste produto',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Vende ± $mediaTxt por dia\n'
+              '× $leadEfetivo dias até o fornecedor entregar  →  $consumoFmt $unidade\n'
+              '+ folga $seguranca $unidade\n'
+              '= ponto de pedido: $ppTxt $unidade',
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.35),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Estoque hoje: $estoqueTxt',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text(
+              critico
+                  ? 'Situação: na hora de comprar (estoque no ou abaixo do PP).'
+                  : 'Situação: ainda dá para esperar (estoque acima do PP).',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: critico ? semantic.errorFg : cs.onSurfaceVariant,
+                fontWeight: critico ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -932,6 +1105,54 @@ class _ProdutosPageState extends State<ProdutosPage>
               .toList(),
         );
       },
+    );
+  }
+
+  List<String> _marcasCadastradasParaSugestao(String query) {
+    final unicos = <String>{};
+    try {
+      for (final p in widget.produtoRepository.listarTodos()) {
+        final marca = ProdutoMarca.efetiva(
+          marca: p.marca,
+          fabricante: p.fabricante,
+        );
+        if (marca.isNotEmpty) unicos.add(marca);
+      }
+    } catch (_) {}
+    final lista = unicos.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return lista.take(16).toList();
+    return lista.where((m) => m.toLowerCase().contains(q)).take(16).toList();
+  }
+
+  Widget _buildCampoMarcaClassificacao(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _erpFieldLabel('Marca', context),
+        Autocomplete<String>(
+          key: ValueKey(
+            'marca_${_produtoEmEdicaoId ?? 0}_$_historicoVersao',
+          ),
+          initialValue: TextEditingValue(text: _marcaController.text),
+          optionsBuilder: (tev) => _marcasCadastradasParaSugestao(tev.text),
+          onSelected: (v) => _marcaController.text = v,
+          fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+            return TextField(
+              controller: controller,
+              focusNode: focusNode,
+              textCapitalization: TextCapitalization.words,
+              decoration: _erpInputDecoration(
+                context,
+                hint: 'Ex.: Votoran, Tigre',
+              ),
+              onChanged: (v) => _marcaController.text = v,
+              onSubmitted: (_) => onFieldSubmitted(),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -1682,8 +1903,6 @@ class _ProdutosPageState extends State<ProdutosPage>
       _modoAlvoPrecificacao = _ModoAlvoPrecificacao.markup;
       _descricaoController.clear();
       _marcaController.clear();
-      _fornecedorController.clear();
-      _fabricanteController.clear();
       _codigoBarrasController.clear();
       _apelidosBuscaController.clear();
       _ncmController.clear();
@@ -4257,8 +4476,6 @@ class _ProdutosPageState extends State<ProdutosPage>
         ? _subcategoriaLivreController.text.trim()
         : (_subcategoriaSelecionada?.trim() ?? '');
     final marca = _marcaController.text.trim();
-    final fornecedor = _fornecedorController.text.trim();
-    final fabricante = _fabricanteController.text.trim();
     final codigoBarras = _codigoBarrasController.text.trim();
     final apelidosBusca = _apelidosBuscaController.text.trim();
     final ncm = _ncmController.text.replaceAll(RegExp(r'\D'), '');
@@ -4384,8 +4601,8 @@ class _ProdutosPageState extends State<ProdutosPage>
       categoria: categoria,
       subcategoria: subcategoria,
       marca: marca,
-      fornecedor: fornecedor,
-      fabricante: fabricante,
+      fornecedor: produtoExistente?.fornecedor ?? '',
+      fabricante: marca,
       codigoBarras: codigoBarras,
       apelidosBusca: apelidosBusca,
       fotoPath: fotoPathFinal,
@@ -4649,9 +4866,10 @@ class _ProdutosPageState extends State<ProdutosPage>
         _subcategoriaSelecionada = null;
         _subcategoriaLivreController.clear();
       }
-      _marcaController.text = produto.marca;
-      _fornecedorController.text = produto.fornecedor;
-      _fabricanteController.text = produto.fabricante;
+      _marcaController.text = ProdutoMarca.efetiva(
+        marca: produto.marca,
+        fabricante: produto.fabricante,
+      );
       _codigoBarrasController.text = produto.codigoBarras;
       _apelidosBuscaController.text = produto.apelidosBusca;
       _fotoPathAtual = produto.fotoPath;
@@ -5281,8 +5499,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                     const SizedBox(height: 6),
                     const Text(
                       'Paradox TabEst1: Codigo, CodInterno ou CodEx, Produto, PrecoVenda, Quantidade, '
-                      'PrecoCusto, CustoMedio, EstMinimo, Fabricante, Unidade, Obs (opcionais).\n'
+                      'PrecoCusto, CustoMedio, EstMinimo, Fabricante/Marca, Unidade, Obs (opcionais).\n'
                       'Chacal/CSV enriquecido: NCM, GTIN, Marca, Familia, Grupo, Subgrupo, Preco2, Preco3, Inativo.\n'
+                      'Fabricante legado entra em Marca quando a coluna Marca estiver vazia.\n'
                       'Categoria e subcategoria sao mapeadas de Familia/Grupo/Subgrupo quando presentes.\n'
                       'PrecoVenda do CSV = apenas A Prazo (preco1); Preco2/Preco3 importados se existirem.\n'
                       'Quantidade negativa ou decimal: arredonda e nao deixa estoque < 0.\n'
@@ -6154,11 +6373,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               ),
                                                             ],
                                                           ),
-                                                        ]),
-                                                        if (_categoriaSelecionada ==
-                                                            _categoriaOutros) ...[
-                                                          const SizedBox(
-                                                            height: _erpGap16,
+                                                          _buildCampoMarcaClassificacao(
+                                                            context,
                                                           ),
                                                           Column(
                                                             crossAxisAlignment:
@@ -6166,73 +6382,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                     .start,
                                                             children: [
                                                               _erpFieldLabel(
-                                                                'Subcategoria personalizada',
-                                                                context,
-                                                              ),
-                                                              TextFormField(
-                                                                controller:
-                                                                    _subcategoriaLivreController,
-                                                                validator:
-                                                                    _validarSubcategoria,
-                                                                decoration:
-                                                                    _erpInputDecoration(
-                                                                      context,
-                                                                      helper:
-                                                                          'Para itens fora do padrao',
-                                                                    ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ],
-                                                        const SizedBox(
-                                                          height: _erpGap8,
-                                                        ),
-                                                        _erpResponsiveGrid(context, [
-                                                          Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .start,
-                                                            children: [
-                                                              _erpFieldLabel(
-                                                                'Marca',
-                                                                context,
-                                                              ),
-                                                              TextField(
-                                                                controller:
-                                                                    _marcaController,
-                                                                decoration:
-                                                                    _erpInputDecoration(
-                                                                      context,
-                                                                    ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                          Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .start,
-                                                            children: [
-                                                              _erpFieldLabel(
-                                                                'Fornecedor',
-                                                                context,
-                                                              ),
-                                                              TextField(
-                                                                controller:
-                                                                    _fornecedorController,
-                                                                decoration:
-                                                                    _erpInputDecoration(
-                                                                      context,
-                                                                    ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                          Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .start,
-                                                            children: [
-                                                              _erpFieldLabel(
-                                                                'Unidade',
+                                                                'Unidade de Medida',
                                                                 context,
                                                               ),
                                                               DropdownButtonFormField<
@@ -6318,26 +6468,36 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               ),
                                                             ],
                                                           ),
+                                                        ]),
+                                                        if (_categoriaSelecionada ==
+                                                            _categoriaOutros) ...[
+                                                          const SizedBox(
+                                                            height: _erpGap16,
+                                                          ),
                                                           Column(
                                                             crossAxisAlignment:
                                                                 CrossAxisAlignment
                                                                     .start,
                                                             children: [
                                                               _erpFieldLabel(
-                                                                'Fabricante',
+                                                                'Subcategoria personalizada',
                                                                 context,
                                                               ),
-                                                              TextField(
+                                                              TextFormField(
                                                                 controller:
-                                                                    _fabricanteController,
+                                                                    _subcategoriaLivreController,
+                                                                validator:
+                                                                    _validarSubcategoria,
                                                                 decoration:
                                                                     _erpInputDecoration(
                                                                       context,
+                                                                      helper:
+                                                                          'Para itens fora do padrao',
                                                                     ),
                                                               ),
                                                             ],
                                                           ),
-                                                        ]),
+                                                        ],
                                                       ],
                                                     );
                                                         if (!ladoALado) {
@@ -6853,10 +7013,28 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                     _erpSurfaceCard(
                                                       context: context,
                                                       title:
-                                                          'Estoque e disponibilidade',
+                                                          'Estoque e quando comprar',
                                                       icon: Icons
                                                           .warehouse_outlined,
                                                       children: [
+                                                        Text(
+                                                          'Preencha o estoque e o prazo do fornecedor. '
+                                                          'O painel abaixo mostra, em português, quando '
+                                                          'o sistema vai sugerir compra.',
+                                                          style: Theme.of(context)
+                                                              .textTheme
+                                                              .bodySmall
+                                                              ?.copyWith(
+                                                                color: Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .colorScheme
+                                                                    .onSurfaceVariant,
+                                                              ),
+                                                        ),
+                                                        const SizedBox(
+                                                          height: _erpGap8,
+                                                        ),
                                                         Wrap(
                                                           spacing: _erpGap16,
                                                           runSpacing: _erpGap16,
@@ -6915,9 +7093,15 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                     keyboardType:
                                                                         TextInputType
                                                                             .number,
+                                                                    onChanged: (_) =>
+                                                                        setState(
+                                                                          () {},
+                                                                        ),
                                                                     decoration:
                                                                         _erpInputDecoration(
                                                                           context,
+                                                                          helper:
+                                                                              'Alerta clássico de estoque baixo',
                                                                         ),
                                                                   ),
                                                                 ],
@@ -6932,7 +7116,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                         .start,
                                                                 children: [
                                                                   _erpFieldLabel(
-                                                                    'Lead time (dias)',
+                                                                    'Prazo fornecedor (dias)',
                                                                     context,
                                                                   ),
                                                                   TextField(
@@ -6950,6 +7134,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                           context,
                                                                           hint:
                                                                               '7',
+                                                                          helper:
+                                                                              'Dias entre pedir e chegar',
                                                                         ),
                                                                   ),
                                                                 ],
@@ -6964,7 +7150,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                         .start,
                                                                 children: [
                                                                   _erpFieldLabel(
-                                                                    'Estoque seguranca',
+                                                                    'Folga (estoque seguranca)',
                                                                     context,
                                                                   ),
                                                                   TextField(
@@ -6982,6 +7168,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                           context,
                                                                           hint:
                                                                               '0',
+                                                                          helper:
+                                                                              'Extra para atraso ou pico',
                                                                         ),
                                                                   ),
                                                                 ],

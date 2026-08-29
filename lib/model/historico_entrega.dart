@@ -1,5 +1,6 @@
 import 'package:objectbox/objectbox.dart';
 
+import '../domain/retirada_parcial_evento.dart';
 import 'venda.dart';
 
 @Entity()
@@ -52,6 +53,29 @@ class HistoricoEntregaEventos {
       default:
         return false;
     }
+  }
+
+  static bool ehEventoRetirada(String statusNovo) {
+    return statusNovo == retiradaFutura || statusNovo == retiradaLojaPreSaida;
+  }
+
+  /// Texto humano do detalhe (JSON estruturado nas baixas de patio).
+  static String textoDetalhe(String statusNovo, String statusAnterior) {
+    if (ehEventoRetirada(statusNovo)) {
+      final ev = RetiradaParcialEvento.tryParse(statusAnterior);
+      if (ev != null) return ev.textoHumano;
+    }
+    return statusAnterior;
+  }
+
+  static String textoStatusAnteriorParaExibicao(
+    String statusNovo,
+    String statusAnterior,
+  ) {
+    if (ehEventoRetirada(statusNovo)) {
+      return textoDetalhe(statusNovo, statusAnterior);
+    }
+    return rotulo(statusAnterior);
   }
 
   static String rotulo(String status) {

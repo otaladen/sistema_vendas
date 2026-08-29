@@ -25,6 +25,7 @@ import '../../services/print_service.dart';
 import '../layout/app_layout.dart';
 import '../listagem_vendas_page.dart';
 import '../main_menu_dashboard.dart';
+import '../theme/app_fundo_camada.dart';
 import '../widgets/app_rodape_status_bar.dart';
 import '../widgets/chat/chat_interno_drawer.dart';
 import '../widgets/chat/chat_interno_hub.dart';
@@ -232,7 +233,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
         config.redeModoServidor &&
         config.redeSincronizacaoAtiva &&
         widget.objectBox != null) {
-      // PC1: so hub (8787 mobile) + LanApi (8788 terminais). Sem scheduler P2P.
+      // PC1: LanApi :8788. Sem scheduler P2P.
       await LanServidorBootstrap.garantirAtivo(
         objectBox: widget.objectBox!,
         configRepository: widget.appConfigRepository,
@@ -748,7 +749,8 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
           badgeSubDe: _badgeSub,
           terminalLeve: widget.terminalLeve,
         ),
-        body: Navigator(
+        body: AppFundoCamada(
+          child: Navigator(
           pages: [
             MaterialPage<void>(
               key: const ValueKey<String>('mobile-inicio'),
@@ -783,6 +785,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
             }
             _fecharModuloMobile();
           },
+        ),
         ),
         bottomNavigationBar: AppRodapeStatusBar(
           usuarioLogin: widget.usuarioLogado.login,
@@ -856,19 +859,21 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
                                   trailing: const ChatInternoTopBarButton(),
                                 ),
                                 Expanded(
-                                  child: IndexedStack(
-                                    index: _indiceAbaAtiva,
-                                    children: [
-                                      for (var i = 0; i < _abas.length; i++)
-                                        AppShellAbaVisibilidade(
-                                          ativa: i == _indiceAbaAtiva,
-                                          child: AppShellTabNavigator(
-                                            key: ValueKey<String>(_abas[i].id),
-                                            navigatorKey: _abas[i].navigatorKey,
-                                            paginaInicial: _abas[i].paginaInicial,
+                                  child: AppFundoCamada(
+                                    child: IndexedStack(
+                                      index: _indiceAbaAtiva,
+                                      children: [
+                                        for (var i = 0; i < _abas.length; i++)
+                                          AppShellAbaVisibilidade(
+                                            ativa: i == _indiceAbaAtiva,
+                                            child: AppShellTabNavigator(
+                                              key: ValueKey<String>(_abas[i].id),
+                                              navigatorKey: _abas[i].navigatorKey,
+                                              paginaInicial: _abas[i].paginaInicial,
+                                            ),
                                           ),
-                                        ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ],

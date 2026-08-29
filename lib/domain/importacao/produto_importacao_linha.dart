@@ -1,4 +1,5 @@
 import '../../domain/produto_embalagem.dart';
+import '../../domain/produto_marca.dart';
 import '../../model/produto.dart';
 import 'categoria_importacao_mapper.dart';
 import 'produto_importacao_util.dart';
@@ -89,6 +90,11 @@ class ProdutoImportacaoLinha {
         ? custoMedio
         : (existente?.custoMedio ?? 0);
 
+    final marcaEfetiva = ProdutoMarca.efetiva(
+      marca: marca,
+      fabricante: fabricante,
+    );
+
     return Produto(
       id: existente?.id ?? 0,
       codigoInterno: codigoInterno,
@@ -99,10 +105,12 @@ class ProdutoImportacaoLinha {
       ),
       categoria: cat.categoria,
       subcategoria: cat.subcategoria,
-      marca: marca.trim(),
+      marca: marcaEfetiva.isNotEmpty
+          ? marcaEfetiva
+          : (existente?.marca ?? ''),
       fornecedor: existente?.fornecedor ?? '',
-      fabricante: fabricante.trim().isNotEmpty
-          ? fabricante.trim()
+      fabricante: marcaEfetiva.isNotEmpty
+          ? marcaEfetiva
           : (existente?.fabricante ?? ''),
       codigoBarras: codigoBarras,
       fotoPath: existente?.fotoPath ?? '',

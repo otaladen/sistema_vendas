@@ -2,6 +2,7 @@ import 'package:objectbox/objectbox.dart';
 
 import '../domain/entrega_venda_helper.dart';
 import '../domain/produto_embalagem.dart';
+import '../domain/saldo_retirada_item.dart';
 import 'produto.dart';
 import 'venda.dart';
 
@@ -34,7 +35,9 @@ class ItemVenda {
   String nomeProduto;
   int quantidade;
 
-  /// Quantidade ja entregue ao cliente em retiradas parciais (retirada futura).
+  /// Quantidade ja entregue ao cliente em baixas formais de patio.
+  /// So mutar via [VendaRepository.registrarRetiradaParcial] (e fluxos de
+  /// cupom/carreto equivalentes) — nunca por edicao manual ou payload solto.
   int quantidadeJaRetirada;
 
   /// Unidades nesta linha que seguem no carreto apos migrar retirada futura > carreto.
@@ -119,13 +122,17 @@ class ItemVenda {
   double get lucro => subtotal - subtotalCusto;
 
   /// Unidades ainda nao retiradas (somente itens [retirada_futura]).
+  /// Desconta devolucao: o cliente nao pode retirar o que ja voltou ao estoque.
   int get quantidadePendenteRetirada {
     if (EntregaVendaHelper.tipoEfetivoItem(this) !=
         EntregaVendaHelper.tipoRetiradaFutura) {
       return 0;
     }
-    final p = quantidade - quantidadeJaRetirada;
-    return p < 0 ? 0 : p;
+    return SaldoRetiradaItem.pendente(
+      quantidade: quantidade,
+      quantidadeJaRetirada: quantidadeJaRetirada,
+      quantidadeDevolvida: quantidadeDevolvida,
+    );
   }
 
   /// Carreto com reserva ate a saida: unidades que ainda seguem no romaneio
@@ -135,8 +142,11 @@ class ItemVenda {
         EntregaVendaHelper.tipoEntregaLoja) {
       return 0;
     }
-    final p = quantidade - quantidadeDevolvida - quantidadeJaRetirada;
-    return p < 0 ? 0 : p;
+    return SaldoRetiradaItem.pendente(
+      quantidade: quantidade,
+      quantidadeJaRetirada: quantidadeJaRetirada,
+      quantidadeDevolvida: quantidadeDevolvida,
+    );
   }
 
   /// Quantidade a mostrar na tela de entregas (carga / caminhao).

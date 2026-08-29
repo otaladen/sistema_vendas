@@ -1145,6 +1145,7 @@ class VendaApiRepository extends ChangeNotifier {
     required String status,
     String motivo = '',
     String usuario = '',
+    String? detalhesEstruturados,
   }) {
     throw StateError(
       'Terminal leve: use registrarOcorrenciaEntregaRemoto (async).',
@@ -2093,6 +2094,33 @@ class VendaApiRepository extends ChangeNotifier {
     return registroId;
   }
 
+  Future<({int orcamentoId, int numeroOrcamento, bool reutilizado})>
+      registrarOrcamentoComplementoTrocaRemoto({
+    required int vendaOrigemId,
+    required int registroDevolucaoId,
+    required double valor,
+    String formaPagamento = 'dinheiro',
+    int quantidadeParcelas = 1,
+  }) async {
+    _exigirServidorOnline();
+    final m = await _client.registrarOrcamentoComplementoTroca(
+      vendaOrigemId: vendaOrigemId,
+      registroId: registroDevolucaoId,
+      valor: valor,
+      formaPagamento: formaPagamento,
+      quantidadeParcelas: quantidadeParcelas,
+    );
+    final orcamentoId = (m['orcamentoId'] as num?)?.toInt() ?? 0;
+    if (orcamentoId > 0) {
+      await _atualizarCacheAposMutacaoOrcamento(orcamentoId);
+    }
+    return (
+      orcamentoId: orcamentoId,
+      numeroOrcamento: (m['numeroOrcamento'] as num?)?.toInt() ?? 0,
+      reutilizado: m['reutilizado'] == true,
+    );
+  }
+
   Future<void> vincularClienteNoOrcamentoRemoto(
     int vendaId,
     int? clienteId,
@@ -2173,6 +2201,21 @@ class VendaApiRepository extends ChangeNotifier {
       itemId,
       quantidade,
       permitirVendaSemEstoque: permitirVendaSemEstoque,
+      terminalId: await _terminalIdCaixa(),
+    );
+    await _atualizarCacheAposMutacaoOrcamento(vendaId);
+  }
+
+  Future<void> atualizarTipoEntregaItemOrcamentoRemoto(
+    int vendaId,
+    int itemId,
+    String tipoEntregaItem,
+  ) async {
+    _exigirServidorOnline();
+    await _client.atualizarTipoEntregaItemOrcamento(
+      vendaId,
+      itemId,
+      tipoEntregaItem,
       terminalId: await _terminalIdCaixa(),
     );
     await _atualizarCacheAposMutacaoOrcamento(vendaId);
@@ -2832,6 +2875,16 @@ class VendaApiRepository extends ChangeNotifier {
     );
   }
 
+  void atualizarTipoEntregaItemOrcamento(
+    int vendaId,
+    int itemId,
+    String tipoEntregaItem,
+  ) {
+    throw StateError(
+      'Terminal leve: use atualizarTipoEntregaItemOrcamentoRemoto (async).',
+    );
+  }
+
   void alterarPagamentoOrcamento(int vendaId, dynamic resultado) {
     throw StateError(
       'Terminal leve: use alterarPagamentoOrcamentoRemoto (async).',
@@ -2906,6 +2959,7 @@ class VendaApiRepository extends ChangeNotifier {
       pix: 0,
       debito: 0,
       credito: 0,
+      vale: 0,
     );
   }
 

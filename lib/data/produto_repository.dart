@@ -165,19 +165,29 @@ class ProdutoRepository extends ChangeNotifier {
   }
 
   /// Pagina produtos ordenados por nome (sugestoes PDV sem carregar catalogo inteiro).
+  ///
+  /// [prefixoNome]: filtra pelo inicio do nome (ex.: `M` → letra M), case-insensitive.
   List<Produto> listarPaginado({
     int offset = 0,
     int limit = 50,
     bool somenteAtivos = true,
     bool somenteInativos = false,
+    String? prefixoNome,
   }) {
     _migrarCampoAtivoLegadoUmaVez();
     if (limit <= 0) return const [];
-    final qb = somenteInativos
-        ? _db.produtoBox.query(Produto_.ativo.equals(false))
-        : somenteAtivos
-            ? _db.produtoBox.query(Produto_.ativo.equals(true))
-            : _db.produtoBox.query();
+    final pfx = (prefixoNome ?? '').trim();
+    Condition<Produto>? cond;
+    if (somenteInativos) {
+      cond = Produto_.ativo.equals(false);
+    } else if (somenteAtivos) {
+      cond = Produto_.ativo.equals(true);
+    }
+    if (pfx.isNotEmpty) {
+      final porNome = Produto_.nome.startsWith(pfx, caseSensitive: false);
+      cond = cond == null ? porNome : cond & porNome;
+    }
+    final qb = cond == null ? _db.produtoBox.query() : _db.produtoBox.query(cond);
     final query = qb.order(Produto_.nome).build();
     try {
       query.offset = offset < 0 ? 0 : offset;

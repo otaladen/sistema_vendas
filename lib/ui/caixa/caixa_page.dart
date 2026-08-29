@@ -23,6 +23,7 @@ import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/sync/sync_refresh_hub.dart';
 import '../../data/sync/caixa_local_refresh_hub.dart';
 import '../../data/sync/caixa_status_hub.dart';
+import '../../data/vale_credito_service.dart';
 import '../../data/venda_repository.dart';
 import '../../model/recebimento_fiado.dart';
 import '../shell/main_menu_deps.dart';
@@ -47,6 +48,8 @@ import '../../domain/pdv_kit_orcamento_insercao.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../domain/pagamento_orcamento.dart';
+import '../../domain/vale_credito.dart';
+import '../../domain/leitura_parcial_caixa.dart';
 import '../../domain/plano_fiado.dart';
 import '../../domain/ultimas_vendas_finalizadas_ordenacao.dart';
 import '../../model/caixa_sessao.dart';
@@ -164,6 +167,8 @@ class _CaixaPageState extends State<CaixaPage> {
   final _pesquisaProdutoConferenciaFocus = FocusNode();
   final _focusAtalhosCaixa = FocusNode(debugLabel: 'caixaAtalhosGlobais');
   final List<int> _produtosRecentesConferencia = [];
+  /// Padrao para novos itens na conferencia (Ctrl+F1/F2/F3 ou chips).
+  String? _tipoEntregaNovoItemConferencia;
   GavetaEscPosService? _gavetaService;
   double? _valorRecebido;
   bool _posVendaProcessando = false;
@@ -1707,7 +1712,11 @@ class _CaixaPageState extends State<CaixaPage> {
       }
       return;
     }
-    await prefs.setString(_kCaixaAuditoriaKey, jsonEncode(lista));
+    try {
+      await prefs.setString(_kCaixaAuditoriaKey, jsonEncode(lista));
+    } catch (e) {
+      debugPrint('Caixa: falha ao gravar auditoria local: $e');
+    }
   }
 
   void _espelharAuditoriaNoLogCentral(
@@ -2642,70 +2651,78 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
-  ({double total, int quantidade}) _resumoRecebimentosFiadoNoPeriodoCaixa() {
-    final abertura = _aberturaCaixaEm;
-    if (abertura == null) {
-      return (total: 0.0, quantidade: 0);
-    }
-    final lista = widget.vendaRepository.recebimentos.listarNoPeriodo(
-      inicio: abertura,
-      fim: DateTime.now(),
-    );
-    return (
-      total: lista.fold<double>(0, (s, r) => s + r.valorTotal),
-      quantidade: lista.length,
-    );
-  }
-
-  Map<String, double> _totaisEsperadosFechamento() {
+  LeituraParcialCaixaSnapshot _montarLeituraParcialLocal() {
     final abertura = _aberturaCaixaEm;
     final agora = DateTime.now();
     final totais = widget.vendaRepository.totaisMeiosPagamentoVendasFinalizadas(
       inicio: abertura,
       fim: agora,
     );
-    var dinheiro = totais.dinheiro as num;
-    var pix = totais.pix as num;
-    var debito = totais.debito as num;
-    var credito = totais.credito as num;
+    var recDinheiro = 0.0;
+    var recPix = 0.0;
+    var recDebito = 0.0;
+    var recCredito = 0.0;
+    var recTotal = 0.0;
+    var recQtd = 0;
     if (abertura != null) {
-      for (final rec in widget.vendaRepository.recebimentos.listarNoPeriodo(
+      final lista = widget.vendaRepository.recebimentos.listarNoPeriodo(
         inicio: abertura,
         fim: agora,
-      )) {
+      );
+      recQtd = lista.length;
+      for (final rec in lista) {
+        recTotal += rec.valorTotal;
         switch (rec.formaPagamento) {
           case 'pix':
-            pix += rec.valorTotal;
+            recPix += rec.valorTotal;
             break;
           case 'cartao_debito':
-            debito += rec.valorTotal;
+            recDebito += rec.valorTotal;
             break;
           case 'cartao_credito':
-            credito += rec.valorTotal;
+            recCredito += rec.valorTotal;
             break;
           case 'dinheiro':
-            dinheiro += rec.valorTotal;
+            recDinheiro += rec.valorTotal;
             break;
-          case 'fiado':
-          case 'transferencia':
-          case 'outros':
           default:
-            // Quitacao por transferencia/outros nao infla a gaveta.
             break;
         }
       }
     }
-    final dinheiroEsperado = (_fundoTrocoAbertura +
-            dinheiro.toDouble() +
-            _totalSuprimentos -
-            _totalSangrias)
-        .clamp(0, double.infinity)
-        .toDouble();
+    final resumo = widget.vendaRepository.resumoVendasFinalizadasNoPeriodo(
+      inicio: abertura,
+      fim: agora,
+    );
+    return LeituraParcialCaixaSnapshot.montar(
+      fundoTroco: _fundoTrocoAbertura,
+      suprimentos: _totalSuprimentos,
+      sangrias: _totalSangrias,
+      vendasDinheiro: totais.dinheiro,
+      vendasPix: totais.pix,
+      vendasDebito: totais.debito,
+      vendasCredito: totais.credito,
+      vendasVale: totais.vale,
+      recDinheiro: recDinheiro,
+      recPix: recPix,
+      recDebito: recDebito,
+      recCredito: recCredito,
+      recTotal: recTotal,
+      recQuantidade: recQtd,
+      totalVendas: resumo.totalVendas,
+      quantidadeVendas: resumo.quantidadeVendas,
+      aberturaEm: abertura,
+      operador: _operadorCaixa,
+    );
+  }
+
+  Map<String, double> _totaisEsperadosFechamento() {
+    final s = _montarLeituraParcialLocal();
     return {
-      'dinheiro': dinheiroEsperado,
-      'pix': pix.toDouble(),
-      'debito': debito.toDouble(),
-      'credito': credito.toDouble(),
+      'dinheiro': s.dinheiroGaveta,
+      'pix': s.pix,
+      'debito': s.debito,
+      'credito': s.credito,
     };
   }
 
@@ -2718,16 +2735,8 @@ class _CaixaPageState extends State<CaixaPage> {
     return _totaisEsperadosFechamento();
   }
 
-  bool _leituraParcialValida(Map<String, dynamic> data) {
-    if (data.containsKey('error') &&
-        '${data['error']}'.trim().isNotEmpty) {
-      return false;
-    }
-    for (final k in const ['dinheiroGaveta', 'pix', 'debito', 'credito']) {
-      if (data[k] is! num) return false;
-    }
-    return true;
-  }
+  bool _leituraParcialValida(Map<String, dynamic> data) =>
+      LeituraParcialCaixaSnapshot.respostaValida(data);
 
   Future<Map<String, double>> _lerTotaisFechamentoDaApi() async {
     final deps = MainMenuDeps.maybeOf(context);
@@ -2751,19 +2760,6 @@ class _CaixaPageState extends State<CaixaPage> {
       'debito': (data['debito'] as num).toDouble(),
       'credito': (data['credito'] as num).toDouble(),
     };
-  }
-
-  ({double totalVendas, int quantidadeVendas}) _totalVendasNoPeriodoCaixa() {
-    final abertura = _aberturaCaixaEm;
-    final agora = DateTime.now();
-    final resumo = widget.vendaRepository.resumoVendasFinalizadasNoPeriodo(
-      inicio: abertura,
-      fim: agora,
-    );
-    return (
-      totalVendas: (resumo.totalVendas as num).toDouble(),
-      quantidadeVendas: (resumo.quantidadeVendas as num).toInt(),
-    );
   }
 
   Future<void> _abrirReceberFiado() async {
@@ -2912,58 +2908,47 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
+  String _formatarAberturaLeituraParcial(DateTime? abertura) {
+    if (abertura == null) return '-';
+    return DateFormat('dd/MM/yyyy HH:mm').format(abertura.toLocal());
+  }
+
   Future<void> _mostrarLeituraParcial() async {
     if (!widget.podeLeituraParcialCaixa) return;
     if (!_caixaAberto) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Abra o caixa para consultar a leitura parcial.'),
-        ),
+      CaixaFeedback.aviso(
+        context,
+        'Abra o caixa para consultar a leitura parcial.',
       );
       return;
     }
 
-    // Terminal leve: busca dados via API do servidor.
     final api = _caixaApi;
     if (api != null) {
       await _mostrarLeituraParcialRemota(api);
       return;
     }
 
-    final esperados = _totaisEsperadosFechamento();
-    final vendas = _totalVendasNoPeriodoCaixa();
-    final recFiado = _resumoRecebimentosFiadoNoPeriodoCaixa();
-    await _registrarAuditoriaCaixa(
-      'leitura_parcial_caixa',
-      detalhes: {
-        'totalVendas': vendas.totalVendas,
-        'quantidadeVendas': vendas.quantidadeVendas,
-        'recebimentosFiado': recFiado.total,
-        'quantidadeRecebimentosFiado': recFiado.quantidade,
-        'esperadoDinheiro': esperados['dinheiro'] ?? 0,
-        'esperadoPix': esperados['pix'] ?? 0,
-        'esperadoDebito': esperados['debito'] ?? 0,
-        'esperadoCredito': esperados['credito'] ?? 0,
-      },
-    );
-    if (!mounted) return;
-    _exibirDialogLeituraParcial(
-      aberturaFmt: _aberturaCaixaEm == null
-          ? '-'
-          : DateFormat('dd/MM/yyyy HH:mm').format(_aberturaCaixaEm!.toLocal()),
-      quantidadeVendas: vendas.quantidadeVendas,
-      totalVendas: vendas.totalVendas,
-      recFiadoQuantidade: recFiado.quantidade,
-      recFiadoTotal: recFiado.total,
-      dinheiroGaveta: esperados['dinheiro'] ?? 0,
-      pix: esperados['pix'] ?? 0,
-      debito: esperados['debito'] ?? 0,
-      credito: esperados['credito'] ?? 0,
-      fundoTroco: _fundoTrocoAbertura,
-      suprimentos: _totalSuprimentos,
-      sangrias: _totalSangrias,
-    );
+    try {
+      final snap = _montarLeituraParcialLocal();
+      try {
+        await _registrarAuditoriaCaixa(
+          'leitura_parcial_caixa',
+          detalhes: snap.toAuditoriaDetalhes(),
+        );
+      } catch (e) {
+        debugPrint('Caixa: auditoria leitura parcial: $e');
+      }
+      if (!mounted) return;
+      _exibirDialogLeituraParcial(snap);
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(
+        context,
+        'Erro ao consultar leitura parcial: ${LanApiFeedback.mensagem(e)}',
+      );
+    }
   }
 
   Future<void> _mostrarLeituraParcialRemota(CaixaSessaoApi api) async {
@@ -2977,64 +2962,41 @@ class _CaixaPageState extends State<CaixaPage> {
         terminalId: _terminalIdParaSessaoCaixa(),
       );
       if (!mounted) return;
-      if (!_leituraParcialValida(data)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              data['error']?.toString().trim().isNotEmpty == true
-                  ? '${data['error']}'
-                  : 'Conexao com o servidor (PC1) oscilou. Tente novamente.',
-            ),
-          ),
+      final snap = LeituraParcialCaixaSnapshot.fromJson(data);
+      if (snap == null) {
+        CaixaFeedback.aviso(
+          context,
+          data['error']?.toString().trim().isNotEmpty == true
+              ? '${data['error']}'
+              : 'Conexao com o servidor (PC1) oscilou. Tente novamente.',
         );
         return;
       }
-      final aberturaRaw = data['aberturaEm']?.toString();
-      final aberturaFmt = aberturaRaw != null
-          ? DateFormat('dd/MM/yyyy HH:mm')
-              .format(DateTime.parse(aberturaRaw).toLocal())
-          : '-';
-      _exibirDialogLeituraParcial(
-        aberturaFmt: aberturaFmt,
-        quantidadeVendas: (data['quantidadeVendas'] as num?)?.toInt() ?? 0,
-        totalVendas: (data['totalVendas'] as num?)?.toDouble() ?? 0,
-        recFiadoQuantidade:
-            (data['recebimentosFiadoQuantidade'] as num?)?.toInt() ?? 0,
-        recFiadoTotal:
-            (data['recebimentosFiadoTotal'] as num?)?.toDouble() ?? 0,
-        dinheiroGaveta: (data['dinheiroGaveta'] as num?)?.toDouble() ?? 0,
-        pix: (data['pix'] as num?)?.toDouble() ?? 0,
-        debito: (data['debito'] as num?)?.toDouble() ?? 0,
-        credito: (data['credito'] as num?)?.toDouble() ?? 0,
-        fundoTroco: (data['fundoTroco'] as num?)?.toDouble() ?? 0,
-        suprimentos: (data['suprimentos'] as num?)?.toDouble() ?? 0,
-        sangrias: (data['sangrias'] as num?)?.toDouble() ?? 0,
-      );
+      try {
+        await _registrarAuditoriaCaixa(
+          'leitura_parcial_caixa',
+          detalhes: snap.toAuditoriaDetalhes(),
+        );
+      } catch (e) {
+        debugPrint('Caixa: auditoria leitura parcial: $e');
+      }
+      if (!mounted) return;
+      _exibirDialogLeituraParcial(snap);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao consultar leitura parcial: $e')),
+      CaixaFeedback.erro(
+        context,
+        'Erro ao consultar leitura parcial: ${LanApiFeedback.mensagem(e)}',
       );
     }
   }
 
-  void _exibirDialogLeituraParcial({
-    required String aberturaFmt,
-    required int quantidadeVendas,
-    required double totalVendas,
-    required int recFiadoQuantidade,
-    required double recFiadoTotal,
-    required double dinheiroGaveta,
-    required double pix,
-    required double debito,
-    required double credito,
-    required double fundoTroco,
-    required double suprimentos,
-    required double sangrias,
-  }) {
+  void _exibirDialogLeituraParcial(LeituraParcialCaixaSnapshot snap) {
+    final aberturaFmt = _formatarAberturaLeituraParcial(snap.aberturaEm);
     showDialog<void>(
       context: context,
-      builder: (context) {
+      useRootNavigator: true,
+      builder: (ctx) {
         return AlertDialog(
           title: const Text('Leitura parcial do caixa'),
           content: SingleChildScrollView(
@@ -3047,43 +3009,52 @@ class _CaixaPageState extends State<CaixaPage> {
                   Text(
                     'Resumo desde a abertura ($aberturaFmt) ate agora, '
                     'sem fechar o caixa.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                    style: Theme.of(ctx).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 12),
                   Text(
                     'Vendas finalizadas',
-                    style: Theme.of(context).textTheme.titleSmall,
+                    style: Theme.of(ctx).textTheme.titleSmall,
                   ),
-                  Text('Quantidade: $quantidadeVendas'),
-                  Text('Total em vendas: ${_formatarMoeda(totalVendas)}'),
+                  Text('Quantidade: ${snap.quantidadeVendas}'),
+                  Text(
+                    'Total em vendas: ${_formatarMoeda(snap.totalVendas)}',
+                  ),
                   const SizedBox(height: 8),
                   Text(
-                    'Recebimentos de fiado: $recFiadoQuantidade '
-                    '(${_formatarMoeda(recFiadoTotal)})',
+                    'Recebimentos de fiado: ${snap.recebimentosFiadoQuantidade} '
+                    '(${_formatarMoeda(snap.recebimentosFiadoTotal)})',
                   ),
                   const SizedBox(height: 12),
                   Text(
                     'Recebimentos por forma de pagamento (esperado)',
-                    style: Theme.of(context).textTheme.titleSmall,
+                    style: Theme.of(ctx).textTheme.titleSmall,
                   ),
                   Text(
-                    'Inclui vendas do periodo + quitacoes de fiado no caixa.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                    'Inclui vendas do periodo + quitacoes de fiado no caixa. '
+                    'Vale nao entra na gaveta.',
+                    style: Theme.of(ctx).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Dinheiro na gaveta (fundo + vendas em dinheiro + '
-                    'suprimentos - sangrias): ${_formatarMoeda(dinheiroGaveta)}',
+                    'suprimentos - sangrias): '
+                    '${_formatarMoeda(snap.dinheiroGaveta)}',
                   ),
-                  Text('PIX: ${_formatarMoeda(pix)}'),
-                  Text('Cartao debito: ${_formatarMoeda(debito)}'),
-                  Text('Cartao credito: ${_formatarMoeda(credito)}'),
+                  Text('PIX: ${_formatarMoeda(snap.pix)}'),
+                  Text('Cartao debito: ${_formatarMoeda(snap.debito)}'),
+                  Text('Cartao credito: ${_formatarMoeda(snap.credito)}'),
+                  if (snap.vale > 0.001)
+                    Text(
+                      'Vale de credito (nao entra na gaveta): '
+                      '${_formatarMoeda(snap.vale)}',
+                    ),
                   const SizedBox(height: 8),
                   Text(
-                    'Fundo inicial: ${_formatarMoeda(fundoTroco)} | '
-                    'Suprimentos: ${_formatarMoeda(suprimentos)} | '
-                    'Sangrias: ${_formatarMoeda(sangrias)}',
-                    style: Theme.of(context).textTheme.bodySmall,
+                    'Fundo inicial: ${_formatarMoeda(snap.fundoTroco)} | '
+                    'Suprimentos: ${_formatarMoeda(snap.suprimentos)} | '
+                    'Sangrias: ${_formatarMoeda(snap.sangrias)}',
+                    style: Theme.of(ctx).textTheme.bodySmall,
                   ),
                 ],
               ),
@@ -3091,7 +3062,7 @@ class _CaixaPageState extends State<CaixaPage> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(ctx),
               child: const Text('Fechar'),
             ),
           ],
@@ -3817,6 +3788,54 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
+  Future<void> _alternarTipoEntregaItemConferencia(
+    Venda venda,
+    ItemVenda item,
+  ) async {
+    if (_etapaCaixa != CaixaEtapa.conferencia) return;
+    final tipoNovo = EntregaVendaHelper.proximoTipoItem(item.tipoEntregaItem);
+    try {
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .atualizarTipoEntregaItemOrcamentoRemoto(
+          venda.id,
+          item.id,
+          tipoNovo,
+        );
+      } else {
+        widget.vendaRepository.atualizarTipoEntregaItemOrcamento(
+          venda.id,
+          item.id,
+          tipoNovo,
+        );
+      }
+      await _registrarAuditoriaCaixa(
+        'ajuste_tipo_entrega_item_orcamento',
+        detalhes: {
+          'vendaId': venda.id,
+          'numeroOrcamento': venda.numeroOrcamento,
+          'itemId': item.id,
+          'produto': item.nomeProduto,
+          'tipoAnterior': item.tipoEntregaItem,
+          'tipoNovo': tipoNovo,
+        },
+      );
+      if (!mounted) return;
+      _recarregarOrcamentoSelecionadoAposAjusteItens();
+      CaixaFeedback.sucesso(
+        context,
+        '${item.nomeProduto}: '
+        '${EntregaVendaHelper.rotuloTipoItem(tipoNovo)}',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      CaixaFeedback.erro(
+        context,
+        'Nao foi possivel alterar a entrega: ${LanApiFeedback.mensagem(e)}',
+      );
+    }
+  }
+
   Future<void> _alterarQuantidadeItemConferencia(
     Venda venda,
     ItemVenda item,
@@ -3970,6 +3989,11 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   String _tipoEntregaPadraoConferencia(Venda venda) {
+    if (_tipoEntregaNovoItemConferencia != null) {
+      return EntregaVendaHelper.normalizarTipoItem(
+        _tipoEntregaNovoItemConferencia,
+      );
+    }
     final itens = _itensVenda(venda);
     if (itens.isEmpty) {
       return EntregaVendaHelper.tipoRetirada;
@@ -4112,6 +4136,7 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
 
+    final tipoPadrao = _tipoEntregaPadraoConferencia(venda);
     if (result.adicaoDireta) {
       await _adicionarProdutoAoOrcamentoConferencia(
         venda,
@@ -4120,6 +4145,7 @@ class _CaixaPageState extends State<CaixaPage> {
         precoLista: result.precoListaAtivo.isNotEmpty
             ? result.precoListaAtivo
             : precoLista,
+        tipoEntregaItem: tipoPadrao,
       );
       return;
     }
@@ -4131,22 +4157,26 @@ class _CaixaPageState extends State<CaixaPage> {
         precoLista: result.precoListaAtivo.isNotEmpty
             ? result.precoListaAtivo
             : precoLista,
+        tipoEntregaItem: tipoPadrao,
       );
       return;
     }
 
-    final qtd = await _perguntarQuantidadeProdutoConferencia(
+    final escolha = await _perguntarQuantidadeProdutoConferencia(
       result.produto,
       quantidadeSugerida: 1,
+      tipoEntregaInicial: tipoPadrao,
     );
-    if (qtd == null || !mounted) return;
+    if (escolha == null || !mounted) return;
+    setState(() => _tipoEntregaNovoItemConferencia = escolha.tipoEntregaItem);
     await _adicionarProdutoAoOrcamentoConferencia(
       venda,
       result.produto,
-      qtd,
+      escolha.quantidade,
       precoLista: result.precoListaAtivo.isNotEmpty
           ? result.precoListaAtivo
           : precoLista,
+      tipoEntregaItem: escolha.tipoEntregaItem,
     );
   }
 
@@ -4174,12 +4204,14 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
 
+    final tipoPadrao = _tipoEntregaPadraoConferencia(venda);
     for (final linha in montada.linhas) {
       await _adicionarProdutoAoOrcamentoConferencia(
         venda,
         linha.produto,
         linha.quantidade.round(),
         precoLista: precoLista,
+        tipoEntregaItem: tipoPadrao,
       );
     }
 
@@ -4196,47 +4228,96 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
-  Future<int?> _perguntarQuantidadeProdutoConferencia(
+  Future<({int quantidade, String tipoEntregaItem})?>
+      _perguntarQuantidadeProdutoConferencia(
     Produto produto, {
     required int quantidadeSugerida,
+    required String tipoEntregaInicial,
   }) async {
     final ctrl = TextEditingController(text: '$quantidadeSugerida');
-    final qtd = await showDialog<int>(
+    var tipo = EntregaVendaHelper.normalizarTipoItem(tipoEntregaInicial);
+    final resultado = await showDialog<({int quantidade, String tipoEntregaItem})>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Quantidade — ${produto.nome}'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Quantidade',
-            hintText: 'Ex.: 1',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: Text('Adicionar — ${produto.nome}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                key: ValueKey(tipo),
+                initialValue: tipo,
+                decoration: const InputDecoration(
+                  labelText: 'Entrega deste item',
+                ),
+                items: [
+                  for (final t in EntregaVendaHelper.tiposItem)
+                    DropdownMenuItem(
+                      value: t,
+                      child: Text(EntregaVendaHelper.rotuloTipoItem(t)),
+                    ),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setLocal(() => tipo = v);
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Quantidade',
+                  hintText: 'Ex.: 1',
+                ),
+                onSubmitted: (_) {
+                  final q = int.tryParse(ctrl.text.trim());
+                  if (q == null || q <= 0) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                        content: Text('Informe quantidade valida.'),
+                      ),
+                    );
+                    return;
+                  }
+                  Navigator.pop(
+                    ctx,
+                    (quantidade: q, tipoEntregaItem: tipo),
+                  );
+                },
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final q = int.tryParse(ctrl.text.trim());
-              if (q == null || q <= 0) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('Informe quantidade valida.')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final q = int.tryParse(ctrl.text.trim());
+                if (q == null || q <= 0) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                      content: Text('Informe quantidade valida.'),
+                    ),
+                  );
+                  return;
+                }
+                Navigator.pop(
+                  ctx,
+                  (quantidade: q, tipoEntregaItem: tipo),
                 );
-                return;
-              }
-              Navigator.pop(ctx, q);
-            },
-            child: const Text('Adicionar'),
-          ),
-        ],
+              },
+              child: const Text('Adicionar'),
+            ),
+          ],
+        ),
       ),
     );
     ctrl.dispose();
-    return qtd;
+    return resultado;
   }
 
   Future<void> _adicionarProdutoAoOrcamentoConferencia(
@@ -4244,6 +4325,7 @@ class _CaixaPageState extends State<CaixaPage> {
     Produto produto,
     int quantidade, {
     required String precoLista,
+    required String tipoEntregaItem,
   }) async {
     if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
     if (quantidade <= 0) return;
@@ -4323,7 +4405,7 @@ class _CaixaPageState extends State<CaixaPage> {
             quantidade: quantidade,
             precoUnitario: resPreco.precoFinal,
             precoTipo: resPreco.precoTipo,
-            tipoEntregaItem: _tipoEntregaPadraoConferencia(venda),
+            tipoEntregaItem: tipoEntregaItem,
             promocaoId: resPreco.promocaoId,
             promocaoNomeSnapshot: resPreco.promocaoNome,
           ),
@@ -4337,7 +4419,7 @@ class _CaixaPageState extends State<CaixaPage> {
             quantidade: quantidade,
             precoUnitario: resPreco.precoFinal,
             precoTipo: resPreco.precoTipo,
-            tipoEntregaItem: _tipoEntregaPadraoConferencia(venda),
+            tipoEntregaItem: tipoEntregaItem,
             promocaoId: resPreco.promocaoId,
             promocaoNomeSnapshot: resPreco.promocaoNome,
           ),
@@ -4353,13 +4435,15 @@ class _CaixaPageState extends State<CaixaPage> {
           'produto': produto.nome,
           'quantidade': quantidade,
           'precoUnitario': resPreco.precoFinal,
+          'tipoEntregaItem': tipoEntregaItem,
         },
       );
       if (!mounted) return;
       _recarregarOrcamentoSelecionadoAposAjusteItens();
       CaixaFeedback.sucesso(
         context,
-        '${produto.nome} adicionado ($quantidade un.).',
+        '${produto.nome} adicionado ($quantidade un. · '
+        '${EntregaVendaHelper.rotuloCurtoTipoItem(tipoEntregaItem)}).',
       );
       _pesquisaProdutoConferenciaFocus.requestFocus();
     } catch (e) {
@@ -4588,6 +4672,8 @@ class _CaixaPageState extends State<CaixaPage> {
         return 'Cartao de debito';
       case 'fiado':
         return 'Fiado';
+      case 'vale':
+        return 'Vale de credito';
       case 'transferencia':
         return 'Transferencia';
       case 'misto':
@@ -4677,6 +4763,88 @@ class _CaixaPageState extends State<CaixaPage> {
       return totalVenda;
     }
     return 0;
+  }
+
+  ValeCreditoService get _valesServico =>
+      ValeCreditoService.deVendaRepository(widget.vendaRepository);
+
+  /// Entre o PDV escolher o vale e o caixa fechar, outro terminal pode ter
+  /// gasto o mesmo codigo. Confere antes de finalizar, quando ainda da para
+  /// voltar atras.
+  Future<String?> _conferirValesAntesDeFinalizar(
+    List<PagamentoOrcamentoLinha> linhas,
+  ) async {
+    final doVale = PagamentoOrcamentoCodec.linhasVale(linhas);
+    if (doVale.isEmpty) return null;
+    final servico = _valesServico;
+    if (!servico.disponivel) {
+      return 'Sem conexao com o servidor para conferir o vale.';
+    }
+    for (final l in doVale) {
+      try {
+        final vale = await servico.buscarPorCodigo(l.codigoVale);
+        if (vale == null) {
+          return 'Vale ${ValeCreditoCodigo.formatar(l.codigoVale)} nao '
+              'encontrado.';
+        }
+        final avaliacao = vale.avaliar(l.valor);
+        if (!avaliacao.podeUsar) {
+          return 'Vale ${vale.codigoFormatado}: ${avaliacao.motivo}';
+        }
+        if (avaliacao.valorAplicavel + 0.004 < l.valor) {
+          return 'Vale ${vale.codigoFormatado} tem so '
+              '${_formatarMoeda(vale.saldo)} de saldo agora. '
+              'Refaca o pagamento no PDV.';
+        }
+      } catch (e) {
+        return 'Nao foi possivel conferir o vale: $e';
+      }
+    }
+    return null;
+  }
+
+  /// Baixa o vale depois que a venda existe, para o uso ficar amarrado a ela.
+  Future<void> _baixarValesDaVenda(Venda vendaFinalizada) async {
+    final linhas = PagamentoOrcamentoCodec.linhasVale(
+      PagamentoOrcamentoCodec.decode(vendaFinalizada.pagamentosJson),
+    );
+    if (linhas.isEmpty) return;
+    final servico = _valesServico;
+    final falhas = <String>[];
+    for (final l in linhas) {
+      try {
+        await servico.resgatar(
+          valeId: l.valeId,
+          valor: l.valor,
+          registradoPor: widget.usuarioLogado.login,
+          vendaId: vendaFinalizada.id,
+          numeroVenda: vendaFinalizada.numeroOrcamento,
+        );
+      } catch (e) {
+        falhas.add(
+          '${ValeCreditoCodigo.formatar(l.codigoVale)} '
+          '(${_formatarMoeda(l.valor)}): $e',
+        );
+      }
+    }
+    if (falhas.isEmpty || !mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Vale nao foi baixado'),
+        content: Text(
+          'A venda foi finalizada, mas o vale abaixo nao pode ser baixado. '
+          'Cobre o valor por outro meio ou chame o responsavel:\n\n'
+          '${falhas.join('\n')}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _finalizarOrcamento(Venda venda) async {
@@ -4924,6 +5092,17 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
     if (!mounted) return;
+
+    final erroVale = await _conferirValesAntesDeFinalizar(
+      PagamentoOrcamentoCodec.decode(venda.pagamentosJson),
+    );
+    if (erroVale != null) {
+      if (!mounted) return;
+      CaixaFeedback.erro(context, erroVale);
+      return;
+    }
+    if (!mounted) return;
+
     setState(() => _finalizandoVenda = true);
     try {
       if (venda.formaPagamento == 'misto') {
@@ -4958,6 +5137,12 @@ class _CaixaPageState extends State<CaixaPage> {
         );
         await LanSyncScheduler.solicitarSyncPrioritario();
       }
+      // Antes de qualquer retorno por unmount: a venda ja existe e o vale
+      // precisa ser baixado, senao o cliente leva a mercadoria e continua
+      // com o credito inteiro.
+      await _baixarValesDaVenda(
+        widget.vendaRepository.obterPorId(venda.id) ?? venda,
+      );
       // KPI "Vendas hoje" no Inicio (PC servidor e terminais via WS).
       SyncRefreshHub.instance.notificarDadosAtualizados();
       if (!mounted) return;
@@ -6674,10 +6859,6 @@ class _CaixaPageState extends State<CaixaPage> {
                     context,
                     item.tipoEntregaItem,
                   );
-                  final corTipo = PdvBotaoTipoEntregaItem.corPara(
-                    context,
-                    item.tipoEntregaItem,
-                  );
                   return Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 4,
@@ -6707,22 +6888,26 @@ class _CaixaPageState extends State<CaixaPage> {
                               ),
                               Expanded(
                                 flex: 4,
-                                child: Text.rich(
-                                  TextSpan(
-                                    children: [
-                                      TextSpan(text: item.nomeProduto),
-                                      TextSpan(
-                                        text:
-                                            ' (${EntregaVendaHelper.abreviacaoTipoItem(item.tipoEntregaItem)})',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          color: corTipo,
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        item.nomeProduto,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    PdvBotaoTipoEntregaItem(
+                                      tipoEntregaItem: item.tipoEntregaItem,
+                                      compacto: true,
+                                      onPressed: () => unawaited(
+                                        _alternarTipoEntregaItemConferencia(
+                                          selecionado,
+                                          item,
                                         ),
                                       ),
-                                    ],
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
                                 ),
                               ),
                               SizedBox(
@@ -7529,17 +7714,37 @@ class _CaixaPageState extends State<CaixaPage> {
       final num = _ultimoTrocoNumeroOrcamento > 0
           ? _ultimoTrocoNumeroOrcamento
           : _ultimoTrocoVendaId;
+      final scheme = Theme.of(context).colorScheme;
+      final texto = Theme.of(context).textTheme;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(titulo),
-          Text(
-            'Troco venda $num: ${_formatarMoeda(_ultimoTrocoValor)}',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.primary,
-                  fontWeight: FontWeight.w600,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                'Troco · venda $num  ',
+                style: texto.labelMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w500,
+                  height: 1.1,
                 ),
+              ),
+              Text(
+                _formatarMoeda(_ultimoTrocoValor),
+                style: texto.titleLarge?.copyWith(
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  height: 1.1,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
           ),
         ],
       );

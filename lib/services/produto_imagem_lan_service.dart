@@ -31,7 +31,7 @@ class ProdutoImagemLanService {
     return SyncApiClient(baseUrl: url, syncToken: config.redeSyncToken);
   }
 
-  /// Preferencia: API 8788 (terminais) → sync hub 8787 (mobile legado).
+  /// Preferencia: API 8788 (terminais).
   Future<List<int>?> _baixarBytes(String nome) async {
     final lan = LanApiEventHub.instance.client;
     if (lan != null && lan.configurado) {
@@ -186,7 +186,7 @@ class ProdutoImagemLanService {
     final bytes = await arquivo.readAsBytes();
     if (bytes.isEmpty) return false;
 
-    // Preferencia: API 8788 (Terminal Leve) → sync hub 8787.
+    // Preferencia: API 8788 (Terminal Leve).
     final lan = LanApiEventHub.instance.client;
     if (lan != null && lan.configurado) {
       try {

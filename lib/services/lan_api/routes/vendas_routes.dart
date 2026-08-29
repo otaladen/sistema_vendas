@@ -16,6 +16,7 @@ import '../../../domain/entrega_status_transicao.dart';
 import '../../../domain/pagamento_orcamento.dart';
 import '../../../domain/plano_fiado.dart';
 import '../../../model/venda.dart';
+import '../../../services/auditoria_registrar.dart';
 import '../../../services/entrega_pod_paths.dart';
 import '../lan_api_caixa_guard.dart';
 import '../lan_api_deps.dart';
@@ -583,6 +584,30 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
           int.parse(itemId),
           (body['quantidade'] as num?)?.toInt() ?? 0,
           permitirVendaSemEstoque: body['permitirVendaSemEstoque'] == true,
+        );
+        return orcamentoMutado(vendaId);
+      } catch (e) {
+        return lanApiJson({'error': '$e'}, status: 400);
+      }
+    },
+  );
+
+  router.post(
+    '/api/orcamentos/<id|[0-9]+>/itens/<itemId|[0-9]+>/tipo-entrega',
+    (Request r, String id, String itemId) async {
+      final body = await lanApiReadJsonMap(r) ?? <String, dynamic>{};
+      final bloqueio = await lanApiExigirCaixaAberto(
+        r,
+        body: body,
+        mensagem: 'Nao e possivel alterar o orcamento com o caixa fechado.',
+      );
+      if (bloqueio != null) return bloqueio;
+      try {
+        final vendaId = int.parse(id);
+        d.vendaRepository.atualizarTipoEntregaItemOrcamento(
+          vendaId,
+          int.parse(itemId),
+          (body['tipoEntregaItem'] ?? '').toString(),
         );
         return orcamentoMutado(vendaId);
       } catch (e) {
@@ -1343,7 +1368,10 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
     }
     try {
       final vendaId = int.parse(id);
-      final usuario = (body['usuario'] ?? 'sistema').toString();
+      final usuarioBody = (body['usuario'] ?? '').toString().trim();
+      final usuario = usuarioBody.isNotEmpty
+          ? usuarioBody
+          : AuditoriaRegistrar.usuarioSessao;
       final retiradoPor = (body['retiradoPor'] ?? '').toString().trim();
       if (tipo == 'loja_carreto') {
         d.vendaRepository.registrarRetiradaParcialLojaCarretoAntesSaida(
@@ -1541,6 +1569,36 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
       return lanApiJson({
         'ok': true,
         'registroId': registroId,
+        'item': item == null ? null : SyncEntityCodec.vendaParaMap(item),
+      });
+    } catch (e) {
+      return lanApiJson({'error': '$e'}, status: 400);
+    }
+  });
+
+  /// Diferenca da troca: orcamento na fila do caixa (sem nova baixa de estoque).
+  router.post('/api/vendas/<id|[0-9]+>/complemento-troca', (
+    Request r,
+    String id,
+  ) async {
+    final body = await lanApiReadJsonMap(r) ?? <String, dynamic>{};
+    try {
+      final vendaOrigemId = int.parse(id);
+      final criado = d.vendaRepository.registrarOrcamentoComplementoTroca(
+        vendaOrigemId: vendaOrigemId,
+        registroDevolucaoId: (body['registroId'] as num?)?.toInt() ?? 0,
+        valor: (body['valor'] as num?)?.toDouble() ?? 0,
+        formaPagamento: (body['formaPagamento'] ?? 'dinheiro').toString(),
+        quantidadeParcelas:
+            (body['quantidadeParcelas'] as num?)?.toInt() ?? 1,
+      );
+      d.notificar('venda');
+      final item = d.vendaRepository.obterPorId(criado.orcamentoId);
+      return lanApiJson({
+        'ok': true,
+        'orcamentoId': criado.orcamentoId,
+        'numeroOrcamento': criado.numeroOrcamento,
+        'reutilizado': criado.reutilizado,
         'item': item == null ? null : SyncEntityCodec.vendaParaMap(item),
       });
     } catch (e) {

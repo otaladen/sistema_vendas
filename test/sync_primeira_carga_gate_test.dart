@@ -31,7 +31,7 @@ void main() {
       SyncPrimeiraCarga.deveForcarGateCliente(
         redeModoServidor: false,
         redeSincronizacaoAtiva: true,
-        redeServidorUrl: 'http://192.168.1.10:8787',
+        redeServidorUrl: 'http://192.168.1.10:8788',
         bancoVazio: true,
       ),
       isTrue,

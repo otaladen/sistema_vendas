@@ -6,6 +6,9 @@ import '../model/produto.dart';
 /// SKU reservado ao ERP (ex.: frete retirada futura). Nao vende no balcao.
 const String kCodigoInternoFreteRetiradaFutura = '__FRETE_RET_FUTURA__';
 
+/// Diferenca da troca enviada ao caixa (servico, sem baixa de estoque).
+const String kCodigoInternoComplementoTroca = '__COMPLEMENTO_TROCA__';
+
 /// Produto criado pelo sistema (codigo interno com prefixo `__`).
 bool produtoEhCadastroInternoSistema(Produto produto) {
   final codigo = produto.codigoInterno.trim();

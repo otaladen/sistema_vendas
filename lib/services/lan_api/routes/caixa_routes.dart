@@ -9,6 +9,7 @@ import '../../../data/caixa_auditoria_repository.dart';
 import '../../../data/caixa_sessao_repository.dart';
 import '../../../data/sync/caixa_local_refresh_hub.dart';
 import '../../../data/sync/caixa_status_hub.dart';
+import '../../../domain/leitura_parcial_caixa.dart';
 import '../../../model/caixa_sessao.dart';
 import '../lan_api_deps.dart';
 import '../lan_api_json.dart';
@@ -271,84 +272,82 @@ void registerCaixaRoutes(Router router, LanApiDeps d) {
 
   /// Leitura parcial: totais de vendas/pagamentos desde a abertura, sem fechar.
   router.get('/api/caixa/leitura-parcial', (Request r) async {
-    final terminalId =
-        (r.url.queryParameters['terminalId'] ?? '').toString().trim();
-    final mapa = await repo.listarTodasSessoes();
-    final config = await configRepo.carregarEmpresaConfig();
-    final aberta = _sessaoAbertaPara(
-      mapa,
-      terminalId: terminalId,
-      umCaixa: config.umCaixaAbertoPorLoja,
-    );
-    if (aberta == null || !aberta.aberto) {
-      return lanApiJson({'error': 'caixa nao aberto'}, status: 409);
-    }
-    final abertura = aberta.aberturaEm;
-    final agora = DateTime.now();
-    final totais = d.vendaRepository.totaisMeiosPagamentoVendasFinalizadas(
-      inicio: abertura,
-      fim: agora,
-    );
-    final resumo = d.vendaRepository.resumoVendasFinalizadasNoPeriodo(
-      inicio: abertura,
-      fim: agora,
-    );
-    final recList = d.vendaRepository.recebimentos.listarNoPeriodo(
-      inicio: abertura ?? agora,
-      fim: agora,
-    );
-    var recTotal = 0.0;
-    var recDinheiro = 0.0;
-    var recPix = 0.0;
-    var recDebito = 0.0;
-    var recCredito = 0.0;
-    for (final rec in recList) {
-      recTotal += rec.valorTotal;
-      switch (rec.formaPagamento) {
-        case 'pix':
-          recPix += rec.valorTotal;
-          break;
-        case 'cartao_debito':
-          recDebito += rec.valorTotal;
-          break;
-        case 'cartao_credito':
-          recCredito += rec.valorTotal;
-          break;
-        case 'dinheiro':
-          recDinheiro += rec.valorTotal;
-          break;
-        case 'fiado':
-        case 'transferencia':
-        case 'outros':
-        default:
-          // Transferencia/outros nao entram na gaveta fisica.
-          break;
+    try {
+      final terminalId =
+          (r.url.queryParameters['terminalId'] ?? '').toString().trim();
+      final mapa = await repo.listarTodasSessoes();
+      final config = await configRepo.carregarEmpresaConfig();
+      final aberta = _sessaoAbertaPara(
+        mapa,
+        terminalId: terminalId,
+        umCaixa: config.umCaixaAbertoPorLoja,
+      );
+      if (aberta == null || !aberta.aberto) {
+        return lanApiJson({'error': 'caixa nao aberto'}, status: 409);
       }
+      final abertura = aberta.aberturaEm;
+      final agora = DateTime.now();
+      final totais = d.vendaRepository.totaisMeiosPagamentoVendasFinalizadas(
+        inicio: abertura,
+        fim: agora,
+      );
+      final resumo = d.vendaRepository.resumoVendasFinalizadasNoPeriodo(
+        inicio: abertura,
+        fim: agora,
+      );
+      final recList = d.vendaRepository.recebimentos.listarNoPeriodo(
+        inicio: abertura ?? agora,
+        fim: agora,
+      );
+      var recTotal = 0.0;
+      var recDinheiro = 0.0;
+      var recPix = 0.0;
+      var recDebito = 0.0;
+      var recCredito = 0.0;
+      for (final rec in recList) {
+        recTotal += rec.valorTotal;
+        switch (rec.formaPagamento) {
+          case 'pix':
+            recPix += rec.valorTotal;
+            break;
+          case 'cartao_debito':
+            recDebito += rec.valorTotal;
+            break;
+          case 'cartao_credito':
+            recCredito += rec.valorTotal;
+            break;
+          case 'dinheiro':
+            recDinheiro += rec.valorTotal;
+            break;
+          default:
+            break;
+        }
+      }
+      final snap = LeituraParcialCaixaSnapshot.montar(
+        fundoTroco: aberta.fundoTroco,
+        suprimentos: aberta.suprimentos,
+        sangrias: aberta.sangrias,
+        vendasDinheiro: totais.dinheiro,
+        vendasPix: totais.pix,
+        vendasDebito: totais.debito,
+        vendasCredito: totais.credito,
+        vendasVale: totais.vale,
+        recDinheiro: recDinheiro,
+        recPix: recPix,
+        recDebito: recDebito,
+        recCredito: recCredito,
+        recTotal: recTotal,
+        recQuantidade: recList.length,
+        totalVendas: resumo.totalVendas,
+        quantidadeVendas: resumo.quantidadeVendas,
+        aberturaEm: abertura,
+        terminalId: aberta.terminalId,
+        operador: aberta.operador,
+      );
+      return lanApiJson(snap.toJson());
+    } catch (e) {
+      return lanApiJson({'error': '$e'}, status: 500);
     }
-    final dinheiroGaveta = (aberta.fundoTroco +
-            totais.dinheiro +
-            recDinheiro +
-            aberta.suprimentos -
-            aberta.sangrias)
-        .clamp(0, double.infinity)
-        .toDouble();
-    return lanApiJson({
-      'terminalId': aberta.terminalId,
-      'aberturaEm': abertura?.toUtc().toIso8601String(),
-      'operador': aberta.operador,
-      'totalVendas': resumo.totalVendas,
-      'quantidadeVendas': resumo.quantidadeVendas,
-      'recebimentosFiadoTotal': recTotal,
-      'recebimentosFiadoQuantidade': recList.length,
-      'dinheiro': totais.dinheiro + recDinheiro,
-      'pix': totais.pix + recPix,
-      'debito': totais.debito + recDebito,
-      'credito': totais.credito + recCredito,
-      'dinheiroGaveta': dinheiroGaveta,
-      'fundoTroco': aberta.fundoTroco,
-      'suprimentos': aberta.suprimentos,
-      'sangrias': aberta.sangrias,
-    });
   });
 
   /// Atualiza operador/fundo da sessao aberta (sangria/suprimento via /movimentacao).

@@ -154,6 +154,14 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   bool _filtroSomenteAplicacao = false;
   PdvConsultaModoSugestao _modoSugestao = PdvConsultaModoSugestao.misto;
 
+  /// Letra do catalogo A–Z (`null` = todos, em ordem).
+  String? _catalogoLetra;
+  int _catalogoOffset = 0;
+  bool _catalogoTemMais = true;
+  bool _catalogoCarregando = false;
+  /// Lote interno de I/O; a lista vai crescendo ao rolar ate o fim do cadastro.
+  static const int _kCatalogoLote = 120;
+
   /// Montada uma vez (recentes + ranking); evita travar ao apagar o texto.
   List<Produto>? _cacheSugestoes;
 
@@ -167,6 +175,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     _pesquisaFocus = FocusNode(debugLabel: 'pdvConsultaPesquisa');
     _listaFocus = FocusNode(debugLabel: 'pdvConsultaLista');
     _scrollController = ScrollController();
+    _scrollController.addListener(_onScrollCatalogoAz);
     try {
       _sugestaoMetricaRepo = SugestaoVendaMetricaRepository(
         widget.produtoRepository.objectBox,
@@ -431,6 +440,13 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       nucleo = switch (_modoSugestao) {
         PdvConsultaModoSugestao.recentes => 'Produtos recentes nesta sessao',
         PdvConsultaModoSugestao.maisVendidos => 'Mais vendidos (30 dias)',
+        PdvConsultaModoSugestao.catalogoAz => _catalogoLetra == null
+            ? (_catalogoTemMais
+                ? 'Catalogo A–Z · ${base.length} carregados · role para ver todos'
+                : 'Catalogo A–Z · ${base.length} produtos')
+            : (_catalogoTemMais
+                ? 'Letra ${_catalogoLetra!} · ${base.length} · role para ver todos'
+                : 'Letra ${_catalogoLetra!} · ${base.length} produtos'),
         PdvConsultaModoSugestao.misto =>
           base.isEmpty
               ? 'Nenhum produto ativo cadastrado'
@@ -518,8 +534,111 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
 
   void _onModoSugestaoChanged(PdvConsultaModoSugestao modo) {
     _modoSugestao = modo;
+    if (modo == PdvConsultaModoSugestao.catalogoAz) {
+      _filtrosExpandidos = true;
+    } else {
+      _catalogoLetra = null;
+      _catalogoOffset = 0;
+      _catalogoTemMais = true;
+    }
     if (_termoBuscaAtual.isEmpty) {
       _atualizarLista();
+    }
+  }
+
+  void _onCatalogoLetraChanged(String? letra) {
+    if (_modoSugestao != PdvConsultaModoSugestao.catalogoAz) return;
+    setState(() => _catalogoLetra = letra);
+    unawaited(_carregarCatalogoAz(reiniciar: true));
+  }
+
+  void _onScrollCatalogoAz() {
+    if (_modoSugestao != PdvConsultaModoSugestao.catalogoAz) return;
+    if (_termoBuscaAtual.isNotEmpty) return;
+    if (!_catalogoTemMais || _catalogoCarregando) return;
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    // Antecipa o proximo lote bem antes do fim, para a lista nao "travar" em N itens.
+    if (pos.pixels >= pos.maxScrollExtent - 900) {
+      unawaited(_carregarCatalogoAz());
+    }
+  }
+
+  Future<void> _carregarCatalogoAz({bool reiniciar = false}) async {
+    if (_catalogoCarregando) return;
+    if (!reiniciar && !_catalogoTemMais) return;
+    _catalogoCarregando = true;
+    if (reiniciar) {
+      _catalogoOffset = 0;
+      _catalogoTemMais = true;
+    }
+    try {
+      // Continua puxando enquanto houver cadastro e a lista ainda nao encheu
+      // a tela (ou o usuario ja esta perto do fim).
+      var ciclos = 0;
+      while (mounted && _catalogoTemMais && ciclos < 8) {
+        ciclos++;
+        List<Produto> lote = const [];
+        try {
+          lote = List<Produto>.from(
+            widget.produtoRepository.listarPaginado(
+              offset: _catalogoOffset,
+              limit: _kCatalogoLote,
+              somenteAtivos: true,
+              prefixoNome: _catalogoLetra,
+            ) as List,
+          );
+        } catch (_) {
+          lote = List<Produto>.from(
+            widget.produtoRepository.listarPaginado(
+              offset: _catalogoOffset,
+              limit: _kCatalogoLote,
+              somenteAtivos: true,
+            ) as List,
+          );
+          if (_catalogoLetra != null) {
+            final pfx = _catalogoLetra!.toLowerCase();
+            lote = lote
+                .where((p) => p.nome.trim().toLowerCase().startsWith(pfx))
+                .toList();
+          }
+        }
+        final limpos = lote
+            .where((p) => p.ativo && !produtoEhCadastroInternoSistema(p))
+            .toList();
+        if (!mounted) return;
+        final primeiroLote = reiniciar && ciclos == 1;
+        setState(() {
+          if (primeiroLote) {
+            _produtosBase = limpos;
+            _produtos = _filtrarProdutos(limpos);
+            _remontarLinhasVm();
+            _indiceSelecionado = _produtos.isEmpty ? null : 0;
+            _produtoPreviewPainel =
+                _produtos.isEmpty ? null : _produtos.first;
+            _quantidadeAdicionar = 1;
+          } else {
+            _produtosBase = [..._produtosBase, ...limpos];
+            _produtos = _filtrarProdutos(_produtosBase);
+            _remontarLinhasVm();
+          }
+          _catalogoOffset += lote.length;
+          _catalogoTemMais = lote.length >= _kCatalogoLote;
+          _termoBuscaAtual = '';
+          _subtituloLista = _montarSubtituloLista(_produtosBase, '');
+        });
+        if (!_catalogoTemMais || lote.isEmpty) break;
+
+        // Se a lista ainda nao tem scroll (poucos itens / filtros), busca mais.
+        await Future<void>.delayed(Duration.zero);
+        if (!mounted || !_scrollController.hasClients) break;
+        final pos = _scrollController.position;
+        final precisaEncherTela = pos.maxScrollExtent < 240;
+        final pertoDoFim = pos.pixels >= pos.maxScrollExtent - 900;
+        if (!precisaEncherTela && !pertoDoFim) break;
+      }
+    } finally {
+      _catalogoCarregando = false;
     }
   }
 
@@ -574,9 +693,22 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     final termo = comando.termoBusca;
     late final List<Produto> lista;
 
+    if (termo.isEmpty && _modoSugestao == PdvConsultaModoSugestao.catalogoAz) {
+      if (!mounted) return;
+      setState(() => _termoBuscaAtual = '');
+      unawaited(_carregarCatalogoAz(reiniciar: true));
+      if (manterFocoNaPesquisa) return;
+      return;
+    }
+
     if (termo.isEmpty) {
       lista = _listaSugestoes();
     } else {
+      if (_modoSugestao == PdvConsultaModoSugestao.catalogoAz) {
+        // Digitar sai do catalogo e volta a busca normal.
+        _modoSugestao = PdvConsultaModoSugestao.misto;
+        _catalogoLetra = null;
+      }
       final resolvido = widget.produtoRepository.resolverPesquisaPdv(
         termo,
         clienteId: widget.clienteId,
@@ -716,6 +848,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
             limite: 50,
           ),
         );
+      case PdvConsultaModoSugestao.catalogoAz:
+        return _produtosBase;
       case PdvConsultaModoSugestao.misto:
         if (_cacheSugestoes != null) return _cacheSugestoes!;
     }
@@ -960,6 +1094,12 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
               onSomenteAplicacaoChanged: _onFiltroSomenteAplicacaoChanged,
               onModoSugestaoChanged: _onModoSugestaoChanged,
             ),
+          ),
+        if (_modoSugestao == PdvConsultaModoSugestao.catalogoAz &&
+            _termoBuscaAtual.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: _buildCatalogoLetrasBar(),
           ),
         if (_atalhosVisiveis)
           const Padding(
@@ -1511,6 +1651,44 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildCatalogoLetrasBar() {
+    const letras = [
+      'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+      'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    ];
+    return SizedBox(
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: FilterChip(
+              label: const Text('Todos'),
+              selected: _catalogoLetra == null,
+              onSelected: (_) => _onCatalogoLetraChanged(null),
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          for (final letra in letras)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: FilterChip(
+                label: Text(letra),
+                selected: _catalogoLetra == letra,
+                onSelected: (_) => _onCatalogoLetraChanged(
+                  _catalogoLetra == letra ? null : letra,
+                ),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+        ],
       ),
     );
   }

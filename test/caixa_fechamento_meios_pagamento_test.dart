@@ -13,6 +13,14 @@ void main() {
       expect(CaixaMeioPagamentoFechamento.entraNaGaveta('transferencia'), isFalse);
       expect(CaixaMeioPagamentoFechamento.entraNaGaveta('outros'), isFalse);
       expect(CaixaMeioPagamentoFechamento.entraNaGaveta('desconhecido'), isFalse);
+      expect(CaixaMeioPagamentoFechamento.entraNaGaveta('vale'), isFalse);
+    });
+
+    test('vale tem bucket proprio e nao cai no dinheiro', () {
+      expect(
+        CaixaMeioPagamentoFechamento.bucket('vale'),
+        CaixaMeioPagamentoFechamento.bucketVale,
+      );
     });
 
     test('fiado e transferencia nao caem no bucket dinheiro', () {

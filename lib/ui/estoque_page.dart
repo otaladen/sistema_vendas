@@ -15,6 +15,7 @@ import '../data/venda_repository.dart';
 import 'theme/app_semantic_helper.dart';
 import '../domain/estoque/estoque_diagnostico_models.dart';
 import '../domain/estoque/filtro_estoque_operacional.dart';
+import '../domain/fornecedor_entrada_nfe_indice.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../domain/produto_embalagem.dart';
@@ -43,9 +44,10 @@ import 'estoque/extrato_movimento_estoque_panel.dart';
 import '../data/lote_produto_repository.dart';
 import 'lista_compra_page.dart';
 import 'sugestao_compra_page.dart';
-import '../data/lista_compra_repository.dart';
+import '../data/sugestao_compra_repository.dart';
 import '../data/inventario_repository.dart';
 import '../data/inventario_gateway.dart';
+import '../data/lista_compra_repository.dart';
 import '../data/api/lista_compra_api_repository.dart';
 import '../data/api/inventario_api_repository.dart';
 import '../data/api/reajuste_preco_api_repository.dart';
@@ -135,6 +137,8 @@ class _EstoquePageState extends State<EstoquePage>
   List<Produto> _produtosFiltrados = [];
   List<String> _categoriasDisponiveis = [];
   List<String> _fornecedoresDisponiveis = [];
+  FornecedorEntradaNfeIndice _indiceFornecedoresNfe =
+      FornecedorEntradaNfeIndice.vazio();
   Map<int, bool> _criticoPpPorProdutoId = {};
   Map<int, int> _consumo60dPorProdutoId = {};
   Map<int, double> _ppExibicaoPorProdutoId = {};
@@ -422,7 +426,6 @@ class _EstoquePageState extends State<EstoquePage>
     var reservado = 0;
     var valorEstoque = 0.0;
     final categorias = <String>{};
-    final fornecedores = <String>{};
 
     for (final p in produtos) {
       if (p.ativo) {
@@ -433,8 +436,6 @@ class _EstoquePageState extends State<EstoquePage>
       reservado += EstoqueListaMetricas.estoqueReservadoExibicaoArredondado(p);
       final categoria = p.categoria.trim();
       if (categoria.isNotEmpty) categorias.add(categoria);
-      final fornecedor = p.fornecedor.trim();
-      if (fornecedor.isNotEmpty) fornecedores.add(fornecedor);
     }
 
     _produtosAtivosCount = ativos;
@@ -442,7 +443,7 @@ class _EstoquePageState extends State<EstoquePage>
     _valorEstoqueTotalCache = valorEstoque;
     _totalReservadoCache = reservado;
     _categoriasDisponiveis = categorias.toList()..sort();
-    _fornecedoresDisponiveis = fornecedores.toList()..sort();
+    _fornecedoresDisponiveis = _indiceFornecedoresNfe.nomesOrdenados;
   }
 
   void _onOrdenarColuna(EstoqueColunaOrdenacao coluna) {
@@ -574,6 +575,29 @@ class _EstoquePageState extends State<EstoquePage>
       }
 
       if (!mounted) return;
+
+      FornecedorEntradaNfeIndice indiceForn = FornecedorEntradaNfeIndice.vazio();
+      if (_temObjectBox) {
+        try {
+          indiceForn = SugestaoCompraRepository(
+            widget.produtoRepository.objectBox,
+          ).indiceFornecedoresNfe();
+        } catch (_) {}
+      } else {
+        final client = _lanClient;
+        if (client != null) {
+          try {
+            indiceForn = FornecedorEntradaNfeIndice.deApiMap(
+              await client.listarFornecedoresNfeEstoque(),
+            );
+          } catch (_) {}
+        }
+      }
+      _indiceFornecedoresNfe = indiceForn;
+      if (_filtroFornecedor != null &&
+          !_indiceFornecedoresNfe.nomesOrdenados.contains(_filtroFornecedor)) {
+        _filtroFornecedor = null;
+      }
 
       _atualizarResumosProdutos(produtos);
 
@@ -1358,9 +1382,16 @@ class _EstoquePageState extends State<EstoquePage>
       if (_filtroCategoria != null && p.categoria.trim() != _filtroCategoria) {
         return false;
       }
-      if (_filtroFornecedor != null &&
-          p.fornecedor.trim() != _filtroFornecedor) {
-        return false;
+      if (_filtroFornecedor != null) {
+        if (!_indiceFornecedoresNfe.produtoDoFornecedor(
+          p.id,
+          _filtroFornecedor!,
+        )) {
+          return false;
+        }
+        final abaixoMin = EstoqueListaMetricas.abaixoDoMinimo(p);
+        final criticoPp = _criticoPpPorProdutoId[p.id] ?? false;
+        if (!abaixoMin && !criticoPp) return false;
       }
       switch (_filtroOperacional) {
         case FiltroEstoqueOperacional.todos:
@@ -1681,6 +1712,9 @@ class _EstoquePageState extends State<EstoquePage>
                     ),
                   if (fornecedores.isNotEmpty)
                     DropdownMenu<String?>(
+                      key: ValueKey(
+                        'est_forn_${fornecedores.length}_${_filtroFornecedor ?? ''}',
+                      ),
                       width: compact ? larguraDrop : null,
                       label: const Text('Fornecedor'),
                       initialSelection: _filtroFornecedor,
@@ -1698,6 +1732,15 @@ class _EstoquePageState extends State<EstoquePage>
                       }),
                     ),
                 ],
+              ),
+            ],
+            if (_filtroFornecedor != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Mostrando so SKUs com NF-e/compra desse fornecedor abaixo do ponto de pedido ou do estoque minimo.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
               ),
             ],
             if (_temFiltrosAvancadosAtivos) ...[

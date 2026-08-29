@@ -15,11 +15,14 @@ import '../data/api/venda_api_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/venda_repository.dart';
 import 'shell/main_menu_deps.dart';
+import '../domain/cancelada_por_rotulo.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../model/cliente.dart';
+import '../model/historico_entrega.dart';
 import '../model/item_venda.dart';
+import '../model/registro_devolucao.dart';
 import '../model/usuario_sistema.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
@@ -100,7 +103,7 @@ abstract final class ListagemVendasAbertura {
 }
 
 class _ListagemVendasPageState extends State<ListagemVendasPage> {
-  static const int _tamPaginaListagem = 20;
+  static const int _tamPaginaListagem = 30;
 
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
@@ -130,6 +133,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   int _totalListagemVendas = 0;
   double _valorTotalFiltro = 0;
   bool _carregandoListagem = false;
+  bool _carregandoMais = false;
   int _pesquisaSeq = 0;
   Timer? _debounceFiltros;
   ListagemVendasColuna _colunaOrdenacao = ListagemVendasColuna.data;
@@ -812,7 +816,34 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       final atual = widget.vendaRepository.obterPorId(v.id) ?? v;
       final itens = await _itensDaVendaAsync(atual);
       final linhas = <String>[];
+      final dataFmt = DateFormat('dd/MM/yyyy HH:mm');
+
+      List<HistoricoEntrega> hist = const [];
+      try {
+        final repo = widget.vendaRepository;
+        if (repo is VendaApiRepository) {
+          hist = await repo.listarHistoricoEntregaRemoto(atual.id);
+        } else {
+          hist = repo.listarHistoricoEntrega(atual.id);
+        }
+      } catch (_) {}
+      final baixas = hist
+          .where((h) => HistoricoEntregaEventos.ehEventoRetirada(h.statusNovo))
+          .toList();
+      if (baixas.isNotEmpty) {
+        linhas.add('Baixas formais de patio:');
+        for (final h in baixas) {
+          final quando = dataFmt.format(h.dataHora.toLocal());
+          final detalhe = HistoricoEntregaEventos.textoDetalhe(
+            h.statusNovo,
+            h.statusAnterior,
+          );
+          linhas.add('- $quando · ${h.usuario}: $detalhe');
+        }
+      }
+
       if (atual.observacaoEntrega.trim().isNotEmpty) {
+        if (linhas.isNotEmpty) linhas.add('');
         linhas.add(atual.observacaoEntrega.trim());
       }
       final comRetirada =
@@ -821,20 +852,78 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         if (linhas.isNotEmpty) linhas.add('');
         linhas.add('Resumo — ja retirado por item:');
         for (final i in comRetirada) {
-          linhas.add('- ${i.nomeProduto}: ${i.quantidadeJaRetirada} un.');
+          final vendido = i.quantidade;
+          linhas.add(
+            '- ${i.nomeProduto}: ${i.quantidadeJaRetirada} de $vendido un.'
+            '${i.quantidadeDevolvida > 0 ? ' (devolvido ${i.quantidadeDevolvida})' : ''}',
+          );
         }
       }
+
+      List<RegistroDevolucao> regsDevTroca = const [];
+      try {
+        regsDevTroca = List<RegistroDevolucao>.from(
+          widget.vendaRepository.listarRegistrosDevolucaoPorVenda(atual.id)
+              as List,
+        );
+      } catch (_) {}
+      if (regsDevTroca.isNotEmpty) {
+        if (linhas.isNotEmpty) linhas.add('');
+        linhas.add('Devolucao / troca registrada:');
+        for (final r in regsDevTroca) {
+          final quando = dataFmt.format(r.data.toLocal());
+          final tipoRotulo = r.tipo == 'troca' ? 'Troca' : 'Devolucao';
+          final por = r.registradoPor.trim();
+          linhas.add(
+            '- $tipoRotulo em $quando'
+            '${por.isEmpty ? '' : ' · $por'}',
+          );
+          final motivo = r.motivo.trim();
+          if (motivo.isNotEmpty) {
+            linhas.add('  Motivo: $motivo');
+          }
+          for (final l in r.linhasEntrada) {
+            final nome = l.nomeProdutoSnapshot.trim().isNotEmpty
+                ? l.nomeProdutoSnapshot.trim()
+                : (l.produto.target?.nome.trim().isNotEmpty == true
+                    ? l.produto.target!.nome.trim()
+                    : 'Produto');
+            linhas.add('  Devolveu: $nome — ${l.quantidade} un.');
+          }
+          if (r.tipo == 'troca') {
+            if (r.linhasSaidaTroca.isEmpty) {
+              linhas.add(
+                '  Cliente levou: (nao informado — registre a saida no modo Troca)',
+              );
+            } else {
+              for (final l in r.linhasSaidaTroca) {
+                final nome = l.nomeProdutoSnapshot.trim().isNotEmpty
+                    ? l.nomeProdutoSnapshot.trim()
+                    : (l.produto.target?.nome.trim().isNotEmpty == true
+                        ? l.produto.target!.nome.trim()
+                        : 'Produto');
+                linhas.add('  Cliente levou: $nome — ${l.quantidade} un.');
+              }
+            }
+          }
+          final obsFin = r.observacaoFinanceira.trim();
+          if (obsFin.isNotEmpty) {
+            linhas.add('  Obs. financeira: $obsFin');
+          }
+        }
+      }
+
       final texto = linhas.isEmpty
-          ? 'Nenhum registro de retirada ou texto de entrega nesta venda.'
+          ? 'Nenhum registro de retirada, entrega ou troca nesta venda.'
           : linhas.join('\n');
 
       if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Historico de retiradas e entrega'),
+          title: const Text('Historico de retiradas, entrega e troca'),
           content: SizedBox(
-            width: 480,
+            width: 520,
             child: SingleChildScrollView(child: SelectableText(texto)),
           ),
           actions: [
@@ -1025,7 +1114,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   Future<void> _pesquisar() async {
     _debounceFiltros?.cancel();
     final seq = ++_pesquisaSeq;
-    setState(() => _carregandoListagem = true);
+    setState(() {
+      _carregandoListagem = true;
+      _carregandoMais = false;
+    });
     try {
       final pagina = await _obterPaginaListagem(offset: 0);
       final distintosCancel = widget.vendaRepository
@@ -1066,27 +1158,28 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     }
   }
 
+  bool get _temMaisVendas => _resultados.length < _totalListagemVendas;
+
   Future<void> _carregarMaisVendas() async {
-    if (_carregandoListagem) return;
-    if (_resultados.length >= _totalListagemVendas) {
-      return;
-    }
-    setState(() => _carregandoListagem = true);
+    if (_carregandoListagem || _carregandoMais) return;
+    if (!_temMaisVendas) return;
+    setState(() => _carregandoMais = true);
     try {
       final pagina = await _obterPaginaListagem(offset: _offsetListagem);
       if (!mounted) return;
       final scheme = Theme.of(context).colorScheme;
+      final novas = (pagina.vendas as List).whereType<Venda>().toList();
       setState(() {
-        _resultados.addAll(pagina.vendas);
-        _offsetListagem += (pagina.vendas as List).length;
+        _resultados.addAll(novas);
+        _offsetListagem += novas.length;
         _totalListagemVendas = pagina.total;
         _valorTotalFiltro = pagina.totalValor;
         _itensUi = _mapearVendasParaItensUi(_resultados, scheme);
-        _carregandoListagem = false;
+        _carregandoMais = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _carregandoListagem = false);
+      setState(() => _carregandoMais = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erro ao carregar mais vendas: $e')),
       );
@@ -1243,7 +1336,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     }
     if (v.cancelada) {
       alertas.add(
-        'Cancelada por: ${v.canceladaPor.isEmpty ? 'Nao informado' : v.canceladaPor}'
+        'Cancelada por: ${CanceladaPorRotulo.exibicao(v.canceladaPor)}'
         '${v.canceladaEm == null ? '' : ' · ${_dataHora.format(v.canceladaEm!.toLocal())}'}'
         '${v.motivoCancelamento.isEmpty ? '' : ' · ${v.motivoCancelamento}'}',
       );
@@ -1444,9 +1537,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
           v.numeroOrcamento.toString(),
           _csvEscape(dataVenda),
           _csvEscape(canceladaEm),
-          _csvEscape(
-            v.canceladaPor.trim().isEmpty ? 'Nao informado' : v.canceladaPor,
-          ),
+          _csvEscape(CanceladaPorRotulo.exibicao(v.canceladaPor)),
           _csvEscape(v.motivoCancelamento),
           v.total.toStringAsFixed(2).replaceAll('.', ','),
         ].join(',');
@@ -1501,9 +1592,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
               final emCancelada = v.canceladaEm == null
                   ? 'Nao informado'
                   : fmt.format(v.canceladaEm!.toLocal());
-              final por = v.canceladaPor.trim().isEmpty
-                  ? 'Nao informado'
-                  : v.canceladaPor.trim();
+              final por = CanceladaPorRotulo.exibicao(v.canceladaPor);
               final motivo = v.motivoCancelamento.trim().isEmpty
                   ? 'Nao informado'
                   : v.motivoCancelamento.trim();
@@ -1781,7 +1870,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                   (u) => DropdownMenuItem(
                                     value: u,
                                     child: Text(
-                                      u,
+                                      CanceladaPorRotulo.exibicao(u),
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -1954,8 +2043,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                         child: Text(
                           _totalListagemVendas == 0
                               ? 'Nenhuma venda encontrada com os filtros.'
-                              : 'Exibindo ${_resultados.length} de $_totalListagemVendas · '
-                                    'lotes de $_tamPaginaListagem',
+                              : _temMaisVendas
+                                  ? 'Exibindo ${_resultados.length} de $_totalListagemVendas · '
+                                        'role para carregar mais'
+                                  : 'Exibindo ${_resultados.length} de $_totalListagemVendas',
                           style: theme.textTheme.titleSmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
@@ -2015,15 +2106,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
                       ],
-                      if (_resultados.length < _totalListagemVendas)
-                        FilledButton.tonal(
-                          onPressed: _carregandoListagem
-                              ? null
-                              : () => unawaited(_carregarMaisVendas()),
-                          child: Text('Carregar mais $_tamPaginaListagem'),
-                        ),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -2051,6 +2134,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                         : usarTabela
                         ? ListagemVendasTabela(
                             itens: itensUiBrutos,
+                            temMais: _temMaisVendas,
+                            carregandoMais: _carregandoMais,
+                            onChegouAoFim: () =>
+                                unawaited(_carregarMaisVendas()),
                             onTapItem: (item) =>
                                 _mostrarModalItensVenda(item.venda),
                             onAcaoMenu: (acao, item) =>
@@ -2059,6 +2146,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                           )
                         : ListagemVendasListaCards(
                             itens: itensUi,
+                            temMais: _temMaisVendas,
+                            carregandoMais: _carregandoMais,
+                            onChegouAoFim: () =>
+                                unawaited(_carregarMaisVendas()),
                             onTapItem: (item) =>
                                 _mostrarModalItensVenda(item.venda),
                             onAcaoMenu: (acao, item) =>

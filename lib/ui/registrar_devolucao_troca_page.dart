@@ -4,10 +4,13 @@ import 'package:intl/intl.dart';
 import '../data/api/venda_api_repository.dart';
 import '../data/app_config_repository.dart';
 import '../data/devolucao_fiscal_store.dart';
+import '../data/vale_credito_service.dart';
 import '../data/venda_repository.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/troca_com_nota_pdv_intent.dart';
+import '../domain/troca_diferenca_caixa.dart';
 import '../domain/usuario_permissao_helper.dart';
+import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/registro_devolucao.dart';
@@ -15,9 +18,11 @@ import '../model/usuario_sistema.dart';
 import '../model/venda.dart';
 import '../services/print_service.dart';
 import '../services/venda_fiscal_service.dart';
+import 'clientes_page.dart';
 import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
 import 'shell/main_menu_deps.dart';
 import 'troca_com_nota_pdv_navigation.dart';
+import 'vales/vale_credito_comprovante_dialog.dart';
 import 'widgets/lan_api_feedback.dart';
 import 'widgets/produto_busca_input.dart';
 
@@ -83,6 +88,8 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
   bool _permitirVendaSemEstoque = true;
   bool _carregando = true;
   String? _erroCarregamento;
+  bool _gerarVale = false;
+  bool _vinculandoCliente = false;
 
   @override
   void initState() {
@@ -191,6 +198,18 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     return n == null || n < 0 ? 0 : n;
   }
 
+  int _maxDevolvivel(ItemVenda item) =>
+      item.quantidade - item.quantidadeDevolvida;
+
+  bool _quantidadeAcimaDoMax(ItemVenda item) {
+    final ctl = _qtdDevolucaoPorItem[item.id];
+    if (ctl == null) return false;
+    return _parseQtd(ctl.text) > _maxDevolvivel(item);
+  }
+
+  List<ItemVenda> get _itensComQuantidadeInvalida =>
+      _itens.where(_quantidadeAcimaDoMax).toList();
+
   bool get _podeFluxoTrocaComNotaNoPdv {
     final u = widget.usuarioLogado;
     return u != null &&
@@ -206,7 +225,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       final ctl = _qtdDevolucaoPorItem[item.id];
       if (ctl == null) continue;
       final q = _parseQtd(ctl.text);
-      if (q <= 0) continue;
+      if (q <= 0 || q > _maxDevolvivel(item)) continue;
       entradas.add(
         LinhaDevolucaoEntradaInput(itemVendaId: item.id, quantidade: q),
       );
@@ -246,6 +265,75 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
 
   static const double _epsValorTroca = 0.009;
 
+  /// Sem vale, o credito da devolucao so existe se o cliente comprar agora.
+  Widget _buildOpcaoVale(BuildContext context) {
+    final tema = Theme.of(context);
+    final v = _venda;
+    final cliente = v == null ? null : _clienteDaVenda(v);
+    final credito = _creditoSugeridoAtual();
+
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: tema.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SwitchListTile(
+            value: _gerarVale,
+            onChanged: (x) => setState(() => _gerarVale = x),
+            title: const Text('Gerar vale de credito'),
+            subtitle: Text(
+              'O cliente leva ${_formatarMoeda(credito)} em vale e gasta '
+              'depois, em qualquer compra. Sem o vale, o credito so vale '
+              'se ele comprar agora.',
+              style: tema.textTheme.bodySmall?.copyWith(height: 1.35),
+            ),
+          ),
+          if (_gerarVale)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    cliente == null
+                        ? Icons.person_off_outlined
+                        : Icons.person_outline,
+                    size: 20,
+                    color: cliente == null
+                        ? tema.colorScheme.tertiary
+                        : tema.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      cliente == null
+                          ? 'Venda sem cliente. O vale sai so pelo codigo '
+                              'impresso: quem apresentar o codigo usa. '
+                              'Vincule um cliente para poder recuperar o vale '
+                              'se o cliente perder o papel.'
+                          : 'Vale sai no nome de ${cliente.rotuloExibicao()} '
+                              'e tambem pelo codigo.',
+                      style: tema.textTheme.bodySmall?.copyWith(height: 1.35),
+                    ),
+                  ),
+                  if (cliente == null) ...[
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed:
+                          _vinculandoCliente ? null : _vincularClienteNaVenda,
+                      child: const Text('Vincular'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildResumoValoresTroca(BuildContext context) {
     final tema = Theme.of(context);
     final devolvido = _valorTotalDevolvido();
@@ -277,9 +365,10 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       tituloDiff = 'Cliente paga a diferenca';
       orientacao =
           'O que o cliente leva custa mais do que o devolvido. '
-          'Registre a troca aqui e cobre ${_formatarMoeda(diff)} no caixa '
-          '(ou PDV + caixa se precisar de nota dos produtos novos). '
-          'Anote na observacao financeira.';
+          'Ao registrar, o sistema pergunta se envia '
+          '${_formatarMoeda(diff)} para o caixa receber '
+          '(sem baixar estoque de novo). '
+          'Se precisar de nota dos produtos novos, use Devolucao + PDV.';
     } else {
       corDiff = tema.colorScheme.secondary;
       iconeDiff = Icons.savings_outlined;
@@ -400,30 +489,349 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     );
   }
 
+  Cliente? _clienteDaVenda(Venda venda) {
+    // Entidade detached (API): .target pode lancar; preferir targetId + repo.
+    try {
+      final ligado = venda.cliente.target;
+      if (ligado != null) return ligado;
+    } catch (_) {}
+    final id = venda.cliente.targetId;
+    if (id == 0) return null;
+    try {
+      return widget.clienteRepository.obterPorId(id) as Cliente?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Amarra um cliente a venda ja finalizada para o vale ficar nominal.
+  Future<void> _vincularClienteNaVenda() async {
+    final v = _venda;
+    if (v == null || _vinculandoCliente) return;
+    final c = await Navigator.push<Cliente>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClientesPage(
+          clienteRepository: widget.clienteRepository,
+          vendaRepository: widget.vendaRepository,
+          vendedorRepository: widget.vendedorRepository,
+          retornarClienteAoSalvar: true,
+        ),
+      ),
+    );
+    if (!mounted || c == null) return;
+    setState(() => _vinculandoCliente = true);
+    try {
+      final repo = widget.vendaRepository;
+      if (repo is VendaApiRepository) {
+        await repo.vincularClienteVendaFinalizadaRemoto(v.id, c.id);
+      } else {
+        repo.vincularClienteVendaFinalizada(v.id, c.id);
+      }
+      await _recarregarVenda();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(LanApiFeedback.mensagem(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _vinculandoCliente = false);
+    }
+  }
+
+  Future<void> _emitirValeDaDevolucao({
+    required Venda v,
+    required int registroId,
+    required double credito,
+    required String registradoPor,
+  }) async {
+    final servico = ValeCreditoService.deVendaRepository(widget.vendaRepository);
+    if (!servico.disponivel) {
+      await _avisarValeNaoSaiu(
+        'Sem conexao com o servidor para gerar o vale. '
+        'A devolucao foi registrada; gere o vale pelo PC servidor.',
+      );
+      return;
+    }
+    try {
+      final vale = await servico.emitir(
+        valor: credito,
+        emitidoPor: registradoPor,
+        vendaOrigemId: v.id,
+        registroDevolucaoId: registroId,
+        clienteId: _clienteDaVenda(v)?.id ?? 0,
+        numeroVendaOrigem: v.numeroOrcamento,
+        observacao: _obsFinanceiraController.text.trim(),
+      );
+      if (!mounted) return;
+      await mostrarComprovanteVale(context, vale: vale);
+    } catch (e) {
+      await _avisarValeNaoSaiu(
+        'A devolucao foi registrada, mas o vale nao pode ser gerado: '
+        '${LanApiFeedback.mensagem(e)}',
+      );
+    }
+  }
+
+  Future<void> _avisarValeNaoSaiu(String motivo) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Vale nao gerado'),
+        content: Text(motivo),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A devolucao ja foi gravada quando isso aparece: o aviso precisa
+  /// sobreviver ao fechamento da tela, entao vai em dialogo, nao snackbar.
+  Future<void> _avisarPdvNaoAbriu(String motivo) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Devolucao registrada, mas o PDV nao abriu'),
+        content: Text(motivo),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _oferecerEnvioDiferencaAoCaixa({
+    required Venda vendaOrigem,
+    required int registroId,
+  }) async {
+    final diff = TrocaDiferencaCaixa.diferenca(
+      valorSaida: _valorTotalSaidaTroca(),
+      valorDevolvido: _valorTotalDevolvido(),
+    );
+    if (TrocaDiferencaCaixa.lojaDevolve(diff)) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        useRootNavigator: true,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Devolva ao cliente'),
+          content: Text(
+            'A troca ficou ${_formatarMoeda(-diff)} a favor do cliente. '
+            'Pague em dinheiro ou PIX e anote na observacao. '
+            'Isso nao sai automaticamente da gaveta.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Entendi'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    if (!TrocaDiferencaCaixa.clientePaga(diff)) return;
+
+    if (!mounted) return;
+    var meio = 'dinheiro';
+    var parcelas = 1;
+    final escolha = await showDialog<({String meio, int parcelas})>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setD) {
+            return AlertDialog(
+              title: const Text('Enviar diferenca ao caixa?'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'O cliente deve ${_formatarMoeda(diff)}. '
+                      'O orcamento vai para a fila do Caixa, sem baixar estoque de novo.',
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      value: meio,
+                      decoration: const InputDecoration(
+                        labelText: 'Forma de pagamento',
+                        isDense: true,
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'dinheiro',
+                          child: Text('Dinheiro (cupom)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'pix',
+                          child: Text('PIX (NFC-e)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'cartao_debito',
+                          child: Text('Cartao de debito (NFC-e)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'cartao_credito',
+                          child: Text('Cartao de credito (NFC-e)'),
+                        ),
+                      ],
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setD(() {
+                          meio = v;
+                          if (v != 'cartao_credito') parcelas = 1;
+                        });
+                      },
+                    ),
+                    if (meio == 'cartao_credito') ...[
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<int>(
+                        value: parcelas,
+                        decoration: const InputDecoration(
+                          labelText: 'Parcelas',
+                          isDense: true,
+                        ),
+                        items: [
+                          for (var i = 1; i <= 12; i++)
+                            DropdownMenuItem(value: i, child: Text('${i}x')),
+                        ],
+                        onChanged: (v) {
+                          if (v == null) return;
+                          setD(() => parcelas = v);
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Text(
+                      TrocaDiferencaCaixa.geraNfce(meio)
+                          ? 'No caixa, ao finalizar, a NFC-e sai da diferenca '
+                              '(${_formatarMoeda(diff)}), nao dos produtos da troca. '
+                              'Para nota dos itens novos, use Devolucao + PDV.'
+                          : 'Dinheiro: o caixa imprime cupom. Se mudar para cartao ou PIX la, a NFC-e e emitida.',
+                      style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                            height: 1.35,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Agora nao'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, (meio: meio, parcelas: parcelas)),
+                  child: const Text('Enviar ao caixa'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (escolha == null || !mounted) return;
+
+    try {
+      final repo = widget.vendaRepository;
+      late final int numero;
+      late final bool reutilizado;
+      if (repo is VendaApiRepository) {
+        final r = await repo.registrarOrcamentoComplementoTrocaRemoto(
+          vendaOrigemId: vendaOrigem.id,
+          registroDevolucaoId: registroId,
+          valor: diff,
+          formaPagamento: escolha.meio,
+          quantidadeParcelas: escolha.parcelas,
+        );
+        numero = r.numeroOrcamento;
+        reutilizado = r.reutilizado;
+      } else if (repo is VendaRepository) {
+        final r = repo.registrarOrcamentoComplementoTroca(
+          vendaOrigemId: vendaOrigem.id,
+          registroDevolucaoId: registroId,
+          valor: diff,
+          formaPagamento: escolha.meio,
+          quantidadeParcelas: escolha.parcelas,
+        );
+        numero = r.numeroOrcamento;
+        reutilizado = r.reutilizado;
+      } else {
+        throw StateError('Repositorio de vendas indisponivel.');
+      }
+      if (!mounted) return;
+      final nfce = TrocaDiferencaCaixa.geraNfce(escolha.meio);
+      await showDialog<void>(
+        context: context,
+        useRootNavigator: true,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Na fila do caixa'),
+          content: Text(
+            reutilizado
+                ? 'O orcamento #$numero ja estava no caixa. Abra o Caixa e receba.'
+                : nfce
+                    ? 'Orcamento #$numero de ${_formatarMoeda(diff)} foi para o Caixa. '
+                        'Ao finalizar no cartao/PIX, a NFC-e da diferenca e emitida normalmente.'
+                    : 'Orcamento #$numero de ${_formatarMoeda(diff)} foi para o Caixa. '
+                        'Abra a aba Caixa e receba.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Ok'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        useRootNavigator: true,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Nao enviou ao caixa'),
+          content: Text(
+            'A troca foi registrada, mas o orcamento da diferenca nao foi criado: '
+            '${LanApiFeedback.mensagem(e)}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Entendi'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   Future<void> _abrirPdvTrocaComNota({
     required Venda v,
     required double credito,
   }) async {
     if (!_podeFluxoTrocaComNotaNoPdv) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Abra pela Listagem de vendas com usuario que acessa o PDV.',
-          ),
-        ),
+      await _avisarPdvNaoAbriu(
+        'Abra pela Listagem de vendas com um usuario que tenha acesso ao PDV.',
       );
       return;
     }
     final intent = _montarIntentTrocaComNota(v: v, credito: credito);
     if (intent == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Venda sem cliente cadastrado. Vincule o cliente antes de abrir o PDV.',
-          ),
-        ),
+      await _avisarPdvNaoAbriu(
+        'Esta venda nao tem cliente cadastrado. Vincule o cliente na venda '
+        'para abrir o PDV com o credito da devolucao.',
       );
       return;
     }
@@ -764,11 +1172,27 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       },
     );
 
+    if (!abrirPdvApos && !_modoTroca && _gerarVale && credito > 0.004) {
+      await _emitirValeDaDevolucao(
+        v: v,
+        registroId: registroId,
+        credito: credito,
+        registradoPor: auth.$2,
+      );
+    }
+
     if (abrirPdvApos && credito > 0.004) {
       await _abrirPdvTrocaComNota(v: v, credito: credito);
     } else if (abrirPdvApos && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Nenhum credito de devolucao para o PDV.')),
+      );
+    }
+
+    if (_modoTroca && mounted) {
+      await _oferecerEnvioDiferencaAoCaixa(
+        vendaOrigem: v,
+        registroId: registroId,
       );
     }
 
@@ -1012,14 +1436,16 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                     ),
                   ),
                   SizedBox(
-                    width: 72,
+                    width: 84,
                     child: TextField(
                       controller: ctl,
+                      enabled: maxD > 0,
                       keyboardType: TextInputType.number,
                       onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Qtd',
                         isDense: true,
+                        errorText: qDev > maxD ? 'Max $maxD' : null,
                       ),
                     ),
                   ),
@@ -1163,22 +1589,54 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
               labelText: 'Observacao financeira (opcional)',
               hintText: _modoTroca && _diferencaTroca().abs() > _epsValorTroca
                   ? (_diferencaTroca() > 0
-                      ? 'Ex.: Cliente pagou diferenca ${_formatarMoeda(_diferencaTroca())} no caixa'
+                      ? 'Ex.: Complemento ${_formatarMoeda(_diferencaTroca())} enviado ao caixa'
                       : 'Ex.: Devolvido ${_formatarMoeda(-_diferencaTroca())} em dinheiro ao cliente')
                   : 'Ex.: R\$ devolvido em dinheiro, cliente pagou diferenca...',
             ),
             maxLines: 2,
           ),
+          if (!_modoTroca && _creditoSugeridoAtual() > 0.004) ...[
+            const SizedBox(height: 16),
+            _buildOpcaoVale(context),
+          ],
+          if (_itensComQuantidadeInvalida.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Quantidade acima do que ainda pode voltar em '
+                    '${_itensComQuantidadeInvalida.map((i) => i.nomeProduto).join(', ')}. '
+                    'Ajuste para continuar.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                          height: 1.35,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: () => _confirmar(),
+            onPressed: _itensComQuantidadeInvalida.isEmpty
+                ? () => _confirmar()
+                : null,
             icon: const Icon(Icons.check),
             label: const Text('Registrar'),
           ),
           if (!_modoTroca && _podeFluxoTrocaComNotaNoPdv) ...[
             const SizedBox(height: 10),
             FilledButton.tonalIcon(
-              onPressed: _creditoSugeridoAtual() > 0.004
+              onPressed: _creditoSugeridoAtual() > 0.004 &&
+                      _itensComQuantidadeInvalida.isEmpty
                   ? () => _confirmar(abrirPdvApos: true)
                   : null,
               icon: const Icon(Icons.point_of_sale_outlined),
