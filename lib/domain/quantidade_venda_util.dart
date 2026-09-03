@@ -9,6 +9,12 @@ class QuantidadeVendaUtil {
 
   static const int escalaFracionada = 1000;
 
+  /// Casas decimais aceitas na digitacao (bate com milésimos).
+  static const int casasDecimaisFracionada = 3;
+
+  /// Passo dos botoes +/- no PDV: 0,01 na unidade de venda (10 milésimos).
+  static const int passoFracionadoArmazenado = escalaFracionada ~/ 100;
+
   /// Interpreta texto do PDV (aceita vírgula ou ponto).
   static double? parseEntradaPdv(String texto, {required bool fracionada}) {
     var t = texto.trim();
@@ -66,6 +72,14 @@ class QuantidadeVendaUtil {
       return q.ceil().toInt();
     }
     return q.round();
+  }
+
+  /// Texto ainda em digitacao no campo de quantidade (vazio, "5," ou "5,75").
+  static bool textoQuantidadeValido(String texto, {required bool fracionada}) {
+    final t = texto.trim();
+    if (t.isEmpty) return true;
+    if (!fracionada) return RegExp(r'^\d{1,8}$').hasMatch(t);
+    return RegExp(r'^\d{1,8}([.,]\d{0,3})?$').hasMatch(t);
   }
 
   /// True se o texto parece quantidade decimal (ex.: 1,5 ou 2.75).

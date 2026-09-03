@@ -7,7 +7,7 @@ class PdvPesquisaComando {
   });
 
   final String termoBusca;
-  final int? quantidadeDireta;
+  final double? quantidadeDireta;
   final bool adicaoDireta;
 
   static PdvPesquisaComando parse(String textoOriginal) {
@@ -24,12 +24,14 @@ class PdvPesquisaComando {
       );
     }
 
-    final quantidadeDireta = RegExp(r'^\s*(\d{1,3})\s+(.+)$').firstMatch(texto);
+    final quantidadeDireta =
+        RegExp(r'^\s*(\d{1,6}(?:[.,]\d{1,3})?)\s+(.+)$').firstMatch(texto);
     if (quantidadeDireta != null) {
-      final qtd = int.tryParse(quantidadeDireta.group(1)!);
+      final bruto = quantidadeDireta.group(1)!;
+      final qtd = double.tryParse(bruto.replaceAll(',', '.'));
       var termo = quantidadeDireta.group(2)!.trim();
       termo = termo.replaceFirst(RegExp(r'^de\s+', caseSensitive: false), '');
-      if (qtd != null && qtd > 0 && termo.isNotEmpty) {
+      if (qtd != null && qtd > 0 && qtd.isFinite && termo.isNotEmpty) {
         return PdvPesquisaComando(
           termoBusca: termo,
           quantidadeDireta: qtd,

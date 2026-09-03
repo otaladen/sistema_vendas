@@ -69,6 +69,8 @@ import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../services/cupom_pdf_gerado.dart';
+import '../services/esc_pos_orcamento_builder.dart';
+import '../services/esc_pos_printer_service.dart';
 import '../services/orcamento_pdf_service.dart';
 import '../services/print_service.dart';
 import 'clientes_page.dart';
@@ -94,6 +96,7 @@ import 'widgets/pdv_barcode_scanner_page.dart';
 import 'widgets/pdv_barcode_scanner_support.dart';
 import 'widgets/pdv_mobile_ui.dart';
 import 'widgets/pdv_carrinho_linha_compacta.dart';
+import 'widgets/quantidade_pdv_input_formatter.dart';
 import 'widgets/pdv_tipo_entrega_item.dart';
 import 'widgets/plano_fiado_pdv_panel.dart';
 import 'widgets/troca_com_nota_pdv_banner.dart';
@@ -221,7 +224,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   bool _dialogoOrcamentoSalvoAberto = false;
 
   /// Evita envio duplo (F10 + clique) e corrida com fechamento do dialogo.
+  /// Permanece true tambem durante imprimir/PDF pos-save.
   bool _salvandoOrcamento = false;
+
+  /// Overlay "Processando orcamento..." — so durante o save no servidor.
+  bool _overlaySalvandoOrcamento = false;
 
   /// UUID reutilizado em retry apos timeout (so na criacao, nao na edicao).
   String? _idempotencyKeyOrcamentoPendente;
@@ -301,7 +308,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   bool _pagamentoMistoPdV = false;
   final List<_LinhaPagamentoMistoPdV> _linhasPagamentoMisto = [];
   List<PlanoFiadoParcela> _planoFiadoParcelas = [];
-  static const double _valorMinimoParcelaCreditoPdV = 5.0;
   static const int _parcelasMaximasCheckoutPdV = 12;
   int? _clienteSelecionadoId;
   int _indiceEnderecoSelecionado = 0;
@@ -1442,16 +1448,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         'Soma dos meios (${_formatarMoeda(soma)}) deve ser ${_formatarMoeda(totalEsperado)}.',
       );
     }
-    for (final p in out) {
-      if (p.meio == 'cartao_credito') {
-        final vp = p.parcelas > 0 ? p.valor / p.parcelas : p.valor;
-        if (vp < _valorMinimoParcelaCreditoPdV) {
-          throw StateError(
-            'Parcela minima no cartao de credito: ${_formatarMoeda(_valorMinimoParcelaCreditoPdV)}.',
-          );
-        }
-      }
-    }
     final qtdFiado = out.where((p) => p.meio == 'fiado').length;
     if (qtdFiado > 1) {
       throw StateError('Pagamento misto: apenas uma linha pode ser Fiado.');
@@ -2412,11 +2408,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   int _passoQuantidadeCarrinho(_OrcamentoItemDraft item) {
-    if (item.quantidadeEmUnidadeCompra ||
-        !item.produto.permiteQuantidadeFracionada) {
+    if (item.quantidadeEmUnidadeCompra || !item.usaArmazenamentoFracionado) {
       return 1;
     }
-    return QuantidadeVendaUtil.escalaFracionada ~/ 10;
+    return QuantidadeVendaUtil.passoFracionadoArmazenado;
   }
 
   void _alterarQuantidadeCarrinho(int index, int deltaArmazenado) {
@@ -2478,6 +2473,35 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         _notificarUiCarrinho();
       }
     });
+  }
+
+  Future<void> _editarQuantidadeCarrinho(int index) async {
+    if (index < 0 || index >= _carrinho.length) return;
+    final item = _carrinho[index];
+    final fracionada = item.usaArmazenamentoFracionado;
+    final unidade = item.quantidadeEmUnidadeCompra &&
+            item.produto.pdvPodeVenderEmUnidadeCompra
+        ? ProdutoEmbalagem.normalizarUnidade(item.produto.unidadeCompraEfetiva)
+        : ProdutoEmbalagem.normalizarUnidade(item.produto.unidade);
+    final digitada = await showDialog<double>(
+      context: context,
+      builder: (ctx) => _EditarQuantidadeCarrinhoDialog(
+        nomeProduto: item.produto.nome,
+        quantidadeInicial: item.quantidadeExibicaoTexto,
+        fracionada: fracionada,
+        unidade: unidade,
+      ),
+    );
+    if (!mounted || digitada == null) return;
+    final novaArmazenada = item.quantidadeEmUnidadeCompra &&
+            item.produto.pdvPodeVenderEmUnidadeCompra
+        ? digitada.round()
+        : QuantidadeVendaUtil.paraArmazenamento(
+            digitada,
+            fracionada: fracionada,
+          );
+    if (novaArmazenada <= 0) return;
+    _alterarQuantidadeCarrinho(index, novaArmazenada - item.quantidade);
   }
 
   void _removerItemCarrinho(int index) {
@@ -4059,9 +4083,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     );
   }
 
-  bool _estoqueCriticoPdv(Produto p) =>
-      p.estoqueExibicao <= p.quantidadeMinima + 1e-9;
-
   _OrcamentoItemDraft? get _linhaCarrinhoSelecionada {
     final i = _indiceLinhaCarrinho;
     if (i == null || i < 0 || i >= _carrinho.length) return null;
@@ -4155,20 +4176,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         const [];
     return PdvConsultaPreviewPanel(
       produto: linha.produto,
-      precoListaAtivo: linha.precoTipo,
-      precoUnitarioDe: _precoExibicaoConsulta,
-      rotuloPreco: _rotuloPreco,
       formatarMoeda: _formatarMoeda,
-      estoqueCritico: _estoqueCriticoPdv(linha.produto),
       compacto: compacto,
       mostrarDescricaoInline: true,
       tituloPainel: 'Item no carrinho',
       campanhaPromo: campanhas.isNotEmpty ? campanhas.first : null,
-      promocaoAtiva: _resolverPrecoProduto(
-        linha.produto,
-        precoTipoLista: linha.precoTipo,
-        quantidade: linha.quantidadeEstoque,
-      ),
       quantidadeNoOrcamento: _quantidadeUnidadeVendaNoCarrinho(
         linha.produto.id,
       ),
@@ -4260,6 +4272,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         rotuloPreco: _rotuloPreco,
         formatarMoeda: _formatarMoeda,
         onAlterarQuantidade: _alterarQuantidadeCarrinho,
+        onEditarQuantidade: (index) => unawaited(_editarQuantidadeCarrinho(index)),
         passoQuantidadeCarrinho: _passoQuantidadeCarrinho,
         onRemoverItem: _removerItemCarrinho,
         onAlternarTipoEntrega: _alternarTipoEntregaLinhaCarrinho,
@@ -6767,7 +6780,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       return;
     }
     _salvandoOrcamento = true;
+    _overlaySalvandoOrcamento = true;
     if (mounted) setState(() {});
+    var salvouOk = false;
+    Venda? vendaSalvaPos;
+    int? numeroOrcamentoSalvoPos;
     try {
       final valorFrete = _carrinhoTemItemCarreto
           ? _parseValorMonetario(_valorFreteController.text)
@@ -6848,6 +6865,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
               tipoEntregaItem: item.tipoEntregaItem,
               promocaoId: item.promocaoId,
               promocaoNomeSnapshot: item.promocaoNome,
+              precoUnitarioManual: item.precoUnitarioManual,
               botaForaAplicado: item.botaForaAplicado,
               percentualBotaForaAplicado: item.percentualBotaForaAplicado,
             ),
@@ -7037,15 +7055,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           duration: Duration(seconds: temFutura ? 5 : 3),
         ),
       );
-      if (vendaSalva != null && mounted) {
-        await _mostrarAcoesPdfOrcamento(vendaSalva);
-      }
-      if (mounted) {
-        await _prepararNovaVendaAposEnvioCaixa(
-          numeroOrcamentoSalvo: numeroOrcamentoSalvo,
-          totalOrcamentoSalvo: vendaSalva?.total,
-        );
-      }
+      // Libera o overlay ANTES de imprimir/PDF — senao o "Processando
+      // orcamento..." volta a cobrir a tela apos fechar o dialogo de acoes.
+      vendaSalvaPos = vendaSalva;
+      numeroOrcamentoSalvoPos = numeroOrcamentoSalvo;
+      salvouOk = true;
+      _overlaySalvandoOrcamento = false;
+      if (mounted) setState(() {});
     } catch (e) {
       if (!mounted) return;
       if (_ehTimeoutSalvarOrcamento(e)) {
@@ -7073,6 +7089,25 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           'Erro ao salvar venda: ${LanApiFeedback.mensagem(e)}',
         );
       }
+    } finally {
+      _overlaySalvandoOrcamento = false;
+      if (!salvouOk) {
+        _salvandoOrcamento = false;
+      }
+      if (mounted) setState(() {});
+    }
+
+    if (!salvouOk || !mounted) return;
+    try {
+      final vendaSalva = vendaSalvaPos;
+      if (vendaSalva != null) {
+        await _mostrarAcoesPdfOrcamento(vendaSalva);
+      }
+      if (!mounted) return;
+      await _prepararNovaVendaAposEnvioCaixa(
+        numeroOrcamentoSalvo: numeroOrcamentoSalvoPos,
+        totalOrcamentoSalvo: vendaSalva?.total,
+      );
     } finally {
       _salvandoOrcamento = false;
       if (mounted) setState(() {});
@@ -7468,6 +7503,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           quantidade: qCarrinho.quantidadeDigitada,
           precoTipo: item.precoTipo,
           precoUnitario: item.precoUnitario,
+          precoUnitarioManual: item.precoUnitarioManual,
           tipoEntregaItem: tipoItem,
           quantidadeEmUnidadeCompra: qCarrinho.emUnidadeCompra,
           promocaoId: item.promocaoId,
@@ -7622,7 +7658,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     );
   }
 
-  Future<CupomPdfGerado> _gerarOrcamentoPdfBytes(Venda venda) async {
+  Future<({List<ItemVenda> itens, Map<int, Produto?> produtos})>
+  _carregarItensOrcamentoParaImpressao(Venda venda) async {
     var vendaId = venda.id;
     if (vendaId <= 0 && venda.numeroOrcamento > 0) {
       final porNumero = widget.vendaRepository.buscarOrcamentoPendentePorNumero(
@@ -7643,7 +7680,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         final repo = widget.vendaRepository;
         if (repo is VendaApiRepository) {
           try {
-            itensOrcamento = await repo.carregarItensRemoto(vendaId);
+            itensOrcamento = await repo
+                .carregarItensRemoto(vendaId)
+                .timeout(const Duration(seconds: 12));
           } catch (_) {}
         }
       }
@@ -7664,7 +7703,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       }
     }
 
-    // Resolve produtos fora do build do PDF (ToOne detached estoura no Terminal).
+    // Resolve produtos fora do build (ToOne detached estoura no Terminal).
     final produtosPorItem = <int, Produto?>{};
     for (var i = 0; i < itensOrcamento.length; i++) {
       final item = itensOrcamento[i];
@@ -7679,16 +7718,20 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       }
       produtosPorItem[i] = produto;
     }
+    return (itens: itensOrcamento, produtos: produtosPorItem);
+  }
 
+  Future<CupomPdfGerado> _gerarOrcamentoPdfBytes(Venda venda) async {
+    final carregado = await _carregarItensOrcamentoParaImpressao(venda);
     final empresa = await widget.appConfigRepository.carregarEmpresaConfig();
     return OrcamentoPdfService.gerar(
       venda: venda,
-      itens: itensOrcamento,
+      itens: carregado.itens,
       empresa: empresa,
       validadeDias: _validadeOrcamentoDias,
       cliente: _clienteDaVenda(venda),
       vendedor: _vendedorDaVenda(venda),
-      produtosPorItem: produtosPorItem,
+      produtosPorItem: carregado.produtos,
       formatarMoedaFn: _formatarMoeda,
     );
   }
@@ -7770,6 +7813,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
+    final modoEscPos = config.modoImpressaoBalcao == 'escpos';
     _dialogoOrcamentoSalvoAberto = true;
     String? acao;
     try {
@@ -7830,12 +7874,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                     style: theme.textTheme.bodySmall,
                   ),
                   const SizedBox(height: 14),
-                  const Text('Deseja imprimir o orcamento ou mandar em PDF?'),
+                  Text(
+                    modoEscPos
+                        ? 'Impressao termica ESC/POS (Epson TM-T20 etc.) '
+                            'ou salvar PDF:'
+                        : 'Deseja imprimir o orcamento ou mandar em PDF?',
+                  ),
                   const SizedBox(height: 10),
-                  const Text(
-                    'Teclado: Esc ou 1 — fechar · 2 — PDF · 3 — impressao direta · '
-                    '4 ou Enter — imprimir · F10 ignorado nesta tela',
-                    style: TextStyle(fontSize: 12.5),
+                  Text(
+                    modoEscPos
+                        ? 'Teclado: Esc ou 1 — fechar · 2 — PDF · '
+                            '3/4/Enter — termica ESC/POS · F10 ignorado'
+                        : 'Teclado: Esc ou 1 — fechar · 2 — PDF · '
+                            '3 — impressao direta · 4 ou Enter — imprimir · '
+                            'F10 ignorado nesta tela',
+                    style: const TextStyle(fontSize: 12.5),
                   ),
                 ],
               ),
@@ -7849,15 +7902,25 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                   icon: const Icon(Icons.picture_as_pdf_outlined),
                   label: const Text('Mandar em PDF (2)'),
                 ),
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.pop(dialogContext, 'direto'),
-                  icon: const Icon(Icons.print),
-                  label: const Text('Impressao direta (3)'),
-                ),
+                if (!modoEscPos)
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.pop(dialogContext, 'direto'),
+                    icon: const Icon(Icons.print),
+                    label: const Text('Impressao direta (3)'),
+                  ),
                 ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(dialogContext, 'imprimir'),
-                  icon: const Icon(Icons.print_outlined),
-                  label: const Text('Imprimir (4 · Enter)'),
+                  onPressed: () => Navigator.pop(
+                    dialogContext,
+                    modoEscPos ? 'escpos' : 'imprimir',
+                  ),
+                  icon: Icon(
+                    modoEscPos ? Icons.print : Icons.print_outlined,
+                  ),
+                  label: Text(
+                    modoEscPos
+                        ? 'Imprimir termica ESC/POS (3/4 · Enter)'
+                        : 'Imprimir (4 · Enter)',
+                  ),
                 ),
               ],
             ),
@@ -7872,6 +7935,29 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     await Future<void>.delayed(Duration.zero);
     if (!mounted) return;
     try {
+      final imprimirEscPos = modoEscPos &&
+          (acao == 'escpos' || acao == 'imprimir' || acao == 'direto');
+      if (imprimirEscPos) {
+        final carregado = await _carregarItensOrcamentoParaImpressao(venda);
+        if (!mounted) return;
+        final r = await EscPosPrinterService.imprimirOrcamentoDireto(
+          OrcamentoEscPosDados(
+            venda: venda,
+            config: config,
+            itens: carregado.itens,
+            validadeDias: _validadeOrcamentoDias,
+            cliente: _clienteDaVenda(venda),
+            vendedor: _vendedorDaVenda(venda),
+            produtosPorItem: carregado.produtos,
+          ),
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(r.mensagem)),
+        );
+        return;
+      }
+
       final pdf = await _gerarOrcamentoPdfBytes(venda);
       if (!mounted) return;
       if (acao == 'imprimir') {
@@ -8398,12 +8484,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                       ),
                     ),
                   ),
-                  if (_salvandoOrcamento)
+                  if (_overlaySalvandoOrcamento)
                     const ModalBarrier(
                       dismissible: false,
                       color: Color(0x66000000),
                     ),
-                  if (_salvandoOrcamento)
+                  if (_overlaySalvandoOrcamento)
                     const Center(
                       child: Card(
                         child: Padding(
@@ -8653,6 +8739,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
     required this.rotuloPreco,
     required this.formatarMoeda,
     required this.onAlterarQuantidade,
+    required this.onEditarQuantidade,
     required this.passoQuantidadeCarrinho,
     required this.onRemoverItem,
     required this.onAlternarTipoEntrega,
@@ -8672,6 +8759,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
   final String Function(String) rotuloPreco;
   final String Function(double) formatarMoeda;
   final void Function(int index, int delta) onAlterarQuantidade;
+  final void Function(int index) onEditarQuantidade;
   final int Function(_OrcamentoItemDraft item) passoQuantidadeCarrinho;
   final void Function(int index) onRemoverItem;
   final void Function(int index) onAlternarTipoEntrega;
@@ -8808,6 +8896,7 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
               onAlternarTabelaPreco: () => widget.onAlternarTabelaPreco(index),
               onDiminuir: () => widget.onAlterarQuantidade(index, -passo),
               onAumentar: () => widget.onAlterarQuantidade(index, passo),
+              onEditarQuantidade: () => widget.onEditarQuantidade(index),
               onDividir: () => widget.onDividirLinha(index),
               onAlterarPreco: () => widget.onAlterarPrecoLinha(index),
               onRemover: () => widget.onRemoverItem(index),
@@ -9560,6 +9649,113 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
   }
 }
 
+class _EditarQuantidadeCarrinhoDialog extends StatefulWidget {
+  const _EditarQuantidadeCarrinhoDialog({
+    required this.nomeProduto,
+    required this.quantidadeInicial,
+    required this.fracionada,
+    required this.unidade,
+  });
+
+  final String nomeProduto;
+  final String quantidadeInicial;
+  final bool fracionada;
+  final String unidade;
+
+  @override
+  State<_EditarQuantidadeCarrinhoDialog> createState() =>
+      _EditarQuantidadeCarrinhoDialogState();
+}
+
+class _EditarQuantidadeCarrinhoDialogState
+    extends State<_EditarQuantidadeCarrinhoDialog> {
+  late final TextEditingController _qtdController;
+  String? _erro;
+
+  @override
+  void initState() {
+    super.initState();
+    _qtdController = TextEditingController(text: widget.quantidadeInicial);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _qtdController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _qtdController.text.length,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _qtdController.dispose();
+    super.dispose();
+  }
+
+  void _confirmar() {
+    final q = QuantidadeVendaUtil.parseEntradaPdv(
+      _qtdController.text,
+      fracionada: widget.fracionada,
+    );
+    if (q == null) {
+      setState(() {
+        _erro = widget.fracionada
+            ? 'Informe uma quantidade maior que zero (ex.: 5,75).'
+            : 'Informe uma quantidade inteira maior que zero.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(q);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Quantidade'),
+      content: AdaptiveDialogPane(
+        desktopWidth: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              widget.nomeProduto,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _qtdController,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Quantidade (${widget.unidade})',
+                helperText: widget.fracionada
+                    ? 'Aceita decimais (ex.: 5,75 ou 4.50).'
+                    : 'Somente quantidade inteira.',
+                errorText: _erro,
+              ),
+              keyboardType: widget.fracionada
+                  ? const TextInputType.numberWithOptions(decimal: true)
+                  : TextInputType.number,
+              inputFormatters: [
+                QuantidadePdvInputFormatter(fracionada: widget.fracionada),
+              ],
+              textInputAction: TextInputAction.done,
+              onChanged: (_) => setState(() => _erro = null),
+              onFieldSubmitted: (_) => _confirmar(),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(onPressed: _confirmar, child: const Text('Aplicar')),
+      ],
+    );
+  }
+}
+
 class _AdicionarAoOrcamentoDialog extends StatefulWidget {
   const _AdicionarAoOrcamentoDialog({
     required this.produtoRepository,
@@ -9654,7 +9850,7 @@ class _AdicionarAoOrcamentoDialogState
             'Salve no cadastro, feche este dialogo, pesquise o produto de novo '
             'e tente outra vez.';
       } else if (fracionada) {
-        msg = 'Informe uma quantidade maior que zero (ex.: 4,50 ou 1.5).';
+        msg = 'Informe uma quantidade maior que zero (ex.: 5,75 ou 1.5).';
       } else {
         msg = 'Informe uma quantidade inteira maior que zero.';
       }
@@ -9728,7 +9924,7 @@ class _AdicionarAoOrcamentoDialogState
                   child: Chip(
                     avatar: const Icon(Icons.straighten, size: 18),
                     label: Text(
-                      'Venda fracionada ($uVenda) — use 4,50 ou 4.5',
+                      'Venda fracionada ($uVenda) — use 5,75 ou 4.50',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     visualDensity: VisualDensity.compact,
@@ -9805,7 +10001,7 @@ class _AdicionarAoOrcamentoDialogState
                 helperText:
                     previewEstoque ??
                     (fracionada
-                        ? 'Permite decimais (ex.: 4,50 ou 4.50).'
+                        ? 'Permite decimais (ex.: 5,75 ou 4.50).'
                         : 'Somente quantidade inteira. Para vender fracionado, '
                               'ative "Permite venda fracionada" no cadastro do produto.'),
                 errorText: _erroQtd,
@@ -9813,6 +10009,9 @@ class _AdicionarAoOrcamentoDialogState
               keyboardType: fracionada
                   ? const TextInputType.numberWithOptions(decimal: true)
                   : TextInputType.number,
+              inputFormatters: [
+                QuantidadePdvInputFormatter(fracionada: fracionada),
+              ],
               textInputAction: TextInputAction.done,
               onChanged: (_) => setState(() => _erroQtd = null),
               onFieldSubmitted: (_) => _confirmar(),

@@ -55,7 +55,7 @@ class PdvConsultaProdutoResult {
 
   final Produto produto;
   final String precoListaAtivo;
-  final int? quantidadeDireta;
+  final double? quantidadeDireta;
   final bool adicaoDireta;
   final bool abrirDialogoAdicionar;
   final bool quantidadeEmUnidadeCompra;
@@ -132,7 +132,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   SugestaoVendaMetricaRepository? _sugestaoMetricaRepo;
 
   late String _precoListaAtivo;
-  int _quantidadeAdicionar = 1;
+  double _quantidadeAdicionar = 1;
   final GlobalKey<PdvConsultaControlesAdicionarState> _controlesQuantidadeKey =
       GlobalKey<PdvConsultaControlesAdicionarState>();
   List<Produto> _produtosBase = [];
@@ -497,21 +497,35 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     }
   }
 
+  PdvConsultaPrecosLinha _montarPrecosLinha(Produto item) {
+    String fmt(String tabela) {
+      final res = widget.resolverPromocao?.call(item, tabela);
+      final preco = res?.precoFinal ?? widget.precoUnitarioDe(item, tabela);
+      return widget.formatarMoeda(preco);
+    }
+
+    final res1 = widget.resolverPromocao?.call(item, 'preco1');
+    final emPromo1 = res1?.emPromocao ?? false;
+    return PdvConsultaPrecosLinha(
+      preco1Formatado: fmt('preco1'),
+      preco2Formatado: fmt('preco2'),
+      preco3Formatado: fmt('preco3'),
+      preco1EmPromocao: emPromo1,
+      preco1DeFormatado: emPromo1
+          ? widget.formatarMoeda(res1!.precoBasePreco1)
+          : null,
+    );
+  }
+
   void _remontarLinhasVm() {
-    final tabela = _precoListaAtivo;
     final lista = _produtos;
     _linhasVm = List<_PdvConsultaLinhaVm>.generate(lista.length, (i) {
       final item = lista[i];
-      final res = widget.resolverPromocao?.call(item, tabela);
-      final preco = res?.precoFinal ?? widget.precoUnitarioDe(item, tabela);
-      final emPromo = res?.emPromocao ?? false;
+      final precos = _montarPrecosLinha(item);
       return _PdvConsultaLinhaVm(
         produto: item,
-        precoFormatado: widget.formatarMoeda(preco),
-        emPromocao: emPromo,
-        precoDeFormatado: emPromo
-            ? widget.formatarMoeda(res!.precoBasePreco1)
-            : null,
+        precos: precos,
+        emPromocao: precos.preco1EmPromocao,
         estoqueNivel: PdvEstoqueSemaforoUtil.nivelDe(item),
       );
     }, growable: false);
@@ -944,10 +958,6 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => tentar());
   }
 
-  bool _estoqueCritico(Produto p) =>
-      PdvEstoqueSemaforoUtil.nivelDe(p) == PdvEstoqueSemaforoNivel.amarelo ||
-      PdvEstoqueSemaforoUtil.nivelDe(p) == PdvEstoqueSemaforoNivel.vermelho;
-
   bool get _temFiltrosAtivos =>
       _filtroSomenteComEstoque ||
       _filtroSomentePromocao ||
@@ -1169,7 +1179,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     }
   }
 
-  void _atualizarQuantidadeAdicionar(int quantidade) {
+  void _atualizarQuantidadeAdicionar(double quantidade) {
     _quantidadeAdicionar = quantidade;
   }
 
@@ -1313,28 +1323,19 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       return;
     }
     if (adicionarDireto) {
-      final qtd = _quantidadeAdicionar;
-      if (qtd <= 1) {
-        Navigator.of(context).pop(
-          PdvConsultaProdutoResult(
-            produto: produto,
-            precoListaAtivo: _precoListaAtivo,
-            adicaoDireta: true,
-            abrirDialogoAdicionar: false,
-            quantidadeEmUnidadeCompra: emUnidadeCompra,
-          ),
-        );
-      } else {
-        Navigator.of(context).pop(
-          PdvConsultaProdutoResult(
-            produto: produto,
-            precoListaAtivo: _precoListaAtivo,
-            quantidadeDireta: qtd,
-            abrirDialogoAdicionar: false,
-            quantidadeEmUnidadeCompra: emUnidadeCompra,
-          ),
-        );
-      }
+      final qtd =
+          _controlesQuantidadeKey.currentState?.quantidadeConfirmada() ??
+          _quantidadeAdicionar;
+      if (qtd <= 0) return;
+      Navigator.of(context).pop(
+        PdvConsultaProdutoResult(
+          produto: produto,
+          precoListaAtivo: _precoListaAtivo,
+          quantidadeDireta: qtd,
+          abrirDialogoAdicionar: false,
+          quantidadeEmUnidadeCompra: emUnidadeCompra,
+        ),
+      );
       return;
     }
     Navigator.of(context).pop(
@@ -1535,7 +1536,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       PdvConsultaProdutoResult(
         produto: produto,
         precoListaAtivo: _precoListaAtivo,
-        quantidadeDireta: agregado.quantidadeSugerida,
+        quantidadeDireta: agregado.quantidadeSugerida.toDouble(),
         abrirDialogoAdicionar: false,
       ),
     );
@@ -1576,18 +1577,12 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     return PdvConsultaPreviewPanel(
       key: ValueKey<int>(produto.id),
       produto: produto,
-      precoListaAtivo: _precoListaAtivo,
-      precoUnitarioDe: widget.precoUnitarioDe,
-      rotuloPreco: widget.rotuloPreco,
       formatarMoeda: widget.formatarMoeda,
       campanhaPromo: campanhas.isNotEmpty ? campanhas.first : null,
-      promocaoAtiva: widget.resolverPromocao?.call(produto, _precoListaAtivo),
-      estoqueCritico: _estoqueCritico(produto),
       compacto: compacto,
       quantidadeNoOrcamento:
           widget.quantidadeNoOrcamentoDe?.call(produto.id) ?? 0,
       onDetalhes: _abrirDetalhesProduto,
-      onSelecionarTabela: _selecionarTabelaPreco,
       mostrarAdicionarAoOrcamento: true,
       onQuantidadeChanged: _atualizarQuantidadeAdicionar,
       onAdicionar: _adicionarSelecionadoAoOrcamento,
@@ -1698,7 +1693,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         PdvConsultaListaCabecalho(
-          rotuloColunaPreco: widget.rotuloPreco(_precoListaAtivo),
+          rotuloPreco: widget.rotuloPreco,
+          precoListaAtivo: _precoListaAtivo,
         ),
         Expanded(
           child: RefreshIndicator(
@@ -1744,9 +1740,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                         child: PdvConsultaLinhaProduto(
                           produto: item,
                           termoBusca: _termoBuscaAtual,
-                          precoFormatado: vm.precoFormatado,
-                          emPromocao: vm.emPromocao,
-                          precoDeFormatado: vm.precoDeFormatado,
+                          precos: vm.precos,
+                          precoListaAtivo: _precoListaAtivo,
                           estoqueNivel: vm.estoqueNivel,
                           selecionado: selecionado,
                           quantidadeNoOrcamento: qtdOrcamento,
@@ -1950,15 +1945,13 @@ class _PdvConsultaFecharIntent extends Intent {
 class _PdvConsultaLinhaVm {
   const _PdvConsultaLinhaVm({
     required this.produto,
-    required this.precoFormatado,
+    required this.precos,
     required this.emPromocao,
     required this.estoqueNivel,
-    this.precoDeFormatado,
   });
 
   final Produto produto;
-  final String precoFormatado;
+  final PdvConsultaPrecosLinha precos;
   final bool emPromocao;
-  final String? precoDeFormatado;
   final PdvEstoqueSemaforoNivel estoqueNivel;
 }

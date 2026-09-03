@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../domain/promocao_info_vigente.dart';
-import '../domain/promocao_preco_result.dart';
 import '../domain/pdv_consulta_insights_service.dart';
 import '../domain/pdv_consulta_multi_deposito_util.dart';
+import '../domain/quantidade_venda_util.dart';
 import '../model/produto.dart';
 import 'produto_detalhe_venda_page.dart';
 import 'widgets/pdv_consulta_painel_insights.dart';
@@ -13,133 +13,25 @@ import 'widgets/pdv_estoque_resumo_panel.dart';
 import 'widgets/pdv_sugestoes_carrinho_strip.dart';
 import 'widgets/produto_foto_view.dart';
 import 'widgets/promocao_badge.dart';
-
-/// Tres listas de preco do produto (ativo em destaque; clicavel na consulta).
-class PdvConsultaTresPrecos extends StatelessWidget {
-  const PdvConsultaTresPrecos({
-    super.key,
-    required this.produto,
-    required this.precoListaAtivo,
-    required this.precoUnitarioDe,
-    required this.rotuloPreco,
-    required this.formatarMoeda,
-    this.compacto = false,
-    this.onSelecionarTabela,
-  });
-
-  static const _tiposPreco = ['preco1', 'preco2', 'preco3'];
-
-  final Produto produto;
-  final String precoListaAtivo;
-  final double Function(Produto produto, String precoTipo) precoUnitarioDe;
-  final String Function(String precoTipo) rotuloPreco;
-  final String Function(double) formatarMoeda;
-  final bool compacto;
-  final ValueChanged<String>? onSelecionarTabela;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (var i = 0; i < _tiposPreco.length; i++) ...[
-          if (i > 0) SizedBox(height: compacto ? 4 : 6),
-          _linhaPreco(context, scheme, _tiposPreco[i]),
-        ],
-      ],
-    );
-  }
-
-  Widget _linhaPreco(BuildContext context, ColorScheme scheme, String tipo) {
-    final ativo = tipo == precoListaAtivo;
-    final valor = precoUnitarioDe(produto, tipo);
-    final rotulo = rotuloPreco(tipo);
-    final clicavel = onSelecionarTabela != null;
-
-    Widget conteudo = Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: ativo ? 8 : 4,
-        vertical: ativo ? 6 : 2,
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: compacto ? 72 : 80,
-            child: Text(
-              rotulo,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: ativo ? FontWeight.w700 : FontWeight.w500,
-                    color: ativo ? scheme.primary : scheme.onSurfaceVariant,
-                  ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              formatarMoeda(valor),
-              textAlign: TextAlign.end,
-              style: (ativo
-                      ? Theme.of(context).textTheme.titleMedium
-                      : Theme.of(context).textTheme.bodyMedium)
-                  ?.copyWith(
-                fontWeight: ativo ? FontWeight.bold : FontWeight.w600,
-                color: ativo ? scheme.primary : scheme.onSurface,
-              ),
-            ),
-          ),
-          if (ativo) ...[
-            const SizedBox(width: 4),
-            Icon(Icons.check_circle, size: 16, color: scheme.primary),
-          ],
-        ],
-      ),
-    );
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: ativo
-            ? scheme.primaryContainer.withValues(alpha: 0.45)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(6),
-        border: clicavel && !ativo
-            ? Border.all(color: scheme.outlineVariant.withValues(alpha: 0.35))
-            : null,
-      ),
-      child: clicavel
-          ? Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () => onSelecionarTabela!(tipo),
-                borderRadius: BorderRadius.circular(6),
-                child: conteudo,
-              ),
-            )
-          : conteudo,
-    );
-  }
-}
+import 'widgets/quantidade_pdv_input_formatter.dart';
 
 /// Painel lateral (ou compacto) com foto e resumo do item selecionado na consulta PDV.
+///
+/// Os precos das 3 tabelas ficam nas colunas da lista da consulta (nao neste painel).
 class PdvConsultaPreviewPanel extends StatelessWidget {
   const PdvConsultaPreviewPanel({
     super.key,
     required this.produto,
-    required this.precoListaAtivo,
-    required this.precoUnitarioDe,
-    required this.rotuloPreco,
     required this.formatarMoeda,
-    required this.estoqueCritico,
     required this.onDetalhes,
     this.compacto = false,
     this.mostrarDescricaoInline = false,
     this.tituloPainel = 'Selecionado',
-    this.promocaoAtiva,
     this.campanhaPromo,
     this.quantidadeNoOrcamento = 0,
     this.precoUnitarioLinha,
     this.precoUnitarioManual = false,
     this.onAlterarPreco,
-    this.onSelecionarTabela,
     this.mostrarAdicionarAoOrcamento = false,
     this.onQuantidadeChanged,
     this.onAdicionar,
@@ -157,24 +49,18 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
   });
 
   final Produto produto;
-  final String precoListaAtivo;
-  final double Function(Produto produto, String precoTipo) precoUnitarioDe;
-  final String Function(String precoTipo) rotuloPreco;
   final String Function(double) formatarMoeda;
-  final bool estoqueCritico;
   final VoidCallback onDetalhes;
   final bool compacto;
   final bool mostrarDescricaoInline;
   final String tituloPainel;
-  final PromocaoPrecoResult? promocaoAtiva;
   final PromocaoInfoVigente? campanhaPromo;
   final num quantidadeNoOrcamento;
   final double? precoUnitarioLinha;
   final bool precoUnitarioManual;
   final VoidCallback? onAlterarPreco;
-  final ValueChanged<String>? onSelecionarTabela;
   final bool mostrarAdicionarAoOrcamento;
-  final ValueChanged<int>? onQuantidadeChanged;
+  final ValueChanged<double>? onQuantidadeChanged;
   final VoidCallback? onAdicionar;
   final GlobalKey<PdvConsultaControlesAdicionarState>? controlesQuantidadeKey;
   final PdvConsultaInsightsPacote? insights;
@@ -387,30 +273,11 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
               ),
         ),
       ],
-      const SizedBox(height: 10),
-      Text(
-        onSelecionarTabela != null
-            ? 'Precos — toque ou F1–F3 para adicionar com'
-            : 'Precos (F1–F3 escolhe lista ativa)',
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-      ),
+      // Precos das 3 tabelas ficam nas colunas da lista da consulta.
       if (campanhaPromo != null) ...[
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         _PainelPromocaoVendedor(campanha: campanhaPromo!),
       ],
-      const SizedBox(height: 6),
-      PdvConsultaTresPrecos(
-        produto: produto,
-        precoListaAtivo: precoListaAtivo,
-        precoUnitarioDe: precoUnitarioDe,
-        rotuloPreco: rotuloPreco,
-        formatarMoeda: formatarMoeda,
-        compacto: compacto,
-        onSelecionarTabela: onSelecionarTabela,
-      ),
       if (precoUnitarioLinha != null) ...[
         const SizedBox(height: 8),
         Container(
@@ -532,7 +399,7 @@ class PdvConsultaControlesAdicionar extends StatefulWidget {
   });
 
   final Produto produto;
-  final ValueChanged<int> onQuantidadeChanged;
+  final ValueChanged<double> onQuantidadeChanged;
   final VoidCallback onAdicionar;
 
   @override
@@ -542,12 +409,19 @@ class PdvConsultaControlesAdicionar extends StatefulWidget {
 
 class PdvConsultaControlesAdicionarState
     extends State<PdvConsultaControlesAdicionar> {
-  static const int _min = 1;
-  static const int _max = 99999;
+  static const double _max = 99999;
 
-  late int _quantidade;
+  late double _quantidade;
+  late final TextEditingController _qtdController;
 
   bool get _emUnidadeCompra => widget.produto.pdvPodeVenderEmUnidadeCompra;
+
+  bool get _fracionada =>
+      widget.produto.permiteQuantidadeFracionada && !_emUnidadeCompra;
+
+  double get _min => _fracionada ? 0.001 : 1;
+
+  double get _passoBotoes => _fracionada ? 0.01 : 1;
 
   String get _rotuloUnidadeQuantidade {
     if (_emUnidadeCompra) {
@@ -564,52 +438,110 @@ class PdvConsultaControlesAdicionarState
     if (conv.isEmpty) return null;
     final m2 = ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
       produto: widget.produto,
-      quantidadeComercial: _quantidade.toDouble(),
+      quantidadeComercial: _quantidade,
     );
     final uVenda = ProdutoEmbalagem.normalizarUnidade(widget.produto.unidade);
     final m2Txt = m2 == m2.roundToDouble()
         ? m2.toStringAsFixed(0)
         : m2.toStringAsFixed(2).replaceAll('.', ',');
-    return '$_quantidade $_rotuloUnidadeQuantidade = $m2Txt $uVenda no orcamento';
+    final qTxt = QuantidadeVendaUtil.formatarExibicao(
+      _quantidade,
+      fracionada: false,
+    );
+    return '$qTxt $_rotuloUnidadeQuantidade = $m2Txt $uVenda no orcamento';
   }
 
   @override
   void initState() {
     super.initState();
-    _quantidade = _min;
+    _quantidade = 1;
+    _qtdController = TextEditingController(text: '1');
     widget.onQuantidadeChanged(_quantidade);
+  }
+
+  @override
+  void dispose() {
+    _qtdController.dispose();
+    super.dispose();
   }
 
   @override
   void didUpdateWidget(PdvConsultaControlesAdicionar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.produto.id != widget.produto.id) {
-      setState(() => _quantidade = _min);
+      setState(() {
+        _quantidade = 1;
+        _qtdController.text = '1';
+      });
       widget.onQuantidadeChanged(_quantidade);
     }
   }
 
-  void aplicarDelta(int delta) => _aplicar(_quantidade + delta);
+  double? quantidadeConfirmada() {
+    return QuantidadeVendaUtil.parseEntradaPdv(
+          _qtdController.text,
+          fracionada: _fracionada,
+        ) ??
+        (_quantidade > 0 ? _quantidade : null);
+  }
 
-  void _aplicar(int nova) {
+  void aplicarDelta(int delta) {
+    final atual = QuantidadeVendaUtil.parseEntradaPdv(
+          _qtdController.text,
+          fracionada: _fracionada,
+        ) ??
+        _quantidade;
+    _aplicar(atual + delta);
+  }
+
+  void _aplicar(double nova) {
     final q = nova.clamp(_min, _max);
-    if (q == _quantidade) return;
     setState(() => _quantidade = q);
+    final txt = QuantidadeVendaUtil.formatarExibicao(q, fracionada: _fracionada);
+    _qtdController.value = TextEditingValue(
+      text: txt,
+      selection: TextSelection.collapsed(offset: txt.length),
+    );
     widget.onQuantidadeChanged(q);
   }
 
-  void _delta(int delta) => _aplicar(_quantidade + delta);
+  void _delta(double delta) {
+    final atual = QuantidadeVendaUtil.parseEntradaPdv(
+          _qtdController.text,
+          fracionada: _fracionada,
+        ) ??
+        _quantidade;
+    _aplicar(atual + delta);
+  }
+
+  void _onTextoQtd(String texto) {
+    final q = QuantidadeVendaUtil.parseEntradaPdv(
+      texto,
+      fracionada: _fracionada,
+    );
+    if (q == null) return;
+    if ((q - _quantidade).abs() < 0.0000001) return;
+    setState(() => _quantidade = q);
+    widget.onQuantidadeChanged(q);
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final qAtual = QuantidadeVendaUtil.parseEntradaPdv(
+          _qtdController.text,
+          fracionada: _fracionada,
+        ) ??
+        _quantidade;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Quantidade ($_rotuloUnidadeQuantidade) (+ / − no teclado)',
+          _fracionada
+              ? 'Quantidade ($_rotuloUnidadeQuantidade) — aceita 5,75'
+              : 'Quantidade ($_rotuloUnidadeQuantidade) (+ / − no teclado)',
           style: theme.textTheme.labelMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: scheme.onSurfaceVariant,
@@ -640,22 +572,39 @@ class PdvConsultaControlesAdicionarState
               children: [
                 IconButton.filledTonal(
                   tooltip: 'Diminuir quantidade',
-                  onPressed: _quantidade > _min ? () => _delta(-1) : null,
+                  onPressed: qAtual > _min ? () => _delta(-_passoBotoes) : null,
                   icon: const Icon(Icons.remove),
                 ),
                 Expanded(
-                  child: Text(
-                    '$_quantidade',
+                  child: TextField(
+                    controller: _qtdController,
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      hintText: _fracionada ? '5,75' : '1',
+                    ),
+                    keyboardType: _fracionada
+                        ? const TextInputType.numberWithOptions(decimal: true)
+                        : TextInputType.number,
+                    inputFormatters: [
+                      QuantidadePdvInputFormatter(fracionada: _fracionada),
+                    ],
+                    onChanged: _onTextoQtd,
+                    onSubmitted: (_) => widget.onAdicionar(),
+                    onTap: () => _qtdController.selection = TextSelection(
+                      baseOffset: 0,
+                      extentOffset: _qtdController.text.length,
+                    ),
                   ),
                 ),
                 IconButton.filledTonal(
                   tooltip: 'Aumentar quantidade',
-                  onPressed: _quantidade < _max ? () => _delta(1) : null,
+                  onPressed: qAtual < _max ? () => _delta(_passoBotoes) : null,
                   icon: const Icon(Icons.add),
                 ),
               ],

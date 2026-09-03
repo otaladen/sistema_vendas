@@ -35,6 +35,7 @@ import '../../domain/promocao_cadastro.dart';
 import '../../domain/promocao_preco_result.dart';
 import '../../domain/promocao_preco_service.dart';
 import '../../domain/produto_embalagem.dart';
+import '../../domain/quantidade_venda_util.dart';
 import '../../domain/produto_limite_desconto_pdv.dart';
 import '../../domain/fiscal/caixa_fiscal_acao_helper.dart';
 import '../../domain/fiscal/cliente_fiscal_helper.dart';
@@ -76,6 +77,7 @@ import '../segunda_via_cupom_autorizacao.dart';
 import '../widgets/conta_sessao_app_bar_actions.dart';
 import '../widgets/lan_api_feedback.dart';
 import '../widgets/pdv_tipo_entrega_item.dart';
+import '../widgets/quantidade_pdv_input_formatter.dart';
 import '../widgets/receber_fiado_panel.dart';
 import '../../services/recibo_movimento_caixa_pdf.dart';
 import '../../services/recibo_recebimento_fiado_pdf.dart';
@@ -153,7 +155,6 @@ class _CaixaPageState extends State<CaixaPage> {
       'caixa_ultimas_vendas_ordenacao_v2';
   final _sessaoRepo = CaixaSessaoRepository();
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
-  static const double _valorMinimoParcela = 5.0;
   List<Venda> _orcamentos = [];
   Venda? _selecionado;
   CaixaEtapa _etapaCaixa = CaixaEtapa.fila;
@@ -841,7 +842,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<UsuarioSistema> _usuarioLogadoCaixa() async {
-    final lista = await _usuarioRepository.listarTodos();
+    final lista = await _usuarioRepository.listarTodos(); // policy-allow: usuario logado caixa
     for (final u in lista) {
       if (u.login == widget.usuarioAtual) return u;
     }
@@ -4228,15 +4229,45 @@ class _CaixaPageState extends State<CaixaPage> {
     }
   }
 
-  Future<({int quantidade, String tipoEntregaItem})?>
+  double? _parseQuantidadeExibicaoConferencia(Produto produto, String texto) {
+    return QuantidadeVendaUtil.parseEntradaPdv(
+      texto,
+      fracionada: produto.permiteQuantidadeFracionada,
+    );
+  }
+
+  Future<({double quantidade, String tipoEntregaItem})?>
       _perguntarQuantidadeProdutoConferencia(
     Produto produto, {
     required int quantidadeSugerida,
     required String tipoEntregaInicial,
   }) async {
+    final fracionada = produto.permiteQuantidadeFracionada;
     final ctrl = TextEditingController(text: '$quantidadeSugerida');
     var tipo = EntregaVendaHelper.normalizarTipoItem(tipoEntregaInicial);
-    final resultado = await showDialog<({int quantidade, String tipoEntregaItem})>(
+
+    void confirmar(BuildContext ctx) {
+      final q = _parseQuantidadeExibicaoConferencia(produto, ctrl.text);
+      if (q == null || q <= 0) {
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          SnackBar(
+            content: Text(
+              fracionada
+                  ? 'Informe quantidade valida (ex.: 5,75).'
+                  : 'Informe quantidade valida.',
+            ),
+          ),
+        );
+        return;
+      }
+      Navigator.pop(
+        ctx,
+        (quantidade: q, tipoEntregaItem: tipo),
+      );
+    }
+
+    final resultado =
+        await showDialog<({double quantidade, String tipoEntregaItem})>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
@@ -4266,26 +4297,20 @@ class _CaixaPageState extends State<CaixaPage> {
               TextField(
                 controller: ctrl,
                 autofocus: true,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
+                keyboardType: fracionada
+                    ? const TextInputType.numberWithOptions(decimal: true)
+                    : TextInputType.number,
+                inputFormatters: [
+                  QuantidadePdvInputFormatter(fracionada: fracionada),
+                ],
+                decoration: InputDecoration(
                   labelText: 'Quantidade',
-                  hintText: 'Ex.: 1',
+                  hintText: fracionada ? 'Ex.: 5,75' : 'Ex.: 1',
+                  helperText: fracionada
+                      ? 'Venda fracionada: aceita 5,75'
+                      : null,
                 ),
-                onSubmitted: (_) {
-                  final q = int.tryParse(ctrl.text.trim());
-                  if (q == null || q <= 0) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                      const SnackBar(
-                        content: Text('Informe quantidade valida.'),
-                      ),
-                    );
-                    return;
-                  }
-                  Navigator.pop(
-                    ctx,
-                    (quantidade: q, tipoEntregaItem: tipo),
-                  );
-                },
+                onSubmitted: (_) => confirmar(ctx),
               ),
             ],
           ),
@@ -4295,21 +4320,7 @@ class _CaixaPageState extends State<CaixaPage> {
               child: const Text('Cancelar'),
             ),
             FilledButton(
-              onPressed: () {
-                final q = int.tryParse(ctrl.text.trim());
-                if (q == null || q <= 0) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(
-                      content: Text('Informe quantidade valida.'),
-                    ),
-                  );
-                  return;
-                }
-                Navigator.pop(
-                  ctx,
-                  (quantidade: q, tipoEntregaItem: tipo),
-                );
-              },
+              onPressed: () => confirmar(ctx),
               child: const Text('Adicionar'),
             ),
           ],
@@ -4323,12 +4334,19 @@ class _CaixaPageState extends State<CaixaPage> {
   Future<void> _adicionarProdutoAoOrcamentoConferencia(
     Venda venda,
     Produto produto,
-    int quantidade, {
+    num quantidade, {
     required String precoLista,
     required String tipoEntregaItem,
   }) async {
     if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
     if (quantidade <= 0) return;
+    final qExibicao = quantidade.toDouble();
+    final qEstoquePromo = qExibicao.ceil();
+    final qArmazenada = QuantidadeVendaUtil.paraArmazenamento(
+      qExibicao,
+      fracionada: produto.permiteQuantidadeFracionada,
+    );
+    if (qArmazenada <= 0) return;
 
     final svc = _promoPreco;
     final resPreco = svc == null
@@ -4340,14 +4358,14 @@ class _CaixaPageState extends State<CaixaPage> {
         : svc.resolver(
             produto,
             dataReferencia: DateTime.now(),
-            quantidade: quantidade,
+            quantidade: qEstoquePromo,
             precoTipoLista: precoLista,
             segmentoCliente: _segmentoClienteConferencia,
           );
 
     if (resPreco.emPromocao) {
       if (resPreco.quantidadeMaximaPorVenda > 0 &&
-          quantidade > resPreco.quantidadeMaximaPorVenda) {
+          qEstoquePromo > resPreco.quantidadeMaximaPorVenda) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -4381,7 +4399,7 @@ class _CaixaPageState extends State<CaixaPage> {
       final fresh = widget.produtoRepository.obterPorId(produto.id) ?? produto;
       final disp = fresh.estoqueLivreParaVenda;
       final ja = _quantidadeProdutoNoOrcamentoSelecionado(produto.id);
-      if (ja + quantidade > disp) {
+      if (ja + qExibicao > disp) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -4402,7 +4420,7 @@ class _CaixaPageState extends State<CaixaPage> {
           venda.id,
           ItemVendaInput(
             produtoId: produto.id,
-            quantidade: quantidade,
+            quantidade: qArmazenada,
             precoUnitario: resPreco.precoFinal,
             precoTipo: resPreco.precoTipo,
             tipoEntregaItem: tipoEntregaItem,
@@ -4416,7 +4434,7 @@ class _CaixaPageState extends State<CaixaPage> {
           venda.id,
           ItemVendaInput(
             produtoId: produto.id,
-            quantidade: quantidade,
+            quantidade: qArmazenada,
             precoUnitario: resPreco.precoFinal,
             precoTipo: resPreco.precoTipo,
             tipoEntregaItem: tipoEntregaItem,
@@ -4433,16 +4451,20 @@ class _CaixaPageState extends State<CaixaPage> {
           'numeroOrcamento': venda.numeroOrcamento,
           'produtoId': produto.id,
           'produto': produto.nome,
-          'quantidade': quantidade,
+          'quantidade': qExibicao,
           'precoUnitario': resPreco.precoFinal,
           'tipoEntregaItem': tipoEntregaItem,
         },
       );
       if (!mounted) return;
       _recarregarOrcamentoSelecionadoAposAjusteItens();
+      final qTxt = QuantidadeVendaUtil.formatarExibicao(
+        qExibicao,
+        fracionada: produto.permiteQuantidadeFracionada,
+      );
       CaixaFeedback.sucesso(
         context,
-        '${produto.nome} adicionado ($quantidade un. · '
+        '${produto.nome} adicionado ($qTxt un. · '
         '${EntregaVendaHelper.rotuloCurtoTipoItem(tipoEntregaItem)}).',
       );
       _pesquisaProdutoConferenciaFocus.requestFocus();
@@ -5006,20 +5028,6 @@ class _CaixaPageState extends State<CaixaPage> {
       }
       final linhas = _normalizarLinhasMistoGravacao(linhasBruto, totalVenda);
       for (final l in linhas) {
-        if (l.meio == 'cartao_credito') {
-          final valorParcela =
-              l.parcelas > 0 ? l.valor / l.parcelas : l.valor;
-          if (valorParcela < _valorMinimoParcela) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Parcela minima de ${_formatarMoeda(_valorMinimoParcela)} no cartao de credito.',
-                ),
-              ),
-            );
-            return;
-          }
-        }
         if (l.meio == 'cartao_debito' && l.parcelas != 1) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -5037,21 +5045,6 @@ class _CaixaPageState extends State<CaixaPage> {
             const SnackBar(
               content: Text(
                 'Valor recebido insuficiente para finalizar em dinheiro.',
-              ),
-            ),
-          );
-          return;
-        }
-      }
-      if (venda.formaPagamento == 'cartao_credito') {
-        final valorParcela = venda.quantidadeParcelas > 0
-            ? (totalVenda / venda.quantidadeParcelas)
-            : totalVenda;
-        if (valorParcela < _valorMinimoParcela) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Parcela minima de ${_formatarMoeda(_valorMinimoParcela)} nao atingida. Ajuste as parcelas.',
               ),
             ),
           );
@@ -5655,7 +5648,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<UsuarioSistema> _resolverUsuarioSessaoParaNfe() async {
-    final todos = await _usuarioRepository.listarTodos();
+    final todos = await _usuarioRepository.listarTodos(); // policy-allow: usuario sessao NF-e
     for (final u in todos) {
       if (u.login == widget.usuarioLogado.login) return u;
     }

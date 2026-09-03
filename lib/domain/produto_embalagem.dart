@@ -9,6 +9,18 @@ class ProdutoEmbalagem {
     final t = (unidade ?? '').trim().toUpperCase();
     if (t.isEmpty) return 'UN';
     if (t == 'METRO') return 'M';
+    // Unidade comercial do fornecedor (peca) → UN de estoque.
+    if (t == 'PC' ||
+        t == 'PC1' ||
+        t == 'PÇ' ||
+        t == 'PÇ1' ||
+        t == 'PEC' ||
+        t == 'PECA' ||
+        t == 'PEÇA' ||
+        t == 'UNID' ||
+        t == 'UND') {
+      return 'UN';
+    }
     return t;
   }
 
@@ -67,6 +79,11 @@ class ProdutoEmbalagem {
     return bruto;
   }
 
+  /// Quando nao ha [Produto] vinculado, decide se grava em milésimos (×1000).
+  ///
+  /// Nao usar so "unidade da nota != unidade interna": PC1/UN com fator 1
+  /// virava 6 → 6000. Escala fracionada so para qtd/fator nao inteiros ou
+  /// unidades tipicamente fracionadas (M, M2, KG…).
   static bool notaExigeEscalaEstoque({
     required double quantidadeUnidadeVenda,
     required double fator,
@@ -81,14 +98,12 @@ class ProdutoEmbalagem {
         fator != fator.roundToDouble()) {
       return true;
     }
-    final uCom = normalizarUnidade(unidadeComercial);
     final uInt = normalizarUnidade(unidadeInterna);
-    if (uCom.isNotEmpty &&
-        uInt.isNotEmpty &&
-        !unidadesEquivalentes(uCom, uInt)) {
-      return true;
-    }
-    return false;
+    return uInt == 'M' ||
+        uInt == 'M2' ||
+        uInt == 'M3' ||
+        uInt == 'KG' ||
+        uInt == 'LT';
   }
 
   /// Quantidade da nota convertida para valor armazenado em [Produto.estoqueReal].
@@ -453,7 +468,7 @@ class ProdutoEmbalagem {
     }
     if (produto.permiteQuantidadeFracionada ||
         leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
-      return QuantidadeVendaUtil.escalaFracionada ~/ 10;
+      return QuantidadeVendaUtil.passoFracionadoArmazenado;
     }
     return 1;
   }

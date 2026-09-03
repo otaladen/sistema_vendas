@@ -24,6 +24,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     required this.onAlternarTabelaPreco,
     required this.onDiminuir,
     required this.onAumentar,
+    required this.onEditarQuantidade,
     required this.onDividir,
     required this.onAlterarPreco,
     required this.onRemover,
@@ -53,6 +54,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final VoidCallback onAlternarTabelaPreco;
   final VoidCallback onDiminuir;
   final VoidCallback onAumentar;
+  final VoidCallback onEditarQuantidade;
   final VoidCallback onDividir;
   final VoidCallback onAlterarPreco;
   final VoidCallback onRemover;
@@ -248,10 +250,20 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
               onPressed: onDiminuir,
               tamanhoMinimo: minAcao,
             ),
-            Text(
-              quantidadeExibicao,
-              style: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w800,
+            Tooltip(
+              message: 'Informar quantidade',
+              child: InkWell(
+                onTap: onEditarQuantidade,
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  child: Text(
+                    quantidadeExibicao,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
               ),
             ),
             _AcaoIcone(
@@ -381,12 +393,19 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           onPressed: onDiminuir,
           tamanhoMinimo: minAcao,
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2),
-          child: Text(
-            quantidadeExibicao,
-            style: theme.textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w700,
+        Tooltip(
+          message: 'Informar quantidade (ex.: 5,75)',
+          child: InkWell(
+            onTap: onEditarQuantidade,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Text(
+                quantidadeExibicao,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
         ),

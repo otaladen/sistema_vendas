@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/pdv_consulta_detalhe_linha.dart';
 import '../../domain/pdv_estoque_semaforo_util.dart';
+import '../../domain/pdv_tabela_preco_util.dart';
 import '../../domain/produto_embalagem.dart';
 import '../../domain/produto_unidade_exibicao.dart';
 import '../../model/produto.dart';
@@ -10,17 +11,44 @@ import 'pdv_consulta_lista_cabecalho.dart';
 import 'pdv_consulta_semaforo_estoque.dart';
 import 'promocao_badge.dart';
 
+/// Precos formatados das tres tabelas (prazo / vista / especial).
+class PdvConsultaPrecosLinha {
+  const PdvConsultaPrecosLinha({
+    required this.preco1Formatado,
+    required this.preco2Formatado,
+    required this.preco3Formatado,
+    this.preco1DeFormatado,
+    this.preco1EmPromocao = false,
+  });
+
+  final String preco1Formatado;
+  final String preco2Formatado;
+  final String preco3Formatado;
+  final String? preco1DeFormatado;
+  final bool preco1EmPromocao;
+
+  String formatadoDe(String precoTipo) {
+    switch (PdvTabelaPrecoUtil.normalizar(precoTipo)) {
+      case 'preco2':
+        return preco2Formatado;
+      case 'preco3':
+        return preco3Formatado;
+      default:
+        return preco1Formatado;
+    }
+  }
+}
+
 /// Linha da consulta de produtos (colunas fixas + detalhe quando selecionada).
 class PdvConsultaLinhaProduto extends StatelessWidget {
   const PdvConsultaLinhaProduto({
     super.key,
     required this.produto,
     required this.termoBusca,
-    required this.precoFormatado,
+    required this.precos,
+    required this.precoListaAtivo,
     required this.onAdicionar,
     this.tooltipAdicionar,
-    this.emPromocao = false,
-    this.precoDeFormatado,
     this.estoqueNivel,
     this.selecionado = false,
     this.quantidadeNoOrcamento = 0,
@@ -28,9 +56,8 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
 
   final Produto produto;
   final String termoBusca;
-  final String precoFormatado;
-  final bool emPromocao;
-  final String? precoDeFormatado;
+  final PdvConsultaPrecosLinha precos;
+  final String precoListaAtivo;
   /// Nivel base (sem qtd no orcamento). Se [quantidadeNoOrcamento] > 0, recalcula.
   final PdvEstoqueSemaforoNivel? estoqueNivel;
   final VoidCallback onAdicionar;
@@ -42,6 +69,8 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
   static const double alturaLinhaComBadges = 58;
   static const double alturaLinhaExpandida = 68;
 
+  static const _tiposPreco = ['preco1', 'preco2', 'preco3'];
+
   static bool exibirBadgesCompactos(Produto produto) {
     return produto.codigoInterno.trim().isNotEmpty ||
         produto.rotuloConversaoEmbalagem.isNotEmpty;
@@ -51,8 +80,9 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
     required bool expandido,
     required Produto produto,
   }) {
-    // Altura fixa (ignora expandido): evita "piscar" ao navegar com setas.
-    return alturaLinhaExpandida;
+    if (expandido) return alturaLinhaExpandida;
+    if (exibirBadgesCompactos(produto)) return alturaLinhaComBadges;
+    return alturaLinha;
   }
 
   @override
@@ -68,6 +98,8 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
         : '';
     final badgesCompactos =
         !selecionado && exibirBadgesCompactos(produto);
+    final ativo = PdvTabelaPrecoUtil.normalizar(precoListaAtivo);
+    final emPromocaoAtiva = ativo == 'preco1' && precos.preco1EmPromocao;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -77,7 +109,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              if (emPromocao) ...[
+              if (emPromocaoAtiva) ...[
                 const PromocaoBadge(compacto: true),
                 const SizedBox(width: 4),
               ],
@@ -129,40 +161,18 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                       : estoqueNivel,
                 ),
               ),
-              SizedBox(
-                width: PdvConsultaColunas.larguraPreco,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerRight,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (precoDeFormatado != null)
-                        Text(
-                          precoDeFormatado!,
-                          style:
-                              Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    decoration: TextDecoration.lineThrough,
-                                    color: scheme.onSurfaceVariant,
-                                    fontSize: 10,
-                                  ),
-                        ),
-                      Text(
-                        precoFormatado,
-                        style:
-                            Theme.of(context).textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                  color: emPromocao
-                                      ? PromocaoBadge.corDe(context)
-                                      : null,
-                                ),
-                      ),
-                    ],
+              for (final tipo in _tiposPreco)
+                SizedBox(
+                  width: PdvConsultaColunas.larguraPrecoColuna,
+                  child: _CelulaPreco(
+                    valor: precos.formatadoDe(tipo),
+                    ativo: tipo == ativo,
+                    emPromocao: tipo == 'preco1' && precos.preco1EmPromocao,
+                    precoDeFormatado: tipo == 'preco1'
+                        ? precos.preco1DeFormatado
+                        : null,
                   ),
                 ),
-              ),
               SizedBox(
                 width: PdvConsultaColunas.larguraAcao,
                 child: IconButton(
@@ -195,6 +205,57 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                     ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CelulaPreco extends StatelessWidget {
+  const _CelulaPreco({
+    required this.valor,
+    required this.ativo,
+    this.emPromocao = false,
+    this.precoDeFormatado,
+  });
+
+  final String valor;
+  final bool ativo;
+  final bool emPromocao;
+  final String? precoDeFormatado;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final corAtiva = emPromocao
+        ? PromocaoBadge.corDe(context)
+        : scheme.primary;
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerRight,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (precoDeFormatado != null)
+            Text(
+              precoDeFormatado!,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    decoration: TextDecoration.lineThrough,
+                    color: scheme.onSurfaceVariant,
+                    fontSize: 9,
+                  ),
+            ),
+          Text(
+            valor,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: ativo ? FontWeight.w800 : FontWeight.w600,
+                  fontSize: ativo ? 13 : 12,
+                  color: ativo
+                      ? corAtiva
+                      : scheme.onSurfaceVariant,
+                ),
+          ),
         ],
       ),
     );

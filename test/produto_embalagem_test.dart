@@ -328,6 +328,43 @@ void main() {
     );
   });
 
+  test('quantidadeNotaParaEstoque NF-e PC1/UN fator 1 nao multiplica por 1000', () {
+    // Bug real: arco de serra qCom=6 PC1 virava Entrada 6000.
+    expect(ProdutoEmbalagem.normalizarUnidade('PC1'), 'UN');
+    expect(
+      ProdutoEmbalagem.quantidadeNotaParaEstoque(
+        quantidadeComercial: 6,
+        fator: 1,
+        embalagemMultiplica: true,
+        unidadeComercial: 'PC1',
+        unidadeInterna: 'UN',
+      ),
+      6,
+    );
+    expect(
+      ProdutoEmbalagem.notaExigeEscalaEstoque(
+        quantidadeUnidadeVenda: 6,
+        fator: 1,
+        unidadeComercial: 'PC1',
+        unidadeInterna: 'UN',
+      ),
+      isFalse,
+    );
+  });
+
+  test('quantidadeNotaParaEstoque NF-e RL100/UN fator 1 permanece inteiro', () {
+    expect(
+      ProdutoEmbalagem.quantidadeNotaParaEstoque(
+        quantidadeComercial: 1,
+        fator: 1,
+        embalagemMultiplica: true,
+        unidadeComercial: 'RL100',
+        unidadeInterna: 'UN',
+      ),
+      1,
+    );
+  });
+
   test('textoQuantidadeArmazenada exibe m2 e nao escala bruta no caixa', () {
     final produto = Produto(
       id: 7,
@@ -357,6 +394,30 @@ void main() {
       ),
       QuantidadeVendaUtil.paraArmazenamento(2.63, fracionada: true),
     );
+  });
+
+  test('passo fracionado no PDV e 0,01', () {
+    final produto = Produto(
+      id: 8,
+      codigoInterno: 'AREIA',
+      nome: 'Areia',
+      unidade: 'M3',
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 10,
+      permiteQuantidadeFracionada: true,
+    );
+    expect(
+      ProdutoEmbalagem.passoQuantidadeArmazenada(
+        produto: produto,
+        quantidadeArmazenada: QuantidadeVendaUtil.paraArmazenamento(
+          5.7,
+          fracionada: true,
+        ),
+      ),
+      QuantidadeVendaUtil.passoFracionadoArmazenado,
+    );
+    expect(QuantidadeVendaUtil.passoFracionadoArmazenado, 10);
   });
 
   test('valorMediaDiariaExibicao converte milésimos em m2/dia', () {

@@ -10,9 +10,15 @@ void main() {
       expect(cmd.adicaoDireta, isFalse);
     });
 
-    test('5 parafuso mantem termo sem de', () {
-      final cmd = PdvPesquisaComando.parse('5 parafuso');
-      expect(cmd.quantidadeDireta, 5);
+    test('5,75 areia extrai quantidade fracionada', () {
+      final cmd = PdvPesquisaComando.parse('5,75 areia');
+      expect(cmd.quantidadeDireta, closeTo(5.75, 0.0001));
+      expect(cmd.termoBusca, 'areia');
+    });
+
+    test('5.75 parafuso aceita ponto decimal', () {
+      final cmd = PdvPesquisaComando.parse('5.75 parafuso');
+      expect(cmd.quantidadeDireta, closeTo(5.75, 0.0001));
       expect(cmd.termoBusca, 'parafuso');
     });
 

@@ -4,6 +4,44 @@ import 'package:sistema_vendas/domain/quantidade_venda_util.dart';
 import 'package:sistema_vendas/model/produto.dart';
 
 void main() {
+  test('parseEntradaPdv aceita duas casas (5,75)', () {
+    expect(
+      QuantidadeVendaUtil.parseEntradaPdv('5,75', fracionada: true),
+      closeTo(5.75, 0.0001),
+    );
+    expect(
+      QuantidadeVendaUtil.parseEntradaPdv('5.75', fracionada: true),
+      closeTo(5.75, 0.0001),
+    );
+    expect(
+      QuantidadeVendaUtil.paraArmazenamento(5.75, fracionada: true),
+      5750,
+    );
+    expect(
+      QuantidadeVendaUtil.formatarExibicao(5.75, fracionada: true),
+      '5,75',
+    );
+  });
+
+  test('textoQuantidadeValido aceita ate 3 casas', () {
+    expect(
+      QuantidadeVendaUtil.textoQuantidadeValido('5,75', fracionada: true),
+      isTrue,
+    );
+    expect(
+      QuantidadeVendaUtil.textoQuantidadeValido('5,755', fracionada: true),
+      isTrue,
+    );
+    expect(
+      QuantidadeVendaUtil.textoQuantidadeValido('5,7555', fracionada: true),
+      isFalse,
+    );
+    expect(
+      QuantidadeVendaUtil.textoQuantidadeValido('5,7', fracionada: false),
+      isFalse,
+    );
+  });
+
   test('paraEstoqueInteiro fracionada 0,24 m³ nao vira zero', () {
     final produto = Produto(
       id: 1,
