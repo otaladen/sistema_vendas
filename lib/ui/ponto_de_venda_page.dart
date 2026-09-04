@@ -851,7 +851,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     initSafeSyncRefresh(
       onReload: _recarregarDadosSync,
       bloquearAtualizacao: _bloquearSyncPdv,
-      aoConcluir: _snackbarDadosAtualizados,
     );
     _carregarDadosIniciais();
     _carregarConfiguracaoVendaSemEstoque();
@@ -957,16 +956,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     if (!mounted) return;
     _carregarDadosIniciais();
     _sincronizarEstoqueVisivelPdv();
-  }
-
-  void _snackbarDadosAtualizados({required bool daRede}) {
-    if (!daRede || !mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        duration: Duration(seconds: 2),
-        content: Text('Dados atualizados da rede'),
-      ),
-    );
   }
 
   @override
