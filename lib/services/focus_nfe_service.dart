@@ -1523,7 +1523,8 @@ class FocusNfeService {
         venda.total > 0.009 ? venda.descontoImplicitoTotal : 0.0;
     _aplicarDescontoRateadoNosItens(itensPayload, descontoVenda);
     final desconto = _somaValorDescontoItens(itensPayload);
-    final frete = venda.valorFrete;
+    _aplicarFreteRateadoNosItens(itensPayload, venda.valorFrete);
+    final frete = _somaValorFreteItens(itensPayload);
     final valorTotal = (valorProdutos + frete - desconto)
         .clamp(0, double.infinity)
         .toDouble();
@@ -1642,7 +1643,8 @@ class FocusNfeService {
         venda.total > 0.009 ? venda.descontoImplicitoTotal : 0.0;
     _aplicarDescontoRateadoNosItens(itens, descontoVenda);
     final desconto = _somaValorDescontoItens(itens);
-    final frete = venda.valorFrete;
+    _aplicarFreteRateadoNosItens(itens, venda.valorFrete);
+    final frete = _somaValorFreteItens(itens);
     final valorTotal = (valorProdutos + frete - desconto)
         .clamp(0, double.infinity)
         .toDouble();
@@ -2805,6 +2807,15 @@ class FocusNfeService {
     return (total * 100).roundToDouble() / 100.0;
   }
 
+  static double _somaValorFreteItens(List<Map<String, dynamic>> itens) {
+    var total = 0.0;
+    for (final item in itens) {
+      final f = double.tryParse(item['valor_frete']?.toString() ?? '') ?? 0;
+      total += f;
+    }
+    return (total * 100).roundToDouble() / 100.0;
+  }
+
   /// Rateia desconto implicito da venda em `valor_desconto` de cada item.
   ///
   /// Evita rejeicao SEFAZ 537 (total do desconto difere do somatorio dos itens).
@@ -2860,6 +2871,55 @@ class FocusNfeService {
       final base =
           (brutos[i] - valorDesc).clamp(0.0, double.infinity).toDouble();
       itens[i].addAll(IbscbsFocusItemHelper.camposItem(baseCalculo: base));
+    }
+  }
+
+  /// Rateia frete da venda em `valor_frete` de cada item.
+  ///
+  /// Evita rejeicao SEFAZ quando o total do frete difere do somatorio dos
+  /// itens (vFrete). Centavos residuais ficam no ultimo item com valor_bruto
+  /// > 0.
+  static void _aplicarFreteRateadoNosItens(
+    List<Map<String, dynamic>> itens,
+    double freteTotal,
+  ) {
+    if (itens.isEmpty) return;
+    final frete = (freteTotal * 100).roundToDouble() / 100.0;
+    if (frete <= 0.009) return;
+
+    final brutos = <double>[];
+    var somaBruto = 0.0;
+    for (final item in itens) {
+      final b = double.tryParse(item['valor_bruto']?.toString() ?? '') ?? 0.0;
+      brutos.add(b);
+      somaBruto += b;
+    }
+    if (somaBruto <= 0.0001) return;
+
+    final totalCents = (frete * 100).round();
+    final alocados = List<int>.filled(itens.length, 0);
+    var somaAlocada = 0;
+    var ultimo = -1;
+    for (var i = 0; i < brutos.length; i++) {
+      if (brutos[i] > 0.0001) ultimo = i;
+    }
+    if (ultimo < 0) return;
+
+    for (var i = 0; i < itens.length; i++) {
+      if (i == ultimo || brutos[i] <= 0.0001) continue;
+      var cents = ((totalCents * brutos[i]) / somaBruto).floor();
+      if (cents < 0) cents = 0;
+      alocados[i] = cents;
+      somaAlocada += cents;
+    }
+
+    var resto = totalCents - somaAlocada;
+    if (resto < 0) resto = 0;
+    alocados[ultimo] = resto;
+
+    for (var i = 0; i < itens.length; i++) {
+      if (alocados[i] <= 0) continue;
+      itens[i]['valor_frete'] = _formatarDecimal(alocados[i] / 100.0);
     }
   }
 
