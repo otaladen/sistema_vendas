@@ -13,6 +13,7 @@ import '../domain/entregas/buscar_na_loja.dart';
 import 'loja_origem_rede_store.dart';
 import '../domain/entrega_nao_entregue.dart';
 import '../domain/entrega_status_transicao.dart';
+import '../domain/item_venda_produto_orfao.dart';
 import '../services/entrega_fluxo_service.dart';
 import '../domain/operacao_permissao_guard.dart';
 import '../domain/entregas/agenda_carreto_ocupacao.dart';
@@ -3853,6 +3854,49 @@ class VendaRepository {
       }
       venda.cliente.target = cliente;
       _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  /// Itens da venda cujo produto foi excluido ou nunca vinculado.
+  List<ItemVenda> listarItensSemProdutoVinculado(int vendaId) {
+    return ItemVendaProdutoOrfaoHelper.filtrarOrfaos(
+      listarItensDaVendaGarantidos(vendaId),
+      obterProduto: (id) => _db.produtoBox.get(id),
+    );
+  }
+
+  /// Revincula linhas da venda a produtos existentes no cadastro.
+  void revincularItensAoProduto({
+    required int vendaId,
+    required Map<int, int> itemIdParaProdutoId,
+  }) {
+    if (itemIdParaProdutoId.isEmpty) return;
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      if (venda.cancelada) {
+        throw StateError('Venda cancelada nao pode ser alterada.');
+      }
+      for (final entry in itemIdParaProdutoId.entries) {
+        final itemId = entry.key;
+        final produtoId = entry.value;
+        if (itemId <= 0 || produtoId <= 0) {
+          throw StateError('itemId e produtoId devem ser positivos.');
+        }
+        final item = _itemPersistidoDaVenda(vendaId, itemId);
+        if (item == null) {
+          throw StateError('Item $itemId nao encontrado na venda $vendaId.');
+        }
+        final produto = _db.produtoBox.get(produtoId);
+        if (produto == null) {
+          throw StateError('Produto $produtoId nao encontrado.');
+        }
+        item.produto.target = produto;
+        _db.itemVendaBox.put(item);
+      }
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
   }

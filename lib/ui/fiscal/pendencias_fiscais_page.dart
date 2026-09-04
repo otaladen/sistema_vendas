@@ -11,6 +11,7 @@ import '../../data/cliente_repository.dart';
 import '../../data/sync/sync_refresh_hub.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/fiscal/venda_nfce_obrigatoria_helper.dart';
+import '../../domain/item_venda_produto_orfao.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/venda_finalizacao_caixa_helper.dart';
 import '../../model/usuario_sistema.dart';
@@ -21,6 +22,7 @@ import '../shell/main_menu_deps.dart';
 import '../widgets/lan_api_feedback.dart';
 import 'nfce_emissao_pendente_flow.dart';
 import 'nfe_gerenciamento_page.dart';
+import 'revincular_produto_item_venda_flow.dart';
 
 /// Central de pendencias NFC-e (reconsulta) e atalho para NF-e 55.
 /// Terminal Leve: listagem/emissao/reconsulta 100% via API :8788.
@@ -284,45 +286,10 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
     try {
       final api = widget.vendaRepository;
       if (api is VendaApiRepository) {
-        if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
-          return;
-        }
-        final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
-        if (client == null) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('API do servidor indisponivel para emitir NFC-e.'),
-              ),
-            );
-          }
-          return;
-        }
-        final r = await client.emitirNfce(
-          venda.id,
-          permitirVendaSemEstoque: _permitirVendaSemEstoque,
-        );
-        if (!mounted) return;
-        if (r['ok'] == true) {
-          await api.hidratarPendenciasFiscais();
-          await _recarregar(silencioso: true);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                r['autorizada'] == true
-                    ? 'NFC-e ${(r['numero'] ?? '').toString()} autorizada no servidor.'
-                    : (r['mensagem'] ?? 'NFC-e em processamento no servidor.')
-                        .toString(),
-              ),
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('${r['error'] ?? 'Falha ao emitir NFC-e'}')),
-          );
-        }
+        await _emitirNfceViaApi(venda);
         return;
       }
+      final produtoRepo = _produtoRepository(context);
       final ok = await NfceEmissaoPendenteFlow.emitir(
         context,
         venda: venda,
@@ -330,6 +297,7 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
         clienteRepository: widget.clienteRepository as ClienteRepository,
         appConfigRepository: widget.appConfigRepository,
         permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        produtoRepository: produtoRepo,
       );
       if (ok && mounted) await _recarregar(silencioso: true);
     } catch (e) {
@@ -338,6 +306,96 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
       }
     } finally {
       if (mounted) setState(() => _emitindo = false);
+    }
+  }
+
+  dynamic _produtoRepository(BuildContext context) {
+    return MainMenuDeps.maybeOf(context)?.produtoRepository;
+  }
+
+  Future<void> _emitirNfceViaApi(Venda venda) async {
+    if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+      return;
+    }
+    final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+    final produtoRepo = _produtoRepository(context);
+    if (client == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('API do servidor indisponivel para emitir NFC-e.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    for (var tentativa = 0; tentativa < 2; tentativa++) {
+      if (!mounted) return;
+      final api = widget.vendaRepository as VendaApiRepository;
+
+      if (produtoRepo != null && tentativa == 0) {
+        final itens = await api.carregarItensRemoto(venda.id);
+        final orfaos = ItemVendaProdutoOrfaoHelper.filtrarOrfaos(
+          itens,
+          obterProduto: (id) {
+            try {
+              return produtoRepo.obterPorId(id);
+            } catch (_) {
+              return null;
+            }
+          },
+        );
+        if (orfaos.isNotEmpty) {
+          final resolvido = await RevincularProdutoItemVendaFlow.resolverOrfaosDaVenda(
+            context,
+            vendaId: venda.id,
+            vendaRepository: api,
+            produtoRepository: produtoRepo,
+          );
+          if (!resolvido) return;
+        }
+      }
+
+      final r = await client.emitirNfce(
+        venda.id,
+        permitirVendaSemEstoque: _permitirVendaSemEstoque,
+      );
+      if (!mounted) return;
+      if (r['ok'] == true) {
+        await api.hidratarPendenciasFiscais();
+        await _recarregar(silencioso: true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              r['autorizada'] == true
+                  ? 'NFC-e ${(r['numero'] ?? '').toString()} autorizada no servidor.'
+                  : (r['mensagem'] ?? 'NFC-e em processamento no servidor.')
+                      .toString(),
+            ),
+          ),
+        );
+        return;
+      }
+
+      final erro = '${r['error'] ?? 'Falha ao emitir NFC-e'}';
+      if (produtoRepo != null &&
+          ItemVendaProdutoOrfaoHelper.pareceErroSemProdutoVinculado(erro)) {
+        final resolvido = await RevincularProdutoItemVendaFlow.resolverOrfaosDaVenda(
+          context,
+          vendaId: venda.id,
+          vendaRepository: api,
+          produtoRepository: produtoRepo,
+          mensagemErro: erro,
+        );
+        if (!resolvido) return;
+        continue;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(erro)),
+      );
+      return;
     }
   }
 

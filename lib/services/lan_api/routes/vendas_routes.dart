@@ -1469,6 +1469,45 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
     }
   });
 
+  /// Revincula itens de venda finalizada a produtos do catalogo (cadastro excluido).
+  router.post('/api/vendas/<id|[0-9]+>/revincular-itens-produto', (
+    Request r,
+    String id,
+  ) async {
+    final body = await lanApiReadJsonMap(r) ?? <String, dynamic>{};
+    final raw = body['vinculos'];
+    if (raw is! List || raw.isEmpty) {
+      return lanApiJson({'error': 'vinculos obrigatorio'}, status: 400);
+    }
+    final vinculos = <int, int>{};
+    for (final entry in raw) {
+      if (entry is! Map) continue;
+      final itemId = (entry['itemId'] as num?)?.toInt() ?? 0;
+      final produtoId = (entry['produtoId'] as num?)?.toInt() ?? 0;
+      if (itemId <= 0 || produtoId <= 0) {
+        return lanApiJson(
+          {'error': 'itemId e produtoId devem ser positivos'},
+          status: 400,
+        );
+      }
+      vinculos[itemId] = produtoId;
+    }
+    if (vinculos.isEmpty) {
+      return lanApiJson({'error': 'Nenhum vinculo valido.'}, status: 400);
+    }
+    try {
+      final vendaId = int.parse(id);
+      d.vendaRepository.revincularItensAoProduto(
+        vendaId: vendaId,
+        itemIdParaProdutoId: vinculos,
+      );
+      d.notificar('venda');
+      return lanApiJson({'ok': true, 'revinculados': vinculos.length});
+    } catch (e) {
+      return lanApiJson({'error': '$e'}, status: 400);
+    }
+  });
+
   /// Orcamento filho de frete para retirada futura (carreto).
   router.post('/api/vendas/<id|[0-9]+>/orcamento-frete', (
     Request r,

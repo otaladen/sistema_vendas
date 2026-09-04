@@ -773,6 +773,25 @@ class LanApiClient {
         aceitarErroJson: true,
       );
 
+  Future<void> revincularItensProduto(
+    int vendaId, {
+    required List<Map<String, int>> vinculos,
+  }) async {
+    await _postJson(
+      '/api/vendas/$vendaId/revincular-itens-produto',
+      {
+        'vinculos': vinculos
+            .map(
+              (v) => {
+                'itemId': v['itemId'],
+                'produtoId': v['produtoId'],
+              },
+            )
+            .toList(),
+      },
+    );
+  }
+
   Future<Map<String, dynamic>> emitirNfe(
     int vendaId, {
     Map<String, dynamic>? destinatario,
@@ -1714,9 +1733,20 @@ class LanApiClient {
       });
 
   Future<bool> removerProduto(int id) async {
-    final m = await _postJson('/api/produtos/$id/remover', {});
+    final m = await removerProdutoDetalhado(id);
     return m['ok'] == true;
   }
+
+  Future<Map<String, dynamic>> removerProdutoDetalhado(int id) async {
+    return _postJson(
+      '/api/produtos/$id/remover',
+      {},
+      aceitarErroJson: true,
+    );
+  }
+
+  Future<Map<String, dynamic>> obterBloqueioExclusaoProduto(int id) =>
+      _getJson('/api/produtos/$id/bloqueio-exclusao');
 
   Future<List<Map<String, dynamic>>> listarContasPagar({String? status}) async {
     final m = await _getJson('/api/contas-pagar', query: {

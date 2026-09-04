@@ -14,6 +14,7 @@ import '../domain/produto_imagem_nome_arquivo.dart';
 import '../domain/pdv_consulta_similares_util.dart';
 import '../domain/produto_substitutos_util.dart';
 import '../domain/pdv_busca_inteligente.dart';
+import '../domain/produto_exclusao_guard.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_nome_titulo_normalizer.dart';
 import '../services/gerenciador_estoque_service.dart';
@@ -1417,6 +1418,7 @@ class ProdutoRepository extends ChangeNotifier {
   }
 
   bool remover(int id) {
+    ProdutoExclusaoGuard.garantirPodeExcluir(_db, id);
     final ok = _db.produtoBox.remove(id);
     if (ok) {
       registrarDeleteParaRede('produto', id);
@@ -1433,6 +1435,7 @@ class ProdutoRepository extends ChangeNotifier {
     final removidosIds = <int>[];
     _db.store.runInTransaction(TxMode.write, () {
       for (final id in unicos) {
+        ProdutoExclusaoGuard.garantirPodeExcluir(_db, id);
         if (_db.produtoBox.remove(id)) {
           removidosIds.add(id);
         }

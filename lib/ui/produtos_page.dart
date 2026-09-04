@@ -23,6 +23,7 @@ import '../domain/importacao/produto_importacao_linha.dart';
 import '../domain/importacao/produto_importacao_util.dart';
 import '../domain/produto_categorias_catalogo.dart';
 import '../domain/produto_embalagem.dart';
+import '../domain/produto_exclusao_guard.dart';
 import '../domain/produto_marca.dart';
 import '../data/produto_busca_util.dart';
 import '../domain/produto_substitutos_util.dart';
@@ -2412,6 +2413,22 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
   }
 
+  Future<String?> _mensagemBloqueioExclusaoProduto(int produtoId) async {
+    if (produtoId <= 0) return null;
+    final repo = widget.produtoRepository;
+    if (repo is ProdutoApiRepository) {
+      try {
+        return await repo.mensagemBloqueioExclusaoRemoto(produtoId);
+      } catch (_) {
+        return null;
+      }
+    }
+    if (repo is ProdutoRepository) {
+      return ProdutoExclusaoGuard.mensagemBloqueio(repo.objectBox, produtoId);
+    }
+    return null;
+  }
+
   Future<void> _excluirProdutoEmEdicao() async {
     final produtoId = _produtoEmEdicaoId;
     if (produtoId == null) {
@@ -2424,6 +2441,22 @@ class _ProdutosPageState extends State<ProdutosPage>
       _resetarFormulario();
       return;
     }
+
+    final bloqueio = await _mensagemBloqueioExclusaoProduto(produtoId);
+    if (bloqueio != null) {
+      _definirStatus(bloqueio, erro: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(bloqueio),
+            duration: const Duration(seconds: 10),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -2462,7 +2495,20 @@ class _ProdutosPageState extends State<ProdutosPage>
         return;
       }
     } else {
-      removido = repo.remover(produtoId) as bool;
+      try {
+        removido = repo.remover(produtoId) as bool;
+      } on ProdutoExclusaoBloqueadaException catch (e) {
+        _definirStatus(e.message, erro: true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(e.message),
+              duration: const Duration(seconds: 10),
+            ),
+          );
+        }
+        return;
+      }
     }
     if (!removido) {
       _definirStatus('Nao foi possivel excluir o produto.', erro: true);

@@ -11,6 +11,7 @@ import '../../../data/sync/sync_entity_codec.dart';
 import '../../../data/sync/sync_entity_codec_extras.dart';
 import '../../../data/sync/sync_entity_codec_operacional.dart';
 import '../../../domain/catalogo_produto_revision.dart';
+import '../../../domain/produto_exclusao_guard.dart';
 import '../../../domain/produto_imagem_nome_arquivo.dart';
 import '../../../model/kit_orcamento.dart';
 import '../../../model/produto.dart';
@@ -79,6 +80,23 @@ void registerCadastrosRoutes(Router router, LanApiDeps d) {
     return item == null
         ? lanApiJson({'error': 'nao encontrado'}, status: 404)
         : lanApiJson({'item': SyncEntityCodec.produtoParaMap(item)});
+  });
+
+  router.get('/api/produtos/<id|[0-9]+>/bloqueio-exclusao', (Request _, String id) {
+    final produtoId = int.tryParse(id) ?? 0;
+    if (produtoId <= 0) {
+      return lanApiJson({'error': 'id invalido'}, status: 400);
+    }
+    final bloqueio = ProdutoExclusaoGuard.analisar(d.objectBox, produtoId);
+    if (bloqueio == null) {
+      return lanApiJson({'bloqueado': false});
+    }
+    return lanApiJson({
+      'bloqueado': true,
+      'mensagem': bloqueio.mensagem,
+      'quantidadeVendas': bloqueio.quantidadeVendas,
+      'vendas': bloqueio.rotulosVendas,
+    });
   });
 
   /// Historico de compras (NF-e) do produto — Terminal Leve / Kardex comercial.
@@ -250,6 +268,8 @@ void registerCadastrosRoutes(Router router, LanApiDeps d) {
       }
       d.notificar('produto', ids: [produtoId]);
       return lanApiJson({'ok': true, 'id': produtoId});
+    } on ProdutoExclusaoBloqueadaException catch (e) {
+      return lanApiJson({'error': e.message, 'code': 'nfce_pendente'}, status: 409);
     } catch (e) {
       return lanApiJson({'error': '$e'}, status: 400);
     }

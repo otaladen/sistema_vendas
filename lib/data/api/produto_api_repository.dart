@@ -756,13 +756,28 @@ class ProdutoApiRepository extends ChangeNotifier {
 
   Future<bool> removerRemoto(int id) async {
     _exigirServidorOnline();
-    final ok = await _client.removerProduto(id);
-    if (ok) {
+    final m = await _client.removerProdutoDetalhado(id);
+    if (m['ok'] == true) {
       _porId.remove(id);
       _lista.removeWhere((p) => p.id == id);
       notifyListeners();
+      return true;
     }
-    return ok;
+    final erro = (m['error'] ?? 'Falha ao remover produto').toString();
+    throw LanApiException(erro);
+  }
+
+  Future<String?> mensagemBloqueioExclusaoRemoto(int produtoId) async {
+    if (produtoId <= 0) return null;
+    _exigirServidorOnline();
+    final m = await _client.obterBloqueioExclusaoProduto(produtoId);
+    if (m['bloqueado'] == true) {
+      final msg = (m['mensagem'] ?? '').toString().trim();
+      return msg.isEmpty
+          ? 'Produto em venda(s) com NFC-e pendente.'
+          : msg;
+    }
+    return null;
   }
 
   int salvar(Produto produto) {

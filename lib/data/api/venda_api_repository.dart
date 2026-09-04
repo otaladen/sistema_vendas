@@ -1729,6 +1729,21 @@ class VendaApiRepository extends ChangeNotifier {
     return listarItensPorVenda(vendaId);
   }
 
+  Future<void> revincularItensAoProduto({
+    required int vendaId,
+    required Map<int, int> itemIdParaProdutoId,
+  }) async {
+    if (itemIdParaProdutoId.isEmpty) return;
+    _exigirServidorOnline();
+    await _client.revincularItensProduto(
+      vendaId,
+      vinculos: itemIdParaProdutoId.entries
+          .map((e) => {'itemId': e.key, 'produtoId': e.value})
+          .toList(),
+    );
+    await carregarItensRemoto(vendaId);
+  }
+
   Future<int> registrarOrcamentoRemoto(
     List<ItemVendaInput> itensInput, {
     required DadosPagamentoOrcamento pagamento,
