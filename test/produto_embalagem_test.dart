@@ -439,4 +439,37 @@ void main() {
       closeTo(2.41, 0.001),
     );
   });
+
+  test('PDV le 4,50 persistido sem flag de venda fracionada', () {
+    final produto = Produto(
+      id: 9,
+      codigoInterno: 'PARAF',
+      nome: 'Parafuso',
+      unidade: 'UN',
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 1,
+      permiteQuantidadeFracionada: false,
+    );
+    const armazenado = 4500;
+    expect(
+      ProdutoEmbalagem.leituraUsaEscalaFracionada(produto, armazenado),
+      isTrue,
+    );
+    expect(
+      ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+        produto: produto,
+        quantidadeArmazenada: armazenado,
+      ),
+      closeTo(4.5, 0.001),
+    );
+    expect(
+      ProdutoEmbalagem.rotuloQuantidadeCarrinho(
+        produto: produto,
+        quantidadeDigitada: armazenado,
+        emUnidadeCompra: false,
+      ),
+      '4,5 UN',
+    );
+  });
 }

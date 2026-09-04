@@ -15,6 +15,31 @@ class QuantidadeVendaUtil {
   /// Passo dos botoes +/- no PDV: 0,01 na unidade de venda (10 milésimos).
   static const int passoFracionadoArmazenado = escalaFracionada ~/ 100;
 
+  /// PDV/orcamento: digitacao decimal na unidade de venda (nao na embalagem CX).
+  static bool pdvAceitaDecimalDigitacao({required bool emUnidadeCompra}) =>
+      !emUnidadeCompra;
+
+  /// Grava milésimos quando o cadastro e fracionado ou a qtd nao e inteira.
+  static bool pdvArmazenaEmMilesimos({
+    required bool emUnidadeCompra,
+    required bool cadastroFracionado,
+    required double quantidadeVenda,
+  }) {
+    if (emUnidadeCompra) return false;
+    if (cadastroFracionado) return true;
+    return quantidadeVenda != quantidadeVenda.roundToDouble();
+  }
+
+  /// Inteiro persistido em milésimos (ex.: 4500 = 4,50), sem o flag do cadastro.
+  static bool armazenadoEmMilesimos(
+    int armazenado, {
+    required bool cadastroFracionado,
+  }) {
+    if (cadastroFracionado) return true;
+    if (armazenado < escalaFracionada) return false;
+    return armazenado % escalaFracionada != 0;
+  }
+
   /// Interpreta texto do PDV (aceita vírgula ou ponto).
   static double? parseEntradaPdv(String texto, {required bool fracionada}) {
     var t = texto.trim();
@@ -62,12 +87,21 @@ class QuantidadeVendaUtil {
     final q = valorExibicao(
       quantidadeArmazenada,
       fracionada: produto.permiteQuantidadeFracionada ||
+          armazenadoEmMilesimos(
+            quantidadeArmazenada,
+            cadastroFracionado: false,
+          ) ||
           _leituraEmbalagemUsaEscala(produto, quantidadeArmazenada),
     );
     if (q <= 0) return 0;
-    if (produto.permiteQuantidadeFracionada) {
+    final milesimos = produto.permiteQuantidadeFracionada ||
+        armazenadoEmMilesimos(
+          quantidadeArmazenada,
+          cadastroFracionado: false,
+        ) ||
+        _leituraEmbalagemUsaEscala(produto, quantidadeArmazenada);
+    if (milesimos) {
       // round(0,24) virava 0 e o PDV descartava a linha em silencio.
-      // 0,50 m³ continua 0,50 no carrinho; estoque inteiro exige >= 1 unidade.
       if (q < 1) return 1;
       return q.ceil().toInt();
     }

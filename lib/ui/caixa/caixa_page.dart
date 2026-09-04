@@ -4231,7 +4231,7 @@ class _CaixaPageState extends State<CaixaPage> {
   double? _parseQuantidadeExibicaoConferencia(Produto produto, String texto) {
     return QuantidadeVendaUtil.parseEntradaPdv(
       texto,
-      fracionada: produto.permiteQuantidadeFracionada,
+      fracionada: true,
     );
   }
 
@@ -4241,7 +4241,6 @@ class _CaixaPageState extends State<CaixaPage> {
     required int quantidadeSugerida,
     required String tipoEntregaInicial,
   }) async {
-    final fracionada = produto.permiteQuantidadeFracionada;
     final ctrl = TextEditingController(text: '$quantidadeSugerida');
     var tipo = EntregaVendaHelper.normalizarTipoItem(tipoEntregaInicial);
 
@@ -4251,9 +4250,7 @@ class _CaixaPageState extends State<CaixaPage> {
         ScaffoldMessenger.of(ctx).showSnackBar(
           SnackBar(
             content: Text(
-              fracionada
-                  ? 'Informe quantidade valida (ex.: 5,75).'
-                  : 'Informe quantidade valida.',
+              'Informe quantidade valida (ex.: 5,75).',
             ),
           ),
         );
@@ -4296,18 +4293,16 @@ class _CaixaPageState extends State<CaixaPage> {
               TextField(
                 controller: ctrl,
                 autofocus: true,
-                keyboardType: fracionada
-                    ? const TextInputType.numberWithOptions(decimal: true)
-                    : TextInputType.number,
-                inputFormatters: [
-                  QuantidadePdvInputFormatter(fracionada: fracionada),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: const [
+                  QuantidadePdvInputFormatter(fracionada: true),
                 ],
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'Quantidade',
-                  hintText: fracionada ? 'Ex.: 5,75' : 'Ex.: 1',
-                  helperText: fracionada
-                      ? 'Venda fracionada: aceita 5,75'
-                      : null,
+                  hintText: 'Ex.: 5,75',
+                  helperText: 'Aceita decimais (ex.: 5,75 ou 4,50).',
                 ),
                 onSubmitted: (_) => confirmar(ctx),
               ),
@@ -4341,9 +4336,14 @@ class _CaixaPageState extends State<CaixaPage> {
     if (quantidade <= 0) return;
     final qExibicao = quantidade.toDouble();
     final qEstoquePromo = qExibicao.ceil();
+    final fracionada = QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
+      emUnidadeCompra: false,
+      cadastroFracionado: produto.permiteQuantidadeFracionada,
+      quantidadeVenda: qExibicao,
+    );
     final qArmazenada = QuantidadeVendaUtil.paraArmazenamento(
       qExibicao,
-      fracionada: produto.permiteQuantidadeFracionada,
+      fracionada: fracionada,
     );
     if (qArmazenada <= 0) return;
 
@@ -4459,7 +4459,7 @@ class _CaixaPageState extends State<CaixaPage> {
       _recarregarOrcamentoSelecionadoAposAjusteItens();
       final qTxt = QuantidadeVendaUtil.formatarExibicao(
         qExibicao,
-        fracionada: produto.permiteQuantidadeFracionada,
+        fracionada: true,
       );
       CaixaFeedback.sucesso(
         context,

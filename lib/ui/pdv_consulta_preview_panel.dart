@@ -338,15 +338,13 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
               ),
         ),
       ],
-      if (produto.permiteQuantidadeFracionada) ...[
-        const SizedBox(height: 4),
-        Text(
-          'Venda fracionada permitida',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-        ),
-      ],
+      const SizedBox(height: 4),
+      Text(
+        'Quantidade decimal liberada no PDV (ex.: 4,50)',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+      ),
       const SizedBox(height: 8),
       PdvEstoqueResumoPanel(
         produto: produto,
@@ -416,12 +414,11 @@ class PdvConsultaControlesAdicionarState
 
   bool get _emUnidadeCompra => widget.produto.pdvPodeVenderEmUnidadeCompra;
 
-  bool get _fracionada =>
-      widget.produto.permiteQuantidadeFracionada && !_emUnidadeCompra;
+  bool get _fracionada => true;
 
-  double get _min => _fracionada ? 0.001 : 1;
+  double get _min => 0.001;
 
-  double get _passoBotoes => _fracionada ? 0.01 : 1;
+  double get _passoBotoes => _emUnidadeCompra ? 1 : 0.01;
 
   String get _rotuloUnidadeQuantidade {
     if (_emUnidadeCompra) {
@@ -446,7 +443,7 @@ class PdvConsultaControlesAdicionarState
         : m2.toStringAsFixed(2).replaceAll('.', ',');
     final qTxt = QuantidadeVendaUtil.formatarExibicao(
       _quantidade,
-      fracionada: false,
+      fracionada: true,
     );
     return '$qTxt $_rotuloUnidadeQuantidade = $m2Txt $uVenda no orcamento';
   }
@@ -539,9 +536,9 @@ class PdvConsultaControlesAdicionarState
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          _fracionada
-              ? 'Quantidade ($_rotuloUnidadeQuantidade) — aceita 5,75'
-              : 'Quantidade ($_rotuloUnidadeQuantidade) (+ / − no teclado)',
+          _emUnidadeCompra
+              ? 'Quantidade ($_rotuloUnidadeQuantidade) (+ / − no teclado)'
+              : 'Quantidade ($_rotuloUnidadeQuantidade) — aceita 5,75',
           style: theme.textTheme.labelMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: scheme.onSurfaceVariant,

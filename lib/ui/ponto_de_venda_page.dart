@@ -2020,32 +2020,31 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
     if (quantidadeVenda <= 0) return false;
     final produto = _produtoAtualizadoParaPdv(produtoIn);
-    final fracionada =
-        produto.permiteQuantidadeFracionada && !quantidadeEmUnidadeCompra;
-    if (!fracionada && quantidadeVenda != quantidadeVenda.roundToDouble()) {
-      if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${produto.nome}: quantidade inteira. Para vender com decimais '
-            '(ex.: 4,50), ative "Permite venda fracionada" no cadastro do produto.',
-          ),
-        ),
+    var emEmbalagem =
+        quantidadeEmUnidadeCompra && produto.pdvPodeVenderEmUnidadeCompra;
+    var qVenda = quantidadeVenda;
+    if (emEmbalagem && qVenda != qVenda.roundToDouble()) {
+      qVenda = ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
+        produto: produto,
+        quantidadeComercial: qVenda,
       );
-      return false;
+      emEmbalagem = false;
     }
+    final fracionada = QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
+      emUnidadeCompra: emEmbalagem,
+      cadastroFracionado: produto.permiteQuantidadeFracionada,
+      quantidadeVenda: qVenda,
+    );
     final qArmazenada = QuantidadeVendaUtil.paraArmazenamento(
-      quantidadeVenda,
+      qVenda,
       fracionada: fracionada,
     );
     if (qArmazenada <= 0) return false;
     final precoLista = precoTipo ?? _precoListaAtivo;
-    final emEmbalagem =
-        quantidadeEmUnidadeCompra && produto.pdvPodeVenderEmUnidadeCompra;
     final qUnidadeVenda = emEmbalagem
         ? ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
             produto: produto,
-            quantidadeComercial: quantidadeVenda,
+            quantidadeComercial: qVenda,
           )
         : QuantidadeVendaUtil.valorExibicao(
             qArmazenada,
@@ -2430,9 +2429,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             )
           : QuantidadeVendaUtil.valorExibicao(
               novaArmazenada,
-              fracionada:
-                  item.produto.permiteQuantidadeFracionada &&
-                  !item.quantidadeEmUnidadeCompra,
+              fracionada: item.usaArmazenamentoFracionado,
             );
       final jaOutros =
           _quantidadeUnidadeVendaNoCarrinho(item.produto.id) -
@@ -2478,7 +2475,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   Future<void> _editarQuantidadeCarrinho(int index) async {
     if (index < 0 || index >= _carrinho.length) return;
     final item = _carrinho[index];
-    final fracionada = item.usaArmazenamentoFracionado;
+    final fracionada = !item.quantidadeEmUnidadeCompra;
     final unidade = item.quantidadeEmUnidadeCompra &&
             item.produto.pdvPodeVenderEmUnidadeCompra
         ? ProdutoEmbalagem.normalizarUnidade(item.produto.unidadeCompraEfetiva)
@@ -2498,7 +2495,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         ? digitada.round()
         : QuantidadeVendaUtil.paraArmazenamento(
             digitada,
-            fracionada: fracionada,
+            fracionada: QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
+              emUnidadeCompra: false,
+              cadastroFracionado: item.produto.permiteQuantidadeFracionada,
+              quantidadeVenda: digitada,
+            ),
           );
     if (novaArmazenada <= 0) return;
     _alterarQuantidadeCarrinho(index, novaArmazenada - item.quantidade);
@@ -9700,7 +9701,7 @@ class _EditarQuantidadeCarrinhoDialogState
       setState(() {
         _erro = widget.fracionada
             ? 'Informe uma quantidade maior que zero (ex.: 5,75).'
-            : 'Informe uma quantidade inteira maior que zero.';
+            : 'Informe uma quantidade maior que zero.';
       });
       return;
     }
@@ -9729,7 +9730,7 @@ class _EditarQuantidadeCarrinhoDialogState
                 labelText: 'Quantidade (${widget.unidade})',
                 helperText: widget.fracionada
                     ? 'Aceita decimais (ex.: 5,75 ou 4.50).'
-                    : 'Somente quantidade inteira.',
+                    : 'Quantidade da embalagem.',
                 errorText: _erro,
               ),
               keyboardType: widget.fracionada
@@ -9826,35 +9827,20 @@ class _AdicionarAoOrcamentoDialogState
 
   void _confirmar() {
     _recarregarProdutoDoBanco();
-    final fracionada =
-        _produto.permiteQuantidadeFracionada && !_quantidadeEmUnidadeCompra;
+    final fracionada = QuantidadeVendaUtil.pdvAceitaDecimalDigitacao(
+      emUnidadeCompra: _quantidadeEmUnidadeCompra,
+    );
     final textoQtd = _qtdController.text;
     final q = QuantidadeVendaUtil.parseEntradaPdv(
       textoQtd,
-      fracionada: fracionada,
+      fracionada: true,
     );
     if (q == null) {
-      final pareceDecimal = QuantidadeVendaUtil.textoPareceQuantidadeDecimal(
-        textoQtd,
+      setState(
+        () => _erroQtd = fracionada
+            ? 'Informe uma quantidade maior que zero (ex.: 5,75 ou 1.5).'
+            : 'Informe uma quantidade maior que zero.',
       );
-      final comoFracionada = QuantidadeVendaUtil.parseEntradaPdv(
-        textoQtd,
-        fracionada: true,
-      );
-      String msg;
-      if (pareceDecimal &&
-          comoFracionada != null &&
-          !_produto.permiteQuantidadeFracionada) {
-        msg =
-            'Este produto ainda nao esta com "Permite venda fracionada" no PDV. '
-            'Salve no cadastro, feche este dialogo, pesquise o produto de novo '
-            'e tente outra vez.';
-      } else if (fracionada) {
-        msg = 'Informe uma quantidade maior que zero (ex.: 5,75 ou 1.5).';
-      } else {
-        msg = 'Informe uma quantidade inteira maior que zero.';
-      }
-      setState(() => _erroQtd = msg);
       return;
     }
     Navigator.of(context).pop(
@@ -9870,7 +9856,7 @@ class _AdicionarAoOrcamentoDialogState
   String _previewSubtotalLinha(double precoUnit, bool fracionada) {
     final q = QuantidadeVendaUtil.parseEntradaPdv(
       _qtdController.text,
-      fracionada: fracionada,
+      fracionada: true,
     );
     if (q == null) return '';
     final qVenda =
@@ -9887,22 +9873,30 @@ class _AdicionarAoOrcamentoDialogState
     if (!_quantidadeEmUnidadeCompra || !_produto.pdvPodeVenderEmUnidadeCompra) {
       return null;
     }
-    final q = int.tryParse(_qtdController.text.trim()) ?? 0;
+    final q = QuantidadeVendaUtil.parseEntradaPdv(
+          _qtdController.text,
+          fracionada: true,
+        ) ??
+        0;
     if (q <= 0) return null;
-    final qEst = ProdutoEmbalagem.quantidadeVendaParaEstoque(
+    final qEst = ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
       produto: _produto,
-      quantidadeDigitada: q,
-      emUnidadeCompra: true,
+      quantidadeComercial: q,
     );
     final uVenda = ProdutoEmbalagem.normalizarUnidade(_produto.unidade);
-    return 'Baixa de estoque: $qEst $uVenda';
+    final qEstTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
+      _produto,
+      qEst,
+    );
+    return 'Baixa de estoque: $qEstTxt $uVenda';
   }
 
   @override
   Widget build(BuildContext context) {
     final precoUnit = widget.precoUnitarioDe(_produto, _precoTipo);
-    final fracionada =
-        _produto.permiteQuantidadeFracionada && !_quantidadeEmUnidadeCompra;
+    final fracionada = QuantidadeVendaUtil.pdvAceitaDecimalDigitacao(
+      emUnidadeCompra: _quantidadeEmUnidadeCompra,
+    );
     final podeEmbalagem = _produto.pdvPodeVenderEmUnidadeCompra;
     final uCompra = ProdutoEmbalagem.normalizarUnidade(
       _produto.unidadeCompraEfetiva,
@@ -9924,7 +9918,7 @@ class _AdicionarAoOrcamentoDialogState
                   child: Chip(
                     avatar: const Icon(Icons.straighten, size: 18),
                     label: Text(
-                      'Venda fracionada ($uVenda) — use 5,75 ou 4.50',
+                      'Quantidade em $uVenda — aceita 5,75 ou 4.50',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     visualDensity: VisualDensity.compact,
@@ -10000,17 +9994,12 @@ class _AdicionarAoOrcamentoDialogState
                     : 'Quantidade ($uVenda)',
                 helperText:
                     previewEstoque ??
-                    (fracionada
-                        ? 'Permite decimais (ex.: 5,75 ou 4.50).'
-                        : 'Somente quantidade inteira. Para vender fracionado, '
-                              'ative "Permite venda fracionada" no cadastro do produto.'),
+                    'Permite decimais (ex.: 5,75 ou 4.50).',
                 errorText: _erroQtd,
               ),
-              keyboardType: fracionada
-                  ? const TextInputType.numberWithOptions(decimal: true)
-                  : TextInputType.number,
-              inputFormatters: [
-                QuantidadePdvInputFormatter(fracionada: fracionada),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: const [
+                QuantidadePdvInputFormatter(fracionada: true),
               ],
               textInputAction: TextInputAction.done,
               onChanged: (_) => setState(() => _erroQtd = null),
@@ -10122,8 +10111,13 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
   @override
   bool get precoManual => precoUnitarioManual;
 
-  bool get usaArmazenamentoFracionado =>
-      produto.permiteQuantidadeFracionada && !quantidadeEmUnidadeCompra;
+  bool get usaArmazenamentoFracionado {
+    if (quantidadeEmUnidadeCompra) return false;
+    return QuantidadeVendaUtil.armazenadoEmMilesimos(
+      quantidade,
+      cadastroFracionado: produto.permiteQuantidadeFracionada,
+    );
+  }
 
   double get quantidadeVendaEfetiva {
     if (quantidadeEmUnidadeCompra && produto.pdvPodeVenderEmUnidadeCompra) {

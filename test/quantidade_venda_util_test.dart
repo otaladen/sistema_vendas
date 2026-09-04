@@ -23,6 +23,47 @@ void main() {
     );
   });
 
+  test('PDV aceita decimal sem flag do cadastro', () {
+    expect(
+      QuantidadeVendaUtil.parseEntradaPdv('4,50', fracionada: true),
+      closeTo(4.5, 0.0001),
+    );
+    expect(
+      QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
+        emUnidadeCompra: false,
+        cadastroFracionado: false,
+        quantidadeVenda: 4.5,
+      ),
+      isTrue,
+    );
+    expect(
+      QuantidadeVendaUtil.paraArmazenamento(4.5, fracionada: true),
+      4500,
+    );
+    expect(
+      QuantidadeVendaUtil.armazenadoEmMilesimos(
+        4500,
+        cadastroFracionado: false,
+      ),
+      isTrue,
+    );
+    expect(
+      QuantidadeVendaUtil.armazenadoEmMilesimos(
+        5,
+        cadastroFracionado: false,
+      ),
+      isFalse,
+    );
+    expect(
+      QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
+        emUnidadeCompra: false,
+        cadastroFracionado: false,
+        quantidadeVenda: 107,
+      ),
+      isFalse,
+    );
+  });
+
   test('textoQuantidadeValido aceita ate 3 casas', () {
     expect(
       QuantidadeVendaUtil.textoQuantidadeValido('5,75', fracionada: true),

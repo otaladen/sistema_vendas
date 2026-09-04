@@ -229,6 +229,12 @@ class ProdutoEmbalagem {
     int quantidadeArmazenada,
   ) {
     if (produto.permiteQuantidadeFracionada) return true;
+    if (QuantidadeVendaUtil.armazenadoEmMilesimos(
+      quantidadeArmazenada,
+      cadastroFracionado: false,
+    )) {
+      return true;
+    }
     if (!vendaPodeUsarUnidadeCompra(produto)) return false;
     if (quantidadeArmazenada < QuantidadeVendaUtil.escalaFracionada) {
       return false;
@@ -519,7 +525,11 @@ class ProdutoEmbalagem {
   }) {
     final uVenda = normalizarUnidade(produto.unidade);
     if (!emUnidadeCompra || !vendaPodeUsarUnidadeCompra(produto)) {
-      if (produto.permiteQuantidadeFracionada) {
+      final fracionada = QuantidadeVendaUtil.armazenadoEmMilesimos(
+        quantidadeDigitada,
+        cadastroFracionado: produto.permiteQuantidadeFracionada,
+      );
+      if (fracionada) {
         final qTxt = QuantidadeVendaUtil.formatarExibicao(
           QuantidadeVendaUtil.valorExibicao(
             quantidadeDigitada,
