@@ -18,6 +18,7 @@ import '../../data/api/cliente_api_repository.dart';
 import '../../data/api/venda_api_repository.dart';
 import '../../data/app_config_repository.dart';
 import '../../data/objectbox.dart';
+import '../../data/caixa_auditoria_repository.dart';
 import '../../data/caixa_sessao_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/sync/sync_refresh_hub.dart';
@@ -175,6 +176,8 @@ class _CaixaPageState extends State<CaixaPage> {
   bool _posVendaProcessando = false;
   /// Trava anti-duplicacao na finalizacao (clique duplo / Enter repetido).
   bool _finalizandoVenda = false;
+  /// Trava anti-duplicacao em sangria/suprimento (clique duplo).
+  bool _movimentoCaixaEmAndamento = false;
   CaixaPosVendaSessao? _posVenda;
   int _nfcePendenteEmissaoQtd = 0;
   double _nfcePendenteEmissaoTotal = 0;
@@ -1670,32 +1673,35 @@ class _CaixaPageState extends State<CaixaPage> {
     String evento, {
     Map<String, dynamic>? detalhes,
   }) async {
+    final em = DateTime.now();
+    final detalhesFinais = CaixaAuditoriaRepository.enriquecerDetalhes(
+      evento: evento,
+      em: em,
+      operador: _operadorCaixa,
+      detalhes: detalhes,
+    );
     final clientApi = mounted
         ? MainMenuDeps.maybeOf(context)?.lanApiClient
         : null;
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_kCaixaAuditoriaKey);
-    List<dynamic> lista = [];
-    if (raw != null && raw.trim().isNotEmpty) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is List) {
-          lista = decoded;
-        }
-      } catch (_) {}
-    }
     final registro = <String, dynamic>{
-      'em': DateTime.now().toIso8601String(),
+      'em': em.toIso8601String(),
       'usuario': widget.usuarioAtual,
       'operadorCaixa': _operadorCaixa,
       'evento': evento,
-      'detalhes': detalhes ?? <String, dynamic>{},
+      'detalhes': detalhesFinais,
     };
-    lista.add(registro);
-    if (lista.length > 300) {
-      lista = lista.sublist(lista.length - 300);
+    _espelharAuditoriaNoLogCentral(evento, detalhesFinais);
+    try {
+      _repoAuditoriaCaixa().gravarObjectBox(
+        em: em,
+        evento: evento,
+        usuario: widget.usuarioAtual,
+        operadorCaixa: _operadorCaixa,
+        detalhes: detalhesFinais,
+      );
+    } catch (e) {
+      debugPrint('Caixa: falha ao gravar auditoria ObjectBox: $e');
     }
-    _espelharAuditoriaNoLogCentral(evento, detalhes ?? <String, dynamic>{});
     // Terminal: so o log unificado do PC1. PC1: prefs local (fonte da API).
     if (clientApi != null &&
         clientApi.configurado &&
@@ -1705,8 +1711,8 @@ class _CaixaPageState extends State<CaixaPage> {
           evento: evento,
           usuario: widget.usuarioAtual,
           operadorCaixa: _operadorCaixa,
-          detalhes: detalhes,
-          em: DateTime.tryParse(registro['em']?.toString() ?? ''),
+          detalhes: detalhesFinais,
+          em: em,
         );
       } catch (e) {
         debugPrint('Caixa: falha ao gravar auditoria no servidor: $e');
@@ -1714,19 +1720,48 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kCaixaAuditoriaKey);
+      List<dynamic> lista = [];
+      if (raw != null && raw.trim().isNotEmpty) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is List) {
+            lista = decoded;
+          }
+        } catch (_) {}
+      }
+      lista.add(registro);
+      if (lista.length > 300) {
+        lista = lista.sublist(lista.length - 300);
+      }
       await prefs.setString(_kCaixaAuditoriaKey, jsonEncode(lista));
     } catch (e) {
       debugPrint('Caixa: falha ao gravar auditoria local: $e');
     }
   }
 
+  ObjectBox? _objectBoxLocal() {
+    try {
+      final viaDeps = MainMenuDeps.maybeOf(context)?.objectBox;
+      if (viaDeps != null) return viaDeps;
+      final ob = widget.produtoRepository.objectBox;
+      if (ob is ObjectBox) return ob;
+    } catch (_) {}
+    return null;
+  }
+
+  CaixaAuditoriaRepository _repoAuditoriaCaixa() =>
+      CaixaAuditoriaRepository(db: _objectBoxLocal());
+
   void _espelharAuditoriaNoLogCentral(
     String evento,
     Map<String, dynamic> detalhes,
   ) {
+    final operador = detalhes['operador']?.toString() ?? _operadorCaixa;
+    final valor = CaixaAuditoriaRepository.valorDoEvento(evento, detalhes);
     switch (evento) {
       case 'fechamento_caixa':
-        final operador = detalhes['operador']?.toString() ?? _operadorCaixa;
         final dif = detalhes['diferencaTotal'];
         AuditoriaRegistrar.registrar(
           modulo: AuditoriaModulo.caixa,
@@ -1735,7 +1770,29 @@ class _CaixaPageState extends State<CaixaPage> {
           entidade: 'caixa',
           resumo:
               'Fechamento de caixa — operador $operador'
+              ' — valor ${_formatarMoeda(valor)}'
               '${dif is num ? ' (dif. ${_formatarMoeda(dif.toDouble())})' : ''}',
+          detalhes: detalhes,
+        );
+        break;
+      case 'suprimento':
+        AuditoriaRegistrar.registrar(
+          modulo: AuditoriaModulo.caixa,
+          acao: AuditoriaAcao.suprimentoCaixa,
+          usuarioLogin: widget.usuarioAtual,
+          entidade: 'caixa',
+          resumo:
+              'Suprimento — operador $operador — ${_formatarMoeda(valor)}',
+          detalhes: detalhes,
+        );
+        break;
+      case 'sangria':
+        AuditoriaRegistrar.registrar(
+          modulo: AuditoriaModulo.caixa,
+          acao: AuditoriaAcao.sangriaCaixa,
+          usuarioLogin: widget.usuarioAtual,
+          entidade: 'caixa',
+          resumo: 'Sangria — operador $operador — ${_formatarMoeda(valor)}',
           detalhes: detalhes,
         );
         break;
@@ -1757,8 +1814,7 @@ class _CaixaPageState extends State<CaixaPage> {
       await client.substituirAuditoriaCaixa(registros);
       return;
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kCaixaAuditoriaKey, jsonEncode(registros));
+    await _repoAuditoriaCaixa().substituirTodos(registros);
   }
 
   bool get _auditoriaViaServidor =>
@@ -1775,17 +1831,10 @@ class _CaixaPageState extends State<CaixaPage> {
         return [];
       }
     }
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_kCaixaAuditoriaKey);
-    if (raw == null || raw.trim().isEmpty) return [];
     try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return [];
-      return decoded
-          .whereType<Map>()
-          .map((e) => e.cast<String, dynamic>())
-          .toList();
-    } catch (_) {
+      return await _repoAuditoriaCaixa().listarTodosComoMapas();
+    } catch (e) {
+      debugPrint('Caixa: auditoria local: $e');
       return [];
     }
   }
@@ -2517,94 +2566,43 @@ class _CaixaPageState extends State<CaixaPage> {
       );
       return;
     }
-    final valorController = TextEditingController();
-    final obsController = TextEditingController();
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(suprimento ? 'Registrar suprimento' : 'Registrar sangria'),
-          content: SingleChildScrollView(
-            child: SizedBox(
-              width: 460,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: valorController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Valor',
-                      hintText: 'Ex.: 100,00',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: obsController,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Observacao (opcional)',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Salvar'),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmar != true) {
-      valorController.dispose();
-      obsController.dispose();
-      return;
-    }
-    if (!mounted) {
-      valorController.dispose();
-      obsController.dispose();
-      return;
-    }
-    final valor = _parseValor(valorController.text) ?? 0;
-    final obs = obsController.text.trim();
-    valorController.dispose();
-    obsController.dispose();
-    if (valor <= 0) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Informe um valor valido.')));
-      return;
-    }
+    if (_movimentoCaixaEmAndamento) return;
+    setState(() => _movimentoCaixaEmAndamento = true);
+    _ResultadoMovimentoCaixa? resultado;
     try {
-      final sessao = await _registrarMovimentacaoAtomica(
-        suprimento: suprimento,
-        valor: valor,
+      resultado = await showDialog<_ResultadoMovimentoCaixa>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return _DialogoSangriaSuprimento(
+            suprimento: suprimento,
+            parseValor: _parseValor,
+            registrar: (valor) => _registrarMovimentacaoAtomica(
+              suprimento: suprimento,
+              valor: valor,
+            ),
+          );
+        },
       );
-      if (!mounted) return;
-      setState(() {
-        _totalSuprimentos = sessao.suprimentos;
-        _totalSangrias = sessao.sangrias;
-        if (sessao.fundoTroco > 0) {
-          _fundoTrocoAbertura = sessao.fundoTroco;
-        }
-      });
-      await _recarregarSessaoRede();
-    } catch (e) {
-      if (!mounted) return;
-      CaixaFeedback.erro(
-        context,
-        'Nao foi possivel registrar a movimentacao: ${LanApiFeedback.mensagem(e)}',
-      );
-      return;
+    } finally {
+      if (mounted) {
+        setState(() => _movimentoCaixaEmAndamento = false);
+      } else {
+        _movimentoCaixaEmAndamento = false;
+      }
     }
+    if (resultado == null || !mounted) return;
+    final valor = resultado.valor;
+    final obs = resultado.observacao;
+    final sessao = resultado.sessao;
+    setState(() {
+      _totalSuprimentos = sessao.suprimentos;
+      _totalSangrias = sessao.sangrias;
+      if (sessao.fundoTroco > 0) {
+        _fundoTrocoAbertura = sessao.fundoTroco;
+      }
+    });
+    await _recarregarSessaoRede();
     final dataHora = DateTime.now();
     await _registrarAuditoriaCaixa(
       suprimento ? 'suprimento' : 'sangria',
@@ -2612,6 +2610,7 @@ class _CaixaPageState extends State<CaixaPage> {
         'valor': valor,
         'observacao': obs,
         'em': dataHora.toIso8601String(),
+        'operador': _operadorCaixa,
       },
     );
     if (!mounted) return;
@@ -7766,7 +7765,7 @@ class _CaixaPageState extends State<CaixaPage> {
           ),
         ),
         OutlinedButton.icon(
-          onPressed: _caixaAberto
+          onPressed: _caixaAberto && !_movimentoCaixaEmAndamento
               ? () => _registrarMovimentoCaixa(suprimento: true)
               : null,
           icon: const Icon(Icons.add_circle_outline),
@@ -7779,7 +7778,7 @@ class _CaixaPageState extends State<CaixaPage> {
           ),
         ),
         OutlinedButton.icon(
-          onPressed: _caixaAberto
+          onPressed: _caixaAberto && !_movimentoCaixaEmAndamento
               ? () => _registrarMovimentoCaixa(suprimento: false)
               : null,
           icon: const Icon(Icons.remove_circle_outline),
@@ -8904,4 +8903,149 @@ class _VincularClienteIntent extends Intent {
 
 class _BuscarProdutoConferenciaIntent extends Intent {
   const _BuscarProdutoConferenciaIntent();
+}
+
+class _ResultadoMovimentoCaixa {
+  const _ResultadoMovimentoCaixa({
+    required this.valor,
+    required this.observacao,
+    required this.sessao,
+  });
+
+  final double valor;
+  final String observacao;
+  final CaixaSessao sessao;
+}
+
+class _DialogoSangriaSuprimento extends StatefulWidget {
+  const _DialogoSangriaSuprimento({
+    required this.suprimento,
+    required this.parseValor,
+    required this.registrar,
+  });
+
+  final bool suprimento;
+  final double? Function(String texto) parseValor;
+  final Future<CaixaSessao> Function(double valor) registrar;
+
+  @override
+  State<_DialogoSangriaSuprimento> createState() =>
+      _DialogoSangriaSuprimentoState();
+}
+
+class _DialogoSangriaSuprimentoState extends State<_DialogoSangriaSuprimento> {
+  final _valorController = TextEditingController();
+  final _obsController = TextEditingController();
+  bool _salvando = false;
+  String _erro = '';
+
+  @override
+  void dispose() {
+    _valorController.dispose();
+    _obsController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirmar() async {
+    if (_salvando) return;
+    final valor = widget.parseValor(_valorController.text) ?? 0;
+    if (valor <= 0) {
+      setState(() => _erro = 'Informe um valor valido.');
+      return;
+    }
+    setState(() {
+      _salvando = true;
+      _erro = '';
+    });
+    try {
+      final sessao = await widget.registrar(valor);
+      if (!mounted) return;
+      Navigator.pop(
+        context,
+        _ResultadoMovimentoCaixa(
+          valor: valor,
+          observacao: _obsController.text.trim(),
+          sessao: sessao,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _salvando = false;
+        _erro =
+            'Nao foi possivel registrar a movimentacao: ${LanApiFeedback.mensagem(e)}';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_salvando,
+      child: AlertDialog(
+        title: Text(
+          widget.suprimento ? 'Registrar suprimento' : 'Registrar sangria',
+        ),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 460,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: _valorController,
+                  enabled: !_salvando,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Valor',
+                    hintText: 'Ex.: 100,00',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _obsController,
+                  enabled: !_salvando,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Observacao (opcional)',
+                  ),
+                ),
+                if (_erro.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _erro,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _salvando ? null : () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: _salvando ? null : _confirmar,
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(96, 40),
+            ),
+            child: _salvando
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+  }
 }

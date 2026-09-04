@@ -419,12 +419,12 @@ void registerCaixaRoutes(Router router, LanApiDeps d) {
     }
   });
 
-  /// Auditoria local do caixa no PC1 (SharedPreferences do servidor).
+  /// Auditoria do caixa no PC1: ObjectBox (historico persistente) + prefs.
   /// Terminais leves leem/escrevem aqui em vez do prefs local.
   router.get('/api/caixa/auditoria', (Request r) async {
     final evento = (r.url.queryParameters['evento'] ?? '').trim();
     final limit = lanApiQueryInt(r, 'limit', fallback: 300).clamp(1, 500);
-    final repo = CaixaAuditoriaRepository();
+    final repo = CaixaAuditoriaRepository(db: d.objectBox);
     var items = await repo.listarTodos();
     if (evento.isNotEmpty) {
       items = items.where((e) => e.evento == evento).toList();
@@ -433,39 +433,19 @@ void registerCaixaRoutes(Router router, LanApiDeps d) {
       items = items.take(limit).toList();
     }
     return lanApiJson({
-      'items': items
-          .map(
-            (e) => {
-              'em': e.em.toIso8601String(),
-              'evento': e.evento,
-              'usuario': e.usuario,
-              'operadorCaixa': e.operadorCaixa,
-              'detalhes': e.detalhes,
-            },
-          )
-          .toList(),
+      'items': items.map((e) => e.toMap()).toList(),
     });
   });
 
   router.get('/api/relatorios/historico-fechamento-caixa', (Request r) async {
     final limit = lanApiQueryInt(r, 'limit', fallback: 300).clamp(1, 500);
-    final repo = CaixaAuditoriaRepository();
+    final repo = CaixaAuditoriaRepository(db: d.objectBox);
     var items = await repo.listarFechamentos();
     if (items.length > limit) {
       items = items.take(limit).toList();
     }
     return lanApiJson({
-      'items': items
-          .map(
-            (e) => {
-              'em': e.em.toIso8601String(),
-              'evento': e.evento,
-              'usuario': e.usuario,
-              'operadorCaixa': e.operadorCaixa,
-              'detalhes': e.detalhes,
-            },
-          )
-          .toList(),
+      'items': items.map((e) => e.toMap()).toList(),
     });
   });
 
@@ -482,13 +462,29 @@ void registerCaixaRoutes(Router router, LanApiDeps d) {
     final detalhes = detalhesRaw is Map
         ? Map<String, dynamic>.from(detalhesRaw)
         : <String, dynamic>{};
+    final em = DateTime.tryParse((body['em'] ?? '').toString()) ?? DateTime.now();
+    final usuario = (body['usuario'] ?? '').toString();
+    final operadorCaixa = (body['operadorCaixa'] ?? '').toString();
+    final detalhesFinais = CaixaAuditoriaRepository.enriquecerDetalhes(
+      evento: evento,
+      em: em,
+      operador: operadorCaixa,
+      detalhes: detalhes,
+    );
     final registro = <String, dynamic>{
-      'em': (body['em'] ?? DateTime.now().toIso8601String()).toString(),
-      'usuario': (body['usuario'] ?? '').toString(),
-      'operadorCaixa': (body['operadorCaixa'] ?? '').toString(),
+      'em': em.toIso8601String(),
+      'usuario': usuario,
+      'operadorCaixa': operadorCaixa,
       'evento': evento,
-      'detalhes': detalhes,
+      'detalhes': detalhesFinais,
     };
+    CaixaAuditoriaRepository(db: d.objectBox).gravarObjectBox(
+      em: em,
+      evento: evento,
+      usuario: usuario,
+      operadorCaixa: operadorCaixa,
+      detalhes: detalhesFinais,
+    );
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(CaixaAuditoriaRepository.chavePrefs);
     List<dynamic> lista = [];
@@ -523,7 +519,7 @@ void registerCaixaRoutes(Router router, LanApiDeps d) {
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
-    await CaixaAuditoriaRepository().substituirTodos(items);
+    await CaixaAuditoriaRepository(db: d.objectBox).substituirTodos(items);
     return lanApiJson({'ok': true, 'total': items.length});
   });
 }

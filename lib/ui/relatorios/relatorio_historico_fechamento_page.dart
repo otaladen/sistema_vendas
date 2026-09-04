@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../../data/api/lan_api_client.dart';
 import '../../data/caixa_auditoria_repository.dart';
+import '../../data/objectbox.dart';
 import '../widgets/lan_api_feedback.dart';
 import 'relatorio_export_util.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
@@ -11,10 +12,12 @@ class RelatorioHistoricoFechamentoPage extends StatefulWidget {
   const RelatorioHistoricoFechamentoPage({
     super.key,
     this.lanApiClient,
+    this.objectBox,
   });
 
   /// Terminal leve: le do PC servidor (`/api/relatorios/historico-fechamento-caixa`).
   final LanApiClient? lanApiClient;
+  final ObjectBox? objectBox;
 
   @override
   State<RelatorioHistoricoFechamentoPage> createState() =>
@@ -23,7 +26,6 @@ class RelatorioHistoricoFechamentoPage extends StatefulWidget {
 
 class _RelatorioHistoricoFechamentoPageState
     extends State<RelatorioHistoricoFechamentoPage> {
-  final _repoLocal = CaixaAuditoriaRepository();
   final _fmtData = DateFormat('dd/MM/yyyy HH:mm');
   final _fmtMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   List<CaixaAuditoriaRegistro> _fechamentos = [];
@@ -50,7 +52,8 @@ class _RelatorioHistoricoFechamentoPageState
         final raw = await widget.lanApiClient!.listarHistoricoFechamentoCaixa();
         lista = raw.map(CaixaAuditoriaRegistro.fromMap).toList(growable: false);
       } else {
-        lista = await _repoLocal.listarFechamentos();
+        lista = await CaixaAuditoriaRepository(db: widget.objectBox)
+            .listarFechamentos();
       }
       if (!mounted) return;
       setState(() {
@@ -76,7 +79,10 @@ class _RelatorioHistoricoFechamentoPageState
   List<List<String>> _linhasCsv() => [
         [
           'Data',
+          'Hora',
+          'Tipo',
           'Operador',
+          'Valor',
           'Diferenca total',
           'Esp. dinheiro',
           'Dec. dinheiro',
@@ -85,8 +91,11 @@ class _RelatorioHistoricoFechamentoPageState
         ..._fechamentos.map((r) {
           final d = r.detalhes;
           return [
-            _fmtData.format(r.em.toLocal()),
+            d['data']?.toString() ?? _fmtData.format(r.em.toLocal()).split(' ').first,
+            d['hora']?.toString() ?? '',
+            d['tipo']?.toString() ?? r.evento,
             d['operador']?.toString() ?? r.operadorCaixa,
+            _fmtMoeda.format(r.valor),
             _fmtMoeda.format(r.diferencaTotal ?? 0),
             _fmtMoeda.format(_num(d, 'esperadoDinheiro')),
             _fmtMoeda.format(_num(d, 'declaradoDinheiro')),
@@ -128,6 +137,11 @@ class _RelatorioHistoricoFechamentoPageState
               children: [
                 Text('Operador: ${d['operador'] ?? r.operadorCaixa}'),
                 Text('Usuario registro: ${r.usuario}'),
+                Text('Tipo: ${d['tipo'] ?? r.evento}'),
+                Text(
+                  'Data/Hora: ${d['data'] ?? '-'} ${d['hora'] ?? ''}'.trim(),
+                ),
+                Text('Valor: ${_fmtMoeda.format(r.valor)}'),
                 const Divider(),
                 Text('Fundo troco: ${_fmtMoeda.format(_num(d, 'fundoTroco'))}'),
                 Text('Suprimentos: ${_fmtMoeda.format(_num(d, 'suprimentos'))}'),

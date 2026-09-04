@@ -3543,10 +3543,70 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "41:1697472292442925530",
+      "lastPropertyId": "9:916712371855975897",
+      "name": "CaixaAuditoriaEvento",
+      "properties": [
+        {
+          "id": "1:2907875059341897129",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:1503452198407833767",
+          "name": "dataHora",
+          "indexId": "86:5199397884599854827",
+          "type": 10,
+          "flags": 8
+        },
+        {
+          "id": "3:3644789319835908160",
+          "name": "data",
+          "type": 9
+        },
+        {
+          "id": "4:7565380498537459694",
+          "name": "hora",
+          "type": 9
+        },
+        {
+          "id": "5:3829211112404659405",
+          "name": "tipo",
+          "indexId": "87:3901139813771412500",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "6:3280850287705155121",
+          "name": "operador",
+          "indexId": "88:687633053083918975",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "7:1894588498014912363",
+          "name": "usuario",
+          "type": 9
+        },
+        {
+          "id": "8:3632191069081379263",
+          "name": "valor",
+          "type": 8
+        },
+        {
+          "id": "9:916712371855975897",
+          "name": "detalhesJson",
+          "type": 9
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "40:4237822245225587881",
-  "lastIndexId": "85:8121898667377937475",
+  "lastEntityId": "41:1697472292442925530",
+  "lastIndexId": "88:687633053083918975",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

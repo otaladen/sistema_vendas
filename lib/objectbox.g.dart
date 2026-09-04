@@ -16,6 +16,7 @@ import 'package:objectbox_flutter_libs/objectbox_flutter_libs.dart';
 
 import 'data/models/conta_pagar.dart';
 import 'model/auditoria_evento.dart';
+import 'model/caixa_auditoria_evento.dart';
 import 'model/cliente.dart';
 import 'model/conferencia_carga_romaneio.dart';
 import 'model/fechamento_rh_funcionario.dart';
@@ -4237,6 +4238,73 @@ final _entities = <obx_int.ModelEntity>[
       ),
     ],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(41, 1697472292442925530),
+    name: 'CaixaAuditoriaEvento',
+    lastPropertyId: const obx_int.IdUid(9, 916712371855975897),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 2907875059341897129),
+        name: 'id',
+        type: 6,
+        flags: 129,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 1503452198407833767),
+        name: 'dataHora',
+        type: 10,
+        flags: 8,
+        indexId: const obx_int.IdUid(86, 5199397884599854827),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 3644789319835908160),
+        name: 'data',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 7565380498537459694),
+        name: 'hora',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 3829211112404659405),
+        name: 'tipo',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(87, 3901139813771412500),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 3280850287705155121),
+        name: 'operador',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(88, 687633053083918975),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 1894588498014912363),
+        name: 'usuario',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 3632191069081379263),
+        name: 'valor',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 916712371855975897),
+        name: 'detalhesJson',
+        type: 9,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -4282,8 +4350,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(40, 4237822245225587881),
-    lastIndexId: const obx_int.IdUid(85, 8121898667377937475),
+    lastEntityId: const obx_int.IdUid(41, 1697472292442925530),
+    lastIndexId: const obx_int.IdUid(88, 687633053083918975),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -9635,6 +9703,86 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    CaixaAuditoriaEvento: obx_int.EntityDefinition<CaixaAuditoriaEvento>(
+      model: _entities[40],
+      toOneRelations: (CaixaAuditoriaEvento object) => [],
+      toManyRelations: (CaixaAuditoriaEvento object) => {},
+      getId: (CaixaAuditoriaEvento object) => object.id,
+      setId: (CaixaAuditoriaEvento object, int id) {
+        object.id = id;
+      },
+      objectToFB: (CaixaAuditoriaEvento object, fb.Builder fbb) {
+        final dataOffset = fbb.writeString(object.data);
+        final horaOffset = fbb.writeString(object.hora);
+        final tipoOffset = fbb.writeString(object.tipo);
+        final operadorOffset = fbb.writeString(object.operador);
+        final usuarioOffset = fbb.writeString(object.usuario);
+        final detalhesJsonOffset = fbb.writeString(object.detalhesJson);
+        fbb.startTable(10);
+        fbb.addInt64(0, object.id);
+        fbb.addInt64(1, object.dataHora.millisecondsSinceEpoch);
+        fbb.addOffset(2, dataOffset);
+        fbb.addOffset(3, horaOffset);
+        fbb.addOffset(4, tipoOffset);
+        fbb.addOffset(5, operadorOffset);
+        fbb.addOffset(6, usuarioOffset);
+        fbb.addFloat64(7, object.valor);
+        fbb.addOffset(8, detalhesJsonOffset);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final dataHoraParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 6, 0),
+          isUtc: true,
+        );
+        final dataParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final horaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final tipoParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 12, '');
+        final operadorParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 14, '');
+        final usuarioParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 16, '');
+        final valorParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          18,
+          0,
+        );
+        final detalhesJsonParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 20, '');
+        final object = CaixaAuditoriaEvento(
+          id: idParam,
+          dataHora: dataHoraParam,
+          data: dataParam,
+          hora: horaParam,
+          tipo: tipoParam,
+          operador: operadorParam,
+          usuario: usuarioParam,
+          valor: valorParam,
+          detalhesJson: detalhesJsonParam,
+        );
+
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -12802,5 +12950,53 @@ class ValeCredito_ {
   /// see [ValeCredito.usos]
   static final usos = obx.QueryBacklinkToMany<UsoValeCredito, ValeCredito>(
     UsoValeCredito_.vale,
+  );
+}
+
+/// [CaixaAuditoriaEvento] entity fields to define ObjectBox queries.
+class CaixaAuditoriaEvento_ {
+  /// See [CaixaAuditoriaEvento.id].
+  static final id = obx.QueryIntegerProperty<CaixaAuditoriaEvento>(
+    _entities[40].properties[0],
+  );
+
+  /// See [CaixaAuditoriaEvento.dataHora].
+  static final dataHora = obx.QueryDateProperty<CaixaAuditoriaEvento>(
+    _entities[40].properties[1],
+  );
+
+  /// See [CaixaAuditoriaEvento.data].
+  static final data = obx.QueryStringProperty<CaixaAuditoriaEvento>(
+    _entities[40].properties[2],
+  );
+
+  /// See [CaixaAuditoriaEvento.hora].
+  static final hora = obx.QueryStringProperty<CaixaAuditoriaEvento>(
+    _entities[40].properties[3],
+  );
+
+  /// See [CaixaAuditoriaEvento.tipo].
+  static final tipo = obx.QueryStringProperty<CaixaAuditoriaEvento>(
+    _entities[40].properties[4],
+  );
+
+  /// See [CaixaAuditoriaEvento.operador].
+  static final operador = obx.QueryStringProperty<CaixaAuditoriaEvento>(
+    _entities[40].properties[5],
+  );
+
+  /// See [CaixaAuditoriaEvento.usuario].
+  static final usuario = obx.QueryStringProperty<CaixaAuditoriaEvento>(
+    _entities[40].properties[6],
+  );
+
+  /// See [CaixaAuditoriaEvento.valor].
+  static final valor = obx.QueryDoubleProperty<CaixaAuditoriaEvento>(
+    _entities[40].properties[7],
+  );
+
+  /// See [CaixaAuditoriaEvento.detalhesJson].
+  static final detalhesJson = obx.QueryStringProperty<CaixaAuditoriaEvento>(
+    _entities[40].properties[8],
   );
 }

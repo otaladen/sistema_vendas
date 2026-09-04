@@ -41,6 +41,8 @@ class AuditoriaAcao {
   static const backupZipExport = 'backup_zip_export';
   static const backupTarefaWindows = 'backup_tarefa_windows';
   static const fechamentoCaixa = 'fechamento_caixa';
+  static const suprimentoCaixa = 'suprimento';
+  static const sangriaCaixa = 'sangria';
   static const fechamentoNegado = 'fechamento_negado';
   static const limparManual = 'limpar_manual';
   static const retencaoAutomatica = 'retencao_automatica';
@@ -123,6 +125,10 @@ String auditoriaRotuloAcao(String acao) {
       return 'Tarefa Windows backup';
     case AuditoriaAcao.fechamentoCaixa:
       return 'Fechamento de caixa';
+    case AuditoriaAcao.suprimentoCaixa:
+      return 'Suprimento de caixa';
+    case AuditoriaAcao.sangriaCaixa:
+      return 'Sangria de caixa';
     case AuditoriaAcao.fechamentoNegado:
       return 'Fechamento negado';
     case AuditoriaAcao.limparManual:

@@ -822,12 +822,13 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
           'auditoria',
         ],
         onTap: () {
-          final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
+          final deps = MainMenuDeps.maybeOf(context);
           Navigator.push<void>(
             context,
             MaterialPageRoute<void>(
               builder: (_) => RelatorioHistoricoFechamentoPage(
-                lanApiClient: client,
+                lanApiClient: deps?.lanApiClient,
+                objectBox: deps?.objectBox,
               ),
             ),
           );
